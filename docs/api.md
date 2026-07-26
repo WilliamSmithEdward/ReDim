@@ -36,8 +36,8 @@ Component factories, get-or-create by id: `Button`, `Label`, `Card`, `Spinner`, 
 | `Render` | Mark everything dirty and paint. Call once after building the UI. |
 | `SetTheme theme` | Restyle every component. |
 | `PrepareCanvas` | Paint the sheet background and hide gridlines. |
-| `Toast message, ttlMs` | Transient card on a rail beside the content, expiring on the pump or on click. Slots reuse lowest-first; modal chrome never shifts the rail. |
-| `ToastTray anchor` | Pins the tray's top-left to a range instead of the default rail. |
+| `Toast message, ttlMs` | Transient card that slides up into a rail beside the content, clamped into the visible viewport so it is never fired off screen. Slots reuse lowest-first; modal chrome never shifts the rail. |
+| `ToastTray anchor` | Pins the tray's top-left to a range, exactly and unclamped. |
 | `Confirm title, message, okProc, cancelProc, okText, cancelText` | Shapes-based modal. |
 | `CloseModal` | Hide the modal set. |
 | `Async(opId)` / `CancelAsync opId` / `AsyncError(opId)` | Async ops (see [async.md](async.md)). |

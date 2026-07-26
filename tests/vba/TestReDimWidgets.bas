@@ -326,6 +326,21 @@ Public Function TestToastSlots() As String
     transcript = transcript & "|thirdAboveSecond=" & _
         CStr(host.Shapes("rdm_wid8_" & thirdToast.ComponentId).Top < _
             host.Shapes("rdm_wid8_" & secondToast.ComponentId).Top)
+
+    ' Entrance slide: a toast spawns 14 points low and the pump eases it up
+    ' into its slot.
+    Dim slideToast As ReDimUI
+    Dim slideShape As Shape
+    Dim topBefore As Double
+    Dim ticks As Long
+    Set slideToast = app.Toast("slide", 60000)
+    Set slideShape = host.Shapes("rdm_wid8_" & slideToast.ComponentId)
+    topBefore = slideShape.Top
+    For ticks = 1 To 10
+        ReDimUI.PumpOnce
+    Next ticks
+    transcript = transcript & "|slideSettled=" & _
+        CStr(Abs((topBefore - slideShape.Top) - 14) < 0.1)
     ReDimUI.AutoPump True
     TestToastSlots = transcript
 End Function
@@ -407,6 +422,28 @@ Public Function TestToastTray() As String
     transcript = transcript & "|pinnedToAnchor=" & _
         CStr(Abs(host.Shapes("rdm_wid10_" & toastValue.ComponentId).Left - _
             host.Range("H2").Left) < 0.5)
+
+    ' Content wider than the window: the rail clamps into the viewport so
+    ' the notification stays on screen.
+    Dim wideApp As ReDimUI
+    Dim wideHost As Worksheet
+    Dim viewLeft As Double
+    Dim viewTop As Double
+    Dim viewWidth As Double
+    Dim viewHeight As Double
+    Set wideHost = NewCanvas()
+    Set wideApp = ReDimUI.Mount(wideHost, "wid11")
+    wideApp.Label("far").AtRect(2000, 20, 300, 40).Text("Far away")
+    wideApp.Render
+    wideApp.ResolveViewport viewLeft, viewTop, viewWidth, viewHeight
+    Set toastValue = wideApp.Toast("clamped", 60000)
+    Dim clampedShape As Shape
+    Set clampedShape = wideHost.Shapes("rdm_wid11_" & toastValue.ComponentId)
+    transcript = transcript & "|clampedIntoView=" & _
+        CStr(clampedShape.Left + clampedShape.Width <= viewLeft + viewWidth _
+            And clampedShape.Left >= viewLeft)
+    transcript = transcript & "|notAtRawRail=" & _
+        CStr(clampedShape.Left < 2312)
     ReDimUI.AutoPump True
     TestToastTray = transcript
 End Function

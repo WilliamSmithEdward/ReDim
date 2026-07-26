@@ -107,6 +107,9 @@ def test_toast_slots(run_widgets):
         "a freed slot must be reclaimed by the next toast"
     )
     assert facts["thirdAboveSecond"] == "True"
+    assert facts["slideSettled"] == "True", (
+        "the entrance slide must ease the toast up exactly its spawn offset"
+    )
 
 
 def test_toast_tray(run_widgets):
@@ -116,6 +119,10 @@ def test_toast_tray(run_widgets):
         "modal chrome must not shift the toast rail"
     )
     assert facts["pinnedToAnchor"] == "True"
+    assert facts["clampedIntoView"] == "True", (
+        "a rail past the viewport edge must clamp into view"
+    )
+    assert facts["notAtRawRail"] == "True"
 
 
 def test_drag_resilience(run_widgets):

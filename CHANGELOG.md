@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.3 - 2026-07-26
+
+- The default toast rail clamps into the visible viewport: the rail position wins whenever it
+  is on screen, and visibility wins when the window is narrower than the content or scrolled
+  away. Explicit `ToastTray` pins are honored exactly.
+- Toasts slide up into their slot on entrance, a pump-driven ease-out of about 300ms.
+
 ## 0.2.2 - 2026-07-26
 
 - Toasts sit on a stable rail just outside the content's right edge, with `ToastTray` to pin

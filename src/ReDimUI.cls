@@ -58,7 +58,7 @@ Private Const REL_NONE As Long = 0
 Private Const REL_BELOW As Long = 1
 Private Const REL_RIGHT_OF As Long = 2
 Private Const PERSIST_PREFIX As String = "rdm_s_"
-Private Const REDIM_VERSION As String = "0.2.2"
+Private Const REDIM_VERSION As String = "0.2.3"
 
 Private mRole As Long
 
@@ -125,6 +125,7 @@ Private mBindEnabledInvert As Boolean
 Private mWritesToKey As String
 Private mLastClickMs As LongLong
 Private mExpiresAtMs As LongLong
+Private mSlideRemaining As Double
 Private mItems As Collection
 Private mItemsStamp As Long
 Private mSliderMin As Long
@@ -1755,10 +1756,16 @@ Friend Sub ConfigureToast( _
     mExpiresAtMs = GetTickCount64() + ttlMs
     mValue = slot
     Set hostApp = OwnerApp
-    ' Tray origin, in preference order: an explicit ToastTray anchor, a rail
-    ' just outside the content's right edge, or the viewport as a fallback.
+    ' Tray origin, in preference order: an explicit ToastTray anchor (used
+    ' exactly as pinned), or a rail just outside the content's right edge,
+    ' clamped into the visible viewport. A toast is a notification first:
+    ' when the rail and the viewport disagree, one of them hides the
+    ' message, so visibility wins in exactly that case and the rail wins in
+    ' every other.
     Dim originLeft As Double
     Dim originTop As Double
+    Dim viewLeft As Double
+    Dim viewTop As Double
     If Not hostApp.ToastTrayOrigin(originLeft, originTop) Then
         If hostApp.ContentBounds(boundLeft, boundTop, boundRight) Then
             originLeft = boundRight + 12
@@ -1768,9 +1775,21 @@ Friend Sub ConfigureToast( _
             originLeft = boundLeft + viewWidth - mWidth - 12
             originTop = boundTop + 8
         End If
+        hostApp.ResolveViewport viewLeft, viewTop, viewWidth, viewHeight
+        If originLeft + mWidth + 12 > viewLeft + viewWidth Then
+            originLeft = viewLeft + viewWidth - mWidth - 12
+        End If
+        If originLeft < viewLeft + 12 Then originLeft = viewLeft + 12
+        If originTop + mHeight + 8 > viewTop + viewHeight Then
+            originTop = viewTop + viewHeight - mHeight - 8
+        End If
+        If originTop < viewTop + 8 Then originTop = viewTop + 8
     End If
     mLeft = originLeft
     mTop = originTop + (slot - 1) * (mHeight + 6)
+    ' Entrance animation: the shape spawns this far below its slot and the
+    ' pump eases it up into place.
+    mSlideRemaining = 14
     mHasRect = True
     mVisible = True
 End Sub
@@ -2456,6 +2475,8 @@ Private Sub ApplyKindExtras( _
             ApplyInputCell hostSheet, themeValue
         Case KIND_SELECT
             ApplySelectParts hostSheet, themeValue
+        Case KIND_TOAST
+            If mSlideRemaining > 0 Then target.Top = mTop + mSlideRemaining
     End Select
 End Sub
 
@@ -2714,15 +2735,25 @@ Friend Sub DeleteShapes(ByVal hostSheet As Worksheet)
 End Sub
 
 Friend Function NeedsAnimation() As Boolean
-    NeedsAnimation = (mKind = KIND_SPINNER And mVisible)
+    NeedsAnimation = (mKind = KIND_SPINNER And mVisible) _
+        Or (mKind = KIND_TOAST And mSlideRemaining > 0)
 End Function
 
-' Animation bypasses the diff cache: rotation is transient visual state, not
-' a declared prop.
+' Animation bypasses the diff cache: rotation and the toast entrance slide
+' are transient visual state, not declared props.
 Friend Sub TickAnimation(ByVal hostSheet As Worksheet)
     If Not NeedsAnimation() Then Exit Sub
     On Error Resume Next
-    hostSheet.Shapes(ShapeName).IncrementRotation 30
+    Select Case mKind
+        Case KIND_SPINNER
+            hostSheet.Shapes(ShapeName).IncrementRotation 30
+        Case KIND_TOAST
+            ' Ease-out: close 45 percent of the remaining distance per tick
+            ' and snap home once inside a point.
+            mSlideRemaining = mSlideRemaining * 0.55
+            If mSlideRemaining < 0.75 Then mSlideRemaining = 0
+            hostSheet.Shapes(ShapeName).Top = mTop + mSlideRemaining
+    End Select
     On Error GoTo 0
 End Sub
 
