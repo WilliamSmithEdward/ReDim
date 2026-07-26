@@ -565,6 +565,51 @@ Public Function TestSlideBar() As String
     TestSlideBar = transcript
 End Function
 
+' Physical ground truth for the click mapping: a fixed screen pixel must
+' map to absolute points that shift by exactly the scroll delta, and point
+' spans must shrink with zoom. Catches both a wrong conversion factor and
+' a wrong input-model choice, whatever contract the Excel build uses.
+Public Function TestSlideMapping() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim probe As ReDimUI
+    Dim fixedPx As Long
+    Dim p1 As Double, p2 As Double
+    Dim scrollDeltaPts As Double
+    Dim span100 As Double, span150 As Double
+    Dim transcript As String
+
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "wid16")
+    app.SlideBar("map").AtRect 24, 24, 200, 18
+    app.Render
+    Set probe = app.Component("map")
+
+    ActiveWindow.ScrollColumn = 1
+    ActiveWindow.ScrollRow = 1
+    ActiveWindow.Zoom = 100
+    fixedPx = CLng(ActiveWindow.PointsToScreenPixelsX(0)) + 500
+    p1 = probe.ScreenXToSheetPoints(fixedPx)
+    span100 = probe.ScreenXToSheetPoints(fixedPx + 300) - p1
+
+    ActiveWindow.ScrollColumn = 15
+    scrollDeltaPts = ActiveWindow.VisibleRange.Left
+    p2 = probe.ScreenXToSheetPoints(fixedPx)
+    transcript = "scrollShiftMatches=" & _
+        CStr(Abs((p2 - p1) - scrollDeltaPts) < 1)
+
+    ActiveWindow.ScrollColumn = 1
+    ActiveWindow.Zoom = 150
+    span150 = probe.ScreenXToSheetPoints(fixedPx + 300) - _
+        probe.ScreenXToSheetPoints(fixedPx)
+    transcript = transcript & "|zoomScales=" & _
+        CStr(Abs(span150 - span100 / 1.5) < span100 * 0.03)
+    transcript = transcript & "|span100Sane=" & _
+        CStr(span100 > 100 And span100 < 400)
+    ActiveWindow.Zoom = 100
+    TestSlideMapping = transcript
+End Function
+
 Public Function TestModalConfirm() As String
     Dim app As ReDimUI
     Dim host As Worksheet

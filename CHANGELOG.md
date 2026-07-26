@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.6.2 - 2026-07-26
+
+- Fix SlideBar click accuracy. PointsToScreenPixelsX is misnamed on current Excel builds:
+  probing showed its input is document pixels (slope exactly 1 at any zoom, while scrolling
+  shifts the origin by the true pixels-per-point), so treating cursor pixels as points landed
+  clicks about a third short. The mapping now derives pixels-per-point from display DPI and
+  window zoom, selects the conversion by comparing the measured slope against it (robust to
+  either contract), and returns absolute sheet points scroll-proof. A physical regression
+  test pins the contract: a fixed screen pixel must map to points shifted by exactly the
+  scroll delta, and spans must scale inversely with zoom.
+
 ## 0.6.1 - 2026-07-26
 
 - `SlideBar` drops the drag loop and becomes pure click-to-set. The loop violated the

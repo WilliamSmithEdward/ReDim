@@ -28,6 +28,14 @@ End Type
 
 Private Declare PtrSafe Function GetCursorPos Lib "user32" ( _
     ByRef position As RdxScreenPoint) As Long
+Private Declare PtrSafe Function GetDC Lib "user32" ( _
+    ByVal windowHandle As LongPtr) As LongPtr
+Private Declare PtrSafe Function ReleaseDC Lib "user32" ( _
+    ByVal windowHandle As LongPtr, ByVal deviceContext As LongPtr) As Long
+Private Declare PtrSafe Function GetDeviceCaps Lib "gdi32" ( _
+    ByVal deviceContext As LongPtr, ByVal capabilityIndex As Long) As Long
+
+Private Const LOGPIXELSX As Long = 88
 
 Private Const SHAPE_PREFIX As String = "rdm_"
 Private Const PART_SEPARATOR As String = "__"
@@ -36,6 +44,7 @@ Private Const ERROR_INVALID_ARGUMENT As Long = ERROR_BASE + 1
 Private Const ERROR_INVALID_OPERATION As Long = ERROR_BASE + 2
 Private Const ERROR_NOT_FOUND As Long = ERROR_BASE + 3
 Private Const CLICK_DEBOUNCE_MS As Long = 150
+Private Const UNMAPPABLE_POINTS As Double = -1E+18
 
 Private Const ROLE_UNSET As Long = 0
 Private Const ROLE_APP As Long = 1
@@ -70,7 +79,7 @@ Private Const REL_NONE As Long = 0
 Private Const REL_BELOW As Long = 1
 Private Const REL_RIGHT_OF As Long = 2
 Private Const PERSIST_PREFIX As String = "rdm_s_"
-Private Const REDIM_VERSION As String = "0.6.1"
+Private Const REDIM_VERSION As String = "0.6.2"
 
 Private mRole As Long
 
@@ -3419,33 +3428,73 @@ Friend Sub HandleSlideClick(ByVal hostApp As ReDimUI)
     SlideToFraction hostApp, fraction, True
 End Sub
 
-' Inverts ActiveWindow.PointsToScreenPixelsX by two-point calibration, so
-' the mapping holds at any zoom. Returns -1 when no usable window mapping
-' exists (headless automation without an active pane, frozen-pane splits).
 Private Function CursorTrackFraction() As Double
     Dim cursor As RdxScreenPoint
-    Dim originPx As Double
-    Dim referencePx As Double
-    Dim pixelsPerPoint As Double
     Dim cursorPoints As Double
 
     CursorTrackFraction = -1
     If GetCursorPos(cursor) = 0 Then Exit Function
-    On Error GoTo Unmappable
-    originPx = ActiveWindow.PointsToScreenPixelsX(0)
-    referencePx = ActiveWindow.PointsToScreenPixelsX(1000)
-    On Error GoTo 0
-    pixelsPerPoint = (referencePx - originPx) / 1000#
-    If pixelsPerPoint = 0 Then Exit Function
-    cursorPoints = (cursor.X - originPx) / pixelsPerPoint
+    cursorPoints = ScreenXToSheetPoints(cursor.X)
+    If cursorPoints = UNMAPPABLE_POINTS Then Exit Function
     If mWidth <= 0 Then Exit Function
     CursorTrackFraction = (cursorPoints - mLeft) / mWidth
     If CursorTrackFraction < 0 Then CursorTrackFraction = 0
     If CursorTrackFraction > 1 Then CursorTrackFraction = 1
+End Function
+
+' Maps a screen pixel X to absolute sheet points. PointsToScreenPixelsX is
+' misnamed on current Excel builds: its input is document PIXELS (measured
+' slope exactly 1 at any zoom, while scrolling shifts the origin by the
+' true pixels-per-point). The conversion is therefore chosen empirically:
+' if the measured slope matches DPI times zoom it is a real points input;
+' if the slope is 1 the input is pixels and DPI times zoom converts. Under
+' either contract (px - f(0)) / conversion yields absolute points, scroll
+' already accounted for by f(0).
+Friend Function ScreenXToSheetPoints(ByVal screenX As Long) As Double
+    Dim originPx As Double
+    Dim referencePx As Double
+    Dim measuredSlope As Double
+    Dim dpiSlope As Double
+    Dim conversion As Double
+
+    ScreenXToSheetPoints = UNMAPPABLE_POINTS
+    On Error GoTo Unmappable
+    originPx = ActiveWindow.PointsToScreenPixelsX(0)
+    referencePx = ActiveWindow.PointsToScreenPixelsX(1000)
+    measuredSlope = (referencePx - originPx) / 1000#
+    dpiSlope = ScreenPixelsPerPoint()
+    On Error GoTo 0
+    If measuredSlope <= 0 Or dpiSlope <= 0 Then Exit Function
+    If Abs(measuredSlope - dpiSlope) < 0.02 Then
+        conversion = measuredSlope
+    ElseIf Abs(measuredSlope - 1#) < 0.02 Then
+        conversion = dpiSlope
+    Else
+        conversion = measuredSlope
+    End If
+    ScreenXToSheetPoints = (screenX - originPx) / conversion
     Exit Function
 
 Unmappable:
-    CursorTrackFraction = -1
+    ScreenXToSheetPoints = UNMAPPABLE_POINTS
+End Function
+
+Private Function ScreenPixelsPerPoint() As Double
+    Static dotsPerInch As Double
+    Dim deviceContext As LongPtr
+
+    If dotsPerInch = 0 Then
+        deviceContext = GetDC(0)
+        If deviceContext <> 0 Then
+            dotsPerInch = GetDeviceCaps(deviceContext, LOGPIXELSX)
+            ReleaseDC 0, deviceContext
+        End If
+        If dotsPerInch = 0 Then dotsPerInch = 96
+    End If
+    On Error Resume Next
+    ScreenPixelsPerPoint = dotsPerInch / 72# * ActiveWindow.Zoom / 100#
+    On Error GoTo 0
+    If ScreenPixelsPerPoint = 0 Then ScreenPixelsPerPoint = dotsPerInch / 72#
 End Function
 
 Private Sub ApplyInputCell( _

@@ -172,6 +172,19 @@ def test_slide_bar(run_widgets):
     assert facts["maxValue"] == "100"
 
 
+def test_slide_mapping(run_widgets):
+    facts = parse_transcript(run_widgets("TestSlideMapping"))
+    assert facts["scrollShiftMatches"] == "True", (
+        "a fixed screen pixel must map to points shifted by exactly the scroll"
+    )
+    assert facts["zoomScales"] == "True", (
+        "point spans must scale inversely with zoom"
+    )
+    assert facts["span100Sane"] == "True", (
+        "300 px at 100 percent zoom must be roughly 225 points, not 300"
+    )
+
+
 def test_modal_confirm(run_widgets):
     facts = parse_transcript(run_widgets("TestModalConfirm"))
     assert facts["overlayShown"] == "True"
