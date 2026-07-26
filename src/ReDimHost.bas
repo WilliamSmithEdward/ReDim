@@ -18,7 +18,9 @@ Private Declare PtrSafe Function KillTimer Lib "user32" ( _
     ByVal nIDEvent As LongPtr _
 ) As Long
 
-Private Const PUMP_DEFAULT_INTERVAL_MS As Long = 50
+' Animation frame interval. Work (ops, budget jobs, toast expiry) runs on a
+' 50 ms cadence inside ReDimUI.TickAll regardless of the frame rate.
+Private Const PUMP_DEFAULT_INTERVAL_MS As Long = 16
 Private Const PUMP_MAX_CONSECUTIVE_ERRORS As Long = 10
 Private Const PUMP_ID_NAME As String = "rdm_pump_id"
 
@@ -102,10 +104,10 @@ Public Function RdxTickCount() As LongLong
     RdxTickCount = gTickCount
 End Function
 
-' Deterministic single tick for tests and debugging: same body the timer
-' runs, without arming a timer.
+' Deterministic single tick for tests and debugging: one nominal 50 ms
+' frame with the work pass forced, without arming a timer.
 Public Sub RdxPumpOnce()
-    RdxPumpCallback 0, 0, 0, 0
+    ReDimUI.PumpOnce
 End Sub
 
 ' The armed timer id survives VBA state loss inside a workbook-scoped name,

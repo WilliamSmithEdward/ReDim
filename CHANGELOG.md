@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.5 - 2026-07-26
+
+- The pump runs animation frames at 16 ms (about 60 fps) while ops, budget jobs, and toast
+  expiry keep their 50 ms work cadence, so smoother motion costs no extra task polling.
+  Spinner rotation and toast easing are time-based, preserving their speeds at any frame
+  rate, and paced jobs are sampled every frame for tighter game timing.
+
 ## 0.2.4 - 2026-07-26
 
 - Toast stack compaction: when a toast expires or is dismissed, survivors renumber to slots

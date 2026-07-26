@@ -8,11 +8,15 @@ a background completion pump, because the pump's timer callback can only live in
 module and ROneCOne ships as a single class by hard invariant. The ADR explicitly left the door
 open for an external host loop.
 
-ReDim is that host. `ReDimHost.bas` arms a `SetTimer` callback (default 50 ms). Excel dispatches
-WM_TIMER whenever it pumps messages, which includes ordinary idle time between user actions. Each
-tick calls `AdvanceTask` (Friend scope, same project) on every in-flight task, non-blockingly.
-The result is fire-and-forget async in VBA: start work, return immediately, and let completion
-handlers fire while the user keeps editing cells.
+ReDim is that host. `ReDimHost.bas` arms a `SetTimer` callback at a 16 ms animation frame rate.
+Excel dispatches WM_TIMER whenever it pumps messages, which includes ordinary idle time between
+user actions. Animations advance every frame with measured elapsed time; ops, budget jobs, and
+toast expiry run on a 50 ms work cadence inside the same loop, so the higher frame rate buys
+smoothness without multiplying task polling or job duty. Each work pass calls `AdvanceTask`
+(Friend scope, same project) on every in-flight task, non-blockingly. The result is
+fire-and-forget async in VBA: start work, return immediately, and let completion handlers fire
+while the user keeps editing cells. `PumpOnce` advances one nominal 50 ms frame with the work
+pass included, which is what keeps tests deterministic.
 
 Transport tasks (Delay, HTTP, ADO, shell, file watch) genuinely overlap; each tick is one poll.
 A delegate task runs its whole body inside one tick, so long CPU-bound VBA belongs in a job.

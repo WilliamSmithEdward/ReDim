@@ -58,7 +58,7 @@ Private Const REL_NONE As Long = 0
 Private Const REL_BELOW As Long = 1
 Private Const REL_RIGHT_OF As Long = 2
 Private Const PERSIST_PREFIX As String = "rdm_s_"
-Private Const REDIM_VERSION As String = "0.2.4"
+Private Const REDIM_VERSION As String = "0.2.5"
 
 Private mRole As Long
 
@@ -69,6 +69,8 @@ Private mSenderComponent As ReDimUI
 Private mSenderPartName As String
 Private mAutoPumpOff As Boolean
 Private mInPumpTick As Boolean
+Private mLastTickMs As LongLong
+Private mWorkDebtMs As Long
 Private WithEvents mExcelApp As Excel.Application
 Attribute mExcelApp.VB_VarHelpID = -1
 
@@ -340,22 +342,49 @@ Friend Property Get FactorySenderPart() As String
     FactorySenderPart = mSenderPartName
 End Property
 
-' One pump tick across every mounted app. Called by ReDimHost on WM_TIMER and
-' by PumpOnce in deterministic tests. Must never raise.
-Friend Sub TickAll()
+' One pump tick across every mounted app. Called by ReDimHost on WM_TIMER
+' (animation frame rate) and by PumpOnce in deterministic tests. Must never
+' raise. Animations advance every frame with measured elapsed time; ops,
+' budget jobs, and toast expiry run on a 50 ms work cadence via an
+' accumulator. A forced tick is one nominal 50 ms frame with work included,
+' which keeps PumpOnce-driven tests deterministic.
+Friend Sub TickAll(Optional ByVal forceWork As Boolean = False)
     Dim appValue As ReDimUI
+    Dim nowMs As LongLong
+    Dim elapsedMs As Long
+    Dim runWork As Boolean
 
     If Not IsFactory(Me) Then
-        ReDimUI.TickAll
+        ReDimUI.TickAll forceWork
         Exit Sub
     End If
     EnsureFactory
+    nowMs = GetTickCount64()
+    If forceWork Then
+        elapsedMs = 50
+        runWork = True
+        mWorkDebtMs = 0
+    Else
+        If mLastTickMs = 0 Then
+            elapsedMs = 16
+        Else
+            elapsedMs = CLng(nowMs - mLastTickMs)
+        End If
+        If elapsedMs < 1 Then elapsedMs = 1
+        If elapsedMs > 250 Then elapsedMs = 250
+        mWorkDebtMs = mWorkDebtMs + elapsedMs
+        If mWorkDebtMs >= 50 Then
+            runWork = True
+            mWorkDebtMs = 0
+        End If
+    End If
+    mLastTickMs = nowMs
     ' Renders inside a tick skip the ScreenUpdating toggle: flipping it at
     ' pump frequency redraws scroll bars and blips the cursor.
     mInPumpTick = True
     On Error Resume Next
     For Each appValue In mApps
-        appValue.TickApp GetTickCount64()
+        appValue.TickApp nowMs, elapsedMs, runWork
     Next appValue
     On Error GoTo 0
     mInPumpTick = False
@@ -370,7 +399,7 @@ Friend Property Get InPumpTick() As Boolean
 End Property
 
 Public Sub PumpOnce()
-    ReDimUI.TickAll
+    ReDimUI.TickAll True
 End Sub
 
 ' Deterministic tests turn the wall-clock timer off and drive PumpOnce
@@ -1204,23 +1233,33 @@ Public Sub OnError(ByVal procName As String)
     mErrorHandlerProc = procName
 End Sub
 
-Friend Sub TickApp(ByVal nowMs As LongLong)
+Friend Sub TickApp( _
+    ByVal nowMs As LongLong, _
+    ByVal elapsedMs As Long, _
+    ByVal runWork As Boolean _
+)
     Dim opValue As ReDimUI
     Dim jobValue As ReDimUI
     Dim componentValue As ReDimUI
     Dim expiredIds As Collection
 
-    For Each opValue In mAsyncOps
-        If opValue.OpIsRunning Then opValue.TickOp Me
-    Next opValue
+    If runWork Then
+        For Each opValue In mAsyncOps
+            If opValue.OpIsRunning Then opValue.TickOp Me
+        Next opValue
+    End If
+    ' Paced jobs self-gate on the wall clock, so sampling them every frame
+    ' tightens their timing; budget jobs stay on the work cadence.
     For Each jobValue In mJobs
-        If jobValue.JobIsRunning Then jobValue.TickJob Me, nowMs
+        If jobValue.JobIsRunning Then jobValue.TickJob Me, nowMs, runWork
     Next jobValue
     Set expiredIds = New Collection
     For Each componentValue In mComponents
-        componentValue.TickAnimation mSheet
-        If componentValue.IsExpiredToast(nowMs) Then
-            expiredIds.Add componentValue.ComponentId
+        componentValue.TickAnimation mSheet, elapsedMs
+        If runWork Then
+            If componentValue.IsExpiredToast(nowMs) Then
+                expiredIds.Add componentValue.ComponentId
+            End If
         End If
     Next componentValue
     Dim expiredId As Variant
@@ -2788,18 +2827,18 @@ Friend Function NeedsAnimation() As Boolean
         Or (mKind = KIND_TOAST And mSlideRemaining > 0)
 End Function
 
-' Animation bypasses the diff cache: rotation and the toast entrance slide
-' are transient visual state, not declared props.
-Friend Sub TickAnimation(ByVal hostSheet As Worksheet)
+' Animation bypasses the diff cache: rotation and the toast slide are
+' transient visual state, not declared props. Both are time-based so the
+' frame rate changes smoothness, never speed: the spinner turns at 600
+' degrees per second and the slide decays with a 50 ms half-life factor.
+Friend Sub TickAnimation(ByVal hostSheet As Worksheet, ByVal elapsedMs As Long)
     If Not NeedsAnimation() Then Exit Sub
     On Error Resume Next
     Select Case mKind
         Case KIND_SPINNER
-            hostSheet.Shapes(ShapeName).IncrementRotation 30
+            hostSheet.Shapes(ShapeName).IncrementRotation elapsedMs * 0.6
         Case KIND_TOAST
-            ' Ease-out: close 45 percent of the remaining distance per tick
-            ' and snap home once inside a point.
-            mSlideRemaining = mSlideRemaining * 0.55
+            mSlideRemaining = mSlideRemaining * (0.55 ^ (elapsedMs / 50#))
             If mSlideRemaining < 0.75 Then mSlideRemaining = 0
             hostSheet.Shapes(ShapeName).Top = mTop + mSlideRemaining
     End Select
@@ -3090,7 +3129,11 @@ Friend Sub RequestJobCancel()
     mJobCancelRequested = True
 End Sub
 
-Friend Sub TickJob(ByVal ownerApp As ReDimUI, ByVal nowMs As LongLong)
+Friend Sub TickJob( _
+    ByVal ownerApp As ReDimUI, _
+    ByVal nowMs As LongLong, _
+    ByVal runWork As Boolean _
+)
     Dim startedAt As LongLong
     Dim stepDone As Variant
 
@@ -3105,6 +3148,10 @@ Friend Sub TickJob(ByVal ownerApp As ReDimUI, ByVal nowMs As LongLong)
         mJobLastStepMs = nowMs
         stepDone = Application.Run(mJobStepProc)
         If CBool(stepDone) Then FinishJob ownerApp, mJobDoneProc
+        On Error GoTo 0
+        Exit Sub
+    End If
+    If Not runWork Then
         On Error GoTo 0
         Exit Sub
     End If
