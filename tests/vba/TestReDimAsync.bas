@@ -298,6 +298,26 @@ Public Function TestAdaptiveBudget() As String
     TestAdaptiveBudget = transcript
 End Function
 
+' Rendering a slider must arm the pump for its press watch: demand alone
+' only keeps an already-armed pump alive, so a fresh workbook whose only
+' interactive content is a slider would otherwise never watch for drags.
+Public Function TestRenderArmsDragWatch() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim transcript As String
+
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "async9")
+    app.SlideBar("vol").AtRect 24, 24, 200, 18
+    app.Render
+    transcript = "armedAfterRender=" & CStr(RdxPumpArmed())
+    transcript = transcript & "|demandHolds=" & CStr(ReDimUI.HasPendingWork)
+    app.Unmount True
+    RdxStopPump
+    transcript = transcript & "|cleanedUp=" & CStr(Not RdxPumpArmed())
+    TestRenderArmsDragWatch = transcript
+End Function
+
 ' The crown: a real armed SetTimer completes an op with no PumpOnce calls,
 ' then disarms itself once the work drains.
 Public Function TestRealTimerEndToEnd() As String

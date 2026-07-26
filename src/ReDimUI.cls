@@ -83,7 +83,7 @@ Private Const REL_NONE As Long = 0
 Private Const REL_BELOW As Long = 1
 Private Const REL_RIGHT_OF As Long = 2
 Private Const PERSIST_PREFIX As String = "rdm_s_"
-Private Const REDIM_VERSION As String = "0.7.1"
+Private Const REDIM_VERSION As String = "0.7.2"
 
 Private mRole As Long
 
@@ -597,6 +597,8 @@ Private Sub NavigateCore(ByVal appId As String, ByVal pushCurrent As Boolean)
             windowApp.RefreshNavBar
         End If
     Next windowId
+    ' The newly shown window may carry pump demand (sliders, spinners).
+    RequestPump
     target.InvokeShow
 End Sub
 
@@ -1268,6 +1270,10 @@ Public Sub Render()
     mRendered = True
     FlushDirty
     PruneOrphanShapes
+    ' Anything rendered that needs frames (a slider's press watch, a
+    ' spinner, a toast) arms the pump right here; demand alone only keeps
+    ' an already-armed pump alive.
+    If HasAppWork() Then ReDimUI.RequestPump
 End Sub
 
 ' Shapes with this app's prefix but no registered component are leftovers

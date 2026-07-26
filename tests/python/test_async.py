@@ -77,6 +77,15 @@ def test_adaptive_budget(run_async):
     assert int(facts["stepsAnimating"]) >= 1
 
 
+def test_render_arms_drag_watch(run_async):
+    facts = parse_transcript(run_async("TestRenderArmsDragWatch"))
+    assert facts["armedAfterRender"] == "True", (
+        "rendering a slider must arm the pump so drags are watchable at once"
+    )
+    assert facts["demandHolds"] == "True"
+    assert facts["cleanedUp"] == "True"
+
+
 def test_real_timer_end_to_end(run_async):
     facts = parse_transcript(run_async("TestRealTimerEndToEnd"))
     assert facts["armedAfterStart"] == "True"

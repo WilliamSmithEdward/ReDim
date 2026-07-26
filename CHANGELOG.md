@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.7.2 - 2026-07-26
+
+- Fix drag never engaging on freshly opened workbooks: slider demand kept an armed pump
+  alive but nothing armed it after Render, so the press watch was not running until some
+  other feature started the pump. Render and Navigate now arm the pump whenever the app has
+  pending work. A real-input experiment also confirmed the platform premise: the pump's
+  timer keeps firing and COM writes keep succeeding while the mouse button is held down on
+  a macro shape, so mid-drag tracking is fully available.
+
 ## 0.7.1 - 2026-07-26
 
 - True press-drag sliding. OnAction only fires at mouse up, so 0.7.0's click-then-follow

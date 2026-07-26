@@ -562,6 +562,9 @@ Public Function TestSlideBar() As String
         CStr(fillShape.Visible = msoFalse)
     app.Component("vol").SlideToFraction app, 1#, False
     transcript = transcript & "|maxValue=" & app.State("volume")
+    ' Render armed the pump for the slider's press watch; never leave a
+    ' timer armed across harness call boundaries.
+    RdxStopPump
     TestSlideBar = transcript
 End Function
 
@@ -661,6 +664,7 @@ Public Function TestSlideMapping() As String
     transcript = transcript & "|span100Sane=" & _
         CStr(span100 > 100 And span100 < 400)
     ActiveWindow.Zoom = 100
+    RdxStopPump
     TestSlideMapping = transcript
 End Function
 
