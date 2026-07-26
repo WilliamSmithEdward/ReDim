@@ -94,3 +94,11 @@ One thread. Ticks fire only while Excel pumps messages: they pause during anothe
 cell is being edited, and behind native modal dialogs. Delegate bodies block their tick for their
 full duration. These are Excel's rules; ReDim's job is to make the cooperative model feel
 effortless, not to pretend the host is multithreaded.
+
+Pauses are visual, not corrupting: animations are time-based, paces are wall-clock, and task
+state advances on the next tick, so everything catches up correctly when the interaction ends.
+The one preventable stall is edit mode on the app sheet itself, and the opt-in `ProtectSurface`
+closes it by treating that sheet as an application surface. ReDim deliberately does not reach
+for `Application.Interactive` or dialog suppression: locking a user out of their own Excel to
+keep a spinner smooth inverts who the session belongs to, and a failure while input is disabled
+leaves Excel unusable.

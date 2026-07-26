@@ -62,7 +62,7 @@ Private Const REL_NONE As Long = 0
 Private Const REL_BELOW As Long = 1
 Private Const REL_RIGHT_OF As Long = 2
 Private Const PERSIST_PREFIX As String = "rdm_s_"
-Private Const REDIM_VERSION As String = "0.2.6"
+Private Const REDIM_VERSION As String = "0.2.7"
 
 Private mRole As Long
 
@@ -96,6 +96,7 @@ Private mToastCounter As Long
 Private mToastTrayAnchor As String
 Private mPersistOn As Boolean
 Private mHotKeys As Collection
+Private mSurfaceProtected As Boolean
 
 ' Component fields.
 Private mComponentId As String
@@ -1172,6 +1173,36 @@ Public Property Get Theme() As ReDimUI
     Set Theme = mTheme
 End Property
 
+' Treats the app sheet as an application surface: users cannot enter cell
+' edit mode or drag shapes there, which also keeps the pump from stalling
+' in edit mode, while UserInterfaceOnly leaves every framework write free.
+' TextInput cells stay unlocked and editable. Opt-in, and scoped to this
+' one sheet: the rest of the workbook is untouched. Call after Render.
+Public Function ProtectSurface(Optional ByVal enabled As Boolean = True) As ReDimUI
+    Dim componentValue As ReDimUI
+
+    RequireRole ROLE_APP, "ProtectSurface"
+    If enabled Then
+        For Each componentValue In mComponents
+            componentValue.UnlockInputCell mSheet
+        Next componentValue
+        mSheet.Protect DrawingObjects:=True, Contents:=True, _
+            UserInterfaceOnly:=True
+        mSurfaceProtected = True
+    Else
+        On Error Resume Next
+        mSheet.Unprotect
+        On Error GoTo 0
+        mSurfaceProtected = False
+    End If
+    Set ProtectSurface = Me
+End Function
+
+Public Property Get IsSurfaceProtected() As Boolean
+    RequireRole ROLE_APP, "IsSurfaceProtected"
+    IsSurfaceProtected = mSurfaceProtected
+End Property
+
 ' Application.OnKey with lifecycle management: registered keys are released
 ' on Unmount and Shutdown so no binding outlives its app.
 Public Sub HotKey(ByVal keyCode As String, ByVal procName As String)
@@ -1205,6 +1236,7 @@ Public Sub Unmount(Optional ByVal deleteShapes As Boolean = True)
 
     RequireRole ROLE_APP, "Unmount"
     ClearHotKeys
+    If mSurfaceProtected Then ProtectSurface False
     If deleteShapes Then
         For Each componentValue In mComponents
             componentValue.DeleteShapes mSheet
@@ -2820,7 +2852,20 @@ Private Sub ApplyInputCell( _
         cell.Font.Color = themeValue.OnSurfaceColor
         cell.Interior.Color = themeValue.SurfaceColor
         cell.HorizontalAlignment = xlLeft
+        ' Unlocked from birth so ProtectSurface keeps inputs editable.
+        cell.Locked = False
     End If
+End Sub
+
+Friend Sub UnlockInputCell(ByVal hostSheet As Worksheet)
+    Dim cell As Range
+
+    If mKind <> KIND_INPUT Then Exit Sub
+    If LenB(mAnchor) = 0 Then Exit Sub
+    On Error Resume Next
+    Set cell = InputCell(hostSheet)
+    If Not cell Is Nothing Then cell.Locked = False
+    On Error GoTo 0
 End Sub
 
 Friend Sub DeleteShapes(ByVal hostSheet As Worksheet)

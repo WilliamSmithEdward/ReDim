@@ -376,6 +376,48 @@ Public Function TestHotKeyLifecycle() As String
     TestHotKeyLifecycle = transcript
 End Function
 
+Public Function TestProtectSurface() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim transcript As String
+
+    Set host = NewCanvas()
+    gClickCount = 0
+    Set app = ReDimUI.Mount(host, "core13")
+    app.Button("btn").At("B2:C3").Text("Go").OnClick "TestReDimCore.CoreStateHandler"
+    app.Label("out").At("B5:E5").BindText "msg"
+    app.TextInput("name").At("C7").WritesTo "who"
+    app.SetState "msg", "before"
+    app.Render
+    app.ProtectSurface
+
+    transcript = "protected=" & CStr(host.ProtectContents)
+    transcript = transcript & "|inputUnlocked=" & _
+        CStr(host.Range("C7").Locked = False)
+    transcript = transcript & "|otherCellsLocked=" & _
+        CStr(host.Range("A1").Locked = True)
+
+    ' Framework writes keep working under UserInterfaceOnly protection.
+    app.SetState "msg", "updated under protection"
+    transcript = transcript & "|renderWorks=" & _
+        CStr(host.Shapes("rdm_core13_out").TextFrame2.TextRange.Text = _
+            "updated under protection")
+    ReDimUI.DispatchShape "rdm_core13_btn"
+    transcript = transcript & "|dispatchWorks=" & CStr(gClickCount = 1)
+    Dim toastValue As ReDimUI
+    Set toastValue = app.Toast("under protection", 60000)
+    transcript = transcript & "|toastCreates=" & _
+        CStr(Not toastValue Is Nothing)
+
+    app.ProtectSurface False
+    transcript = transcript & "|unprotects=" & CStr(Not host.ProtectContents)
+    app.ProtectSurface
+    app.Unmount True
+    transcript = transcript & "|unmountUnprotects=" & _
+        CStr(Not host.ProtectContents)
+    TestProtectSurface = transcript
+End Function
+
 Private Function ShapeExistsCore( _
     ByVal host As Worksheet, _
     ByVal shapeName As String _

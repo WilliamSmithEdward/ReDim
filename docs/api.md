@@ -43,6 +43,7 @@ Component factories, get-or-create by id: `Button`, `Label`, `Card`, `Spinner`, 
 | `Async(opId)` / `CancelAsync opId` / `AsyncError(opId)` | Async ops (see [async.md](async.md)). |
 | `Job(jobId)` / `CancelJob jobId` | Chunked or paced background work. |
 | `OnError "Module.Proc"` | One-argument sink for swallowed handler failures. |
+| `ProtectSurface enabled` | Opt-in app-sheet protection (UserInterfaceOnly): users cannot enter cell edit mode or drag shapes there, framework writes keep working, TextInput cells stay editable. Call after Render; Unmount unprotects. |
 | `Unmount deleteShapes` | Remove components (and shapes) and forget the app. |
 
 ## Component builders

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.7 - 2026-07-26
+
+- `ProtectSurface`: opt-in UserInterfaceOnly protection for the app sheet, so users cannot
+  park the pump in cell edit mode or drag shapes there, while framework writes keep working
+  and TextInput cells stay editable. Unmount unprotects. Deliberately scoped to the one
+  sheet: ReDim will not disable Excel-wide input or dialogs to protect an animation.
+
 ## 0.2.6 - 2026-07-26
 
 - Steadier frames: the multimedia timer resolution rises to 1 ms while the pump is armed and

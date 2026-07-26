@@ -105,8 +105,24 @@ def test_orphan_pruning(run_core):
     assert facts["newExists"] == "True"
 
 
+def test_protect_surface(run_core):
+    facts = parse_transcript(run_core("TestProtectSurface"))
+    assert facts["protected"] == "True"
+    assert facts["inputUnlocked"] == "True", (
+        "TextInput cells must stay editable under protection"
+    )
+    assert facts["otherCellsLocked"] == "True"
+    assert facts["renderWorks"] == "True", (
+        "UserInterfaceOnly must leave framework writes free"
+    )
+    assert facts["dispatchWorks"] == "True"
+    assert facts["toastCreates"] == "True"
+    assert facts["unprotects"] == "True"
+    assert facts["unmountUnprotects"] == "True"
+
+
 def test_hotkey_lifecycle_and_version(run_core):
     facts = parse_transcript(run_core("TestHotKeyLifecycle"))
     assert facts["procCallable"] == "True"
     assert facts["unmountClean"] == "True"
-    assert facts["version"] == "0.2.6"
+    assert facts["version"] == "0.2.7"
