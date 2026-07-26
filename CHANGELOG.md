@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.0 - 2026-07-26
+
+- Breaking: the native form control wrappers (`Checkbox`, `Dropdown`, `Slider`) are removed,
+  along with the whole form-control rendering path. The drawn family (`Toggle`, `TickBox`,
+  `RadioGroup`, `Stepper`, `SelectBox`) covers every interaction with full theme control.
+  Migration: `Checkbox` becomes `TickBox`, `Dropdown` becomes `SelectBox`, `Slider` becomes
+  `Stepper` (optionally paired with a bound `ProgressBar`).
+- The gallery drops its native row; the meter now binds to a drawn Stepper.
+
 ## 0.4.0 - 2026-07-26
 
 - Drawn control family completes: `TickBox` (themed checkbox with check glyph and clickable

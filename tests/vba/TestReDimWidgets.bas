@@ -93,63 +93,6 @@ Public Function TestToggle() As String
     TestToggle = transcript
 End Function
 
-Public Function TestFormControls() As String
-    Dim app As ReDimUI
-    Dim host As Worksheet
-    Dim checkboxShape As Shape
-    Dim dropdownShape As Shape
-    Dim sliderShape As Shape
-    Dim transcript As String
-
-    Set host = NewCanvas()
-    gChangeCount = 0
-    Set app = ReDimUI.Mount(host, "wid3")
-    app.Checkbox("chk").At("B2").Text("Enable audit").Checked(True).WritesTo "audit"
-    app.Dropdown("dd").At("B4:C4").Items("North", "South", "East", "West") _
-        .Value(2).WritesTo "region"
-    app.Slider("sld").At("B6:E6").SliderRange(0, 200, 5).Value(80).WritesTo "volume"
-    app.Render
-
-    Set checkboxShape = host.Shapes("rdm_wid3_chk")
-    Set dropdownShape = host.Shapes("rdm_wid3_dd")
-    Set sliderShape = host.Shapes("rdm_wid3_sld")
-    transcript = "chkChecked=" & _
-        CStr(checkboxShape.ControlFormat.Value = xlOn)
-    transcript = transcript & "|chkNativeCaptionEmpty=" & _
-        CStr(LenB(checkboxShape.TextFrame.Characters.Text) = 0)
-    transcript = transcript & "|chkCaption=" & _
-        host.Shapes("rdm_wid3_chk__lbl").TextFrame2.TextRange.Text
-    transcript = transcript & "|chkCaptionSize=" & _
-        host.Shapes("rdm_wid3_chk__lbl").TextFrame2.TextRange.Font.Size
-    transcript = transcript & "|ddItems=" & _
-        dropdownShape.ControlFormat.ListCount
-    transcript = transcript & "|ddIndex=" & _
-        dropdownShape.ControlFormat.ListIndex
-    transcript = transcript & "|sldValue=" & sliderShape.ControlFormat.Value
-
-    ' Simulate user interaction: change control values then dispatch, the
-    ' same order Excel uses when a form control fires OnAction.
-    checkboxShape.ControlFormat.Value = xlOff
-    ReDimUI.DispatchShape "rdm_wid3_chk"
-    transcript = transcript & "|auditState=" & CStr(app.State("audit"))
-    Sleep 200
-    dropdownShape.ControlFormat.ListIndex = 4
-    ReDimUI.DispatchShape "rdm_wid3_dd"
-    transcript = transcript & "|regionState=" & app.State("region")
-    Sleep 200
-    sliderShape.ControlFormat.Value = 145
-    ReDimUI.DispatchShape "rdm_wid3_sld"
-    transcript = transcript & "|volumeState=" & app.State("volume")
-
-    ' Clicking the themed caption part must toggle the box itself.
-    Sleep 200
-    ReDimUI.DispatchShape "rdm_wid3_chk__lbl"
-    transcript = transcript & "|captionClickChecked=" & CStr(app.State("audit"))
-    transcript = transcript & "|captionClickNative=" & _
-        CStr(checkboxShape.ControlFormat.Value = xlOn)
-    TestFormControls = transcript
-End Function
-
 Public Function TestSelectBox() As String
     Dim app As ReDimUI
     Dim host As Worksheet

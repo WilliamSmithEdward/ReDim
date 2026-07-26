@@ -44,9 +44,6 @@ Private Const KIND_CARD As Long = 3
 Private Const KIND_PROGRESS As Long = 4
 Private Const KIND_SPINNER As Long = 5
 Private Const KIND_TOGGLE As Long = 6
-Private Const KIND_CHECKBOX As Long = 7
-Private Const KIND_DROPDOWN As Long = 8
-Private Const KIND_SLIDER As Long = 9
 Private Const KIND_INPUT As Long = 10
 Private Const KIND_TOAST As Long = 11
 Private Const KIND_OVERLAY As Long = 12
@@ -65,7 +62,7 @@ Private Const REL_NONE As Long = 0
 Private Const REL_BELOW As Long = 1
 Private Const REL_RIGHT_OF As Long = 2
 Private Const PERSIST_PREFIX As String = "rdm_s_"
-Private Const REDIM_VERSION As String = "0.4.0"
+Private Const REDIM_VERSION As String = "0.5.0"
 
 Private mRole As Long
 
@@ -151,7 +148,6 @@ Private mLastClickMs As LongLong
 Private mExpiresAtMs As LongLong
 Private mSlideRemaining As Double
 Private mItems As Collection
-Private mItemsStamp As Long
 Private mSliderMin As Long
 Private mSliderMax As Long
 Private mSliderStep As Long
@@ -176,7 +172,6 @@ Private mAppliedVisible As Boolean
 Private mAppliedOnAction As String
 Private mAppliedValue As Double
 Private mAppliedChecked As Boolean
-Private mAppliedItemsStamp As Long
 
 ' Async op fields.
 Private mOpTask As ROneCOne
@@ -710,29 +705,19 @@ Public Function Toggle(ByVal componentId As String) As ReDimUI
     Set Toggle = GetOrCreateComponent(componentId, KIND_TOGGLE)
 End Function
 
-Public Function Checkbox(ByVal componentId As String) As ReDimUI
-    Set Checkbox = GetOrCreateComponent(componentId, KIND_CHECKBOX)
-End Function
-
-Public Function Dropdown(ByVal componentId As String) As ReDimUI
-    Set Dropdown = GetOrCreateComponent(componentId, KIND_DROPDOWN)
-End Function
-
-' Drawn picker: a themed alternative to the native Dropdown, whose face and
-' option list use the app font instead of Excel's fixed form-control font.
+' Drawn picker: face, caret, and option list in the app font.
 Public Function SelectBox(ByVal componentId As String) As ReDimUI
     Set SelectBox = GetOrCreateComponent(componentId, KIND_SELECT)
 End Function
 
-' Drawn checkbox: themed box, check glyph, and caption, with no native
-' form control anywhere. Click the box or the caption to toggle.
+' Drawn checkbox: themed box, check glyph, and caption. Click the box or
+' the caption to toggle.
 Public Function TickBox(ByVal componentId As String) As ReDimUI
     Set TickBox = GetOrCreateComponent(componentId, KIND_TICKBOX)
 End Function
 
-' Drawn single-select option rows; the native controls never offered radio
-' buttons at all. Items supplies the rows, Value the selected index, and
-' WritesTo receives the selected item's text.
+' Drawn single-select option rows. Items supplies the rows, Value the
+' selected index, and WritesTo receives the selected item's text.
 Public Function RadioGroup(ByVal componentId As String) As ReDimUI
     Set RadioGroup = GetOrCreateComponent(componentId, KIND_RADIO)
 End Function
@@ -742,10 +727,6 @@ End Function
 ' slider cannot be drawn honestly; stepped entry can.
 Public Function Stepper(ByVal componentId As String) As ReDimUI
     Set Stepper = GetOrCreateComponent(componentId, KIND_STEPPER)
-End Function
-
-Public Function Slider(ByVal componentId As String) As ReDimUI
-    Set Slider = GetOrCreateComponent(componentId, KIND_SLIDER)
 End Function
 
 Public Function TextInput(ByVal componentId As String) As ReDimUI
@@ -1803,13 +1784,6 @@ Friend Sub ConfigureComponent( _
             mWidth = 200: mHeight = 12
         Case KIND_TOGGLE
             mWidth = 44: mHeight = 22
-        Case KIND_CHECKBOX
-            mWidth = 110: mHeight = 20
-        Case KIND_DROPDOWN
-            mWidth = 130: mHeight = 22
-        Case KIND_SLIDER
-            mWidth = 160: mHeight = 16
-            mSliderMin = 0: mSliderMax = 100: mSliderStep = 1
         Case KIND_INPUT
             mWidth = 140: mHeight = 20
         Case KIND_SELECT
@@ -2110,7 +2084,6 @@ Public Function Items(ParamArray listItems() As Variant) As ReDimUI
     For position = LBound(listItems) To UBound(listItems)
         mItems.Add CStr(listItems(position))
     Next position
-    mItemsStamp = mItemsStamp + 1
     Touch
     Set Items = Me
 End Function
@@ -2338,9 +2311,7 @@ End Sub
 ' case-insensitive, so a local named ownerApp would shadow the OwnerApp
 ' property and Set ownerApp = OwnerApp would self-assign Nothing.
 Friend Sub RunClickBehavior()
-    Dim hostSheet As Worksheet
     Dim hostApp As ReDimUI
-    Dim selectedIndex As Long
 
     Set hostApp = OwnerApp
     Select Case mKind
@@ -2348,40 +2319,6 @@ Friend Sub RunClickBehavior()
             mChecked = Not mChecked
             If LenB(mWritesToKey) > 0 Then hostApp.SetState mWritesToKey, mChecked
             Touch
-        Case KIND_CHECKBOX
-            Set hostSheet = hostApp.Sheet
-            On Error Resume Next
-            ' A caption click arrives without the native box having toggled,
-            ' so flip it here before reading the value back.
-            If ReDimUI.SenderPart = "lbl" Then
-                If hostSheet.Shapes(ShapeName).ControlFormat.Value = xlOn Then
-                    hostSheet.Shapes(ShapeName).ControlFormat.Value = xlOff
-                Else
-                    hostSheet.Shapes(ShapeName).ControlFormat.Value = xlOn
-                End If
-            End If
-            mChecked = (hostSheet.Shapes(ShapeName).ControlFormat.Value = xlOn)
-            On Error GoTo 0
-            mAppliedChecked = mChecked
-            If LenB(mWritesToKey) > 0 Then hostApp.SetState mWritesToKey, mChecked
-        Case KIND_DROPDOWN
-            Set hostSheet = hostApp.Sheet
-            selectedIndex = 0
-            On Error Resume Next
-            selectedIndex = hostSheet.Shapes(ShapeName).ControlFormat.ListIndex
-            On Error GoTo 0
-            mValue = selectedIndex
-            mAppliedValue = selectedIndex
-            If LenB(mWritesToKey) > 0 And selectedIndex >= 1 Then
-                hostApp.SetState mWritesToKey, ItemAt(selectedIndex)
-            End If
-        Case KIND_SLIDER
-            Set hostSheet = hostApp.Sheet
-            On Error Resume Next
-            mValue = hostSheet.Shapes(ShapeName).ControlFormat.Value
-            On Error GoTo 0
-            mAppliedValue = mValue
-            If LenB(mWritesToKey) > 0 Then hostApp.SetState mWritesToKey, mValue
         Case KIND_SELECT
             If Left$(ReDimUI.SenderPart, 3) = "opt" Then
                 mValue = CLng(Mid$(ReDimUI.SenderPart, 4))
@@ -2500,11 +2437,6 @@ Friend Sub Apply( _
     ApplyKindExtras target, hostSheet, themeValue
     mAppliedValid = True
 End Sub
-
-Private Function IsFormControlKind() As Boolean
-    IsFormControlKind = (mKind = KIND_CHECKBOX Or mKind = KIND_DROPDOWN _
-        Or mKind = KIND_SLIDER)
-End Function
 
 Private Sub ResolveBindings(ByVal ownerApp As ReDimUI)
     Dim bound As Variant
@@ -2675,15 +2607,6 @@ Private Function CreateShapeForKind(ByVal hostSheet As Worksheet) As Shape
             Set target = hostSheet.Shapes.AddShape( _
                 msoShapeRoundedRectangle, mLeft, mTop, mWidth, mHeight)
             target.Adjustments(1) = 0.15
-        Case KIND_CHECKBOX
-            Set target = hostSheet.Shapes.AddFormControl( _
-                xlCheckBox, CLng(mLeft), CLng(mTop), CLng(mWidth), CLng(mHeight))
-        Case KIND_DROPDOWN
-            Set target = hostSheet.Shapes.AddFormControl( _
-                xlDropDown, CLng(mLeft), CLng(mTop), CLng(mWidth), CLng(mHeight))
-        Case KIND_SLIDER
-            Set target = hostSheet.Shapes.AddFormControl( _
-                xlScrollBar, CLng(mLeft), CLng(mTop), CLng(mWidth), CLng(mHeight))
         Case Else
             Set target = hostSheet.Shapes.AddShape( _
                 msoShapeRectangle, mLeft, mTop, mWidth, mHeight)
@@ -2737,7 +2660,7 @@ End Sub
 Private Sub ApplyStyle(ByVal target As Shape, ByVal themeValue As ReDimUI)
     Dim resolvedFill As Long
 
-    If IsFormControlKind() Or IsCompositeDrawnKind() Then Exit Sub
+    If IsCompositeDrawnKind() Then Exit Sub
     resolvedFill = ResolveFill(themeValue)
     Select Case mKind
         Case KIND_LABEL
@@ -2910,8 +2833,7 @@ Private Sub ApplyText(ByVal target As Shape, ByVal themeValue As ReDimUI)
     Dim textChanged As Boolean
 
     If mKind = KIND_SPINNER Or mKind = KIND_TOGGLE Or mKind = KIND_OVERLAY _
-        Or mKind = KIND_INPUT Or IsFormControlKind() _
-        Or IsCompositeDrawnKind() Then Exit Sub
+        Or mKind = KIND_INPUT Or IsCompositeDrawnKind() Then Exit Sub
     resolved = ResolveText(Nothing)
     resolvedColor = ResolveTextColor(themeValue)
     resolvedSize = mFontSize
@@ -2983,12 +2905,6 @@ Private Sub ApplyKindExtras( _
         Case KIND_PROGRESS
             ApplyProgressFill hostSheet, themeValue
             mAppliedValue = mValue
-        Case KIND_CHECKBOX
-            ApplyCheckboxControl target, hostSheet, themeValue
-        Case KIND_DROPDOWN
-            ApplyDropdownControl target
-        Case KIND_SLIDER
-            ApplySliderControl target
         Case KIND_INPUT
             ApplyInputCell hostSheet, themeValue
         Case KIND_SELECT
@@ -3287,58 +3203,6 @@ Private Sub ApplyProgressFill( _
     fillPart.Fill.ForeColor.RGB = ResolveFill(themeValue)
 End Sub
 
-' The native caption stays empty because Excel fixes form-control caption
-' fonts at a small size. A themed textbox part carries the visible caption
-' and toggles the box when clicked.
-Private Sub ApplyCheckboxControl( _
-    ByVal target As Shape, _
-    ByVal hostSheet As Worksheet, _
-    ByVal themeValue As ReDimUI _
-)
-    Dim caption As Shape
-    Dim resolvedSize As Double
-
-    If Not mAppliedValid Then
-        target.TextFrame.Characters.Text = vbNullString
-    End If
-    If Not mAppliedValid Or mAppliedChecked <> mChecked Then
-        If mChecked Then
-            target.ControlFormat.Value = xlOn
-        Else
-            target.ControlFormat.Value = xlOff
-        End If
-        mAppliedChecked = mChecked
-    End If
-    resolvedSize = mFontSize
-    If resolvedSize <= 0 Then resolvedSize = themeValue.BaseFontSize
-    Set caption = EnsurePartShape(hostSheet, "lbl", msoShapeRectangle)
-    caption.Left = mLeft + 16
-    caption.Top = mTop - 1
-    caption.Width = mWidth - 16
-    caption.Height = mHeight + 2
-    caption.Fill.Visible = msoFalse
-    caption.Line.Visible = msoFalse
-    With caption.TextFrame2
-        .MarginLeft = 2
-        .MarginRight = 0
-        .MarginTop = 0
-        .MarginBottom = 0
-        .VerticalAnchor = msoAnchorMiddle
-        .WordWrap = msoFalse
-        .TextRange.Text = mText
-        .TextRange.ParagraphFormat.Alignment = msoAlignLeft
-        With .TextRange.Font
-            .Name = themeValue.FontName
-            .Size = resolvedSize
-            .Bold = BoolToMso(mFontBold)
-            .Fill.ForeColor.RGB = themeValue.OnSurfaceColor
-        End With
-    End With
-    caption.Visible = BoolToMso(mVisible)
-    caption.OnAction = mAppliedOnAction
-    mAppliedText = mText
-End Sub
-
 Private Sub ApplySelectParts( _
     ByVal hostSheet As Worksheet, _
     ByVal themeValue As ReDimUI _
@@ -3414,47 +3278,6 @@ Private Sub SyncSelectOptions( _
         On Error GoTo 0
     Next position
     mAppliedOptionCount = wanted
-End Sub
-
-Private Sub ApplyDropdownControl(ByVal target As Shape)
-    Dim entry As Variant
-    Dim desiredIndex As Long
-
-    If Not mItems Is Nothing Then
-        If Not mAppliedValid Or mAppliedItemsStamp <> mItemsStamp Then
-            target.ControlFormat.RemoveAllItems
-            For Each entry In mItems
-                target.ControlFormat.AddItem CStr(entry)
-            Next entry
-            mAppliedItemsStamp = mItemsStamp
-            mAppliedValue = 0
-        End If
-        desiredIndex = CLng(mValue)
-        If desiredIndex >= 1 And desiredIndex <= mItems.Count Then
-            If Not mAppliedValid Or mAppliedValue <> desiredIndex Then
-                target.ControlFormat.ListIndex = desiredIndex
-                mAppliedValue = desiredIndex
-            End If
-        End If
-    End If
-End Sub
-
-Private Sub ApplySliderControl(ByVal target As Shape)
-    Dim clamped As Long
-
-    If Not mAppliedValid Then
-        target.ControlFormat.Min = mSliderMin
-        target.ControlFormat.Max = mSliderMax
-        target.ControlFormat.SmallChange = mSliderStep
-        target.ControlFormat.LargeChange = mSliderStep * 10
-    End If
-    clamped = CLng(mValue)
-    If clamped < mSliderMin Then clamped = mSliderMin
-    If clamped > mSliderMax Then clamped = mSliderMax
-    If Not mAppliedValid Or mAppliedValue <> clamped Then
-        target.ControlFormat.Value = clamped
-        mAppliedValue = clamped
-    End If
 End Sub
 
 Private Sub ApplyInputCell( _

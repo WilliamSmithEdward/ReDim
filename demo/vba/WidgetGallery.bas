@@ -41,9 +41,7 @@ Public Sub BuildWidgetGallery()
     app.Label("lblValues").AtRect(24, 128, 200, 16).Text("Value controls").Bold
     app.Toggle("notify").AtRect(24, 150, 44, 22).WritesTo "notifications"
     app.Label("notifyLbl").AtRect(76, 152, 110, 18).Text("Notifications")
-    app.Checkbox("audit").AtRect(196, 150, 130, 20).Text("Audit trail") _
-        .WritesTo "audit"
-    app.SelectBox("region").AtRect(340, 148, 130, 24) _
+    app.SelectBox("region").AtRect(196, 148, 130, 24) _
         .Items("North", "South", "East", "West").Value(1).WritesTo "region"
     app.SelectBox("region").OnChange "WidgetGallery.HandleRegionChange"
 
@@ -53,37 +51,27 @@ Public Sub BuildWidgetGallery()
         .WritesTo "drawnCheck"
     app.RadioGroup("priority").AtRect(190, 204, 130, 60) _
         .Items("Low", "Medium", "High").Value(2).WritesTo "priority"
-    app.Stepper("threads").AtRect(350, 206, 120, 24).SliderRange(1, 8, 1) _
-        .Value(4).WritesTo "threads"
-
-    app.Label("lblNative").AtRect(24, 280, 300, 16) _
-        .Text("Native controls (Excel-drawn, fixed font)").Bold
-    app.Dropdown("nativedd").AtRect(24, 302, 120, 22) _
-        .Items("Alpha", "Beta", "Gamma").Value(1).WritesTo "nativePick"
-    app.Slider("volume").AtRect(160, 304, 130, 16).SliderRange(0, 100, 5) _
+    app.Stepper("volume").AtRect(350, 206, 120, 24).SliderRange(0, 100, 5) _
         .Value(35).WritesTo "volume"
 
-    app.Label("lblInput").AtRect(24, 338, 200, 16).Text("Cell-backed input").Bold
-    app.TextInput("username").At("C19").WritesTo "userName"
-    app.Label("inputHint").AtRect(24, 384, 260, 16) _
+    app.Label("lblInput").AtRect(24, 280, 200, 16).Text("Cell-backed input").Bold
+    app.TextInput("username").At("C15").WritesTo "userName"
+    app.Label("inputHint").AtRect(24, 324, 260, 16) _
         .Text("Type in the framed cell and press Enter.")
 
-    app.Label("lblProgress").AtRect(24, 416, 200, 16).Text("Progress").Bold
-    app.ProgressBar("meter").AtRect(24, 438, 240, 12).BindValue "volume"
-    app.Label("meterLbl").AtRect(276, 434, 200, 18) _
-        .BindText "volume", "Bound to the slider: {0}"
-    app.Spinner("spin").AtRect 490, 430, 26, 26
+    app.Label("lblProgress").AtRect(24, 356, 200, 16).Text("Progress").Bold
+    app.ProgressBar("meter").AtRect(24, 378, 240, 12).BindValue "volume"
+    app.Label("meterLbl").AtRect(276, 374, 200, 18) _
+        .BindText "volume", "Bound to the stepper: {0}"
+    app.Spinner("spin").AtRect 490, 370, 26, 26
 
-    app.Card("inspector").AtRect(24, 470, 560, 110).Text("State inspector")
-    app.Label("inspectorBody").AtRect(36, 498, 536, 74).BindText "inspector"
+    app.Card("inspector").AtRect(24, 410, 560, 110).Text("State inspector")
+    app.Label("inspectorBody").AtRect(36, 438, 536, 74).BindText "inspector"
 
     app.SetState "notifications", False
-    app.SetState "audit", False
     app.SetState "region", "North"
     app.SetState "drawnCheck", False
     app.SetState "priority", "Medium"
-    app.SetState "threads", 4
-    app.SetState "nativePick", "Alpha"
     app.SetState "volume", 35
     app.SetState "userName", vbNullString
     app.SetState "lastAction", "none yet"
@@ -95,12 +83,9 @@ End Sub
 
 Private Sub WireInspector(ByVal app As ReDimUI)
     app.OnStateChanged "notifications", "WidgetGallery.RefreshInspector"
-    app.OnStateChanged "audit", "WidgetGallery.RefreshInspector"
     app.OnStateChanged "region", "WidgetGallery.RefreshInspector"
     app.OnStateChanged "drawnCheck", "WidgetGallery.RefreshInspector"
     app.OnStateChanged "priority", "WidgetGallery.RefreshInspector"
-    app.OnStateChanged "threads", "WidgetGallery.RefreshInspector"
-    app.OnStateChanged "nativePick", "WidgetGallery.RefreshInspector"
     app.OnStateChanged "volume", "WidgetGallery.RefreshInspector"
     app.OnStateChanged "userName", "WidgetGallery.RefreshInspector"
     app.OnStateChanged "lastAction", "WidgetGallery.RefreshInspector"
@@ -112,15 +97,12 @@ Public Sub RefreshInspector()
 
     Set app = GalleryApp()
     summary = "notifications = " & CStr(app.State("notifications")) & _
-        "   audit = " & CStr(app.State("audit")) & _
         "   region = " & CStr(app.State("region")) & _
-        "   native = " & CStr(app.State("nativePick")) & vbLf & _
+        "   check = " & CStr(app.State("drawnCheck")) & vbLf & _
         "volume = " & CStr(app.State("volume")) & _
-        "   check = " & CStr(app.State("drawnCheck")) & _
         "   priority = " & CStr(app.State("priority")) & _
-        "   threads = " & CStr(app.State("threads")) & vbLf & _
-        "userName = " & CStr(app.State("userName")) & _
-        "   last action = " & CStr(app.State("lastAction"))
+        "   userName = " & CStr(app.State("userName")) & vbLf & _
+        "last action = " & CStr(app.State("lastAction"))
     app.SetState "inspector", summary
 End Sub
 

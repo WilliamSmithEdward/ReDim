@@ -43,10 +43,8 @@ demo is the working reference.
 ## App
 
 Component factories, get-or-create by id: `Button`, `Label`, `Card`, `Spinner`, `ProgressBar`,
-`Toggle`, `TickBox`, `RadioGroup`, `Stepper`, `SelectBox`, `Checkbox`, `Dropdown`, `Slider`,
-`TextInput`. The drawn family (`Toggle`, `TickBox`, `RadioGroup`, `Stepper`, `SelectBox`) is
-fully themed; `Checkbox`, `Dropdown`, and `Slider` wrap native form controls for the OS look.
-Also:
+`Toggle`, `TickBox`, `RadioGroup`, `Stepper`, `SelectBox`, `TextInput`. Every control is drawn
+from shapes and fully themed; there are no native form controls in the framework. Also:
 
 | Member | Purpose |
 |---|---|
@@ -95,22 +93,20 @@ Handlers are zero-argument public procedures referenced as `"Module.Proc"`. Insi
 `ReDimUI.Sender` carries who fired and `ReDimUI.SenderPart` names the clicked sub-shape when a
 composite widget fired (toggle knob, checkbox caption, select option).
 
-## Drawn controls versus native controls
+## The drawn control family
 
-Excel fixes the fonts and look of form controls, so ReDim ships a fully drawn family for
-complete styling control, all pure shapes with no added dependencies:
+Excel fixes the fonts and look of form controls, so as of 0.5.0 ReDim draws every control from
+shapes and ships no native form controls at all. Full styling control, pure shapes, no added
+dependencies:
 
-- `TickBox` replaces the native checkbox: themed box, check glyph, caption; box and caption
-  both toggle on click.
-- `RadioGroup` provides single-select option rows, which native form controls never offered.
-- `Stepper` replaces the native scrollbar for numeric entry: minus and plus around a value
-  face, honoring `SliderRange`. Shapes cannot report click coordinates, so a drag-thumb slider
-  cannot be drawn honestly; stepped entry can, and reads better on a worksheet.
-- `SelectBox` replaces the native dropdown with a themed face and option list.
-
-The native wrappers remain for the OS look: `Checkbox` (its caption drawn themed, since the
-native caption font is fixed), `Dropdown`, and `Slider`. `Slider` has no text; pair it with a
-bound `Label`, as the gallery does.
+- `TickBox`: themed box, check glyph, caption; box and caption both toggle on click.
+- `RadioGroup`: single-select option rows, a control native form controls never offered.
+- `Stepper`: numeric entry as minus and plus around a value face, honoring `SliderRange`.
+  Shapes cannot report click coordinates, so a drag-thumb slider cannot be drawn honestly;
+  stepped entry can, and reads better on a worksheet. Pair it with a bound `ProgressBar` when
+  a level visualization is wanted, as the gallery does.
+- `SelectBox`: a themed face, caret, and option list in place of the native dropdown.
+- `Toggle`: the pill switch for booleans.
 
 ## Shapes are framework-owned
 

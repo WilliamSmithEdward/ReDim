@@ -32,28 +32,6 @@ def test_toggle(run_widgets):
     assert facts["knobClickTogglesOff"] == "True"
 
 
-def test_form_controls(run_widgets):
-    facts = parse_transcript(run_widgets("TestFormControls"))
-    assert facts["chkChecked"] == "True"
-    assert facts["chkNativeCaptionEmpty"] == "True", (
-        "the fixed-font native caption must stay empty"
-    )
-    assert facts["chkCaption"] == "Enable audit"
-    assert float(facts["chkCaptionSize"]) == 11.0, (
-        "caption part must use the theme font size"
-    )
-    assert facts["ddItems"] == "4"
-    assert facts["ddIndex"] == "2"
-    assert facts["sldValue"] == "80"
-    assert facts["auditState"] == "False"
-    assert facts["regionState"] == "West"
-    assert facts["volumeState"] == "145"
-    assert facts["captionClickChecked"] == "True", (
-        "clicking the themed caption must toggle the checkbox"
-    )
-    assert facts["captionClickNative"] == "True"
-
-
 def test_select_box(run_widgets):
     facts = parse_transcript(run_widgets("TestSelectBox"))
     assert facts["faceText"] == "South"
