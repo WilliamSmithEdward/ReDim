@@ -105,15 +105,18 @@ dependencies:
 - `RadioGroup`: single-select option rows, a control native form controls never offered.
 - `Stepper`: numeric entry as minus and plus around a value face, honoring `SliderRange` -
   the precise keyboard-free form of numeric input.
-- `SlideBar`: a drawn slider with click-to-set plus non-blocking sliding. The first click
-  sets the value and grabs the thumb (shown in the accent color); pump frames then follow the
-  cursor with snapped live state writes, and either a second click on the slider or a mouse
-  press anywhere else drops it. `OnChange` fires on the engaging click and once on a drop
-  that moved the value. Loop-free by construction: tracking is one cursor read per 16 ms
-  frame, and every other pump duty keeps running while the user slides. Coordinates come
-  from `GetCursorPos` plus a DPI-and-zoom-aware inversion of `PointsToScreenPixelsX`;
-  frozen-pane splits skew that calibration, so keep app surfaces unsplit. Use `Stepper` for
-  precision.
+- `SlideBar`: a drawn slider with true press-drag, without blocking. Shape OnAction only
+  fires at mouse up, so the pump's frames watch for the left-button press edge themselves,
+  hit-test the cursor against the track, and run the drag session: the value follows the
+  cursor with snapped live state writes while the button is held (thumb shown in the accent
+  color), `OnChange` fires once at release if the value moved, and the release click Excel
+  then delivers is swallowed. A plain tap sets the value at the press point. Loop-free by
+  construction: one key-state poll and at most one cursor read per 16 ms frame, and every
+  other pump duty keeps running mid-drag. A visible slider on the active sheet keeps the
+  pump armed so presses are never missed - the idle cost is that one poll per frame.
+  Coordinates come from `GetCursorPos` plus a DPI-and-zoom-aware inversion of
+  `PointsToScreenPixels`; frozen-pane splits skew that calibration, so keep app surfaces
+  unsplit. Use `Stepper` for precision.
 - `SelectBox`: a themed face, caret, and option list in place of the native dropdown.
 - `Toggle`: the pill switch for booleans.
 

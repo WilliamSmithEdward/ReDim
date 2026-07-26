@@ -565,11 +565,10 @@ Public Function TestSlideBar() As String
     TestSlideBar = transcript
 End Function
 
-' The tracking state machine, driven through its deterministic seams: the
-' cursor-following step itself needs a physical mouse, but engage, drop,
-' change-on-drop semantics, dispatch toggling, and pump survival are all
-' assertable.
-Public Function TestSlideTracking() As String
+' The drag-session state machine through its deterministic seams: the
+' press watch itself needs a physical mouse, but begin, live continue,
+' release semantics, click swallowing, and pump demand are assertable.
+Public Function TestSlideDrag() As String
     Dim app As ReDimUI
     Dim host As Worksheet
     Dim probe As ReDimUI
@@ -587,37 +586,37 @@ Public Function TestSlideTracking() As String
     Set probe = app.Component("trk")
     Set thumbShape = host.Shapes("rdm_wid17_trk__thumb")
 
-    probe.StartSlideTracking app
-    transcript = "tracking=" & CStr(probe.IsSlideTracking)
-    transcript = transcript & "|pumpHasWork=" & CStr(ReDimUI.HasPendingWork)
+    ' A visible slider on the active sheet demands the pump for its press
+    ' watch.
+    transcript = "dragWatchDemandsPump=" & CStr(ReDimUI.HasPendingWork)
+
+    probe.BeginSlideDrag app, 0.3
+    transcript = transcript & "|dragging=" & CStr(probe.IsSlideDragging)
+    transcript = transcript & "|pressValue=" & app.State("level")
     transcript = transcript & "|thumbAccent=" & _
         CStr(thumbShape.Fill.ForeColor.RGB = app.Theme.PrimaryColor)
 
-    ' No button pressed in the harness, so frames keep tracking alive.
-    ReDimUI.PumpOnce
-    ReDimUI.PumpOnce
-    transcript = transcript & "|survivesFrames=" & CStr(probe.IsSlideTracking)
+    probe.ContinueSlideDrag app, 0.9
+    transcript = transcript & "|liveValue=" & app.State("level")
+    transcript = transcript & "|noChangeDuringHold=" & CStr(gChangeCount = 0)
 
-    ' Value moved during tracking, then dropped: OnChange fires once.
-    probe.SlideToFraction app, 0.8, False
-    probe.StopSlideTracking app
-    transcript = transcript & "|dropFiredChange=" & CStr(gChangeCount = 1)
-    transcript = transcript & "|droppedValue=" & app.State("level")
+    probe.EndSlideDrag app
+    transcript = transcript & "|releasedFiredChange=" & CStr(gChangeCount = 1)
     transcript = transcript & "|thumbWhiteAgain=" & _
         CStr(thumbShape.Fill.ForeColor.RGB = RGB(255, 255, 255))
 
-    ' Engage and drop with no movement: no change event.
-    probe.StartSlideTracking app
-    probe.StopSlideTracking app
-    transcript = transcript & "|noMoveNoChange=" & CStr(gChangeCount = 1)
-
-    ' A second click on the slider is the drop gesture through dispatch.
-    probe.StartSlideTracking app
-    Sleep 200
+    ' The release click Excel delivers right after is swallowed.
     ReDimUI.DispatchShape "rdm_wid17_trk"
-    transcript = transcript & "|clickDrops=" & CStr(Not probe.IsSlideTracking)
+    transcript = transcript & "|releaseClickSwallowed=" & _
+        CStr(app.State("level") = 90 And gChangeCount = 1)
+
+    ' A no-movement session fires nothing.
+    Sleep 500
+    probe.BeginSlideDrag app, 0.9
+    probe.EndSlideDrag app
+    transcript = transcript & "|noMoveNoChange=" & CStr(gChangeCount = 1)
     ReDimUI.AutoPump True
-    TestSlideTracking = transcript
+    TestSlideDrag = transcript
 End Function
 
 ' Physical ground truth for the click mapping: a fixed screen pixel must

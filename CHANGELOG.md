@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.7.1 - 2026-07-26
+
+- True press-drag sliding. OnAction only fires at mouse up, so 0.7.0's click-then-follow
+  mode could not serve the natural press-hold-sweep gesture and actively fought it. The
+  pump's frames now watch the left-button press edge themselves, hit-test the cursor against
+  the track, and run the drag session: live snapped writes while held, OnChange once at
+  release if the value moved, release click swallowed, plain taps still set. A visible
+  slider on the active sheet keeps the pump armed so presses are never missed; the idle cost
+  is one key-state poll per frame.
+
 ## 0.7.0 - 2026-07-26
 
 - Non-blocking sliding: the first click on a SlideBar sets the value and grabs the thumb,

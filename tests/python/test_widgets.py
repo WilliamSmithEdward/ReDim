@@ -172,21 +172,22 @@ def test_slide_bar(run_widgets):
     assert facts["maxValue"] == "100"
 
 
-def test_slide_tracking(run_widgets):
-    facts = parse_transcript(run_widgets("TestSlideTracking"))
-    assert facts["tracking"] == "True"
-    assert facts["pumpHasWork"] == "True", "tracking must keep the pump alive"
-    assert facts["thumbAccent"] == "True", "the engaged thumb must show the accent"
-    assert facts["survivesFrames"] == "True", (
-        "frames without a button press must not drop tracking"
+def test_slide_drag(run_widgets):
+    facts = parse_transcript(run_widgets("TestSlideDrag"))
+    assert facts["dragWatchDemandsPump"] == "True", (
+        "a slider on the active sheet must keep the pump armed for its press watch"
     )
-    assert facts["dropFiredChange"] == "True"
-    assert facts["droppedValue"] == "80"
+    assert facts["dragging"] == "True"
+    assert facts["pressValue"] == "30"
+    assert facts["thumbAccent"] == "True", "the held thumb must show the accent"
+    assert facts["liveValue"] == "90", "the value must track during the hold"
+    assert facts["noChangeDuringHold"] == "True"
+    assert facts["releasedFiredChange"] == "True"
     assert facts["thumbWhiteAgain"] == "True"
-    assert facts["noMoveNoChange"] == "True", (
-        "a drop without movement must not fire OnChange"
+    assert facts["releaseClickSwallowed"] == "True", (
+        "the OnAction click delivered at release must not re-set the value"
     )
-    assert facts["clickDrops"] == "True"
+    assert facts["noMoveNoChange"] == "True"
 
 
 def test_slide_mapping(run_widgets):

@@ -38,6 +38,7 @@ Private Declare PtrSafe Function GetAsyncKeyState Lib "user32" ( _
     ByVal virtualKey As Long) As Integer
 
 Private Const LOGPIXELSX As Long = 88
+Private Const LOGPIXELSY As Long = 90
 Private Const VK_LEFT_BUTTON As Long = 1
 
 Private Const SHAPE_PREFIX As String = "rdm_"
@@ -82,7 +83,7 @@ Private Const REL_NONE As Long = 0
 Private Const REL_BELOW As Long = 1
 Private Const REL_RIGHT_OF As Long = 2
 Private Const PERSIST_PREFIX As String = "rdm_s_"
-Private Const REDIM_VERSION As String = "0.7.0"
+Private Const REDIM_VERSION As String = "0.7.1"
 
 Private mRole As Long
 
@@ -1633,10 +1634,12 @@ Friend Sub TickApp( _
             jobValue.TickJob Me, nowMs, runWork, animating
         End If
     Next jobValue
+    Dim leftButtonDown As Boolean
+    leftButtonDown = (GetAsyncKeyState(VK_LEFT_BUTTON) < 0)
     Set expiredIds = New Collection
     For Each componentValue In mComponents
         componentValue.TickAnimation mSheet, elapsedMs
-        componentValue.TickSlideTracking Me
+        componentValue.TickSlideDrag Me, leftButtonDown
         If runWork Then
             If componentValue.IsExpiredToast(nowMs) Then
                 expiredIds.Add componentValue.ComponentId
@@ -1708,7 +1711,11 @@ Friend Function HasAppWork() As Boolean
             HasAppWork = True
             Exit Function
         End If
-        If componentValue.IsSlideTracking Then
+        If componentValue.IsSlideDragging Then
+            HasAppWork = True
+            Exit Function
+        End If
+        If componentValue.NeedsDragWatch(mSheet) Then
             HasAppWork = True
             Exit Function
         End If
@@ -2412,14 +2419,13 @@ Friend Sub RunClickBehavior()
             If LenB(mWritesToKey) > 0 Then hostApp.SetState mWritesToKey, mValue
             Touch
         Case KIND_SLIDEBAR
-            If mSlideTracking Then
-                StopSlideTracking hostApp
-            ElseIf GetTickCount64() < mSlideSuppressUntilMs Then
-                ' The click that just dropped tracking via the button edge;
-                ' neither jump the value nor re-engage.
-            Else
-                HandleSlideClick hostApp
-                StartSlideTracking hostApp
+            ' Drags are handled by the pump's press watch; the release
+            ' click arrives here and is swallowed by the suppress window.
+            ' A tap with the pump disarmed still sets via this fallback.
+            If Not mSlideTracking Then
+                If GetTickCount64() >= mSlideSuppressUntilMs Then
+                    HandleSlideClick hostApp
+                End If
             End If
             Exit Sub
         Case KIND_TOAST
@@ -3460,22 +3466,53 @@ Friend Sub HandleSlideClick(ByVal hostApp As ReDimUI)
     SlideToFraction hostApp, fraction, True
 End Sub
 
-' Pump-tracked sliding: the engaging click grabs the thumb, each pump
-' frame follows the cursor with snapped live state writes, and either a
-' second click on the slider or a mouse press anywhere else drops it.
-' Never blocks: tracking is one cursor read per frame, and every other
-' pump duty keeps running while the user slides.
-Friend Sub StartSlideTracking(ByVal hostApp As ReDimUI)
-    mSlideTracking = True
-    mSlidePrevButtonDown = False
-    mSlideValueAtEngage = mValue
-    Touch
-    ReDimUI.RequestPump
+' True press-drag, watched by the pump: OnAction only fires at mouse up,
+' so the frames themselves detect the left-button press edge, hit-test the
+' cursor against this slider's rectangle, and run the drag session - value
+' tracks while the button is held, finalizes on release. One key-state
+' poll and at most one cursor read per frame; nothing blocks.
+Friend Sub TickSlideDrag(ByVal hostApp As ReDimUI, ByVal buttonDown As Boolean)
+    Dim fraction As Double
+
+    If mKind <> KIND_SLIDEBAR Then Exit Sub
+    If mSlideTracking Then
+        If Not mVisible Or Not mEnabled Then
+            EndSlideDrag hostApp
+        ElseIf buttonDown Then
+            fraction = CursorTrackFraction()
+            If fraction >= 0 Then ContinueSlideDrag hostApp, fraction
+        Else
+            EndSlideDrag hostApp
+        End If
+    ElseIf buttonDown And Not mSlidePrevButtonDown Then
+        If mVisible And mEnabled Then
+            If CursorOverTrack() Then
+                fraction = CursorTrackFraction()
+                If fraction >= 0 Then BeginSlideDrag hostApp, fraction
+            End If
+        End If
+    End If
+    mSlidePrevButtonDown = buttonDown
 End Sub
 
-Friend Sub StopSlideTracking(ByVal hostApp As ReDimUI)
+Friend Sub BeginSlideDrag(ByVal hostApp As ReDimUI, ByVal fraction As Double)
+    mSlideTracking = True
+    mSlideValueAtEngage = mValue
+    SlideToFraction hostApp, fraction, False
+    Touch
+End Sub
+
+Friend Sub ContinueSlideDrag(ByVal hostApp As ReDimUI, ByVal fraction As Double)
+    If Not mSlideTracking Then Exit Sub
+    SlideToFraction hostApp, fraction, False
+End Sub
+
+' Release: fire OnChange once if the session moved the value, and swallow
+' the OnAction click Excel is about to deliver for the same release.
+Friend Sub EndSlideDrag(ByVal hostApp As ReDimUI)
     If Not mSlideTracking Then Exit Sub
     mSlideTracking = False
+    mSlideSuppressUntilMs = GetTickCount64() + 400
     Touch
     If mValue <> mSlideValueAtEngage Then
         If LenB(mClickProc) > 0 Then
@@ -3486,32 +3523,34 @@ Friend Sub StopSlideTracking(ByVal hostApp As ReDimUI)
     End If
 End Sub
 
-Friend Property Get IsSlideTracking() As Boolean
-    IsSlideTracking = mSlideTracking
+Friend Property Get IsSlideDragging() As Boolean
+    IsSlideDragging = mSlideTracking
 End Property
 
-' One tracking step, called every pump frame. A fresh button press while
-' tracking is the drop signal; the suppress window keeps the same click
-' from re-engaging if it lands on the slider and dispatches.
-Friend Sub TickSlideTracking(ByVal hostApp As ReDimUI)
-    Dim buttonDown As Boolean
-    Dim fraction As Double
+' A slider on the active sheet keeps the pump armed so the press edge is
+' never missed. Idle cost is one key-state poll per frame.
+Friend Function NeedsDragWatch(ByVal hostSheet As Worksheet) As Boolean
+    If mKind <> KIND_SLIDEBAR Then Exit Function
+    If Not mVisible Or Not mEnabled Then Exit Function
+    On Error Resume Next
+    NeedsDragWatch = (hostSheet Is ActiveSheet)
+    On Error GoTo 0
+End Function
 
-    If Not mSlideTracking Then Exit Sub
-    If Not mVisible Or Not mEnabled Then
-        StopSlideTracking hostApp
-        Exit Sub
-    End If
-    buttonDown = (GetAsyncKeyState(VK_LEFT_BUTTON) < 0)
-    If buttonDown And Not mSlidePrevButtonDown Then
-        mSlideSuppressUntilMs = GetTickCount64() + 400
-        StopSlideTracking hostApp
-        Exit Sub
-    End If
-    mSlidePrevButtonDown = buttonDown
-    fraction = CursorTrackFraction()
-    If fraction >= 0 Then SlideToFraction hostApp, fraction, False
-End Sub
+Private Function CursorOverTrack() As Boolean
+    Dim cursor As RdxScreenPoint
+    Dim pointsX As Double
+    Dim pointsY As Double
+
+    If GetCursorPos(cursor) = 0 Then Exit Function
+    pointsX = ScreenXToSheetPoints(cursor.X)
+    If pointsX = UNMAPPABLE_POINTS Then Exit Function
+    pointsY = ScreenYToSheetPoints(cursor.Y)
+    If pointsY = UNMAPPABLE_POINTS Then Exit Function
+    If pointsX < mLeft - 8 Or pointsX > mLeft + mWidth + 8 Then Exit Function
+    If pointsY < mTop - 4 Or pointsY > mTop + mHeight + 4 Then Exit Function
+    CursorOverTrack = True
+End Function
 
 Private Function CursorTrackFraction() As Double
     Dim cursor As RdxScreenPoint
@@ -3562,6 +3601,53 @@ Friend Function ScreenXToSheetPoints(ByVal screenX As Long) As Double
 
 Unmappable:
     ScreenXToSheetPoints = UNMAPPABLE_POINTS
+End Function
+
+Friend Function ScreenYToSheetPoints(ByVal screenY As Long) As Double
+    Dim originPx As Double
+    Dim referencePx As Double
+    Dim measuredSlope As Double
+    Dim dpiSlope As Double
+    Dim conversion As Double
+
+    ScreenYToSheetPoints = UNMAPPABLE_POINTS
+    On Error GoTo Unmappable
+    originPx = ActiveWindow.PointsToScreenPixelsY(0)
+    referencePx = ActiveWindow.PointsToScreenPixelsY(1000)
+    measuredSlope = (referencePx - originPx) / 1000#
+    dpiSlope = ScreenPixelsPerPointY()
+    On Error GoTo 0
+    If measuredSlope <= 0 Or dpiSlope <= 0 Then Exit Function
+    If Abs(measuredSlope - dpiSlope) < 0.02 Then
+        conversion = measuredSlope
+    ElseIf Abs(measuredSlope - 1#) < 0.02 Then
+        conversion = dpiSlope
+    Else
+        conversion = measuredSlope
+    End If
+    ScreenYToSheetPoints = (screenY - originPx) / conversion
+    Exit Function
+
+Unmappable:
+    ScreenYToSheetPoints = UNMAPPABLE_POINTS
+End Function
+
+Private Function ScreenPixelsPerPointY() As Double
+    Static dotsPerInch As Double
+    Dim deviceContext As LongPtr
+
+    If dotsPerInch = 0 Then
+        deviceContext = GetDC(0)
+        If deviceContext <> 0 Then
+            dotsPerInch = GetDeviceCaps(deviceContext, LOGPIXELSY)
+            ReleaseDC 0, deviceContext
+        End If
+        If dotsPerInch = 0 Then dotsPerInch = 96
+    End If
+    On Error Resume Next
+    ScreenPixelsPerPointY = dotsPerInch / 72# * ActiveWindow.Zoom / 100#
+    On Error GoTo 0
+    If ScreenPixelsPerPointY = 0 Then ScreenPixelsPerPointY = dotsPerInch / 72#
 End Function
 
 Private Function ScreenPixelsPerPoint() As Double
