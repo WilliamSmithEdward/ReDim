@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.6.0 - 2026-07-26
+
+- `SlideBar`: a drawn slider with click-to-set and live drag, correcting 0.4.0's claim that
+  this was impossible. GetCursorPos plus a two-point inversion of PointsToScreenPixelsX maps
+  the cursor into track fractions at any zoom, and a left-button key-state loop tracks the
+  drag. Snaps to SliderRange, writes state live, fires OnChange on release. The pump pauses
+  during a drag; the slider repaints from the drag loop itself.
+- Gallery: the input frame anchors at C20 (a 15-point row-height arithmetic slip had parked
+  it beside the TickBox), and the slider, stepper, and meter now share one state key.
+
 ## 0.5.0 - 2026-07-26
 
 - Breaking: the native form control wrappers (`Checkbox`, `Dropdown`, `Slider`) are removed,

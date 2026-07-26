@@ -52,21 +52,24 @@ Public Sub BuildWidgetGallery()
     app.RadioGroup("priority").AtRect(190, 204, 130, 60) _
         .Items("Low", "Medium", "High").Value(2).WritesTo "priority"
     app.Stepper("volume").AtRect(350, 206, 120, 24).SliderRange(0, 100, 5) _
-        .Value(35).WritesTo "volume"
+        .Value(35).WritesTo("volume").BindValue "volume"
 
     app.Label("lblInput").AtRect(24, 280, 200, 16).Text("Cell-backed input").Bold
-    app.TextInput("username").At("C15").WritesTo "userName"
+    app.TextInput("username").At("C20").WritesTo "userName"
     app.Label("inputHint").AtRect(24, 324, 260, 16) _
         .Text("Type in the framed cell and press Enter.")
 
-    app.Label("lblProgress").AtRect(24, 356, 200, 16).Text("Progress").Bold
-    app.ProgressBar("meter").AtRect(24, 378, 240, 12).BindValue "volume"
-    app.Label("meterLbl").AtRect(276, 374, 200, 18) _
-        .BindText "volume", "Bound to the stepper: {0}"
-    app.Spinner("spin").AtRect 490, 370, 26, 26
+    app.Label("lblProgress").AtRect(24, 356, 200, 16) _
+        .Text("Slider, stepper, and meter share one state key").Bold
+    app.SlideBar("volumeslide").AtRect(24, 378, 240, 18) _
+        .SliderRange(0, 100, 5).Value(35).WritesTo("volume").BindValue "volume"
+    app.ProgressBar("meter").AtRect(24, 404, 240, 12).BindValue "volume"
+    app.Label("meterLbl").AtRect(276, 398, 220, 18) _
+        .BindText "volume", "Drag, step, or watch: {0}"
+    app.Spinner("spin").AtRect 490, 394, 26, 26
 
-    app.Card("inspector").AtRect(24, 410, 560, 110).Text("State inspector")
-    app.Label("inspectorBody").AtRect(36, 438, 536, 74).BindText "inspector"
+    app.Card("inspector").AtRect(24, 436, 560, 110).Text("State inspector")
+    app.Label("inspectorBody").AtRect(36, 464, 536, 74).BindText "inspector"
 
     app.SetState "notifications", False
     app.SetState "region", "North"

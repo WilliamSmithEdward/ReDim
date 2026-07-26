@@ -518,6 +518,53 @@ Public Function TestStepper() As String
     TestStepper = transcript
 End Function
 
+Public Function TestSlideBar() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim trackShape As Shape
+    Dim fillShape As Shape
+    Dim thumbShape As Shape
+    Dim transcript As String
+
+    Set host = NewCanvas()
+    gChangeCount = 0
+    Set app = ReDimUI.Mount(host, "wid15")
+    app.SlideBar("vol").AtRect(24, 24, 200, 18).SliderRange(0, 100, 5) _
+        .Value(40).WritesTo("volume").OnChange "TestReDimWidgets.RecordChange"
+    app.Render
+
+    Set trackShape = host.Shapes("rdm_wid15_vol")
+    Set fillShape = host.Shapes("rdm_wid15_vol__fill")
+    Set thumbShape = host.Shapes("rdm_wid15_vol__thumb")
+    transcript = "partsExist=" & _
+        CStr(Not fillShape Is Nothing And Not thumbShape Is Nothing)
+    transcript = transcript & "|fillFraction=" & _
+        CStr(Abs(fillShape.Width - 80) < 0.5)
+    transcript = transcript & "|thumbCentered=" & _
+        CStr(Abs((thumbShape.Left + thumbShape.Width / 2) - (24 + 80)) < 0.5)
+
+    ' The deterministic seam the drag loop drives: set from track fractions.
+    app.Component("vol").SlideToFraction app, 0.75, True
+    transcript = transcript & "|threeQuarterValue=" & app.State("volume")
+    transcript = transcript & "|changeRan=" & gChangeCount
+    transcript = transcript & "|fillMoved=" & _
+        CStr(Abs(fillShape.Width - 150) < 0.5)
+
+    ' Snapping: 0.52 across 0..100 step 5 lands on 50.
+    app.Component("vol").SlideToFraction app, 0.52, False
+    transcript = transcript & "|snappedValue=" & app.State("volume")
+    transcript = transcript & "|noExtraChange=" & CStr(gChangeCount = 1)
+
+    ' Clamping at the rails.
+    app.Component("vol").SlideToFraction app, 0#, False
+    transcript = transcript & "|minValue=" & app.State("volume")
+    transcript = transcript & "|fillHiddenAtMin=" & _
+        CStr(fillShape.Visible = msoFalse)
+    app.Component("vol").SlideToFraction app, 1#, False
+    transcript = transcript & "|maxValue=" & app.State("volume")
+    TestSlideBar = transcript
+End Function
+
 Public Function TestModalConfirm() As String
     Dim app As ReDimUI
     Dim host As Worksheet

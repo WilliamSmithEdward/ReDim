@@ -157,6 +157,21 @@ def test_stepper(run_widgets):
     assert facts["changeRan"] == "2"
 
 
+def test_slide_bar(run_widgets):
+    facts = parse_transcript(run_widgets("TestSlideBar"))
+    assert facts["partsExist"] == "True"
+    assert facts["fillFraction"] == "True"
+    assert facts["thumbCentered"] == "True"
+    assert facts["threeQuarterValue"] == "75"
+    assert facts["changeRan"] == "1"
+    assert facts["fillMoved"] == "True"
+    assert facts["snappedValue"] == "50", "0.52 across 0..100 step 5 must snap to 50"
+    assert facts["noExtraChange"] == "True"
+    assert facts["minValue"] == "0"
+    assert facts["fillHiddenAtMin"] == "True"
+    assert facts["maxValue"] == "100"
+
+
 def test_modal_confirm(run_widgets):
     facts = parse_transcript(run_widgets("TestModalConfirm"))
     assert facts["overlayShown"] == "True"

@@ -30,10 +30,10 @@ user keeps working in the workbook.
 ## What it does
 
 - **Components over shapes.** Button, Label, Card, ProgressBar, Spinner, Toggle, TickBox,
-  RadioGroup, Stepper, SelectBox, cell-backed TextInput, Toast, and a shapes-based modal
-  overlay with Confirm - every control drawn from shapes and fully themed, with light and
-  dark presets, no native form controls anywhere, and no dependencies beyond a stock
-  Excel 365 install.
+  RadioGroup, Stepper, SlideBar (with real click-and-drag), SelectBox, cell-backed TextInput,
+  Toast, and a shapes-based modal overlay with Confirm - every control drawn from shapes and
+  fully themed, with light and dark presets, no native form controls anywhere, and no
+  dependencies beyond a stock Excel 365 install.
 - **Stateful.** Each app owns a key-value store. `BindText`, `BindValue`, `BindVisible`, and
   `BindEnabled` re-render only what changed. `OnStateChanged` registers workbook procedures as
   state listeners. `WritesTo` flows control values back into state. `Persist True` writes state

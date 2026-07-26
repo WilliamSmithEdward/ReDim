@@ -43,8 +43,9 @@ demo is the working reference.
 ## App
 
 Component factories, get-or-create by id: `Button`, `Label`, `Card`, `Spinner`, `ProgressBar`,
-`Toggle`, `TickBox`, `RadioGroup`, `Stepper`, `SelectBox`, `TextInput`. Every control is drawn
-from shapes and fully themed; there are no native form controls in the framework. Also:
+`Toggle`, `TickBox`, `RadioGroup`, `Stepper`, `SlideBar`, `SelectBox`, `TextInput`. Every
+control is drawn from shapes and fully themed; there are no native form controls in the
+framework. Also:
 
 | Member | Purpose |
 |---|---|
@@ -101,10 +102,15 @@ dependencies:
 
 - `TickBox`: themed box, check glyph, caption; box and caption both toggle on click.
 - `RadioGroup`: single-select option rows, a control native form controls never offered.
-- `Stepper`: numeric entry as minus and plus around a value face, honoring `SliderRange`.
-  Shapes cannot report click coordinates, so a drag-thumb slider cannot be drawn honestly;
-  stepped entry can, and reads better on a worksheet. Pair it with a bound `ProgressBar` when
-  a level visualization is wanted, as the gallery does.
+- `Stepper`: numeric entry as minus and plus around a value face, honoring `SliderRange` -
+  the precise keyboard-free form of numeric input.
+- `SlideBar`: a real drawn slider with click-to-set and live drag. `Application.Caller` never
+  reports coordinates, but `GetCursorPos` plus a two-point inversion of
+  `ActiveWindow.PointsToScreenPixelsX` maps the cursor into track fractions at any zoom, and a
+  left-button key-state loop tracks the drag. Values snap to `SliderRange`; `WritesTo` updates
+  live during the drag and `OnChange` fires once on release. Honest limits: the pump pauses
+  while dragging (one thread; the slider repaints from the drag loop itself), and frozen-pane
+  splits skew the calibration, so keep app surfaces unsplit.
 - `SelectBox`: a themed face, caret, and option list in place of the native dropdown.
 - `Toggle`: the pill switch for booleans.
 

@@ -21,6 +21,19 @@ Private Declare PtrSafe Function QueryPerformanceCounter Lib "kernel32" ( _
     ByRef counter As LongLong) As Long
 Private Declare PtrSafe Function QueryPerformanceFrequency Lib "kernel32" ( _
     ByRef frequency As LongLong) As Long
+Private Type RdxScreenPoint
+    X As Long
+    Y As Long
+End Type
+
+Private Declare PtrSafe Function GetCursorPos Lib "user32" ( _
+    ByRef position As RdxScreenPoint) As Long
+Private Declare PtrSafe Function GetAsyncKeyState Lib "user32" ( _
+    ByVal virtualKey As Long) As Integer
+Private Declare PtrSafe Sub SleepMs Lib "kernel32" Alias "Sleep" ( _
+    ByVal milliseconds As Long)
+
+Private Const VK_LEFT_BUTTON As Long = 1
 
 Private Const SHAPE_PREFIX As String = "rdm_"
 Private Const PART_SEPARATOR As String = "__"
@@ -51,6 +64,7 @@ Private Const KIND_SELECT As Long = 13
 Private Const KIND_TICKBOX As Long = 14
 Private Const KIND_RADIO As Long = 15
 Private Const KIND_STEPPER As Long = 16
+Private Const KIND_SLIDEBAR As Long = 17
 
 Private Const VARIANT_PRIMARY As Long = 0
 Private Const VARIANT_SECONDARY As Long = 1
@@ -62,7 +76,7 @@ Private Const REL_NONE As Long = 0
 Private Const REL_BELOW As Long = 1
 Private Const REL_RIGHT_OF As Long = 2
 Private Const PERSIST_PREFIX As String = "rdm_s_"
-Private Const REDIM_VERSION As String = "0.5.0"
+Private Const REDIM_VERSION As String = "0.6.0"
 
 Private mRole As Long
 
@@ -727,6 +741,14 @@ End Function
 ' slider cannot be drawn honestly; stepped entry can.
 Public Function Stepper(ByVal componentId As String) As ReDimUI
     Set Stepper = GetOrCreateComponent(componentId, KIND_STEPPER)
+End Function
+
+' Drawn slider with real click-and-drag: the cursor position is mapped back
+' into sheet points by inverting PointsToScreenPixels, and a key-state loop
+' tracks the drag while the button stays down. The pump pauses during a
+' drag (one thread); the slider itself renders live from the drag loop.
+Public Function SlideBar(ByVal componentId As String) As ReDimUI
+    Set SlideBar = GetOrCreateComponent(componentId, KIND_SLIDEBAR)
 End Function
 
 Public Function TextInput(ByVal componentId As String) As ReDimUI
@@ -1795,6 +1817,9 @@ Friend Sub ConfigureComponent( _
         Case KIND_STEPPER
             mWidth = 120: mHeight = 24
             mSliderMin = 0: mSliderMax = 100: mSliderStep = 1
+        Case KIND_SLIDEBAR
+            mWidth = 160: mHeight = 18
+            mSliderMin = 0: mSliderMax = 100: mSliderStep = 1
         Case KIND_TOAST
             mWidth = 240: mHeight = 40
         Case Else
@@ -2365,6 +2390,9 @@ Friend Sub RunClickBehavior()
             mValue = stepped
             If LenB(mWritesToKey) > 0 Then hostApp.SetState mWritesToKey, mValue
             Touch
+        Case KIND_SLIDEBAR
+            StartSlideDrag hostApp
+            Exit Sub
         Case KIND_TOAST
             mExpiresAtMs = 1
             ReDimUI.RequestPump
@@ -2607,6 +2635,10 @@ Private Function CreateShapeForKind(ByVal hostSheet As Worksheet) As Shape
             Set target = hostSheet.Shapes.AddShape( _
                 msoShapeRoundedRectangle, mLeft, mTop, mWidth, mHeight)
             target.Adjustments(1) = 0.15
+        Case KIND_SLIDEBAR
+            Set target = hostSheet.Shapes.AddShape( _
+                msoShapeRoundedRectangle, mLeft, mTop, mWidth, 6)
+            target.Adjustments(1) = 0.5
         Case Else
             Set target = hostSheet.Shapes.AddShape( _
                 msoShapeRectangle, mLeft, mTop, mWidth, mHeight)
@@ -2638,7 +2670,7 @@ End Function
 
 Private Function IsCompositeDrawnKind() As Boolean
     IsCompositeDrawnKind = (mKind = KIND_TICKBOX Or mKind = KIND_RADIO _
-        Or mKind = KIND_STEPPER)
+        Or mKind = KIND_STEPPER Or mKind = KIND_SLIDEBAR)
 End Function
 
 ' Geometry diffs against the shape's actual position rather than a cache, so
@@ -2915,6 +2947,8 @@ Private Sub ApplyKindExtras( _
             ApplyRadioGroup target, hostSheet, themeValue
         Case KIND_STEPPER
             ApplyStepper target, hostSheet, themeValue
+        Case KIND_SLIDEBAR
+            ApplySlideBar target, hostSheet, themeValue
         Case KIND_TOAST
             If mSlideRemaining > 0 Then target.Top = mTop + mSlideRemaining
     End Select
@@ -3280,6 +3314,160 @@ Private Sub SyncSelectOptions( _
     mAppliedOptionCount = wanted
 End Sub
 
+' Slim centered track, accent fill up to the value, and a round thumb.
+Private Sub ApplySlideBar( _
+    ByVal target As Shape, _
+    ByVal hostSheet As Worksheet, _
+    ByVal themeValue As ReDimUI _
+)
+    Dim fillPart As Shape
+    Dim thumb As Shape
+    Dim trackTop As Double
+    Dim fraction As Double
+    Dim thumbSize As Double
+
+    fraction = SlideFraction()
+    trackTop = mTop + (mHeight - 6) / 2
+    target.Left = mLeft
+    target.Top = trackTop
+    target.Width = mWidth
+    target.Height = 6
+    target.Visible = BoolToMso(mVisible)
+    target.Fill.Visible = msoTrue
+    target.Fill.ForeColor.RGB = themeValue.MutedColor
+    target.Line.Visible = msoFalse
+
+    Set fillPart = EnsurePartShape(hostSheet, "fill", msoShapeRoundedRectangle)
+    fillPart.Left = mLeft
+    fillPart.Top = trackTop
+    fillPart.Height = 6
+    If fraction <= 0 Then
+        fillPart.Visible = msoFalse
+    Else
+        fillPart.Width = mWidth * fraction
+        fillPart.Visible = BoolToMso(mVisible)
+    End If
+    fillPart.Fill.Visible = msoTrue
+    If mEnabled Then
+        fillPart.Fill.ForeColor.RGB = ResolveFill(themeValue)
+    Else
+        fillPart.Fill.ForeColor.RGB = themeValue.OnMutedColor
+    End If
+    fillPart.Line.Visible = msoFalse
+    fillPart.OnAction = mAppliedOnAction
+
+    thumbSize = mHeight
+    Set thumb = EnsurePartShape(hostSheet, "thumb", msoShapeOval)
+    thumb.Width = thumbSize
+    thumb.Height = thumbSize
+    thumb.Left = mLeft + mWidth * fraction - thumbSize / 2
+    If thumb.Left < mLeft - thumbSize / 2 Then thumb.Left = mLeft - thumbSize / 2
+    thumb.Top = mTop
+    thumb.Fill.Visible = msoTrue
+    thumb.Fill.ForeColor.RGB = RGB(255, 255, 255)
+    thumb.Line.Visible = msoTrue
+    thumb.Line.ForeColor.RGB = themeValue.BorderColor
+    thumb.Line.Weight = 1.25
+    thumb.Visible = BoolToMso(mVisible)
+    thumb.OnAction = mAppliedOnAction
+    mAppliedValue = mValue
+End Sub
+
+Private Function SlideFraction() As Double
+    If mSliderMax <= mSliderMin Then Exit Function
+    SlideFraction = (mValue - mSliderMin) / (mSliderMax - mSliderMin)
+    If SlideFraction < 0 Then SlideFraction = 0
+    If SlideFraction > 1 Then SlideFraction = 1
+End Function
+
+' Applies a track fraction to the value with SliderRange snapping. The drag
+' loop calls it live; tests call it directly as a deterministic seam.
+Friend Sub SlideToFraction( _
+    ByVal hostApp As ReDimUI, _
+    ByVal fraction As Double, _
+    ByVal fireChange As Boolean _
+)
+    Dim rawValue As Double
+    Dim snapped As Double
+
+    If fraction < 0 Then fraction = 0
+    If fraction > 1 Then fraction = 1
+    rawValue = mSliderMin + fraction * (mSliderMax - mSliderMin)
+    If mSliderStep > 0 Then
+        snapped = mSliderMin + _
+            CLng((rawValue - mSliderMin) / mSliderStep) * mSliderStep
+    Else
+        snapped = rawValue
+    End If
+    If snapped < mSliderMin Then snapped = mSliderMin
+    If snapped > mSliderMax Then snapped = mSliderMax
+    If snapped <> mValue Then
+        mValue = snapped
+        If LenB(mWritesToKey) > 0 Then hostApp.SetState mWritesToKey, mValue
+        Touch
+    End If
+    If fireChange Then
+        If LenB(mClickProc) > 0 Then
+            On Error Resume Next
+            Application.Run mClickProc
+            On Error GoTo 0
+        End If
+    End If
+End Sub
+
+' The drag loop: seed from the click position, then track the cursor while
+' the left button stays down. Everything runs on Excel's thread, so the
+' pump waits; the slider itself repaints from inside the loop.
+Friend Sub StartSlideDrag(ByVal hostApp As ReDimUI)
+    Dim fraction As Double
+
+    fraction = CursorTrackFraction()
+    If fraction < 0 Then Exit Sub
+    SlideToFraction hostApp, fraction, False
+    Do While GetAsyncKeyState(VK_LEFT_BUTTON) < 0
+        fraction = CursorTrackFraction()
+        If fraction >= 0 Then SlideToFraction hostApp, fraction, False
+        DoEvents
+        SleepMs 8
+    Loop
+    fraction = CursorTrackFraction()
+    If fraction >= 0 Then SlideToFraction hostApp, fraction, False
+    If LenB(mClickProc) > 0 Then
+        On Error Resume Next
+        Application.Run mClickProc
+        On Error GoTo 0
+    End If
+End Sub
+
+' Inverts ActiveWindow.PointsToScreenPixelsX by two-point calibration, so
+' the mapping holds at any zoom. Returns -1 when no usable window mapping
+' exists (headless automation without an active pane, frozen-pane splits).
+Private Function CursorTrackFraction() As Double
+    Dim cursor As RdxScreenPoint
+    Dim originPx As Double
+    Dim referencePx As Double
+    Dim pixelsPerPoint As Double
+    Dim cursorPoints As Double
+
+    CursorTrackFraction = -1
+    If GetCursorPos(cursor) = 0 Then Exit Function
+    On Error GoTo Unmappable
+    originPx = ActiveWindow.PointsToScreenPixelsX(0)
+    referencePx = ActiveWindow.PointsToScreenPixelsX(1000)
+    On Error GoTo 0
+    pixelsPerPoint = (referencePx - originPx) / 1000#
+    If pixelsPerPoint = 0 Then Exit Function
+    cursorPoints = (cursor.X - originPx) / pixelsPerPoint
+    If mWidth <= 0 Then Exit Function
+    CursorTrackFraction = (cursorPoints - mLeft) / mWidth
+    If CursorTrackFraction < 0 Then CursorTrackFraction = 0
+    If CursorTrackFraction > 1 Then CursorTrackFraction = 1
+    Exit Function
+
+Unmappable:
+    CursorTrackFraction = -1
+End Function
+
 Private Sub ApplyInputCell( _
     ByVal hostSheet As Worksheet, _
     ByVal themeValue As ReDimUI _
@@ -3325,6 +3513,7 @@ Friend Sub DeleteShapes(ByVal hostSheet As Worksheet)
     hostSheet.Shapes(ShapeName & PART_SEPARATOR & "caret").Delete
     hostSheet.Shapes(ShapeName & PART_SEPARATOR & "minus").Delete
     hostSheet.Shapes(ShapeName & PART_SEPARATOR & "plus").Delete
+    hostSheet.Shapes(ShapeName & PART_SEPARATOR & "thumb").Delete
     For position = 1 To optionCount
         hostSheet.Shapes(ShapeName & PART_SEPARATOR & "opt" & position).Delete
         hostSheet.Shapes(ShapeName & PART_SEPARATOR & "c" & position).Delete
