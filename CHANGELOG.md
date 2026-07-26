@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.4 - 2026-07-26
+
+- Toast stack compaction: when a toast expires or is dismissed, survivors renumber to slots
+  one through N and slide up into the freed positions, and new toasts join below the live
+  stack. The tray now moves like a notification tray.
+
 ## 0.2.3 - 2026-07-26
 
 - The default toast rail clamps into the visible viewport: the rail position wins whenever it

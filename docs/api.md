@@ -36,7 +36,7 @@ Component factories, get-or-create by id: `Button`, `Label`, `Card`, `Spinner`, 
 | `Render` | Mark everything dirty and paint. Call once after building the UI. |
 | `SetTheme theme` | Restyle every component. |
 | `PrepareCanvas` | Paint the sheet background and hide gridlines. |
-| `Toast message, ttlMs` | Transient card that slides up into a rail beside the content, clamped into the visible viewport so it is never fired off screen. Slots reuse lowest-first; modal chrome never shifts the rail. |
+| `Toast message, ttlMs` | Transient card on a rail beside the content, clamped into the visible viewport. Toasts slide up on entrance, and when one leaves the survivors slide up to fill its slot; modal chrome never shifts the rail. |
 | `ToastTray anchor` | Pins the tray's top-left to a range, exactly and unclamped. |
 | `Confirm title, message, okProc, cancelProc, okText, cancelText` | Shapes-based modal. |
 | `CloseModal` | Hide the modal set. |

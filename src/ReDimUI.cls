@@ -58,7 +58,7 @@ Private Const REL_NONE As Long = 0
 Private Const REL_BELOW As Long = 1
 Private Const REL_RIGHT_OF As Long = 2
 Private Const PERSIST_PREFIX As String = "rdm_s_"
-Private Const REDIM_VERSION As String = "0.2.3"
+Private Const REDIM_VERSION As String = "0.2.4"
 
 Private mRole As Long
 
@@ -1229,6 +1229,37 @@ Friend Sub TickApp(ByVal nowMs As LongLong)
             componentValue.Remove
         End If
     Next expiredId
+    If expiredIds.Count > 0 Then CompactToastSlots
+End Sub
+
+' After any toast leaves, survivors renumber to slots 1..N in their current
+' order and slide up into the freed positions, the way a notification tray
+' behaves.
+Private Sub CompactToastSlots()
+    Dim live As Collection
+    Dim componentValue As ReDimUI
+    Dim lowest As ReDimUI
+    Dim position As Long
+    Dim lowestAt As Long
+    Dim assigned As Long
+
+    Set live = New Collection
+    For Each componentValue In mComponents
+        If componentValue.IsPendingToast Then live.Add componentValue
+    Next componentValue
+    Do While live.Count > 0
+        Set lowest = live.Item(1)
+        lowestAt = 1
+        For position = 2 To live.Count
+            If live.Item(position).ToastSlot < lowest.ToastSlot Then
+                Set lowest = live.Item(position)
+                lowestAt = position
+            End If
+        Next position
+        assigned = assigned + 1
+        If lowest.ToastSlot <> assigned Then lowest.ReslotToast assigned
+        live.Remove lowestAt
+    Loop
 End Sub
 
 Friend Function HasAppWork() As Boolean
@@ -1797,6 +1828,24 @@ End Sub
 Friend Property Get ToastSlot() As Long
     If mKind = KIND_TOAST Then ToastSlot = CLng(mValue)
 End Property
+
+' Moves this toast to a new slot, easing from wherever it currently sits
+' (including mid-entrance) to the new position without a visual jump.
+Friend Sub ReslotToast(ByVal newSlot As Long)
+    Dim spacing As Double
+    Dim originTop As Double
+    Dim visualTop As Double
+
+    If mKind <> KIND_TOAST Then Exit Sub
+    spacing = mHeight + 6
+    originTop = mTop - (CLng(mValue) - 1) * spacing
+    visualTop = mTop + mSlideRemaining
+    mValue = newSlot
+    mTop = originTop + (newSlot - 1) * spacing
+    mSlideRemaining = visualTop - mTop
+    If mSlideRemaining < 0 Then mSlideRemaining = 0
+    ReDimUI.RequestPump
+End Sub
 
 Friend Function IsExpiredToast(ByVal nowMs As LongLong) As Boolean
     If mKind <> KIND_TOAST Then Exit Function

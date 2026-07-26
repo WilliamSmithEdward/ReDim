@@ -102,13 +102,15 @@ def test_toast_lifecycle(run_widgets):
 
 def test_toast_slots(run_widgets):
     facts = parse_transcript(run_widgets("TestToastSlots"))
-    assert facts["secondBelowFirst"] == "True"
-    assert facts["thirdReusesSlotOne"] == "True", (
-        "a freed slot must be reclaimed by the next toast"
-    )
-    assert facts["thirdAboveSecond"] == "True"
-    assert facts["slideSettled"] == "True", (
+    assert facts["entranceSlid"] == "True", (
         "the entrance slide must ease the toast up exactly its spawn offset"
+    )
+    assert facts["secondBelowFirst"] == "True"
+    assert facts["survivorSlidUp"] == "True", (
+        "dismissing a toast must slide the survivor up into the freed slot"
+    )
+    assert facts["thirdJoinsBelow"] == "True", (
+        "a new toast must join below the compacted stack"
     )
 
 

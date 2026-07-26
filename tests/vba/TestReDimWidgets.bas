@@ -299,7 +299,9 @@ Public Function TestToastSlots() As String
     Dim secondToast As ReDimUI
     Dim thirdToast As ReDimUI
     Dim firstName As String
-    Dim slotOneTop As Double
+    Dim firstSettledTop As Double
+    Dim secondSettledTop As Double
+    Dim ticks As Long
     Dim transcript As String
 
     Set host = NewCanvas()
@@ -308,39 +310,44 @@ Public Function TestToastSlots() As String
     app.Label("anchor").AtRect(24, 24, 200, 20).Text("x")
     app.Render
 
+    ' Entrance slide: a toast spawns 14 points low and eases into its slot.
     Set firstToast = app.Toast("one", 60000)
-    Set secondToast = app.Toast("two", 60000)
     firstName = "rdm_wid8_" & firstToast.ComponentId
-    slotOneTop = host.Shapes(firstName).Top
-    transcript = "secondBelowFirst=" & _
-        CStr(host.Shapes("rdm_wid8_" & secondToast.ComponentId).Top > slotOneTop)
-
-    ' Dismiss the first toast; the next one must reclaim slot one instead of
-    ' stacking downward forever.
-    ReDimUI.DispatchShape firstName
-    ReDimUI.PumpOnce
-    Set thirdToast = app.Toast("three", 60000)
-    transcript = transcript & "|thirdReusesSlotOne=" & _
-        CStr(Abs(host.Shapes("rdm_wid8_" & thirdToast.ComponentId).Top - _
-            slotOneTop) < 0.01)
-    transcript = transcript & "|thirdAboveSecond=" & _
-        CStr(host.Shapes("rdm_wid8_" & thirdToast.ComponentId).Top < _
-            host.Shapes("rdm_wid8_" & secondToast.ComponentId).Top)
-
-    ' Entrance slide: a toast spawns 14 points low and the pump eases it up
-    ' into its slot.
-    Dim slideToast As ReDimUI
-    Dim slideShape As Shape
-    Dim topBefore As Double
-    Dim ticks As Long
-    Set slideToast = app.Toast("slide", 60000)
-    Set slideShape = host.Shapes("rdm_wid8_" & slideToast.ComponentId)
-    topBefore = slideShape.Top
+    Dim entryTop As Double
+    entryTop = host.Shapes(firstName).Top
     For ticks = 1 To 10
         ReDimUI.PumpOnce
     Next ticks
-    transcript = transcript & "|slideSettled=" & _
-        CStr(Abs((topBefore - slideShape.Top) - 14) < 0.1)
+    transcript = "entranceSlid=" & _
+        CStr(Abs((entryTop - host.Shapes(firstName).Top) - 14) < 0.1)
+
+    Set secondToast = app.Toast("two", 60000)
+    For ticks = 1 To 10
+        ReDimUI.PumpOnce
+    Next ticks
+    firstSettledTop = host.Shapes(firstName).Top
+    secondSettledTop = host.Shapes("rdm_wid8_" & secondToast.ComponentId).Top
+    transcript = transcript & "|secondBelowFirst=" & _
+        CStr(secondSettledTop > firstSettledTop)
+
+    ' Dismissing the first toast compacts the stack: the survivor slides up
+    ' into slot one.
+    ReDimUI.DispatchShape firstName
+    For ticks = 1 To 12
+        ReDimUI.PumpOnce
+    Next ticks
+    transcript = transcript & "|survivorSlidUp=" & _
+        CStr(Abs(host.Shapes("rdm_wid8_" & secondToast.ComponentId).Top - _
+            firstSettledTop) < 0.1)
+
+    ' A new toast joins below the compacted stack, in slot two.
+    Set thirdToast = app.Toast("three", 60000)
+    For ticks = 1 To 10
+        ReDimUI.PumpOnce
+    Next ticks
+    transcript = transcript & "|thirdJoinsBelow=" & _
+        CStr(Abs(host.Shapes("rdm_wid8_" & thirdToast.ComponentId).Top - _
+            secondSettledTop) < 0.1)
     ReDimUI.AutoPump True
     TestToastSlots = transcript
 End Function
