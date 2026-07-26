@@ -1,0 +1,124 @@
+"""Live widget tests: progress, toggle, form controls, inputs, toasts, modal."""
+
+from __future__ import annotations
+
+import pytest
+
+from conftest import _runner, parse_transcript
+
+
+@pytest.fixture
+def run_widgets(excel):
+    return _runner(excel, "TestReDimWidgets")
+
+
+def test_progress_bar(run_widgets):
+    facts = parse_transcript(run_widgets("TestProgressBar"))
+    assert facts["zeroHidesFill"] == "True"
+    assert facts["halfVisible"] == "True"
+    assert facts["halfWidthOk"] == "True"
+    assert facts["fullWidthOk"] == "True"
+    assert facts["clampedOk"] == "True"
+
+
+def test_toggle(run_widgets):
+    facts = parse_transcript(run_widgets("TestToggle"))
+    assert facts["offFillMuted"] == "True"
+    assert facts["stateOn"] == "True"
+    assert facts["changeRan"] == "1"
+    assert facts["onFillPrimary"] == "True"
+    assert facts["knobMoved"] == "True"
+    assert facts["checkedProp"] == "True"
+    assert facts["knobClickTogglesOff"] == "True"
+
+
+def test_form_controls(run_widgets):
+    facts = parse_transcript(run_widgets("TestFormControls"))
+    assert facts["chkChecked"] == "True"
+    assert facts["chkNativeCaptionEmpty"] == "True", (
+        "the fixed-font native caption must stay empty"
+    )
+    assert facts["chkCaption"] == "Enable audit"
+    assert float(facts["chkCaptionSize"]) == 11.0, (
+        "caption part must use the theme font size"
+    )
+    assert facts["ddItems"] == "4"
+    assert facts["ddIndex"] == "2"
+    assert facts["sldValue"] == "80"
+    assert facts["auditState"] == "False"
+    assert facts["regionState"] == "West"
+    assert facts["volumeState"] == "145"
+    assert facts["captionClickChecked"] == "True", (
+        "clicking the themed caption must toggle the checkbox"
+    )
+    assert facts["captionClickNative"] == "True"
+
+
+def test_select_box(run_widgets):
+    facts = parse_transcript(run_widgets("TestSelectBox"))
+    assert facts["faceText"] == "South"
+    assert float(facts["faceFontSize"]) == 11.0
+    assert facts["faceInkOnSurface"] == "True", (
+        "face text must use surface ink, not the primary variant's white"
+    )
+    assert facts["caretExists"] == "True"
+    assert facts["closedNoOptions"] == "True"
+    assert facts["openOptions"] == "True"
+    assert float(facts["optionFontSize"]) == 11.0, (
+        "option list must use the theme font, unlike the native dropdown"
+    )
+    assert facts["optionText"] == "East"
+    assert facts["pickedState"] == "East"
+    assert facts["pickedFace"] == "East"
+    assert facts["closedAfterPick"] == "True"
+    assert facts["changeRan"] == "1"
+    assert facts["toggleClosed"] == "True"
+
+
+def test_text_input(run_widgets):
+    facts = parse_transcript(run_widgets("TestTextInput"))
+    assert facts["frameExists"] == "True"
+    assert facts["apiWriteState"] == "Ada"
+    assert facts["apiNoChangeProc"] == "True", (
+        "API writes must not fire the change handler"
+    )
+    assert facts["editState"] == "Grace"
+    assert facts["editChangeProc"] == "True"
+    assert facts["inputReadback"] == "Grace"
+
+
+def test_toast_lifecycle(run_widgets):
+    facts = parse_transcript(run_widgets("TestToastLifecycle"))
+    assert facts["shown"] == "True"
+    assert facts["pendingWork"] == "True"
+    assert facts["aliveBeforeTtl"] == "True"
+    assert facts["removedAfterTtl"] == "True"
+    assert facts["clickDismissed"] == "True"
+    assert facts["lightInk"] == "True"
+    assert facts["darkInk"] == "True", (
+        "dark theme toast text must use the dark theme's surface ink"
+    )
+
+
+def test_toast_slots(run_widgets):
+    facts = parse_transcript(run_widgets("TestToastSlots"))
+    assert facts["secondBelowFirst"] == "True"
+    assert facts["thirdReusesSlotOne"] == "True", (
+        "a freed slot must be reclaimed by the next toast"
+    )
+    assert facts["thirdAboveSecond"] == "True"
+
+
+def test_modal_confirm(run_widgets):
+    facts = parse_transcript(run_widgets("TestModalConfirm"))
+    assert facts["overlayShown"] == "True"
+    assert facts["cardText"] == "True"
+    assert facts["cancelHasBorder"] == "True", (
+        "secondary buttons need an outline against surface backgrounds"
+    )
+    assert facts["overlayCoversOrigin"] == "True"
+    assert facts["confirmRan"] == "1"
+    assert facts["overlayHidden"] == "True"
+    assert facts["cancelRan"] == "1"
+    assert facts["confirmStillOne"] == "True"
+    assert facts["overlayHiddenAgain"] == "True"
