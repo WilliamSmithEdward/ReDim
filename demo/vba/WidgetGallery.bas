@@ -47,30 +47,42 @@ Public Sub BuildWidgetGallery()
         .Items("North", "South", "East", "West").Value(1).WritesTo "region"
     app.SelectBox("region").OnChange "WidgetGallery.HandleRegionChange"
 
-    app.Label("lblNative").AtRect(24, 188, 300, 16) _
+    app.Label("lblDrawn").AtRect(24, 188, 300, 16) _
+        .Text("Drawn controls (fully themed)").Bold
+    app.TickBox("consent").AtRect(24, 212, 140, 18).Text("Log activity") _
+        .WritesTo "drawnCheck"
+    app.RadioGroup("priority").AtRect(190, 204, 130, 60) _
+        .Items("Low", "Medium", "High").Value(2).WritesTo "priority"
+    app.Stepper("threads").AtRect(350, 206, 120, 24).SliderRange(1, 8, 1) _
+        .Value(4).WritesTo "threads"
+
+    app.Label("lblNative").AtRect(24, 280, 300, 16) _
         .Text("Native controls (Excel-drawn, fixed font)").Bold
-    app.Dropdown("nativedd").AtRect(24, 210, 120, 22) _
+    app.Dropdown("nativedd").AtRect(24, 302, 120, 22) _
         .Items("Alpha", "Beta", "Gamma").Value(1).WritesTo "nativePick"
-    app.Slider("volume").AtRect(160, 212, 130, 16).SliderRange(0, 100, 5) _
+    app.Slider("volume").AtRect(160, 304, 130, 16).SliderRange(0, 100, 5) _
         .Value(35).WritesTo "volume"
 
-    app.Label("lblInput").AtRect(24, 246, 200, 16).Text("Cell-backed input").Bold
-    app.TextInput("username").At("C17").WritesTo "userName"
-    app.Label("inputHint").AtRect(24, 290, 260, 16) _
+    app.Label("lblInput").AtRect(24, 338, 200, 16).Text("Cell-backed input").Bold
+    app.TextInput("username").At("C19").WritesTo "userName"
+    app.Label("inputHint").AtRect(24, 384, 260, 16) _
         .Text("Type in the framed cell and press Enter.")
 
-    app.Label("lblProgress").AtRect(24, 322, 200, 16).Text("Progress").Bold
-    app.ProgressBar("meter").AtRect(24, 344, 240, 12).BindValue "volume"
-    app.Label("meterLbl").AtRect(276, 340, 200, 18) _
+    app.Label("lblProgress").AtRect(24, 416, 200, 16).Text("Progress").Bold
+    app.ProgressBar("meter").AtRect(24, 438, 240, 12).BindValue "volume"
+    app.Label("meterLbl").AtRect(276, 434, 200, 18) _
         .BindText "volume", "Bound to the slider: {0}"
-    app.Spinner("spin").AtRect 490, 336, 26, 26
+    app.Spinner("spin").AtRect 490, 430, 26, 26
 
-    app.Card("inspector").AtRect(24, 376, 560, 110).Text("State inspector")
-    app.Label("inspectorBody").AtRect(36, 404, 536, 74).BindText "inspector"
+    app.Card("inspector").AtRect(24, 470, 560, 110).Text("State inspector")
+    app.Label("inspectorBody").AtRect(36, 498, 536, 74).BindText "inspector"
 
     app.SetState "notifications", False
     app.SetState "audit", False
     app.SetState "region", "North"
+    app.SetState "drawnCheck", False
+    app.SetState "priority", "Medium"
+    app.SetState "threads", 4
     app.SetState "nativePick", "Alpha"
     app.SetState "volume", 35
     app.SetState "userName", vbNullString
@@ -85,6 +97,9 @@ Private Sub WireInspector(ByVal app As ReDimUI)
     app.OnStateChanged "notifications", "WidgetGallery.RefreshInspector"
     app.OnStateChanged "audit", "WidgetGallery.RefreshInspector"
     app.OnStateChanged "region", "WidgetGallery.RefreshInspector"
+    app.OnStateChanged "drawnCheck", "WidgetGallery.RefreshInspector"
+    app.OnStateChanged "priority", "WidgetGallery.RefreshInspector"
+    app.OnStateChanged "threads", "WidgetGallery.RefreshInspector"
     app.OnStateChanged "nativePick", "WidgetGallery.RefreshInspector"
     app.OnStateChanged "volume", "WidgetGallery.RefreshInspector"
     app.OnStateChanged "userName", "WidgetGallery.RefreshInspector"
@@ -101,8 +116,11 @@ Public Sub RefreshInspector()
         "   region = " & CStr(app.State("region")) & _
         "   native = " & CStr(app.State("nativePick")) & vbLf & _
         "volume = " & CStr(app.State("volume")) & _
-        "   userName = " & CStr(app.State("userName")) & vbLf & _
-        "last action = " & CStr(app.State("lastAction"))
+        "   check = " & CStr(app.State("drawnCheck")) & _
+        "   priority = " & CStr(app.State("priority")) & _
+        "   threads = " & CStr(app.State("threads")) & vbLf & _
+        "userName = " & CStr(app.State("userName")) & _
+        "   last action = " & CStr(app.State("lastAction"))
     app.SetState "inspector", summary
 End Sub
 

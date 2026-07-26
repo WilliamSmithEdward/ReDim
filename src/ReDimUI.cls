@@ -51,6 +51,9 @@ Private Const KIND_INPUT As Long = 10
 Private Const KIND_TOAST As Long = 11
 Private Const KIND_OVERLAY As Long = 12
 Private Const KIND_SELECT As Long = 13
+Private Const KIND_TICKBOX As Long = 14
+Private Const KIND_RADIO As Long = 15
+Private Const KIND_STEPPER As Long = 16
 
 Private Const VARIANT_PRIMARY As Long = 0
 Private Const VARIANT_SECONDARY As Long = 1
@@ -62,7 +65,7 @@ Private Const REL_NONE As Long = 0
 Private Const REL_BELOW As Long = 1
 Private Const REL_RIGHT_OF As Long = 2
 Private Const PERSIST_PREFIX As String = "rdm_s_"
-Private Const REDIM_VERSION As String = "0.3.1"
+Private Const REDIM_VERSION As String = "0.4.0"
 
 Private mRole As Long
 
@@ -719,6 +722,26 @@ End Function
 ' option list use the app font instead of Excel's fixed form-control font.
 Public Function SelectBox(ByVal componentId As String) As ReDimUI
     Set SelectBox = GetOrCreateComponent(componentId, KIND_SELECT)
+End Function
+
+' Drawn checkbox: themed box, check glyph, and caption, with no native
+' form control anywhere. Click the box or the caption to toggle.
+Public Function TickBox(ByVal componentId As String) As ReDimUI
+    Set TickBox = GetOrCreateComponent(componentId, KIND_TICKBOX)
+End Function
+
+' Drawn single-select option rows; the native controls never offered radio
+' buttons at all. Items supplies the rows, Value the selected index, and
+' WritesTo receives the selected item's text.
+Public Function RadioGroup(ByVal componentId As String) As ReDimUI
+    Set RadioGroup = GetOrCreateComponent(componentId, KIND_RADIO)
+End Function
+
+' Drawn numeric control: minus and plus around a value face, honoring
+' SliderRange. Shapes cannot report click coordinates, so a drag-thumb
+' slider cannot be drawn honestly; stepped entry can.
+Public Function Stepper(ByVal componentId As String) As ReDimUI
+    Set Stepper = GetOrCreateComponent(componentId, KIND_STEPPER)
 End Function
 
 Public Function Slider(ByVal componentId As String) As ReDimUI
@@ -1791,6 +1814,13 @@ Friend Sub ConfigureComponent( _
             mWidth = 140: mHeight = 20
         Case KIND_SELECT
             mWidth = 130: mHeight = 24
+        Case KIND_TICKBOX
+            mWidth = 130: mHeight = 18
+        Case KIND_RADIO
+            mWidth = 140: mHeight = 60
+        Case KIND_STEPPER
+            mWidth = 120: mHeight = 24
+            mSliderMin = 0: mSliderMax = 100: mSliderStep = 1
         Case KIND_TOAST
             mWidth = 240: mHeight = 40
         Case Else
@@ -2365,6 +2395,39 @@ Friend Sub RunClickBehavior()
                 Touch
                 Exit Sub
             End If
+        Case KIND_TICKBOX
+            mChecked = Not mChecked
+            If LenB(mWritesToKey) > 0 Then hostApp.SetState mWritesToKey, mChecked
+            Touch
+        Case KIND_RADIO
+            Dim rowIndex As Long
+            If LenB(ReDimUI.SenderPart) = 0 Then
+                rowIndex = 1
+            ElseIf IsNumeric(Mid$(ReDimUI.SenderPart, 2)) Then
+                rowIndex = CLng(Mid$(ReDimUI.SenderPart, 2))
+            End If
+            If rowIndex < 1 Then Exit Sub
+            If rowIndex = CLng(mValue) Then Exit Sub
+            mValue = rowIndex
+            If LenB(mWritesToKey) > 0 Then
+                hostApp.SetState mWritesToKey, ItemAt(rowIndex)
+            End If
+            Touch
+        Case KIND_STEPPER
+            Dim stepped As Double
+            If ReDimUI.SenderPart = "minus" Then
+                stepped = mValue - mSliderStep
+            ElseIf ReDimUI.SenderPart = "plus" Then
+                stepped = mValue + mSliderStep
+            Else
+                Exit Sub
+            End If
+            If stepped < mSliderMin Then stepped = mSliderMin
+            If stepped > mSliderMax Then stepped = mSliderMax
+            If stepped = mValue Then Exit Sub
+            mValue = stepped
+            If LenB(mWritesToKey) > 0 Then hostApp.SetState mWritesToKey, mValue
+            Touch
         Case KIND_TOAST
             mExpiresAtMs = 1
             ReDimUI.RequestPump
@@ -2601,6 +2664,17 @@ Private Function CreateShapeForKind(ByVal hostSheet As Worksheet) As Shape
             Set target = hostSheet.Shapes.AddShape( _
                 msoShapeRoundedRectangle, mLeft, mTop, mWidth, mHeight)
             target.Adjustments(1) = 0.15
+        Case KIND_TICKBOX
+            Set target = hostSheet.Shapes.AddShape( _
+                msoShapeRoundedRectangle, mLeft, mTop, 14, 14)
+            target.Adjustments(1) = 0.2
+        Case KIND_RADIO
+            Set target = hostSheet.Shapes.AddShape( _
+                msoShapeOval, mLeft, mTop, 14, 14)
+        Case KIND_STEPPER
+            Set target = hostSheet.Shapes.AddShape( _
+                msoShapeRoundedRectangle, mLeft, mTop, mWidth, mHeight)
+            target.Adjustments(1) = 0.15
         Case KIND_CHECKBOX
             Set target = hostSheet.Shapes.AddFormControl( _
                 xlCheckBox, CLng(mLeft), CLng(mTop), CLng(mWidth), CLng(mHeight))
@@ -2639,10 +2713,17 @@ Private Function EnsurePartShape( _
     Set EnsurePartShape = target
 End Function
 
+Private Function IsCompositeDrawnKind() As Boolean
+    IsCompositeDrawnKind = (mKind = KIND_TICKBOX Or mKind = KIND_RADIO _
+        Or mKind = KIND_STEPPER)
+End Function
+
 ' Geometry diffs against the shape's actual position rather than a cache, so
 ' a shape moved by hand (Ctrl+drag) snaps back to its declared rectangle on
-' the next render.
+' the next render. Composite drawn kinds own their geometry in extras: the
+' main shape is one piece of several, not the declared rectangle.
 Private Sub ApplyGeometry(ByVal target As Shape)
+    If IsCompositeDrawnKind() Then Exit Sub
     If Abs(target.Left - mLeft) > 0.01 Then target.Left = mLeft
     If Abs(target.Top - mTop) > 0.01 Then target.Top = mTop
     If Abs(target.Width - mWidth) > 0.01 Then target.Width = mWidth
@@ -2656,7 +2737,7 @@ End Sub
 Private Sub ApplyStyle(ByVal target As Shape, ByVal themeValue As ReDimUI)
     Dim resolvedFill As Long
 
-    If IsFormControlKind() Then Exit Sub
+    If IsFormControlKind() Or IsCompositeDrawnKind() Then Exit Sub
     resolvedFill = ResolveFill(themeValue)
     Select Case mKind
         Case KIND_LABEL
@@ -2829,7 +2910,8 @@ Private Sub ApplyText(ByVal target As Shape, ByVal themeValue As ReDimUI)
     Dim textChanged As Boolean
 
     If mKind = KIND_SPINNER Or mKind = KIND_TOGGLE Or mKind = KIND_OVERLAY _
-        Or mKind = KIND_INPUT Or IsFormControlKind() Then Exit Sub
+        Or mKind = KIND_INPUT Or IsFormControlKind() _
+        Or IsCompositeDrawnKind() Then Exit Sub
     resolved = ResolveText(Nothing)
     resolvedColor = ResolveTextColor(themeValue)
     resolvedSize = mFontSize
@@ -2911,9 +2993,250 @@ Private Sub ApplyKindExtras( _
             ApplyInputCell hostSheet, themeValue
         Case KIND_SELECT
             ApplySelectParts hostSheet, themeValue
+        Case KIND_TICKBOX
+            ApplyTickBox target, hostSheet, themeValue
+        Case KIND_RADIO
+            ApplyRadioGroup target, hostSheet, themeValue
+        Case KIND_STEPPER
+            ApplyStepper target, hostSheet, themeValue
         Case KIND_TOAST
             If mSlideRemaining > 0 Then target.Top = mTop + mSlideRemaining
     End Select
+End Sub
+
+Private Sub StyleGlyphText( _
+    ByVal target As Shape, _
+    ByVal glyph As String, _
+    ByVal inkColor As Long, _
+    ByVal glyphSize As Double, _
+    ByVal themeValue As ReDimUI _
+)
+    With target.TextFrame2
+        .MarginLeft = 0
+        .MarginRight = 0
+        .MarginTop = 0
+        .MarginBottom = 0
+        .VerticalAnchor = msoAnchorMiddle
+        .WordWrap = msoFalse
+        .TextRange.Text = glyph
+        .TextRange.ParagraphFormat.Alignment = msoAlignCenter
+        With .TextRange.Font
+            .Name = themeValue.FontName
+            .Size = glyphSize
+            .Bold = msoTrue
+            .Fill.ForeColor.RGB = inkColor
+        End With
+    End With
+End Sub
+
+Private Sub StyleCaptionPart( _
+    ByVal caption As Shape, _
+    ByVal captionText As String, _
+    ByVal themeValue As ReDimUI _
+)
+    Dim resolvedSize As Double
+
+    resolvedSize = mFontSize
+    If resolvedSize <= 0 Then resolvedSize = themeValue.BaseFontSize
+    caption.Fill.Visible = msoFalse
+    caption.Line.Visible = msoFalse
+    With caption.TextFrame2
+        .MarginLeft = 2
+        .MarginRight = 0
+        .MarginTop = 0
+        .MarginBottom = 0
+        .VerticalAnchor = msoAnchorMiddle
+        .WordWrap = msoFalse
+        .TextRange.Text = captionText
+        .TextRange.ParagraphFormat.Alignment = msoAlignLeft
+        With .TextRange.Font
+            .Name = themeValue.FontName
+            .Size = resolvedSize
+            .Bold = BoolToMso(mFontBold)
+            .Fill.ForeColor.RGB = ResolveDrawnInk(themeValue)
+        End With
+    End With
+End Sub
+
+Private Function ResolveDrawnInk(ByVal themeValue As ReDimUI) As Long
+    If mEnabled Then
+        ResolveDrawnInk = themeValue.OnSurfaceColor
+    Else
+        ResolveDrawnInk = themeValue.OnMutedColor
+    End If
+End Function
+
+' Box at the left edge, check glyph inside it when checked, caption filling
+' the remainder. Both pieces click-toggle through the dispatcher.
+Private Sub ApplyTickBox( _
+    ByVal target As Shape, _
+    ByVal hostSheet As Worksheet, _
+    ByVal themeValue As ReDimUI _
+)
+    Dim caption As Shape
+    Dim boxSize As Double
+
+    boxSize = mHeight - 2
+    If boxSize > 16 Then boxSize = 16
+    If boxSize < 10 Then boxSize = 10
+    target.Left = mLeft
+    target.Top = mTop + (mHeight - boxSize) / 2
+    target.Width = boxSize
+    target.Height = boxSize
+    target.Visible = BoolToMso(mVisible)
+    target.Fill.Visible = msoTrue
+    If mChecked And mEnabled Then
+        target.Fill.ForeColor.RGB = ResolveFill(themeValue)
+        target.Line.Visible = msoFalse
+    Else
+        target.Fill.ForeColor.RGB = themeValue.SurfaceColor
+        target.Line.Visible = msoTrue
+        target.Line.ForeColor.RGB = themeValue.BorderColor
+        target.Line.Weight = 1.25
+    End If
+    If mChecked Then
+        StyleGlyphText target, ChrW(10003), _
+            IIf(mEnabled, themeValue.OnPrimaryColor, themeValue.OnMutedColor), _
+            boxSize * 0.62, themeValue
+    Else
+        StyleGlyphText target, vbNullString, themeValue.OnSurfaceColor, _
+            boxSize * 0.62, themeValue
+    End If
+    Set caption = EnsurePartShape(hostSheet, "lbl", msoShapeRectangle)
+    caption.Left = mLeft + boxSize + 6
+    caption.Top = mTop - 1
+    caption.Width = mWidth - boxSize - 6
+    caption.Height = mHeight + 2
+    StyleCaptionPart caption, mText, themeValue
+    caption.Visible = BoolToMso(mVisible)
+    caption.OnAction = mAppliedOnAction
+    mAppliedChecked = mChecked
+End Sub
+
+' One circle-and-caption row per item. The selected row's circle fills with
+' the accent and carries an inner dot part.
+Private Sub ApplyRadioGroup( _
+    ByVal target As Shape, _
+    ByVal hostSheet As Worksheet, _
+    ByVal themeValue As ReDimUI _
+)
+    Dim rowCount As Long
+    Dim rowHeight As Double
+    Dim rowTop As Double
+    Dim position As Long
+    Dim ring As Shape
+    Dim caption As Shape
+    Dim dot As Shape
+    Dim circleSize As Double
+    Dim selected As Boolean
+
+    If mItems Is Nothing Then Exit Sub
+    rowCount = mItems.Count
+    If rowCount = 0 Then Exit Sub
+    rowHeight = mHeight / rowCount
+    circleSize = rowHeight - 6
+    If circleSize > 14 Then circleSize = 14
+    If circleSize < 10 Then circleSize = 10
+    For position = 1 To rowCount
+        rowTop = mTop + (position - 1) * rowHeight
+        selected = (position = CLng(mValue))
+        If position = 1 Then
+            Set ring = target
+        Else
+            Set ring = EnsurePartShape(hostSheet, "c" & position, msoShapeOval)
+        End If
+        ring.Left = mLeft
+        ring.Top = rowTop + (rowHeight - circleSize) / 2
+        ring.Width = circleSize
+        ring.Height = circleSize
+        ring.Fill.Visible = msoTrue
+        ring.Fill.ForeColor.RGB = themeValue.SurfaceColor
+        ring.Line.Visible = msoTrue
+        If selected And mEnabled Then
+            ring.Line.ForeColor.RGB = ResolveFill(themeValue)
+            ring.Line.Weight = 1.5
+        Else
+            ring.Line.ForeColor.RGB = themeValue.BorderColor
+            ring.Line.Weight = 1.25
+        End If
+        ring.Visible = BoolToMso(mVisible)
+        ring.OnAction = mAppliedOnAction
+        Set dot = EnsurePartShape(hostSheet, "d" & position, msoShapeOval)
+        dot.Left = ring.Left + circleSize * 0.3
+        dot.Top = ring.Top + circleSize * 0.3
+        dot.Width = circleSize * 0.4
+        dot.Height = circleSize * 0.4
+        dot.Fill.Visible = msoTrue
+        If mEnabled Then
+            dot.Fill.ForeColor.RGB = ResolveFill(themeValue)
+        Else
+            dot.Fill.ForeColor.RGB = themeValue.OnMutedColor
+        End If
+        dot.Line.Visible = msoFalse
+        dot.Visible = BoolToMso(mVisible And selected)
+        dot.OnAction = mAppliedOnAction
+        Set caption = EnsurePartShape(hostSheet, "t" & position, msoShapeRectangle)
+        caption.Left = mLeft + circleSize + 8
+        caption.Top = rowTop
+        caption.Width = mWidth - circleSize - 8
+        caption.Height = rowHeight
+        StyleCaptionPart caption, ItemAt(position), themeValue
+        caption.Visible = BoolToMso(mVisible)
+        caption.OnAction = mAppliedOnAction
+    Next position
+    mAppliedValue = mValue
+End Sub
+
+' Minus and plus squares around a bordered value face.
+Private Sub ApplyStepper( _
+    ByVal target As Shape, _
+    ByVal hostSheet As Worksheet, _
+    ByVal themeValue As ReDimUI _
+)
+    Dim minusButton As Shape
+    Dim plusButton As Shape
+    Dim buttonSize As Double
+
+    buttonSize = mHeight
+    target.Left = mLeft + buttonSize + 4
+    target.Top = mTop
+    target.Width = mWidth - 2 * (buttonSize + 4)
+    target.Height = mHeight
+    target.Visible = BoolToMso(mVisible)
+    target.Fill.Visible = msoTrue
+    target.Fill.ForeColor.RGB = themeValue.SurfaceColor
+    target.Line.Visible = msoTrue
+    target.Line.ForeColor.RGB = themeValue.BorderColor
+    target.Line.Weight = 1
+    StyleGlyphText target, CStr(CLng(mValue)), ResolveDrawnInk(themeValue), _
+        IIf(mFontSize > 0, mFontSize, themeValue.BaseFontSize), themeValue
+
+    Set minusButton = EnsurePartShape(hostSheet, "minus", msoShapeRoundedRectangle)
+    minusButton.Left = mLeft
+    minusButton.Top = mTop
+    minusButton.Width = buttonSize
+    minusButton.Height = buttonSize
+    minusButton.Fill.Visible = msoTrue
+    minusButton.Fill.ForeColor.RGB = themeValue.MutedColor
+    minusButton.Line.Visible = msoFalse
+    StyleGlyphText minusButton, "-", ResolveDrawnInk(themeValue), _
+        themeValue.BaseFontSize + 2, themeValue
+    minusButton.Visible = BoolToMso(mVisible)
+    minusButton.OnAction = mAppliedOnAction
+
+    Set plusButton = EnsurePartShape(hostSheet, "plus", msoShapeRoundedRectangle)
+    plusButton.Left = mLeft + mWidth - buttonSize
+    plusButton.Top = mTop
+    plusButton.Width = buttonSize
+    plusButton.Height = buttonSize
+    plusButton.Fill.Visible = msoTrue
+    plusButton.Fill.ForeColor.RGB = themeValue.MutedColor
+    plusButton.Line.Visible = msoFalse
+    StyleGlyphText plusButton, "+", ResolveDrawnInk(themeValue), _
+        themeValue.BaseFontSize + 2, themeValue
+    plusButton.Visible = BoolToMso(mVisible)
+    plusButton.OnAction = mAppliedOnAction
+    mAppliedValue = mValue
 End Sub
 
 Private Sub ApplyToggleKnob( _
@@ -3177,8 +3500,13 @@ Friend Sub DeleteShapes(ByVal hostSheet As Worksheet)
     hostSheet.Shapes(ShapeName & PART_SEPARATOR & "fill").Delete
     hostSheet.Shapes(ShapeName & PART_SEPARATOR & "lbl").Delete
     hostSheet.Shapes(ShapeName & PART_SEPARATOR & "caret").Delete
+    hostSheet.Shapes(ShapeName & PART_SEPARATOR & "minus").Delete
+    hostSheet.Shapes(ShapeName & PART_SEPARATOR & "plus").Delete
     For position = 1 To optionCount
         hostSheet.Shapes(ShapeName & PART_SEPARATOR & "opt" & position).Delete
+        hostSheet.Shapes(ShapeName & PART_SEPARATOR & "c" & position).Delete
+        hostSheet.Shapes(ShapeName & PART_SEPARATOR & "d" & position).Delete
+        hostSheet.Shapes(ShapeName & PART_SEPARATOR & "t" & position).Delete
     Next position
     On Error GoTo 0
 End Sub

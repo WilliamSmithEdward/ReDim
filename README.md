@@ -29,12 +29,11 @@ user keeps working in the workbook.
 
 ## What it does
 
-- **Components over shapes.** Button, Label, Card, ProgressBar, Spinner, Toggle, Checkbox,
-  Dropdown, SelectBox, Slider, cell-backed TextInput, Toast, and a shapes-based modal overlay
-  with Confirm. Drawn widgets carry a theme (light and dark presets). Where Excel fixes form
-  control fonts, ReDim compensates: checkbox captions render as themed label parts that still
-  toggle the box, and SelectBox is a fully drawn picker for when the native dropdown's small
-  fixed font will not do.
+- **Components over shapes.** Button, Label, Card, ProgressBar, Spinner, Toggle, TickBox,
+  RadioGroup, Stepper, SelectBox, cell-backed TextInput, Toast, and a shapes-based modal
+  overlay with Confirm - a fully drawn, fully themed control family with light and dark
+  presets and no dependencies beyond a stock Excel 365 install. Native wrappers (Checkbox,
+  Dropdown, Slider) remain for when the OS look is wanted.
 - **Stateful.** Each app owns a key-value store. `BindText`, `BindValue`, `BindVisible`, and
   `BindEnabled` re-render only what changed. `OnStateChanged` registers workbook procedures as
   state listeners. `WritesTo` flows control values back into state. `Persist True` writes state

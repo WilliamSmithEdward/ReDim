@@ -455,6 +455,126 @@ Public Function TestToastTray() As String
     TestToastTray = transcript
 End Function
 
+Public Function TestTickBox() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim boxShape As Shape
+    Dim transcript As String
+
+    Set host = NewCanvas()
+    gChangeCount = 0
+    Set app = ReDimUI.Mount(host, "wid12")
+    app.TickBox("agree").AtRect(24, 24, 140, 18).Text("I agree") _
+        .WritesTo("agreed").OnChange "TestReDimWidgets.RecordChange"
+    app.Render
+
+    Set boxShape = host.Shapes("rdm_wid12_agree")
+    transcript = "uncheckedSurface=" & _
+        CStr(boxShape.Fill.ForeColor.RGB = app.Theme.SurfaceColor)
+    transcript = transcript & "|glyphEmpty=" & _
+        CStr(LenB(boxShape.TextFrame2.TextRange.Text) = 0)
+    transcript = transcript & "|captionText=" & _
+        host.Shapes("rdm_wid12_agree__lbl").TextFrame2.TextRange.Text
+    transcript = transcript & "|captionSize=" & _
+        host.Shapes("rdm_wid12_agree__lbl").TextFrame2.TextRange.Font.Size
+
+    ReDimUI.DispatchShape "rdm_wid12_agree"
+    transcript = transcript & "|checkedState=" & CStr(app.State("agreed"))
+    transcript = transcript & "|checkedPrimary=" & _
+        CStr(boxShape.Fill.ForeColor.RGB = app.Theme.PrimaryColor)
+    transcript = transcript & "|glyphCheck=" & _
+        CStr(boxShape.TextFrame2.TextRange.Text = ChrW(10003))
+    transcript = transcript & "|changeRan=" & gChangeCount
+
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid12_agree__lbl"
+    transcript = transcript & "|captionToggles=" & _
+        CStr(app.State("agreed") = False)
+    TestTickBox = transcript
+End Function
+
+Public Function TestRadioGroup() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim transcript As String
+
+    Set host = NewCanvas()
+    gChangeCount = 0
+    Set app = ReDimUI.Mount(host, "wid13")
+    app.RadioGroup("prio").AtRect(24, 24, 140, 60) _
+        .Items("Low", "Medium", "High").Value(2).WritesTo("prio") _
+        .OnChange "TestReDimWidgets.RecordChange"
+    app.Render
+
+    transcript = "rowsExist=" & _
+        CStr(ShapeExists(host, "rdm_wid13_prio") And _
+             ShapeExists(host, "rdm_wid13_prio__c2") And _
+             ShapeExists(host, "rdm_wid13_prio__c3"))
+    transcript = transcript & "|dotOnSelected=" & _
+        CStr(host.Shapes("rdm_wid13_prio__d2").Visible = msoTrue)
+    transcript = transcript & "|dotOffOthers=" & _
+        CStr(host.Shapes("rdm_wid13_prio__d1").Visible = msoFalse And _
+             host.Shapes("rdm_wid13_prio__d3").Visible = msoFalse)
+    transcript = transcript & "|captionText=" & _
+        host.Shapes("rdm_wid13_prio__t3").TextFrame2.TextRange.Text
+    transcript = transcript & "|captionSize=" & _
+        host.Shapes("rdm_wid13_prio__t3").TextFrame2.TextRange.Font.Size
+
+    ReDimUI.DispatchShape "rdm_wid13_prio__t3"
+    transcript = transcript & "|pickedState=" & app.State("prio")
+    transcript = transcript & "|dotMoved=" & _
+        CStr(host.Shapes("rdm_wid13_prio__d3").Visible = msoTrue And _
+             host.Shapes("rdm_wid13_prio__d2").Visible = msoFalse)
+    transcript = transcript & "|changeRan=" & gChangeCount
+
+    ' Clicking the already-selected row is a no-op.
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid13_prio__c3"
+    transcript = transcript & "|sameRowNoOp=" & CStr(gChangeCount = 1)
+
+    ' Row one is reachable through the main circle shape.
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid13_prio"
+    transcript = transcript & "|rowOnePicked=" & app.State("prio")
+    TestRadioGroup = transcript
+End Function
+
+Public Function TestStepper() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim faceShape As Shape
+    Dim transcript As String
+
+    Set host = NewCanvas()
+    gChangeCount = 0
+    Set app = ReDimUI.Mount(host, "wid14")
+    app.Stepper("thr").AtRect(24, 24, 120, 24).SliderRange(1, 5, 1) _
+        .Value(4).WritesTo("threads").OnChange "TestReDimWidgets.RecordChange"
+    app.Render
+
+    Set faceShape = host.Shapes("rdm_wid14_thr")
+    transcript = "faceValue=" & faceShape.TextFrame2.TextRange.Text
+    transcript = transcript & "|partsExist=" & _
+        CStr(ShapeExists(host, "rdm_wid14_thr__minus") And _
+             ShapeExists(host, "rdm_wid14_thr__plus"))
+
+    ReDimUI.DispatchShape "rdm_wid14_thr__plus"
+    transcript = transcript & "|plusValue=" & app.State("threads")
+    transcript = transcript & "|faceUpdated=" & _
+        CStr(faceShape.TextFrame2.TextRange.Text = "5")
+
+    ' Already at the maximum: another plus is a clamped no-op.
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid14_thr__plus"
+    transcript = transcript & "|clampedNoOp=" & CStr(gChangeCount = 1)
+
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid14_thr__minus"
+    transcript = transcript & "|minusValue=" & app.State("threads")
+    transcript = transcript & "|changeRan=" & gChangeCount
+    TestStepper = transcript
+End Function
+
 Public Function TestModalConfirm() As String
     Dim app As ReDimUI
     Dim host As Worksheet

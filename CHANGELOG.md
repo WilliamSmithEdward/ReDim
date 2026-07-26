@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.0 - 2026-07-26
+
+- Drawn control family completes: `TickBox` (themed checkbox with check glyph and clickable
+  caption), `RadioGroup` (single-select rows the native controls never offered), and
+  `Stepper` (numeric minus/value/plus honoring SliderRange). With `Toggle` and `SelectBox`,
+  every interactive control now has a fully themed shape-drawn form; native wrappers remain
+  optional. Pure shapes, no new dependencies.
+- The gallery gains a drawn-controls section wired to the state inspector.
+
 ## 0.3.1 - 2026-07-26
 
 - `NavBar`: one tab per registered window across the top of a sheet, active tab highlighted,

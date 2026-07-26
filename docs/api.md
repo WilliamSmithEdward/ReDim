@@ -43,7 +43,10 @@ demo is the working reference.
 ## App
 
 Component factories, get-or-create by id: `Button`, `Label`, `Card`, `Spinner`, `ProgressBar`,
-`Toggle`, `Checkbox`, `Dropdown`, `SelectBox`, `Slider`, `TextInput`. Also:
+`Toggle`, `TickBox`, `RadioGroup`, `Stepper`, `SelectBox`, `Checkbox`, `Dropdown`, `Slider`,
+`TextInput`. The drawn family (`Toggle`, `TickBox`, `RadioGroup`, `Stepper`, `SelectBox`) is
+fully themed; `Checkbox`, `Dropdown`, and `Slider` wrap native form controls for the OS look.
+Also:
 
 | Member | Purpose |
 |---|---|
@@ -92,16 +95,22 @@ Handlers are zero-argument public procedures referenced as `"Module.Proc"`. Insi
 `ReDimUI.Sender` carries who fired and `ReDimUI.SenderPart` names the clicked sub-shape when a
 composite widget fired (toggle knob, checkbox caption, select option).
 
-## Text sizing on controls
+## Drawn controls versus native controls
 
-Excel fixes the fonts of form controls: checkbox captions and dropdown lists always render at
-the small system size and expose no Font setting. ReDim compensates where it can:
+Excel fixes the fonts and look of form controls, so ReDim ships a fully drawn family for
+complete styling control, all pure shapes with no added dependencies:
 
-- `Checkbox` keeps its native caption empty and draws the caption as a themed textbox part.
-  Clicking the caption toggles the box, so behavior matches a native caption.
-- `SelectBox` is a fully drawn picker (face, caret, option list) that follows the theme font.
-  Prefer it when type consistency matters; keep `Dropdown` when the native Excel look is wanted.
-- `Slider` has no text. Pair it with a bound `Label`, as the gallery does.
+- `TickBox` replaces the native checkbox: themed box, check glyph, caption; box and caption
+  both toggle on click.
+- `RadioGroup` provides single-select option rows, which native form controls never offered.
+- `Stepper` replaces the native scrollbar for numeric entry: minus and plus around a value
+  face, honoring `SliderRange`. Shapes cannot report click coordinates, so a drag-thumb slider
+  cannot be drawn honestly; stepped entry can, and reads better on a worksheet.
+- `SelectBox` replaces the native dropdown with a themed face and option list.
+
+The native wrappers remain for the OS look: `Checkbox` (its caption drawn themed, since the
+native caption font is fixed), `Dropdown`, and `Slider`. `Slider` has no text; pair it with a
+bound `Label`, as the gallery does.
 
 ## Shapes are framework-owned
 

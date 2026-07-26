@@ -137,6 +137,48 @@ def test_drag_resilience(run_widgets):
     assert facts["labelSnappedBack"] == "True"
 
 
+def test_tick_box(run_widgets):
+    facts = parse_transcript(run_widgets("TestTickBox"))
+    assert facts["uncheckedSurface"] == "True"
+    assert facts["glyphEmpty"] == "True"
+    assert facts["captionText"] == "I agree"
+    assert float(facts["captionSize"]) == 11.0
+    assert facts["checkedState"] == "True"
+    assert facts["checkedPrimary"] == "True"
+    assert facts["glyphCheck"] == "True"
+    assert facts["changeRan"] == "1"
+    assert facts["captionToggles"] == "True", (
+        "clicking the caption must toggle like the box"
+    )
+
+
+def test_radio_group(run_widgets):
+    facts = parse_transcript(run_widgets("TestRadioGroup"))
+    assert facts["rowsExist"] == "True"
+    assert facts["dotOnSelected"] == "True"
+    assert facts["dotOffOthers"] == "True"
+    assert facts["captionText"] == "High"
+    assert float(facts["captionSize"]) == 11.0
+    assert facts["pickedState"] == "High"
+    assert facts["dotMoved"] == "True"
+    assert facts["changeRan"] == "1"
+    assert facts["sameRowNoOp"] == "True"
+    assert facts["rowOnePicked"] == "Low"
+
+
+def test_stepper(run_widgets):
+    facts = parse_transcript(run_widgets("TestStepper"))
+    assert facts["faceValue"] == "4"
+    assert facts["partsExist"] == "True"
+    assert facts["plusValue"] == "5"
+    assert facts["faceUpdated"] == "True"
+    assert facts["clampedNoOp"] == "True", (
+        "stepping past the maximum must not fire OnChange"
+    )
+    assert facts["minusValue"] == "4"
+    assert facts["changeRan"] == "2"
+
+
 def test_modal_confirm(run_widgets):
     facts = parse_transcript(run_widgets("TestModalConfirm"))
     assert facts["overlayShown"] == "True"
