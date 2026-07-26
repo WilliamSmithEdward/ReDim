@@ -203,6 +203,29 @@ def test_slide_mapping(run_widgets):
     )
 
 
+def test_item_api(run_widgets):
+    facts = parse_transcript(run_widgets("TestItemApi"))
+    assert facts["countAfterInsert"] == "4"
+    assert facts["insertedFirst"] == "Zeta"
+    assert facts["selectionFollows"] == "True", (
+        "an insert before the selection must keep the same item selected"
+    )
+    assert facts["selectionStillBeta"] == "True"
+    assert facts["clearedToPlaceholder"] == "True", (
+        "removing the selected item must clear to the placeholder"
+    )
+    assert facts["faceShowsPlaceholder"] == "True"
+    assert facts["fromArray"] == "4"
+    assert facts["fromRangeSkipsBlank"] == "3"
+    assert facts["rangeSecond"] == "Green"
+    assert facts["clearedNoOptions"] == "True"
+    assert facts["radioShrunk"] == "2"
+    assert facts["radioStaleGone"] == "True", (
+        "shrinking a radio group must sweep its stale row parts"
+    )
+    assert facts["radioSelectionCleared"] == "True"
+
+
 def test_modal_confirm(run_widgets):
     facts = parse_transcript(run_widgets("TestModalConfirm"))
     assert facts["overlayShown"] == "True"

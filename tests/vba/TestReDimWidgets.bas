@@ -668,6 +668,75 @@ Public Function TestSlideMapping() As String
     TestSlideMapping = transcript
 End Function
 
+Public Function TestItemApi() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim picker As ReDimUI
+    Dim radio As ReDimUI
+    Dim transcript As String
+
+    Set host = NewCanvas()
+    ReDimUI.AutoPump False
+    Set app = ReDimUI.Mount(host, "wid18")
+    app.SelectBox("pick").AtRect 24, 24, 130, 24
+    app.SelectBox("pick").Text("pick one").Items("Alpha", "Beta", "Gamma") _
+        .Value 2
+    app.RadioGroup("rad").AtRect 200, 24, 130, 60
+    app.RadioGroup("rad").Items("One", "Two", "Three").Value 3
+    app.Render
+    Set picker = app.Component("pick")
+    Set radio = app.Component("rad")
+
+    ' Insert before the selection: the selected item stays selected.
+    picker.AddItem "Zeta", 1
+    transcript = "countAfterInsert=" & picker.ItemCount
+    transcript = transcript & "|insertedFirst=" & picker.ItemTextAt(1)
+    transcript = transcript & "|selectionFollows=" & _
+        CStr(picker.CurrentText = "Beta")
+
+    ' Remove before the selection: index shifts, item keeps selection.
+    picker.RemoveItem 1
+    transcript = transcript & "|selectionStillBeta=" & _
+        CStr(picker.CurrentText = "Beta" And picker.CurrentValue = 2)
+
+    ' Remove the selected item by text: selection clears to placeholder.
+    picker.RemoveItem "Beta"
+    transcript = transcript & "|clearedToPlaceholder=" & _
+        CStr(picker.CurrentValue = 0 And picker.CurrentText = "pick one")
+    transcript = transcript & "|faceShowsPlaceholder=" & _
+        CStr(host.Shapes("rdm_wid18_pick").TextFrame2.TextRange.Text = _
+            "pick one")
+
+    ' Replace from an array, then from a worksheet range.
+    picker.ItemsFrom Array("North", "South", "East", "West")
+    transcript = transcript & "|fromArray=" & picker.ItemCount
+    host.Range("H1").Value = "Red"
+    host.Range("H2").Value = "Green"
+    host.Range("H3").Value = "Blue"
+    picker.ItemsFrom host.Range("H1:H4")
+    transcript = transcript & "|fromRangeSkipsBlank=" & picker.ItemCount
+    transcript = transcript & "|rangeSecond=" & picker.ItemTextAt(2)
+
+    ' Cleared list: opening shows no options.
+    picker.ClearItems
+    ReDimUI.DispatchShape "rdm_wid18_pick"
+    transcript = transcript & "|clearedNoOptions=" & _
+        CStr(Not ShapeExists(host, "rdm_wid18_pick__opt1"))
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid18_pick"
+
+    ' Radio shrink: stale third-row parts are swept, selection clears.
+    radio.ItemsFrom Array("Left", "Right")
+    transcript = transcript & "|radioShrunk=" & radio.ItemCount
+    transcript = transcript & "|radioStaleGone=" & _
+        CStr(Not ShapeExists(host, "rdm_wid18_rad__c3") And _
+             Not ShapeExists(host, "rdm_wid18_rad__t3"))
+    transcript = transcript & "|radioSelectionCleared=" & _
+        CStr(radio.CurrentValue = 0)
+    ReDimUI.AutoPump True
+    TestItemApi = transcript
+End Function
+
 Public Function TestModalConfirm() As String
     Dim app As ReDimUI
     Dim host As Worksheet

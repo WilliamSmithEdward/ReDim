@@ -81,8 +81,15 @@ All fluent, all return the component:
 - Content: `Text`, `FontSize`, `Bold`, `BusyText`.
 - Style: `Primary`, `Secondary`, `Success`, `Danger`, `Fill(color)`, `TextColor(color)`.
 - Visibility: `Visible(flag)`, `Enabled(flag)`.
-- Values: `Value(number)` (progress, slider, dropdown index), `Checked(flag)`,
-  `Items("A", "B", ...)`, `SliderRange(min, max, step)`.
+- Values: `Value(number)` (progress, slider, picker index), `Checked(flag)`,
+  `SliderRange(min, max, step)`.
+- Item lists (`SelectBox`, `RadioGroup`): `Items("A", "B", ...)` replaces;
+  `ItemsFrom(source)` replaces from a 1D array, a Collection, or a Range (one item per
+  non-empty cell); `AddItem(text, atPosition)` appends or inserts; `RemoveItem(indexOrText)`;
+  `ClearItems`; read back with `ItemCount` and `ItemTextAt(position)`. The selected item
+  survives inserts and unrelated removals; removing it clears the selection to the
+  placeholder. Programmatic mutations re-render but do not write `WritesTo` state or fire
+  `OnChange`; those belong to user interaction and explicit `SetState`.
 - Bindings: `BindText(key, template)` where `{0}` is the value, `BindValue(key)`,
   `BindVisible(key, invert)`, `BindEnabled(key, invert)`, `WritesTo(key)`. The invert flag
   serves the disable-while-busy pattern: `BindEnabled "anyRunning", True`.

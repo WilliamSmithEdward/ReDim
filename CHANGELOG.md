@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.7.3 - 2026-07-26
+
+- Programmatic item APIs for SelectBox and RadioGroup: `AddItem` with optional position,
+  `RemoveItem` by index or text, `ClearItems`, `ItemsFrom` accepting a 1D array, a
+  Collection, or a Range (one item per non-empty cell), plus `ItemCount` and `ItemTextAt`
+  readers. The selected item survives inserts and unrelated removals; removing it clears
+  the selection to the placeholder. Shrinking a RadioGroup now sweeps its stale row parts.
+
 ## 0.7.2 - 2026-07-26
 
 - Fix drag never engaging on freshly opened workbooks: slider demand kept an armed pump

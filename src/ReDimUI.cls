@@ -83,7 +83,7 @@ Private Const REL_NONE As Long = 0
 Private Const REL_BELOW As Long = 1
 Private Const REL_RIGHT_OF As Long = 2
 Private Const PERSIST_PREFIX As String = "rdm_s_"
-Private Const REDIM_VERSION As String = "0.7.2"
+Private Const REDIM_VERSION As String = "0.7.3"
 
 Private mRole As Long
 
@@ -2143,9 +2143,120 @@ Public Function Items(ParamArray listItems() As Variant) As ReDimUI
     For position = LBound(listItems) To UBound(listItems)
         mItems.Add CStr(listItems(position))
     Next position
+    ClampItemSelection
     Touch
     Set Items = Me
 End Function
+
+' Replaces the item list from a 1D array, a Collection, or a Range (one
+' item per non-empty cell), so pickers can be fed straight from data.
+Public Function ItemsFrom(ByVal source As Variant) As ReDimUI
+    Dim entry As Variant
+    Dim cell As Range
+    Dim position As Long
+
+    RequireRole ROLE_COMPONENT, "ItemsFrom"
+    Set mItems = New Collection
+    If TypeName(source) = "Range" Then
+        For Each cell In source.Cells
+            If LenB(CStr(cell.Value)) > 0 Then mItems.Add CStr(cell.Value)
+        Next cell
+    ElseIf TypeName(source) = "Collection" Then
+        For Each entry In source
+            mItems.Add CStr(entry)
+        Next entry
+    ElseIf IsArray(source) Then
+        For position = LBound(source) To UBound(source)
+            mItems.Add CStr(source(position))
+        Next position
+    Else
+        RaiseError ERROR_INVALID_ARGUMENT, "ItemsFrom", _
+            "ItemsFrom accepts an array, a Collection, or a Range."
+    End If
+    ClampItemSelection
+    Touch
+    Set ItemsFrom = Me
+End Function
+
+' Appends, or inserts at a 1-based position. The selected item stays
+' selected: an insert at or before it shifts the index along with it.
+Public Function AddItem( _
+    ByVal itemText As String, _
+    Optional ByVal atPosition As Long = 0 _
+) As ReDimUI
+    RequireRole ROLE_COMPONENT, "AddItem"
+    If mItems Is Nothing Then Set mItems = New Collection
+    If atPosition >= 1 And atPosition <= mItems.Count Then
+        mItems.Add itemText, Before:=atPosition
+        If CLng(mValue) >= atPosition Then mValue = mValue + 1
+    Else
+        mItems.Add itemText
+    End If
+    Touch
+    Set AddItem = Me
+End Function
+
+' Removes by 1-based position, or by first matching text. Removing an item
+' before the selection shifts the index; removing the selected item clears
+' the selection to the placeholder rather than guessing a neighbor.
+Public Function RemoveItem(ByVal indexOrText As Variant) As ReDimUI
+    Dim position As Long
+    Dim probe As Long
+
+    RequireRole ROLE_COMPONENT, "RemoveItem"
+    If mItems Is Nothing Then
+        Set RemoveItem = Me
+        Exit Function
+    End If
+    If IsNumeric(indexOrText) Then
+        position = CLng(indexOrText)
+    Else
+        For probe = 1 To mItems.Count
+            If CStr(mItems.Item(probe)) = CStr(indexOrText) Then
+                position = probe
+                Exit For
+            End If
+        Next probe
+    End If
+    If position < 1 Or position > mItems.Count Then
+        Set RemoveItem = Me
+        Exit Function
+    End If
+    mItems.Remove position
+    If CLng(mValue) = position Then
+        mValue = 0
+    ElseIf CLng(mValue) > position Then
+        mValue = mValue - 1
+    End If
+    Touch
+    Set RemoveItem = Me
+End Function
+
+Public Function ClearItems() As ReDimUI
+    RequireRole ROLE_COMPONENT, "ClearItems"
+    Set mItems = New Collection
+    mValue = 0
+    Touch
+    Set ClearItems = Me
+End Function
+
+Public Property Get ItemCount() As Long
+    RequireRole ROLE_COMPONENT, "ItemCount"
+    If Not mItems Is Nothing Then ItemCount = mItems.Count
+End Property
+
+Public Property Get ItemTextAt(ByVal position As Long) As String
+    RequireRole ROLE_COMPONENT, "ItemTextAt"
+    ItemTextAt = ItemAt(position)
+End Property
+
+Private Sub ClampItemSelection()
+    If mItems Is Nothing Then
+        mValue = 0
+    ElseIf CLng(mValue) > mItems.Count Then
+        mValue = 0
+    End If
+End Sub
 
 Public Function SliderRange( _
     ByVal minimum As Long, _
@@ -3175,6 +3286,15 @@ Private Sub ApplyRadioGroup( _
         caption.Visible = BoolToMso(mVisible)
         caption.OnAction = mAppliedOnAction
     Next position
+    ' Rows beyond the current item count are leftovers from a longer list.
+    For position = rowCount + 1 To mAppliedOptionCount
+        On Error Resume Next
+        hostSheet.Shapes(ShapeName & PART_SEPARATOR & "c" & position).Delete
+        hostSheet.Shapes(ShapeName & PART_SEPARATOR & "d" & position).Delete
+        hostSheet.Shapes(ShapeName & PART_SEPARATOR & "t" & position).Delete
+        On Error GoTo 0
+    Next position
+    mAppliedOptionCount = rowCount
     mAppliedValue = mValue
 End Sub
 
