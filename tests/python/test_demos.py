@@ -48,6 +48,8 @@ Public Function SmokeMission() As String
 
     HandleStartFeed1
     transcript = transcript & "|feed1Running=" & CStr(app.State("feed1Running"))
+    transcript = transcript & "|launchDisabled=" & _
+        CStr(Not app.Button("launch").IsEnabled)
     ' Feed 1 is paced at 80ms per step, so give each tick a pace window.
     For ticks = 1 To 6
         Sleep 100
@@ -61,15 +63,17 @@ Public Function SmokeMission() As String
     ReDimUI.PumpOnce
     transcript = transcript & "|canceledStatus=" & app.State("feed1Status")
     transcript = transcript & "|startReEnabled=" & CStr(app.State("feed1Idle"))
+    transcript = transcript & "|launchReEnabled=" & _
+        CStr(app.Button("launch").IsEnabled)
 
-    ' Toasts anchor to the app content, not the window edge.
+    ' Toasts sit on a rail just outside the content's right edge.
     Dim toastShape As Shape
     Dim cardShape As Shape
     Set cardShape = app.Sheet.Shapes("rdm_mission_card1")
     Set toastShape = app.Sheet.Shapes("rdm_mission_toast_1")
-    transcript = transcript & "|toastNearContent=" & _
-        CStr(Abs((toastShape.Left + toastShape.Width) - _
-            (cardShape.Left + cardShape.Width)) < 1)
+    transcript = transcript & "|toastOnRail=" & _
+        CStr(Abs(toastShape.Left - _
+            (cardShape.Left + cardShape.Width + 12)) < 1)
     transcript = transcript & "|toastInkOnSurface=" & _
         CStr(toastShape.TextFrame2.TextRange.Font.Fill.ForeColor.RGB = _
             app.Theme.OnSurfaceColor)
@@ -169,10 +173,14 @@ def test_mission_control_smoke(demo_paths):
         assert facts["feed1Running"] == "True"
         assert facts["progressMoved"] == "True"
         assert facts["rowsMoved"] == "True"
+        assert facts["launchDisabled"] == "True", (
+            "launch must disable while any feed runs"
+        )
         assert facts["canceledStatus"] == "Canceled"
         assert facts["startReEnabled"] == "True"
-        assert facts["toastNearContent"] == "True", (
-            "toast must right-align to the app content, not the window edge"
+        assert facts["launchReEnabled"] == "True"
+        assert facts["toastOnRail"] == "True", (
+            "toast must sit on the rail beside the content"
         )
         assert facts["toastInkOnSurface"] == "True"
 

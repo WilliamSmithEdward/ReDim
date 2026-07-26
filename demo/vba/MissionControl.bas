@@ -41,7 +41,8 @@ Public Sub BuildMissionControl()
     app.Label("darklbl").AtRect(502, 24, 80, 18).Text("Dark mode")
 
     app.Button("launch").AtRect(24, 78, 120, 32).Text("Launch all feeds") _
-        .Primary.OnClick "MissionControl.HandleLaunchAll"
+        .Primary.BindEnabled("anyRunning", True) _
+        .OnClick "MissionControl.HandleLaunchAll"
     app.Button("reset").AtRect(152, 78, 90, 32).Text("Reset").Danger _
         .OnClick "MissionControl.HandleResetRequest"
 

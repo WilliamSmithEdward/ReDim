@@ -369,6 +369,48 @@ Public Function TestDragResilience() As String
     TestDragResilience = transcript
 End Function
 
+' The toast tray must be stable: pinned by ToastTray when given, and never
+' shifted by modal chrome even when a toast fires while a modal is open.
+Public Function TestToastTray() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim toastValue As ReDimUI
+    Dim labelShape As Shape
+    Dim expectedRail As Double
+    Dim transcript As String
+
+    Set host = NewCanvas()
+    ReDimUI.AutoPump False
+    Set app = ReDimUI.Mount(host, "wid10")
+    app.Label("info").AtRect(24, 24, 200, 20).Text("Info")
+    app.Render
+
+    ' Default rail: just outside the content's right edge.
+    Set labelShape = host.Shapes("rdm_wid10_info")
+    expectedRail = labelShape.Left + labelShape.Width + 12
+    Set toastValue = app.Toast("rail", 60000)
+    transcript = "onRail=" & _
+        CStr(Abs(host.Shapes("rdm_wid10_" & toastValue.ComponentId).Left - _
+            expectedRail) < 0.5)
+
+    ' A modal must not shift the rail even while it is open.
+    app.Confirm "Wait", "Working...", vbNullString
+    Set toastValue = app.Toast("during modal", 60000)
+    transcript = transcript & "|modalIgnored=" & _
+        CStr(Abs(host.Shapes("rdm_wid10_" & toastValue.ComponentId).Left - _
+            expectedRail) < 0.5)
+    app.CloseModal
+
+    ' Explicit tray anchor wins.
+    app.ToastTray "H2"
+    Set toastValue = app.Toast("pinned", 60000)
+    transcript = transcript & "|pinnedToAnchor=" & _
+        CStr(Abs(host.Shapes("rdm_wid10_" & toastValue.ComponentId).Left - _
+            host.Range("H2").Left) < 0.5)
+    ReDimUI.AutoPump True
+    TestToastTray = transcript
+End Function
+
 Public Function TestModalConfirm() As String
     Dim app As ReDimUI
     Dim host As Worksheet

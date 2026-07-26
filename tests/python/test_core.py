@@ -49,6 +49,8 @@ def test_state_bindings(run_core):
     assert facts["hintHidden"] == "True"
     assert facts["enabledClicks"] == "1"
     assert facts["stateReadback"] == "ready"
+    assert facts["invertedIdleEnabled"] == "True"
+    assert facts["invertedBusyDisabled"] == "True"
 
 
 def test_batch_and_theme(run_core):
@@ -107,4 +109,4 @@ def test_hotkey_lifecycle_and_version(run_core):
     facts = parse_transcript(run_core("TestHotKeyLifecycle"))
     assert facts["procCallable"] == "True"
     assert facts["unmountClean"] == "True"
-    assert facts["version"] == "0.2.1"
+    assert facts["version"] == "0.2.2"

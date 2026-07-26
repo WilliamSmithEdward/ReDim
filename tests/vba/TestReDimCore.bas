@@ -187,6 +187,16 @@ Public Function TestStateBindings() As String
     ReDimUI.DispatchShape "rdm_core5_btn"
     transcript = transcript & "|enabledClicks=" & gClickCount
     transcript = transcript & "|stateReadback=" & app.State("statusMsg")
+
+    ' Inverse binding: enabled while the busy flag is False.
+    app.Button("inv").At("B9:C10").Text("Inverse").BindEnabled "busy", True
+    app.SetState "busy", False
+    app.Render
+    transcript = transcript & "|invertedIdleEnabled=" & _
+        CStr(app.Button("inv").IsEnabled)
+    app.SetState "busy", True
+    transcript = transcript & "|invertedBusyDisabled=" & _
+        CStr(Not app.Button("inv").IsEnabled)
     TestStateBindings = transcript
 End Function
 

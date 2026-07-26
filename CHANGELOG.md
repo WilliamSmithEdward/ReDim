@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.2 - 2026-07-26
+
+- Toasts sit on a stable rail just outside the content's right edge, with `ToastTray` to pin
+  the rail to a range; modal chrome no longer shifts toast placement
+- The spinner is a block arc, a ring concentric with its box, so rotation is circular instead
+  of the wobbling stroke a plain arc produces; stale arc shapes are rebuilt on adoption
+- `BindEnabled` and `BindVisible` take an invert flag; Mission Control's launch button now
+  disables while any feed runs
+
 ## 0.2.1 - 2026-07-26
 
 - The pump pins `Application.Cursor` while armed and restores it on stop, ending the rapid

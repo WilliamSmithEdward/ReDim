@@ -109,6 +109,15 @@ def test_toast_slots(run_widgets):
     assert facts["thirdAboveSecond"] == "True"
 
 
+def test_toast_tray(run_widgets):
+    facts = parse_transcript(run_widgets("TestToastTray"))
+    assert facts["onRail"] == "True"
+    assert facts["modalIgnored"] == "True", (
+        "modal chrome must not shift the toast rail"
+    )
+    assert facts["pinnedToAnchor"] == "True"
+
+
 def test_drag_resilience(run_widgets):
     facts = parse_transcript(run_widgets("TestDragResilience"))
     assert facts["cardSwallowsClicks"] == "True", (

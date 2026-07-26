@@ -10,6 +10,9 @@ def test_async_op_lifecycle(run_async):
     assert facts["statusAfterStart"] == "running"
     assert facts["busyText"] == "Working..."
     assert facts["spinnerShown"] == "True"
+    assert facts["spinnerIsRing"] == "True", (
+        "spinner must be a block arc; plain arcs wobble when rotated"
+    )
     assert facts["workBeforeTick"] == "0"
     assert facts["clickWhileBusyIgnored"] == "True"
     assert facts["workAfterTick"] == "1"

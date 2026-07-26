@@ -73,6 +73,8 @@ Public Function TestAsyncOpLifecycle() As String
         host.Shapes("rdm_async1_btn").TextFrame2.TextRange.Text
     transcript = transcript & "|spinnerShown=" & _
         CStr(host.Shapes("rdm_async1_spn").Visible = msoTrue)
+    transcript = transcript & "|spinnerIsRing=" & _
+        CStr(host.Shapes("rdm_async1_spn").AutoShapeType = msoShapeBlockArc)
     transcript = transcript & "|workBeforeTick=" & gWorkRan
     ReDimUI.DispatchShape "rdm_async1_btn"
     transcript = transcript & "|clickWhileBusyIgnored=" & CStr(gWorkRan = 0)

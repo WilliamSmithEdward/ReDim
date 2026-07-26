@@ -58,7 +58,7 @@ Private Const REL_NONE As Long = 0
 Private Const REL_BELOW As Long = 1
 Private Const REL_RIGHT_OF As Long = 2
 Private Const PERSIST_PREFIX As String = "rdm_s_"
-Private Const REDIM_VERSION As String = "0.2.1"
+Private Const REDIM_VERSION As String = "0.2.2"
 
 Private mRole As Long
 
@@ -87,6 +87,7 @@ Private mAsyncOps As Collection
 Private mJobs As Collection
 Private mErrorHandlerProc As String
 Private mToastCounter As Long
+Private mToastTrayAnchor As String
 Private mPersistOn As Boolean
 Private mHotKeys As Collection
 
@@ -118,7 +119,9 @@ Private mBindTextKey As String
 Private mBindTextFormat As String
 Private mBindValueKey As String
 Private mBindVisibleKey As String
+Private mBindVisibleInvert As Boolean
 Private mBindEnabledKey As String
+Private mBindEnabledInvert As Boolean
 Private mWritesToKey As String
 Private mLastClickMs As LongLong
 Private mExpiresAtMs As LongLong
@@ -550,6 +553,30 @@ Public Function Toast( _
     If mRendered Then FlushDirty
     ReDimUI.RequestPump
     Set Toast = toastValue
+End Function
+
+' Pins the toast tray's top-left to a range anchor instead of the default
+' rail beside the app content.
+Public Function ToastTray(ByVal anchor As String) As ReDimUI
+    RequireRole ROLE_APP, "ToastTray"
+    mToastTrayAnchor = anchor
+    Set ToastTray = Me
+End Function
+
+Friend Function ToastTrayOrigin( _
+    ByRef originLeft As Double, _
+    ByRef originTop As Double _
+) As Boolean
+    Dim anchorRange As Range
+
+    If LenB(mToastTrayAnchor) = 0 Then Exit Function
+    On Error Resume Next
+    Set anchorRange = mSheet.Range(mToastTrayAnchor)
+    On Error GoTo 0
+    If anchorRange Is Nothing Then Exit Function
+    originLeft = anchorRange.Left
+    originTop = anchorRange.Top
+    ToastTrayOrigin = True
 End Function
 
 ' Lowest slot not held by a live toast, so slot one is reused the moment the
@@ -1585,16 +1612,26 @@ Public Function BindValue(ByVal stateKey As String) As ReDimUI
     Set BindValue = Me
 End Function
 
-Public Function BindVisible(ByVal stateKey As String) As ReDimUI
+' invert:=True shows the component while the key is False. The disable-
+' while-busy pattern binds Enabled to a running flag with invert.
+Public Function BindVisible( _
+    ByVal stateKey As String, _
+    Optional ByVal invert As Boolean = False _
+) As ReDimUI
     RequireRole ROLE_COMPONENT, "BindVisible"
     mBindVisibleKey = stateKey
+    mBindVisibleInvert = invert
     Touch
     Set BindVisible = Me
 End Function
 
-Public Function BindEnabled(ByVal stateKey As String) As ReDimUI
+Public Function BindEnabled( _
+    ByVal stateKey As String, _
+    Optional ByVal invert As Boolean = False _
+) As ReDimUI
     RequireRole ROLE_COMPONENT, "BindEnabled"
     mBindEnabledKey = stateKey
+    mBindEnabledInvert = invert
     Touch
     Set BindEnabled = Me
 End Function
@@ -1718,13 +1755,22 @@ Friend Sub ConfigureToast( _
     mExpiresAtMs = GetTickCount64() + ttlMs
     mValue = slot
     Set hostApp = OwnerApp
-    If Not hostApp.ContentBounds(boundLeft, boundTop, boundRight) Then
-        hostApp.ResolveViewport boundLeft, boundTop, viewWidth, viewHeight
-        boundRight = boundLeft + viewWidth
+    ' Tray origin, in preference order: an explicit ToastTray anchor, a rail
+    ' just outside the content's right edge, or the viewport as a fallback.
+    Dim originLeft As Double
+    Dim originTop As Double
+    If Not hostApp.ToastTrayOrigin(originLeft, originTop) Then
+        If hostApp.ContentBounds(boundLeft, boundTop, boundRight) Then
+            originLeft = boundRight + 12
+            originTop = boundTop
+        Else
+            hostApp.ResolveViewport boundLeft, boundTop, viewWidth, viewHeight
+            originLeft = boundLeft + viewWidth - mWidth - 12
+            originTop = boundTop + 8
+        End If
     End If
-    mLeft = boundRight - mWidth
-    If mLeft < boundLeft Then mLeft = boundLeft
-    mTop = boundTop + (slot - 1) * (mHeight + 6)
+    mLeft = originLeft
+    mTop = originTop + (slot - 1) * (mHeight + 6)
     mHasRect = True
     mVisible = True
 End Sub
@@ -1742,8 +1788,12 @@ Friend Property Get IsPendingToast() As Boolean
     IsPendingToast = (mKind = KIND_TOAST)
 End Property
 
+' Modal chrome (the reserved mdl_ ids) is viewport-centered and transient,
+' so it never counts toward content bounds: a toast fired while a modal is
+' up must not shift the tray.
 Friend Property Get CountsForBounds() As Boolean
-    CountsForBounds = (mKind <> KIND_TOAST And mKind <> KIND_OVERLAY And mVisible)
+    CountsForBounds = (mKind <> KIND_TOAST And mKind <> KIND_OVERLAY _
+        And mVisible And Left$(mComponentId, 4) <> "mdl_")
 End Property
 
 Friend Property Get BoundsLeft() As Double
@@ -1954,12 +2004,12 @@ Private Sub ResolveBindings(ByVal ownerApp As ReDimUI)
     End If
     If LenB(mBindVisibleKey) > 0 Then
         If ownerApp.HasState(mBindVisibleKey) Then
-            mVisible = CBool(ownerApp.State(mBindVisibleKey))
+            mVisible = CBool(ownerApp.State(mBindVisibleKey)) Xor mBindVisibleInvert
         End If
     End If
     If LenB(mBindEnabledKey) > 0 Then
         If ownerApp.HasState(mBindEnabledKey) Then
-            mEnabled = CBool(ownerApp.State(mBindEnabledKey))
+            mEnabled = CBool(ownerApp.State(mBindEnabledKey)) Xor mBindEnabledInvert
         End If
     End If
 End Sub
@@ -2040,6 +2090,16 @@ Private Function EnsureShape(ByVal hostSheet As Worksheet) As Shape
     On Error Resume Next
     Set target = hostSheet.Shapes(ShapeName)
     On Error GoTo 0
+    If Not target Is Nothing Then
+        ' An adopted shape from an earlier framework version can carry the
+        ' wrong geometry type; rebuild it rather than styling the wrong form.
+        If mKind = KIND_SPINNER Then
+            If target.AutoShapeType <> msoShapeBlockArc Then
+                target.Delete
+                Set target = Nothing
+            End If
+        End If
+    End If
     If target Is Nothing Then
         Set target = CreateShapeForKind(hostSheet)
         target.Name = ShapeName
@@ -2064,11 +2124,15 @@ Private Function CreateShapeForKind(ByVal hostSheet As Worksheet) As Shape
                 msoShapeRoundedRectangle, mLeft, mTop, mWidth, mHeight)
             target.Adjustments(1) = 0.08
         Case KIND_SPINNER
+            ' A block arc is a filled ring segment concentric with its
+            ' bounding box, so rotation stays visually circular. A plain
+            ' arc's path center is off the box center and wobbles.
             Set target = hostSheet.Shapes.AddShape( _
-                msoShapeArc, mLeft, mTop, mWidth, mHeight)
+                msoShapeBlockArc, mLeft, mTop, mWidth, mHeight)
             On Error Resume Next
             target.Adjustments(1) = 0
-            target.Adjustments(2) = 270
+            target.Adjustments(2) = 290
+            target.Adjustments(3) = 0.34
             On Error GoTo 0
         Case KIND_TOGGLE
             Set target = hostSheet.Shapes.AddShape( _
@@ -2147,10 +2211,9 @@ Private Sub ApplyStyle(ByVal target As Shape, ByVal themeValue As ReDimUI)
             End If
         Case KIND_SPINNER
             If Not mAppliedValid Or mAppliedFill <> resolvedFill Then
-                target.Fill.Visible = msoFalse
-                target.Line.Visible = msoTrue
-                target.Line.ForeColor.RGB = ResolveSpinnerColor(themeValue)
-                target.Line.Weight = 3.25
+                target.Fill.Visible = msoTrue
+                target.Fill.ForeColor.RGB = ResolveSpinnerColor(themeValue)
+                target.Line.Visible = msoFalse
                 mAppliedFill = resolvedFill
             End If
         Case KIND_CARD, KIND_TOAST

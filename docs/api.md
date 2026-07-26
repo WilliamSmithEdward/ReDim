@@ -36,7 +36,8 @@ Component factories, get-or-create by id: `Button`, `Label`, `Card`, `Spinner`, 
 | `Render` | Mark everything dirty and paint. Call once after building the UI. |
 | `SetTheme theme` | Restyle every component. |
 | `PrepareCanvas` | Paint the sheet background and hide gridlines. |
-| `Toast message, ttlMs` | Transient card, expires on the pump or on click. |
+| `Toast message, ttlMs` | Transient card on a rail beside the content, expiring on the pump or on click. Slots reuse lowest-first; modal chrome never shifts the rail. |
+| `ToastTray anchor` | Pins the tray's top-left to a range instead of the default rail. |
 | `Confirm title, message, okProc, cancelProc, okText, cancelText` | Shapes-based modal. |
 | `CloseModal` | Hide the modal set. |
 | `Async(opId)` / `CancelAsync opId` / `AsyncError(opId)` | Async ops (see [async.md](async.md)). |
@@ -58,7 +59,8 @@ All fluent, all return the component:
 - Values: `Value(number)` (progress, slider, dropdown index), `Checked(flag)`,
   `Items("A", "B", ...)`, `SliderRange(min, max, step)`.
 - Bindings: `BindText(key, template)` where `{0}` is the value, `BindValue(key)`,
-  `BindVisible(key)`, `BindEnabled(key)`, `WritesTo(key)`.
+  `BindVisible(key, invert)`, `BindEnabled(key, invert)`, `WritesTo(key)`. The invert flag
+  serves the disable-while-busy pattern: `BindEnabled "anyRunning", True`.
 - Behavior: `OnClick "Module.Proc"`, `OnClickAsync "Module.Proc"`, `OnChange "Module.Proc"`.
 - Reads: `CurrentValue`, `CurrentText`, `IsChecked`, `IsEnabled`, `IsBusy`, `InputValue`
   (TextInput; assigning it writes the cell without firing change events).
