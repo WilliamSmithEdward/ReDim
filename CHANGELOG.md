@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.1 - 2026-07-26
+
+- `SlideBar` drops the drag loop and becomes pure click-to-set. The loop violated the
+  framework's no-blocking rule, and it could never engage anyway: shape OnAction fires on
+  mouse up, so no button is held by the time a handler runs. One cursor read at dispatch,
+  snapped to SliderRange, OnChange per click. The GetAsyncKeyState and Sleep declares are
+  gone with it.
+
 ## 0.6.0 - 2026-07-26
 
 - `SlideBar`: a drawn slider with click-to-set and live drag, correcting 0.4.0's claim that

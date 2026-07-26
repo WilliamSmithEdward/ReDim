@@ -30,7 +30,7 @@ user keeps working in the workbook.
 ## What it does
 
 - **Components over shapes.** Button, Label, Card, ProgressBar, Spinner, Toggle, TickBox,
-  RadioGroup, Stepper, SlideBar (with real click-and-drag), SelectBox, cell-backed TextInput,
+  RadioGroup, Stepper, SlideBar (click-to-set), SelectBox, cell-backed TextInput,
   Toast, and a shapes-based modal overlay with Confirm - every control drawn from shapes and
   fully themed, with light and dark presets, no native form controls anywhere, and no
   dependencies beyond a stock Excel 365 install.

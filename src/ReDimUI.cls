@@ -28,12 +28,6 @@ End Type
 
 Private Declare PtrSafe Function GetCursorPos Lib "user32" ( _
     ByRef position As RdxScreenPoint) As Long
-Private Declare PtrSafe Function GetAsyncKeyState Lib "user32" ( _
-    ByVal virtualKey As Long) As Integer
-Private Declare PtrSafe Sub SleepMs Lib "kernel32" Alias "Sleep" ( _
-    ByVal milliseconds As Long)
-
-Private Const VK_LEFT_BUTTON As Long = 1
 
 Private Const SHAPE_PREFIX As String = "rdm_"
 Private Const PART_SEPARATOR As String = "__"
@@ -76,7 +70,7 @@ Private Const REL_NONE As Long = 0
 Private Const REL_BELOW As Long = 1
 Private Const REL_RIGHT_OF As Long = 2
 Private Const PERSIST_PREFIX As String = "rdm_s_"
-Private Const REDIM_VERSION As String = "0.6.0"
+Private Const REDIM_VERSION As String = "0.6.1"
 
 Private mRole As Long
 
@@ -743,10 +737,9 @@ Public Function Stepper(ByVal componentId As String) As ReDimUI
     Set Stepper = GetOrCreateComponent(componentId, KIND_STEPPER)
 End Function
 
-' Drawn slider with real click-and-drag: the cursor position is mapped back
-' into sheet points by inverting PointsToScreenPixels, and a key-state loop
-' tracks the drag while the button stays down. The pump pauses during a
-' drag (one thread); the slider itself renders live from the drag loop.
+' Drawn slider, click-to-set: the click position is mapped back into sheet
+' points by inverting PointsToScreenPixels, then snapped to SliderRange.
+' Loop-free by design; nothing in ReDim may block the pump.
 Public Function SlideBar(ByVal componentId As String) As ReDimUI
     Set SlideBar = GetOrCreateComponent(componentId, KIND_SLIDEBAR)
 End Function
@@ -2391,7 +2384,7 @@ Friend Sub RunClickBehavior()
             If LenB(mWritesToKey) > 0 Then hostApp.SetState mWritesToKey, mValue
             Touch
         Case KIND_SLIDEBAR
-            StartSlideDrag hostApp
+            HandleSlideClick hostApp
             Exit Sub
         Case KIND_TOAST
             mExpiresAtMs = 1
@@ -3415,28 +3408,15 @@ Friend Sub SlideToFraction( _
     End If
 End Sub
 
-' The drag loop: seed from the click position, then track the cursor while
-' the left button stays down. Everything runs on Excel's thread, so the
-' pump waits; the slider itself repaints from inside the loop.
-Friend Sub StartSlideDrag(ByVal hostApp As ReDimUI)
+' Click-to-set: one cursor read at dispatch time, snapped and applied.
+' Deliberately loop-free; nothing in ReDim may block the pump, and shape
+' OnAction fires on mouse up anyway, so there is no held button to track.
+Friend Sub HandleSlideClick(ByVal hostApp As ReDimUI)
     Dim fraction As Double
 
     fraction = CursorTrackFraction()
     If fraction < 0 Then Exit Sub
-    SlideToFraction hostApp, fraction, False
-    Do While GetAsyncKeyState(VK_LEFT_BUTTON) < 0
-        fraction = CursorTrackFraction()
-        If fraction >= 0 Then SlideToFraction hostApp, fraction, False
-        DoEvents
-        SleepMs 8
-    Loop
-    fraction = CursorTrackFraction()
-    If fraction >= 0 Then SlideToFraction hostApp, fraction, False
-    If LenB(mClickProc) > 0 Then
-        On Error Resume Next
-        Application.Run mClickProc
-        On Error GoTo 0
-    End If
+    SlideToFraction hostApp, fraction, True
 End Sub
 
 ' Inverts ActiveWindow.PointsToScreenPixelsX by two-point calibration, so

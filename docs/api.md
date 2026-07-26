@@ -104,13 +104,12 @@ dependencies:
 - `RadioGroup`: single-select option rows, a control native form controls never offered.
 - `Stepper`: numeric entry as minus and plus around a value face, honoring `SliderRange` -
   the precise keyboard-free form of numeric input.
-- `SlideBar`: a real drawn slider with click-to-set and live drag. `Application.Caller` never
-  reports coordinates, but `GetCursorPos` plus a two-point inversion of
-  `ActiveWindow.PointsToScreenPixelsX` maps the cursor into track fractions at any zoom, and a
-  left-button key-state loop tracks the drag. Values snap to `SliderRange`; `WritesTo` updates
-  live during the drag and `OnChange` fires once on release. Honest limits: the pump pauses
-  while dragging (one thread; the slider repaints from the drag loop itself), and frozen-pane
-  splits skew the calibration, so keep app surfaces unsplit.
+- `SlideBar`: a drawn slider, click-to-set. `Application.Caller` never reports coordinates,
+  but `GetCursorPos` plus a two-point inversion of `ActiveWindow.PointsToScreenPixelsX` maps
+  the click into a track fraction at any zoom, snapped to `SliderRange`, with `WritesTo` and
+  `OnChange` per click. Deliberately loop-free: nothing in ReDim may block the pump, and
+  shape OnAction fires on mouse up anyway, so there is no held button to track. Frozen-pane
+  splits skew the calibration, so keep app surfaces unsplit. Use `Stepper` for precision.
 - `SelectBox`: a themed face, caret, and option list in place of the native dropdown.
 - `Toggle`: the pill switch for booleans.
 
