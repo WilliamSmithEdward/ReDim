@@ -37,6 +37,7 @@ Public Sub BuildWidgetGallery()
         .OnClick "WidgetGallery.HandleModal"
     app.Button("busywork").AtRect(440, 80, 120, 30).Text("Run async work") _
         .OnClickAsync "WidgetGallery.SimulatedWork"
+    app.Label("oplog").AtRect(440, 114, 220, 16).BindText "oplog"
 
     app.Label("lblValues").AtRect(24, 128, 200, 16).Text("Value controls").Bold
     app.Toggle("notify").AtRect(24, 150, 44, 22).WritesTo "notifications"
@@ -78,6 +79,7 @@ Public Sub BuildWidgetGallery()
     app.SetState "volume", 35
     app.SetState "userName", vbNullString
     app.SetState "lastAction", "none yet"
+    app.SetState "oplog", "no run yet"
     RefreshInspector
     WireInspector app
     app.Render
@@ -146,9 +148,14 @@ End Sub
 Public Sub SimulatedWork()
     Dim app As ReDimUI
     Dim ignored As Variant
+    Dim startedAt As Double
 
     Set app = GalleryApp()
+    startedAt = Timer
     app.SetState "lastAction", "async work running"
+    app.SetState "oplog", "op started " & Format$(startedAt, "0.0") & "s"
     ignored = ROneCOne.Task.Delay(1200).Await
     app.SetState "lastAction", "async work finished"
+    app.SetState "oplog", "op ran " & Format$(Timer - startedAt, "0.00") & _
+        "s (expected 1.2)"
 End Sub
