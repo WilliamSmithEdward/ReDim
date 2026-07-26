@@ -8,6 +8,10 @@ Option Explicit
 ' disarms itself before returning.
 
 Private Declare PtrSafe Sub Sleep Lib "kernel32" (ByVal milliseconds As Long)
+Private Declare PtrSafe Function timeBeginPeriod Lib "winmm.dll" ( _
+    ByVal uPeriod As Long) As Long
+Private Declare PtrSafe Function timeEndPeriod Lib "winmm.dll" ( _
+    ByVal uPeriod As Long) As Long
 
 Private gWorkRan As Long
 Private gDoneRan As Long
@@ -247,6 +251,51 @@ Public Function TestJobCancel() As String
         CStr(app.Job("big").JobIsRunning)
     ReDimUI.AutoPump True
     TestJobCancel = transcript
+End Function
+
+' A default-budget job yields to the frame rate while something animates.
+' The armed pump raises the timer resolution in production; PumpOnce does
+' not arm a timer, so the scenario raises it the same way, or budget
+' arithmetic below ~16 ms would quantize into a single step either way.
+Public Function TestAdaptiveBudget() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim stepsIdle As Long
+    Dim stepsAnimating As Long
+    Dim transcript As String
+
+    timeBeginPeriod 1
+    Set host = NewCanvas()
+    ReDimUI.AutoPump False
+    Set app = ReDimUI.Mount(host, "async8")
+    app.Spinner("spn").AtRect 24, 24, 26, 26
+    app.Render
+
+    gJobCounter = 0
+    app.Job("crunch").Steps("TestReDimAsync.JobStepEndless") _
+        .JobOnCancel "TestReDimAsync.RecordCancel"
+    app.Job("crunch").StartJob
+    ReDimUI.PumpOnce
+    stepsIdle = gJobCounter
+    app.CancelJob "crunch"
+    ReDimUI.PumpOnce
+
+    app.Spinner("spn").Visible True
+    gJobCounter = 0
+    app.Job("crunch").StartJob
+    ReDimUI.PumpOnce
+    stepsAnimating = gJobCounter
+    app.CancelJob "crunch"
+    ReDimUI.PumpOnce
+    app.Spinner("spn").Visible False
+
+    transcript = "stepsIdle=" & stepsIdle
+    transcript = transcript & "|stepsAnimating=" & stepsAnimating
+    transcript = transcript & "|yieldsToAnimation=" & _
+        CStr(stepsAnimating < stepsIdle)
+    ReDimUI.AutoPump True
+    timeEndPeriod 1
+    TestAdaptiveBudget = transcript
 End Function
 
 ' The crown: a real armed SetTimer completes an op with no PumpOnce calls,

@@ -18,6 +18,18 @@ Private Declare PtrSafe Function KillTimer Lib "user32" ( _
     ByVal nIDEvent As LongPtr _
 ) As Long
 
+' SetTimer rides the global timer resolution, which defaults to roughly
+' 15.6 ms and quantizes frames into uneven buckets. Raising it to 1 ms
+' while the pump is armed makes frames land on schedule; it is restored on
+' stop so the power cost exists only while something animates.
+Private Declare PtrSafe Function timeBeginPeriod Lib "winmm.dll" ( _
+    ByVal uPeriod As Long _
+) As Long
+
+Private Declare PtrSafe Function timeEndPeriod Lib "winmm.dll" ( _
+    ByVal uPeriod As Long _
+) As Long
+
 ' Animation frame interval. Work (ops, budget jobs, toast expiry) runs on a
 ' 50 ms cadence inside ReDimUI.TickAll regardless of the frame rate.
 Private Const PUMP_DEFAULT_INTERVAL_MS As Long = 16
@@ -28,6 +40,7 @@ Private gTimerId As LongPtr
 Private gInTick As Boolean
 Private gConsecutiveErrors As Long
 Private gTickCount As LongLong
+Private gTimerResolutionRaised As Boolean
 
 ' Shape.OnAction target for every ReDim component. Application.Caller carries
 ' the clicked shape's name.
@@ -76,6 +89,9 @@ Public Sub RdxEnsurePump(Optional ByVal intervalMs As Long = PUMP_DEFAULT_INTERV
     gTimerId = SetTimer(0, 0, intervalMs, AddressOf RdxPumpCallback)
     If gTimerId <> 0 Then
         RdxStoreTimerId gTimerId
+        If Not gTimerResolutionRaised Then
+            gTimerResolutionRaised = (timeBeginPeriod(1) = 0)
+        End If
         ' Excel flips to the busy cursor whenever VBA executes, which at
         ' pump frequency reads as a strobe. Pinning the cursor while the
         ' timer is armed keeps it steady; StopPump restores the default.
@@ -92,6 +108,10 @@ Public Sub RdxStopPump()
         On Error Resume Next
         Application.Cursor = xlDefault
         On Error GoTo 0
+    End If
+    If gTimerResolutionRaised Then
+        timeEndPeriod 1
+        gTimerResolutionRaised = False
     End If
     RdxClearStoredTimerId
 End Sub

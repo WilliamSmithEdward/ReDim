@@ -69,6 +69,14 @@ def test_job_cancel(run_async):
     assert facts["stillRunning"] == "False"
 
 
+def test_adaptive_budget(run_async):
+    facts = parse_transcript(run_async("TestAdaptiveBudget"))
+    assert facts["yieldsToAnimation"] == "True", (
+        "a default-budget job must take fewer steps per pass while animating"
+    )
+    assert int(facts["stepsAnimating"]) >= 1
+
+
 def test_real_timer_end_to_end(run_async):
     facts = parse_transcript(run_async("TestRealTimerEndToEnd"))
     assert facts["armedAfterStart"] == "True"

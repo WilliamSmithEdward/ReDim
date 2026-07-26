@@ -76,6 +76,10 @@ the job through its fail handler and the app error sink instead of surfacing a d
   on stop. Excel otherwise flips to the busy cursor on every VBA execution, which at pump
   frequency reads as a strobe. The steady arrow over the grid doubles as the "work is running"
   signal.
+- While the timer is armed, the multimedia timer resolution is raised to 1 ms and restored on
+  stop, so frames land on schedule instead of quantizing into the default ~15.6 ms buckets.
+- While anything animates, budget jobs still using the default budget yield to the frame rate
+  (8 ms per work pass); an explicit `BudgetMs` is always honored as given.
 - The pump stops itself when no ops, jobs, toasts, or visible spinners remain, and re-arms on
   the next `Start`.
 - The armed timer id is stored in a workbook-scoped name. After VBA state loss, the next arm

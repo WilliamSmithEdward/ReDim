@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.6 - 2026-07-26
+
+- Steadier frames: the multimedia timer resolution rises to 1 ms while the pump is armed and
+  is restored on stop, so frames stop quantizing into ~15.6 ms buckets
+- Frame deltas and job budgets are measured with QueryPerformanceCounter, because
+  GetTickCount64 stays at the coarse system tick on modern Windows and cannot express
+  sub-16 ms budgets
+- Budget jobs on the default budget yield to the frame rate (8 ms per pass) while anything
+  animates; explicit BudgetMs values are always honored
+
 ## 0.2.5 - 2026-07-26
 
 - The pump runs animation frames at 16 ms (about 60 fps) while ops, budget jobs, and toast

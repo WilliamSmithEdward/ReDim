@@ -17,6 +17,10 @@ Option Explicit
 ' that Excel can only route to a standard module.
 
 Private Declare PtrSafe Function GetTickCount64 Lib "kernel32" () As LongLong
+Private Declare PtrSafe Function QueryPerformanceCounter Lib "kernel32" ( _
+    ByRef counter As LongLong) As Long
+Private Declare PtrSafe Function QueryPerformanceFrequency Lib "kernel32" ( _
+    ByRef frequency As LongLong) As Long
 
 Private Const SHAPE_PREFIX As String = "rdm_"
 Private Const PART_SEPARATOR As String = "__"
@@ -58,7 +62,7 @@ Private Const REL_NONE As Long = 0
 Private Const REL_BELOW As Long = 1
 Private Const REL_RIGHT_OF As Long = 2
 Private Const PERSIST_PREFIX As String = "rdm_s_"
-Private Const REDIM_VERSION As String = "0.2.5"
+Private Const REDIM_VERSION As String = "0.2.6"
 
 Private mRole As Long
 
@@ -69,7 +73,7 @@ Private mSenderComponent As ReDimUI
 Private mSenderPartName As String
 Private mAutoPumpOff As Boolean
 Private mInPumpTick As Boolean
-Private mLastTickMs As LongLong
+Private mLastTickPreciseMs As Double
 Private mWorkDebtMs As Long
 Private WithEvents mExcelApp As Excel.Application
 Attribute mExcelApp.VB_VarHelpID = -1
@@ -172,6 +176,7 @@ Private mOpLastError As String
 ' Job fields.
 Private mJobStepProc As String
 Private mJobBudgetMs As Long
+Private mJobBudgetExplicit As Boolean
 Private mJobPaceMs As Long
 Private mJobLastStepMs As LongLong
 Private mJobDoneProc As String
@@ -359,16 +364,22 @@ Friend Sub TickAll(Optional ByVal forceWork As Boolean = False)
         Exit Sub
     End If
     EnsureFactory
+    ' Frame deltas come from QueryPerformanceCounter: GetTickCount64 stays
+    ' at the ~15.6 ms system tick on modern Windows even when the timer
+    ' period is raised, which is too coarse for frame arithmetic. The
+    ' coarse clock remains nowMs for wall-clock gates (paces, TTLs).
+    Dim nowPreciseMs As Double
     nowMs = GetTickCount64()
+    nowPreciseMs = PreciseNowMs()
     If forceWork Then
         elapsedMs = 50
         runWork = True
         mWorkDebtMs = 0
     Else
-        If mLastTickMs = 0 Then
+        If mLastTickPreciseMs = 0 Then
             elapsedMs = 16
         Else
-            elapsedMs = CLng(nowMs - mLastTickMs)
+            elapsedMs = CLng(nowPreciseMs - mLastTickPreciseMs)
         End If
         If elapsedMs < 1 Then elapsedMs = 1
         If elapsedMs > 250 Then elapsedMs = 250
@@ -378,7 +389,7 @@ Friend Sub TickAll(Optional ByVal forceWork As Boolean = False)
             mWorkDebtMs = 0
         End If
     End If
-    mLastTickMs = nowMs
+    mLastTickPreciseMs = nowPreciseMs
     ' Renders inside a tick skip the ScreenUpdating toggle: flipping it at
     ' pump frequency redraws scroll bars and blips the cursor.
     mInPumpTick = True
@@ -1243,15 +1254,25 @@ Friend Sub TickApp( _
     Dim componentValue As ReDimUI
     Dim expiredIds As Collection
 
+    Dim animating As Boolean
+    For Each componentValue In mComponents
+        If componentValue.NeedsAnimation Then
+            animating = True
+            Exit For
+        End If
+    Next componentValue
     If runWork Then
         For Each opValue In mAsyncOps
             If opValue.OpIsRunning Then opValue.TickOp Me
         Next opValue
     End If
     ' Paced jobs self-gate on the wall clock, so sampling them every frame
-    ' tightens their timing; budget jobs stay on the work cadence.
+    ' tightens their timing; budget jobs stay on the work cadence and give
+    ' animations room while they run.
     For Each jobValue In mJobs
-        If jobValue.JobIsRunning Then jobValue.TickJob Me, nowMs, runWork
+        If jobValue.JobIsRunning Then
+            jobValue.TickJob Me, nowMs, runWork, animating
+        End If
     Next jobValue
     Set expiredIds = New Collection
     For Each componentValue In mComponents
@@ -3076,6 +3097,7 @@ Public Function BudgetMs(ByVal budget As Long) As ReDimUI
     RequireRole ROLE_JOB, "BudgetMs"
     If budget < 1 Then budget = 1
     mJobBudgetMs = budget
+    mJobBudgetExplicit = True
     mJobPaceMs = 0
     Set BudgetMs = Me
 End Function
@@ -3132,10 +3154,11 @@ End Sub
 Friend Sub TickJob( _
     ByVal ownerApp As ReDimUI, _
     ByVal nowMs As LongLong, _
-    ByVal runWork As Boolean _
+    ByVal runWork As Boolean, _
+    ByVal animating As Boolean _
 )
-    Dim startedAt As LongLong
     Dim stepDone As Variant
+    Dim effectiveBudget As Long
 
     If Not mJobRunning Then Exit Sub
     If mJobCancelRequested Then
@@ -3155,7 +3178,13 @@ Friend Sub TickJob( _
         On Error GoTo 0
         Exit Sub
     End If
-    startedAt = GetTickCount64()
+    ' While something animates, a default budget yields to the frame rate;
+    ' an explicit BudgetMs is always honored as given. Budget timing uses
+    ' the precise clock so sub-16 ms budgets mean what they say.
+    effectiveBudget = mJobBudgetMs
+    If animating And Not mJobBudgetExplicit Then effectiveBudget = 8
+    Dim startedPreciseMs As Double
+    startedPreciseMs = PreciseNowMs()
     Do
         stepDone = Application.Run(mJobStepProc)
         If CBool(stepDone) Then
@@ -3166,7 +3195,7 @@ Friend Sub TickJob( _
             FinishJob ownerApp, mJobCancelProc
             Exit Sub
         End If
-    Loop While GetTickCount64() - startedAt < CLngLng(mJobBudgetMs)
+    Loop While PreciseNowMs() - startedPreciseMs < effectiveBudget
     On Error GoTo 0
     Exit Sub
 
@@ -3364,6 +3393,18 @@ End Sub
 
 Private Function BoolToMso(ByVal value As Boolean) As Long
     If value Then BoolToMso = msoTrue Else BoolToMso = msoFalse
+End Function
+
+' Millisecond clock from QueryPerformanceCounter: sub-millisecond precision
+' regardless of the system timer resolution. Deltas only; its epoch is not
+' comparable to GetTickCount64.
+Private Function PreciseNowMs() As Double
+    Static frequency As LongLong
+    Dim counter As LongLong
+
+    If frequency = 0 Then QueryPerformanceFrequency frequency
+    QueryPerformanceCounter counter
+    PreciseNowMs = counter * 1000# / frequency
 End Function
 
 Private Sub AssignVariant(ByRef target As Variant, ByVal source As Variant)
