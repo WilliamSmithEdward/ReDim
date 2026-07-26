@@ -565,6 +565,61 @@ Public Function TestSlideBar() As String
     TestSlideBar = transcript
 End Function
 
+' The tracking state machine, driven through its deterministic seams: the
+' cursor-following step itself needs a physical mouse, but engage, drop,
+' change-on-drop semantics, dispatch toggling, and pump survival are all
+' assertable.
+Public Function TestSlideTracking() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim probe As ReDimUI
+    Dim thumbShape As Shape
+    Dim transcript As String
+
+    Set host = NewCanvas()
+    gChangeCount = 0
+    ReDimUI.AutoPump False
+    Set app = ReDimUI.Mount(host, "wid17")
+    app.SlideBar("trk").AtRect 24, 24, 200, 18
+    app.SlideBar("trk").SliderRange(0, 100, 5).Value(20).WritesTo("level") _
+        .OnChange "TestReDimWidgets.RecordChange"
+    app.Render
+    Set probe = app.Component("trk")
+    Set thumbShape = host.Shapes("rdm_wid17_trk__thumb")
+
+    probe.StartSlideTracking app
+    transcript = "tracking=" & CStr(probe.IsSlideTracking)
+    transcript = transcript & "|pumpHasWork=" & CStr(ReDimUI.HasPendingWork)
+    transcript = transcript & "|thumbAccent=" & _
+        CStr(thumbShape.Fill.ForeColor.RGB = app.Theme.PrimaryColor)
+
+    ' No button pressed in the harness, so frames keep tracking alive.
+    ReDimUI.PumpOnce
+    ReDimUI.PumpOnce
+    transcript = transcript & "|survivesFrames=" & CStr(probe.IsSlideTracking)
+
+    ' Value moved during tracking, then dropped: OnChange fires once.
+    probe.SlideToFraction app, 0.8, False
+    probe.StopSlideTracking app
+    transcript = transcript & "|dropFiredChange=" & CStr(gChangeCount = 1)
+    transcript = transcript & "|droppedValue=" & app.State("level")
+    transcript = transcript & "|thumbWhiteAgain=" & _
+        CStr(thumbShape.Fill.ForeColor.RGB = RGB(255, 255, 255))
+
+    ' Engage and drop with no movement: no change event.
+    probe.StartSlideTracking app
+    probe.StopSlideTracking app
+    transcript = transcript & "|noMoveNoChange=" & CStr(gChangeCount = 1)
+
+    ' A second click on the slider is the drop gesture through dispatch.
+    probe.StartSlideTracking app
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid17_trk"
+    transcript = transcript & "|clickDrops=" & CStr(Not probe.IsSlideTracking)
+    ReDimUI.AutoPump True
+    TestSlideTracking = transcript
+End Function
+
 ' Physical ground truth for the click mapping: a fixed screen pixel must
 ' map to absolute points that shift by exactly the scroll delta, and point
 ' spans must shrink with zoom. Catches both a wrong conversion factor and

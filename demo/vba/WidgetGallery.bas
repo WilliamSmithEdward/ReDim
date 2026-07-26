@@ -65,7 +65,7 @@ Public Sub BuildWidgetGallery()
         .SliderRange(0, 100, 5).Value(35).WritesTo("volume").BindValue "volume"
     app.ProgressBar("meter").AtRect(24, 404, 240, 12).BindValue "volume"
     app.Label("meterLbl").AtRect(276, 398, 220, 18) _
-        .BindText "volume", "Drag, step, or watch: {0}"
+        .BindText "volume", "Slide, step, or watch: {0}"
     app.Spinner("spin").AtRect 490, 394, 26, 26
 
     app.Card("inspector").AtRect(24, 436, 560, 110).Text("State inspector")

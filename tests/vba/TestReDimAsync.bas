@@ -313,13 +313,19 @@ Public Function TestRealTimerEndToEnd() As String
     app.Async("real").Start
 
     transcript = "armedAfterStart=" & CStr(RdxPumpArmed())
-    transcript = transcript & "|cursorPinned=" & _
+    ' Pinning is opt-in as of 0.7.0: unpinned by default so hover cursors
+    ' survive, pinned on request, released again on demand.
+    transcript = transcript & "|unpinnedByDefault=" & _
+        CStr(Application.Cursor = xlDefault)
+    ReDimUI.PinPumpCursor True
+    transcript = transcript & "|pinsOnRequest=" & _
         CStr(Application.Cursor = xlNorthwestArrow)
+    ReDimUI.PinPumpCursor False
+    transcript = transcript & "|unpinsOnRequest=" & _
+        CStr(Application.Cursor = xlDefault)
     ignored = ROneCOne.Task.Delay(700).Await
     transcript = transcript & "|statusNoManualPump=" & app.State("est")
     transcript = transcript & "|autoDisarmed=" & CStr(Not RdxPumpArmed())
-    transcript = transcript & "|cursorRestored=" & _
-        CStr(Application.Cursor = xlDefault)
     RdxStopPump
     TestRealTimerEndToEnd = transcript
 End Function

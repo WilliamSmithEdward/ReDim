@@ -13,6 +13,7 @@ only the members of its role and raises a clear error otherwise.
 | `ReDimUI.HasApp(appId)` | Existence probe. |
 | `ReDimUI.Sender`, `SenderApp`, `SenderId` | Click context, valid inside handlers. |
 | `ReDimUI.PumpOnce` | One deterministic pump tick (tests, debugging). |
+| `ReDimUI.PinPumpCursor enabled` | Opt-in steady arrow cursor while the pump is armed. Off by default so interactive shapes keep their hover hand; turn on if busy-cursor flicker is visible on your hardware. |
 | `ReDimUI.AutoPump enabled` | Turn the wall-clock timer off for deterministic runs. |
 | `ReDimUI.Shutdown` | Kill the pump and forget every app. Shapes stay. |
 | `ReDimUI.ThemeLight`, `ThemeDark` | Theme presets; customize with `WithPrimary`, `WithFont`. |
@@ -104,12 +105,15 @@ dependencies:
 - `RadioGroup`: single-select option rows, a control native form controls never offered.
 - `Stepper`: numeric entry as minus and plus around a value face, honoring `SliderRange` -
   the precise keyboard-free form of numeric input.
-- `SlideBar`: a drawn slider, click-to-set. `Application.Caller` never reports coordinates,
-  but `GetCursorPos` plus a two-point inversion of `ActiveWindow.PointsToScreenPixelsX` maps
-  the click into a track fraction at any zoom, snapped to `SliderRange`, with `WritesTo` and
-  `OnChange` per click. Deliberately loop-free: nothing in ReDim may block the pump, and
-  shape OnAction fires on mouse up anyway, so there is no held button to track. Frozen-pane
-  splits skew the calibration, so keep app surfaces unsplit. Use `Stepper` for precision.
+- `SlideBar`: a drawn slider with click-to-set plus non-blocking sliding. The first click
+  sets the value and grabs the thumb (shown in the accent color); pump frames then follow the
+  cursor with snapped live state writes, and either a second click on the slider or a mouse
+  press anywhere else drops it. `OnChange` fires on the engaging click and once on a drop
+  that moved the value. Loop-free by construction: tracking is one cursor read per 16 ms
+  frame, and every other pump duty keeps running while the user slides. Coordinates come
+  from `GetCursorPos` plus a DPI-and-zoom-aware inversion of `PointsToScreenPixelsX`;
+  frozen-pane splits skew that calibration, so keep app surfaces unsplit. Use `Stepper` for
+  precision.
 - `SelectBox`: a themed face, caret, and option list in place of the native dropdown.
 - `Toggle`: the pill switch for booleans.
 

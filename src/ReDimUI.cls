@@ -34,8 +34,11 @@ Private Declare PtrSafe Function ReleaseDC Lib "user32" ( _
     ByVal windowHandle As LongPtr, ByVal deviceContext As LongPtr) As Long
 Private Declare PtrSafe Function GetDeviceCaps Lib "gdi32" ( _
     ByVal deviceContext As LongPtr, ByVal capabilityIndex As Long) As Long
+Private Declare PtrSafe Function GetAsyncKeyState Lib "user32" ( _
+    ByVal virtualKey As Long) As Integer
 
 Private Const LOGPIXELSX As Long = 88
+Private Const VK_LEFT_BUTTON As Long = 1
 
 Private Const SHAPE_PREFIX As String = "rdm_"
 Private Const PART_SEPARATOR As String = "__"
@@ -79,7 +82,7 @@ Private Const REL_NONE As Long = 0
 Private Const REL_BELOW As Long = 1
 Private Const REL_RIGHT_OF As Long = 2
 Private Const PERSIST_PREFIX As String = "rdm_s_"
-Private Const REDIM_VERSION As String = "0.6.2"
+Private Const REDIM_VERSION As String = "0.7.0"
 
 Private mRole As Long
 
@@ -171,6 +174,10 @@ Private mSliderStep As Long
 Private mCloseModalOnClick As Boolean
 Private mSelectOpen As Boolean
 Private mAppliedOptionCount As Long
+Private mSlideTracking As Boolean
+Private mSlidePrevButtonDown As Boolean
+Private mSlideValueAtEngage As Double
+Private mSlideSuppressUntilMs As LongLong
 Private mRelMode As Long
 Private mRelTargetId As String
 Private mRelGap As Double
@@ -441,6 +448,13 @@ End Property
 
 Public Sub PumpOnce()
     ReDimUI.TickAll True
+End Sub
+
+' Opt-in: pin the cursor to a steady arrow while the pump is armed. Off by
+' default so interactive shapes keep their hover hand; turn on if busy
+' cursor flicker is visible on your hardware.
+Public Sub PinPumpCursor(ByVal enabled As Boolean)
+    RdxSetCursorPin enabled
 End Sub
 
 ' Deterministic tests turn the wall-clock timer off and drive PumpOnce
@@ -1622,6 +1636,7 @@ Friend Sub TickApp( _
     Set expiredIds = New Collection
     For Each componentValue In mComponents
         componentValue.TickAnimation mSheet, elapsedMs
+        componentValue.TickSlideTracking Me
         If runWork Then
             If componentValue.IsExpiredToast(nowMs) Then
                 expiredIds.Add componentValue.ComponentId
@@ -1690,6 +1705,10 @@ Friend Function HasAppWork() As Boolean
             Exit Function
         End If
         If componentValue.IsPendingToast Then
+            HasAppWork = True
+            Exit Function
+        End If
+        If componentValue.IsSlideTracking Then
             HasAppWork = True
             Exit Function
         End If
@@ -2393,7 +2412,15 @@ Friend Sub RunClickBehavior()
             If LenB(mWritesToKey) > 0 Then hostApp.SetState mWritesToKey, mValue
             Touch
         Case KIND_SLIDEBAR
-            HandleSlideClick hostApp
+            If mSlideTracking Then
+                StopSlideTracking hostApp
+            ElseIf GetTickCount64() < mSlideSuppressUntilMs Then
+                ' The click that just dropped tracking via the button edge;
+                ' neither jump the value nor re-engage.
+            Else
+                HandleSlideClick hostApp
+                StartSlideTracking hostApp
+            End If
             Exit Sub
         Case KIND_TOAST
             mExpiresAtMs = 1
@@ -3366,7 +3393,12 @@ Private Sub ApplySlideBar( _
     If thumb.Left < mLeft - thumbSize / 2 Then thumb.Left = mLeft - thumbSize / 2
     thumb.Top = mTop
     thumb.Fill.Visible = msoTrue
-    thumb.Fill.ForeColor.RGB = RGB(255, 255, 255)
+    ' The engaged thumb carries the accent so tracking mode is visible.
+    If mSlideTracking Then
+        thumb.Fill.ForeColor.RGB = ResolveFill(themeValue)
+    Else
+        thumb.Fill.ForeColor.RGB = RGB(255, 255, 255)
+    End If
     thumb.Line.Visible = msoTrue
     thumb.Line.ForeColor.RGB = themeValue.BorderColor
     thumb.Line.Weight = 1.25
@@ -3426,6 +3458,59 @@ Friend Sub HandleSlideClick(ByVal hostApp As ReDimUI)
     fraction = CursorTrackFraction()
     If fraction < 0 Then Exit Sub
     SlideToFraction hostApp, fraction, True
+End Sub
+
+' Pump-tracked sliding: the engaging click grabs the thumb, each pump
+' frame follows the cursor with snapped live state writes, and either a
+' second click on the slider or a mouse press anywhere else drops it.
+' Never blocks: tracking is one cursor read per frame, and every other
+' pump duty keeps running while the user slides.
+Friend Sub StartSlideTracking(ByVal hostApp As ReDimUI)
+    mSlideTracking = True
+    mSlidePrevButtonDown = False
+    mSlideValueAtEngage = mValue
+    Touch
+    ReDimUI.RequestPump
+End Sub
+
+Friend Sub StopSlideTracking(ByVal hostApp As ReDimUI)
+    If Not mSlideTracking Then Exit Sub
+    mSlideTracking = False
+    Touch
+    If mValue <> mSlideValueAtEngage Then
+        If LenB(mClickProc) > 0 Then
+            On Error Resume Next
+            Application.Run mClickProc
+            On Error GoTo 0
+        End If
+    End If
+End Sub
+
+Friend Property Get IsSlideTracking() As Boolean
+    IsSlideTracking = mSlideTracking
+End Property
+
+' One tracking step, called every pump frame. A fresh button press while
+' tracking is the drop signal; the suppress window keeps the same click
+' from re-engaging if it lands on the slider and dispatches.
+Friend Sub TickSlideTracking(ByVal hostApp As ReDimUI)
+    Dim buttonDown As Boolean
+    Dim fraction As Double
+
+    If Not mSlideTracking Then Exit Sub
+    If Not mVisible Or Not mEnabled Then
+        StopSlideTracking hostApp
+        Exit Sub
+    End If
+    buttonDown = (GetAsyncKeyState(VK_LEFT_BUTTON) < 0)
+    If buttonDown And Not mSlidePrevButtonDown Then
+        mSlideSuppressUntilMs = GetTickCount64() + 400
+        StopSlideTracking hostApp
+        Exit Sub
+    End If
+    mSlidePrevButtonDown = buttonDown
+    fraction = CursorTrackFraction()
+    If fraction >= 0 Then SlideToFraction hostApp, fraction, False
 End Sub
 
 Private Function CursorTrackFraction() As Double

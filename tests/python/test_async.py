@@ -80,13 +80,14 @@ def test_adaptive_budget(run_async):
 def test_real_timer_end_to_end(run_async):
     facts = parse_transcript(run_async("TestRealTimerEndToEnd"))
     assert facts["armedAfterStart"] == "True"
-    assert facts["cursorPinned"] == "True", (
-        "an armed pump must pin the cursor so busy-cursor strobing cannot happen"
+    assert facts["unpinnedByDefault"] == "True", (
+        "hover cursors must survive an armed pump by default"
     )
+    assert facts["pinsOnRequest"] == "True"
+    assert facts["unpinsOnRequest"] == "True"
     assert facts["statusNoManualPump"] == "done", (
         "the armed SetTimer alone must complete the op"
     )
     assert facts["autoDisarmed"] == "True", (
         "the pump must kill its own timer once work drains"
     )
-    assert facts["cursorRestored"] == "True"

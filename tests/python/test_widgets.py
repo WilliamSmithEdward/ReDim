@@ -172,6 +172,23 @@ def test_slide_bar(run_widgets):
     assert facts["maxValue"] == "100"
 
 
+def test_slide_tracking(run_widgets):
+    facts = parse_transcript(run_widgets("TestSlideTracking"))
+    assert facts["tracking"] == "True"
+    assert facts["pumpHasWork"] == "True", "tracking must keep the pump alive"
+    assert facts["thumbAccent"] == "True", "the engaged thumb must show the accent"
+    assert facts["survivesFrames"] == "True", (
+        "frames without a button press must not drop tracking"
+    )
+    assert facts["dropFiredChange"] == "True"
+    assert facts["droppedValue"] == "80"
+    assert facts["thumbWhiteAgain"] == "True"
+    assert facts["noMoveNoChange"] == "True", (
+        "a drop without movement must not fire OnChange"
+    )
+    assert facts["clickDrops"] == "True"
+
+
 def test_slide_mapping(run_widgets):
     facts = parse_transcript(run_widgets("TestSlideMapping"))
     assert facts["scrollShiftMatches"] == "True", (

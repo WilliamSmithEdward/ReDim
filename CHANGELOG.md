@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.7.0 - 2026-07-26
+
+- Non-blocking sliding: the first click on a SlideBar sets the value and grabs the thumb,
+  pump frames follow the cursor with snapped live state writes, and either a second click on
+  the slider or a mouse press anywhere else drops it. OnChange fires on the engaging click
+  and once on a drop that moved the value. The engaged thumb shows the accent color. One
+  cursor read per frame; every other pump duty keeps running while the user slides.
+- Cursor pinning becomes opt-in (`PinPumpCursor`). The always-on pin was hiding the hover
+  hand on interactive shapes while async work ran; lean frames made the busy-cursor strobe
+  it suppressed negligible, so hover affordance now wins by default.
+
 ## 0.6.2 - 2026-07-26
 
 - Fix SlideBar click accuracy. PointsToScreenPixelsX is misnamed on current Excel builds:

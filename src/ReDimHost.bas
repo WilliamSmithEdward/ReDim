@@ -41,6 +41,8 @@ Private gInTick As Boolean
 Private gConsecutiveErrors As Long
 Private gTickCount As LongLong
 Private gTimerResolutionRaised As Boolean
+Private gPinCursor As Boolean
+Private gCursorPinned As Boolean
 
 ' Shape.OnAction target for every ReDim component. Application.Caller carries
 ' the clicked shape's name.
@@ -92,12 +94,7 @@ Public Sub RdxEnsurePump(Optional ByVal intervalMs As Long = PUMP_DEFAULT_INTERV
         If Not gTimerResolutionRaised Then
             gTimerResolutionRaised = (timeBeginPeriod(1) = 0)
         End If
-        ' Excel flips to the busy cursor whenever VBA executes, which at
-        ' pump frequency reads as a strobe. Pinning the cursor while the
-        ' timer is armed keeps it steady; StopPump restores the default.
-        On Error Resume Next
-        Application.Cursor = xlNorthwestArrow
-        On Error GoTo 0
+        RdxApplyCursorPin
     End If
 End Sub
 
@@ -105,15 +102,44 @@ Public Sub RdxStopPump()
     If gTimerId <> 0 Then
         KillTimer 0, gTimerId
         gTimerId = 0
-        On Error Resume Next
-        Application.Cursor = xlDefault
-        On Error GoTo 0
     End If
+    RdxReleaseCursorPin
     If gTimerResolutionRaised Then
         timeEndPeriod 1
         gTimerResolutionRaised = False
     End If
     RdxClearStoredTimerId
+End Sub
+
+' Cursor pinning is opt-in. Pinning suppresses Excel's busy-cursor flip
+' during each tick, but it also overrides context cursors, hiding the
+' hover hand on interactive shapes while work runs. Lean frames made the
+' strobe negligible, so hover affordance wins by default.
+Public Sub RdxSetCursorPin(ByVal enabled As Boolean)
+    gPinCursor = enabled
+    If gTimerId <> 0 Then
+        If enabled Then
+            RdxApplyCursorPin
+        Else
+            RdxReleaseCursorPin
+        End If
+    End If
+End Sub
+
+Private Sub RdxApplyCursorPin()
+    If Not gPinCursor Then Exit Sub
+    On Error Resume Next
+    Application.Cursor = xlNorthwestArrow
+    gCursorPinned = True
+    On Error GoTo 0
+End Sub
+
+Private Sub RdxReleaseCursorPin()
+    If Not gCursorPinned Then Exit Sub
+    On Error Resume Next
+    Application.Cursor = xlDefault
+    On Error GoTo 0
+    gCursorPinned = False
 End Sub
 
 Public Function RdxPumpArmed() As Boolean

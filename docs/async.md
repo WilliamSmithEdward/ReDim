@@ -72,10 +72,10 @@ the job through its fail handler and the app error sink instead of surfacing a d
 - Renders that happen inside a tick never toggle `Application.ScreenUpdating`: flipping it at
   pump frequency redraws scroll bars and blips the cursor. Batched flushes outside ticks still
   use it.
-- While the timer is armed, `Application.Cursor` is pinned to the arrow and restored to default
-  on stop. Excel otherwise flips to the busy cursor on every VBA execution, which at pump
-  frequency reads as a strobe. The steady arrow over the grid doubles as the "work is running"
-  signal.
+- Cursor pinning is opt-in (`ReDimUI.PinPumpCursor True`). Pinning suppresses Excel's
+  busy-cursor flip during each tick, but it also overrides context cursors, hiding the hover
+  hand on interactive shapes while work runs. Since ticks became lean the strobe is
+  negligible, so hover affordance wins by default.
 - While the timer is armed, the multimedia timer resolution is raised to 1 ms and restored on
   stop, so frames land on schedule instead of quantizing into the default ~15.6 ms buckets.
 - While anything animates, budget jobs still using the default budget yield to the frame rate
