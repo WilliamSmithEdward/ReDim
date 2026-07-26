@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.0 - 2026-07-26
+
+- Window system: `AsWindow` registers an app's sheet as a form-like window; `Navigate` shows
+  one window at a time (target first, others very-hidden), `NavigateBack` walks the stack,
+  `OnShow` and `OnHide` fire as lifecycle hooks, and `NavigatesTo` turns any component into a
+  nav link. Unregistered sheets are never touched, and background windows keep pumping.
+- New Navigator demo: three windows with navigation, a back stack, lifecycle counters, and
+  persisted settings.
+- All demos now ship with `ProtectSurface` applied, using the reopen-safe pattern of
+  unprotecting at build start and protecting after Render.
+
 ## 0.2.7 - 2026-07-26
 
 - `ProtectSurface`: opt-in UserInterfaceOnly protection for the app sheet, so users cannot

@@ -105,6 +105,24 @@ def test_orphan_pruning(run_core):
     assert facts["newExists"] == "True"
 
 
+def test_navigation(run_core):
+    facts = parse_transcript(run_core("TestNavigation"))
+    assert facts["activeA"] == "True"
+    assert facts["aVisible"] == "True"
+    assert facts["bHidden"] == "True", "inactive windows must be very-hidden"
+    assert facts["cHidden"] == "True"
+    assert facts["activeB"] == "True", "NavigatesTo must switch windows"
+    assert facts["aNowHidden"] == "True"
+    assert facts["log"] == "+A-A+B", "lifecycle hooks must fire in order"
+    assert facts["activeC"] == "True"
+    assert facts["backToB"] == "True"
+    assert facts["activeAfterBack"] == "navb"
+    assert facts["backToA"] == "True"
+    assert facts["backEmpty"] == "True", "an empty back stack must report False"
+    assert facts["plainRefused"] == "True"
+    assert facts["goneRefused"] == "True"
+
+
 def test_protect_surface(run_core):
     facts = parse_transcript(run_core("TestProtectSurface"))
     assert facts["protected"] == "True"
@@ -125,4 +143,4 @@ def test_hotkey_lifecycle_and_version(run_core):
     facts = parse_transcript(run_core("TestHotKeyLifecycle"))
     assert facts["procCallable"] == "True"
     assert facts["unmountClean"] == "True"
-    assert facts["version"] == "0.2.7"
+    assert facts["version"] == "0.3.0"

@@ -62,7 +62,7 @@ Private Const REL_NONE As Long = 0
 Private Const REL_BELOW As Long = 1
 Private Const REL_RIGHT_OF As Long = 2
 Private Const PERSIST_PREFIX As String = "rdm_s_"
-Private Const REDIM_VERSION As String = "0.2.7"
+Private Const REDIM_VERSION As String = "0.3.0"
 
 Private mRole As Long
 
@@ -75,6 +75,9 @@ Private mAutoPumpOff As Boolean
 Private mInPumpTick As Boolean
 Private mLastTickPreciseMs As Double
 Private mWorkDebtMs As Long
+Private mWindows As Collection
+Private mNavStack As Collection
+Private mActiveWindowId As String
 Private WithEvents mExcelApp As Excel.Application
 Attribute mExcelApp.VB_VarHelpID = -1
 
@@ -97,6 +100,10 @@ Private mToastTrayAnchor As String
 Private mPersistOn As Boolean
 Private mHotKeys As Collection
 Private mSurfaceProtected As Boolean
+Private mIsWindow As Boolean
+Private mOnShowProc As String
+Private mOnHideProc As String
+Private mCanvasPrepared As Boolean
 
 ' Component fields.
 Private mComponentId As String
@@ -122,6 +129,7 @@ Private mValue As Double
 Private mChecked As Boolean
 Private mClickProc As String
 Private mAsyncClickProc As String
+Private mNavTargetId As String
 Private mBindTextKey As String
 Private mBindTextFormat As String
 Private mBindValueKey As String
@@ -472,6 +480,122 @@ Public Property Get Version() As String
     Version = REDIM_VERSION
 End Property
 
+' ---------------------------------------------------------------
+' Windows: sheets as forms, with navigation between them
+' ---------------------------------------------------------------
+
+' Shows the target window's sheet, then very-hides every other registered
+' window sheet so app surfaces cannot be unhidden from the tab bar. Target
+' first: Excel requires one visible sheet at all times. Ordinary sheets
+' that are not registered windows are never touched. The previously active
+' window goes on the back stack for NavigateBack.
+Public Sub Navigate(ByVal appId As String)
+    If Not IsFactory(Me) Then
+        ReDimUI.Navigate appId
+        Exit Sub
+    End If
+    NavigateCore appId, True
+End Sub
+
+Public Function NavigateBack() As Boolean
+    Dim previousId As String
+
+    If Not IsFactory(Me) Then
+        NavigateBack = ReDimUI.NavigateBack
+        Exit Function
+    End If
+    EnsureFactory
+    If mNavStack Is Nothing Then Exit Function
+    If mNavStack.Count = 0 Then Exit Function
+    previousId = CStr(mNavStack.Item(mNavStack.Count))
+    mNavStack.Remove mNavStack.Count
+    NavigateCore previousId, False
+    NavigateBack = True
+End Function
+
+Public Property Get ActiveWindowId() As String
+    If Not IsFactory(Me) Then
+        ActiveWindowId = ReDimUI.ActiveWindowId
+        Exit Property
+    End If
+    ActiveWindowId = mActiveWindowId
+End Property
+
+Private Sub NavigateCore(ByVal appId As String, ByVal pushCurrent As Boolean)
+    Dim target As ReDimUI
+    Dim previous As ReDimUI
+    Dim windowId As Variant
+    Dim windowApp As ReDimUI
+    Dim previousId As String
+
+    EnsureFactory
+    Set target = App(appId)
+    If Not target.IsWindow Then
+        RaiseError ERROR_INVALID_OPERATION, "Navigate", _
+            "App '" & appId & "' is not a window. Call AsWindow on it first."
+    End If
+    If mActiveWindowId = appId Then Exit Sub
+    previousId = mActiveWindowId
+    target.Sheet.Visible = xlSheetVisible
+    target.Sheet.Activate
+    target.ReassertCanvas
+    For Each windowId In mWindows
+        If CStr(windowId) <> appId Then
+            If TryGetObject(mApps, CStr(windowId), windowApp) Then
+                On Error Resume Next
+                windowApp.Sheet.Visible = xlSheetVeryHidden
+                On Error GoTo 0
+            End If
+        End If
+    Next windowId
+    If LenB(previousId) > 0 Then
+        If pushCurrent Then
+            If mNavStack Is Nothing Then Set mNavStack = New Collection
+            mNavStack.Add previousId
+        End If
+        If TryGetObject(mApps, previousId, previous) Then previous.InvokeHide
+    End If
+    mActiveWindowId = appId
+    target.InvokeShow
+End Sub
+
+Friend Sub RegisterWindow(ByVal appId As String)
+    Dim windowId As Variant
+
+    If Not IsFactory(Me) Then
+        ReDimUI.RegisterWindow appId
+        Exit Sub
+    End If
+    EnsureFactory
+    If mWindows Is Nothing Then Set mWindows = New Collection
+    For Each windowId In mWindows
+        If CStr(windowId) = appId Then Exit Sub
+    Next windowId
+    mWindows.Add appId
+End Sub
+
+Friend Sub ForgetWindow(ByVal appId As String)
+    Dim position As Long
+
+    If Not IsFactory(Me) Then
+        ReDimUI.ForgetWindow appId
+        Exit Sub
+    End If
+    EnsureFactory
+    If mWindows Is Nothing Then Exit Sub
+    For position = mWindows.Count To 1 Step -1
+        If CStr(mWindows.Item(position)) = appId Then mWindows.Remove position
+    Next position
+    If Not mNavStack Is Nothing Then
+        For position = mNavStack.Count To 1 Step -1
+            If CStr(mNavStack.Item(position)) = appId Then
+                mNavStack.Remove position
+            End If
+        Next position
+    End If
+    If mActiveWindowId = appId Then mActiveWindowId = vbNullString
+End Sub
+
 Public Function ThemeLight() As ReDimUI
     Dim themeValue As ReDimUI
 
@@ -748,6 +872,7 @@ Public Function PrepareCanvas( _
     RequireRole ROLE_APP, "PrepareCanvas"
     If paintBackground Then mSheet.Cells.Interior.Color = mTheme.CanvasColor
     If hideGridlines Then
+        mCanvasPrepared = True
         On Error Resume Next
         If mSheet Is ActiveWindow.ActiveSheet Then
             ActiveWindow.DisplayGridlines = False
@@ -1173,6 +1298,59 @@ Public Property Get Theme() As ReDimUI
     Set Theme = mTheme
 End Property
 
+' Registers this app as a window: its sheet participates in Navigate and
+' NavigateBack, shown alone among registered windows like a form.
+Public Function AsWindow() As ReDimUI
+    RequireRole ROLE_APP, "AsWindow"
+    mIsWindow = True
+    ReDimUI.RegisterWindow mAppId
+    Set AsWindow = Me
+End Function
+
+Public Property Get IsWindow() As Boolean
+    RequireRole ROLE_APP, "IsWindow"
+    IsWindow = mIsWindow
+End Property
+
+' Zero-argument workbook procedures run after this window is shown or
+' hidden by navigation, in the spirit of form Load and Deactivate.
+Public Function OnShow(ByVal procName As String) As ReDimUI
+    RequireRole ROLE_APP, "OnShow"
+    mOnShowProc = procName
+    Set OnShow = Me
+End Function
+
+Public Function OnHide(ByVal procName As String) As ReDimUI
+    RequireRole ROLE_APP, "OnHide"
+    mOnHideProc = procName
+    Set OnHide = Me
+End Function
+
+Friend Sub InvokeShow()
+    If LenB(mOnShowProc) = 0 Then Exit Sub
+    On Error Resume Next
+    Application.Run mOnShowProc
+    On Error GoTo 0
+End Sub
+
+Friend Sub InvokeHide()
+    If LenB(mOnHideProc) = 0 Then Exit Sub
+    On Error Resume Next
+    Application.Run mOnHideProc
+    On Error GoTo 0
+End Sub
+
+' Gridlines are window state, not sheet state, so a freshly activated
+' window re-hides them if its canvas was prepared.
+Friend Sub ReassertCanvas()
+    If Not mCanvasPrepared Then Exit Sub
+    On Error Resume Next
+    If mSheet Is ActiveWindow.ActiveSheet Then
+        ActiveWindow.DisplayGridlines = False
+    End If
+    On Error GoTo 0
+End Sub
+
 ' Treats the app sheet as an application surface: users cannot enter cell
 ' edit mode or drag shapes there, which also keeps the pump from stalling
 ' in edit mode, while UserInterfaceOnly leaves every framework write free.
@@ -1257,6 +1435,7 @@ Friend Sub ForgetApp(ByVal appId As String)
     End If
     EnsureFactory
     If TryGetObject(mApps, appId, existing) Then mApps.Remove appId
+    ForgetWindow appId
 End Sub
 
 Friend Sub ReportAppError(ByVal message As String)
@@ -1718,6 +1897,15 @@ Public Function OnClickAsync(ByVal procName As String) As ReDimUI
     Set OnClickAsync = Me
 End Function
 
+' One-declaration navigation link: clicking this component navigates to
+' the named window after any OnClick handler runs.
+Public Function NavigatesTo(ByVal appId As String) As ReDimUI
+    RequireRole ROLE_COMPONENT, "NavigatesTo"
+    mNavTargetId = appId
+    Touch
+    Set NavigatesTo = Me
+End Function
+
 Public Function BindText( _
     ByVal stateKey As String, _
     Optional ByVal formatTemplate As String _
@@ -2082,6 +2270,7 @@ Friend Sub RunClickBehavior()
     End If
     If LenB(mClickProc) > 0 Then Application.Run mClickProc
     If mCloseModalOnClick Then hostApp.CloseModal
+    If LenB(mNavTargetId) > 0 Then ReDimUI.Navigate mNavTargetId
 End Sub
 
 Private Function ItemAt(ByVal position As Long) As String

@@ -36,6 +36,7 @@ Public Sub BuildSnake()
 
     Set host = ThisWorkbook.Worksheets(1)
     Set app = ReDimUI.Mount(host, APP_ID)
+    app.ProtectSurface False
     app.PrepareCanvas
 
     Set boardCells = BoardArea(host)
@@ -58,6 +59,7 @@ Public Sub BuildSnake()
     app.Render
     PaintBoard
     HookKeys
+    app.ProtectSurface
 End Sub
 
 Private Function BoardArea(ByVal host As Worksheet) As Range

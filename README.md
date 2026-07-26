@@ -43,6 +43,10 @@ user keeps working in the workbook.
 - **Composable layout.** Anchor to ranges with `At`, to points with `AtRect`, or to other
   components with `Below` and `RightOf`. Render prunes shapes orphaned by renamed components,
   so iterating on app code never litters the sheet.
+- **Windows.** Sheets as forms: `AsWindow` registers a window, `Navigate` shows one at a time
+  (others go very-hidden), `NavigateBack` walks the stack, `OnShow` and `OnHide` fire like
+  form lifecycle events, and a button becomes a nav link with `NavigatesTo`. Background
+  windows keep pumping. `ProtectSurface` turns an app sheet into a true application surface.
 - **Genuinely async.** A SetTimer pump ticks whenever Excel idles and steps ROneCOne tasks
   without anyone blocking on `Await`. Fire-and-forget ops disable their controls, spin a spinner,
   and fire done, fail, or cancel handlers. HTTP, database, shell, and delay tasks overlap for
@@ -72,6 +76,7 @@ Built workbooks live in `demo/` after running `python tools/build_workbooks.py`:
 | `ReDim_Mission_Control.xlsm` | Three cancellable feeds with live progress, toasts, KPI cards, dark mode, confirm modal | `BuildMissionControl` |
 | `ReDim_Widget_Gallery.xlsm` | Every component wired to a live state inspector | `BuildWidgetGallery` |
 | `ReDim_Snake.xlsm` | A real game loop: paced pump job, arrow-key steering, score state, game-over modal | `BuildSnake` |
+| `ReDim_Navigator.xlsm` | Sheets as forms: Navigate, back stack, lifecycle hooks, persisted settings | `BuildNavigator` |
 
 ## Documentation
 

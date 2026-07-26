@@ -20,6 +20,7 @@ Public Sub BuildWidgetGallery()
 
     Set host = ThisWorkbook.Worksheets(1)
     Set app = ReDimUI.Mount(host, APP_ID)
+    app.ProtectSurface False
     app.PrepareCanvas
 
     app.Label("title").AtRect(24, 16, 300, 30).Text("Widget Gallery") _
@@ -77,6 +78,7 @@ Public Sub BuildWidgetGallery()
     RefreshInspector
     WireInspector app
     app.Render
+    app.ProtectSurface
 End Sub
 
 Private Sub WireInspector(ByVal app As ReDimUI)

@@ -19,6 +19,25 @@ only the members of its role and raises a clear error otherwise.
 
 App ids use letters and digits only. Component ids may add single underscores.
 
+## Windows and navigation
+
+Sheets as forms: an app registered with `AsWindow` becomes a window, and navigation shows one
+window at a time among the registered set.
+
+| Member | Purpose |
+|---|---|
+| `app.AsWindow` | Registers the app's sheet as a window. |
+| `ReDimUI.Navigate appId` | Shows the target window's sheet, activates it, then very-hides every other registered window. Sheets that are not windows are never touched. |
+| `ReDimUI.NavigateBack` | Pops the back stack; returns False when empty. |
+| `ReDimUI.ActiveWindowId` | The currently shown window's app id. |
+| `app.OnShow "Module.Proc"` / `app.OnHide "Module.Proc"` | Lifecycle hooks fired after navigation shows or hides the window. |
+| `component.NavigatesTo "appId"` | One-declaration nav link: navigates after any OnClick handler. |
+
+The target is shown before others hide, because Excel requires one visible sheet at all times.
+Very-hidden windows cannot be unhidden from the tab bar, and their pumps keep running: a
+background window's feeds continue loading while another window is on screen. The Navigator
+demo is the working reference.
+
 ## App
 
 Component factories, get-or-create by id: `Button`, `Label`, `Card`, `Spinner`, `ProgressBar`,
@@ -43,7 +62,7 @@ Component factories, get-or-create by id: `Button`, `Label`, `Card`, `Spinner`, 
 | `Async(opId)` / `CancelAsync opId` / `AsyncError(opId)` | Async ops (see [async.md](async.md)). |
 | `Job(jobId)` / `CancelJob jobId` | Chunked or paced background work. |
 | `OnError "Module.Proc"` | One-argument sink for swallowed handler failures. |
-| `ProtectSurface enabled` | Opt-in app-sheet protection (UserInterfaceOnly): users cannot enter cell edit mode or drag shapes there, framework writes keep working, TextInput cells stay editable. Call after Render; Unmount unprotects. |
+| `ProtectSurface enabled` | Opt-in app-sheet protection (UserInterfaceOnly): users cannot enter cell edit mode or drag shapes there, framework writes keep working, TextInput cells stay editable. UserInterfaceOnly does not persist across reopen, so builds should call `ProtectSurface False` first and `ProtectSurface` after Render, as every demo does. Unmount unprotects. |
 | `Unmount deleteShapes` | Remove components (and shapes) and forget the app. |
 
 ## Component builders

@@ -85,6 +85,7 @@ DEMOS = {
     "ReDim_Mission_Control.xlsm": "MissionControl",
     "ReDim_Widget_Gallery.xlsm": "WidgetGallery",
     "ReDim_Snake.xlsm": "SnakeGame",
+    "ReDim_Navigator.xlsm": "Navigator",
 }
 
 

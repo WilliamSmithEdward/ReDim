@@ -77,8 +77,45 @@ Public Function SmokeMission() As String
     transcript = transcript & "|toastInkOnSurface=" & _
         CStr(toastShape.TextFrame2.TextRange.Font.Fill.ForeColor.RGB = _
             app.Theme.OnSurfaceColor)
+    transcript = transcript & "|surfaceProtected=" & _
+        CStr(app.Sheet.ProtectContents)
     ReDimUI.AutoPump True
     SmokeMission = transcript
+End Function
+"""
+
+SMOKE_NAVIGATOR = """
+Public Function SmokeNavigator() As String
+    Dim transcript As String
+
+    ReDimUI.AutoPump False
+    BuildNavigator
+    ReDimUI.Navigate "navhome"
+    transcript = "active=" & ReDimUI.ActiveWindowId
+    transcript = transcript & "|homeVisible=" & _
+        CStr(ThisWorkbook.Worksheets("NavHome").Visible = xlSheetVisible)
+    transcript = transcript & "|settingsHidden=" & _
+        CStr(ThisWorkbook.Worksheets("NavSettings").Visible = xlSheetVeryHidden)
+    transcript = transcript & "|homeShownOnce=" & _
+        CStr(ReDimUI.App("navhome").State("homeShown") = 1)
+    transcript = transcript & "|homeProtected=" & _
+        CStr(ThisWorkbook.Worksheets("NavHome").ProtectContents)
+
+    ReDimUI.DispatchShape "rdm_navhome_gosettings"
+    transcript = transcript & "|activeSettings=" & _
+        CStr(ReDimUI.ActiveWindowId = "navsettings")
+    transcript = transcript & "|homeNowHidden=" & _
+        CStr(ThisWorkbook.Worksheets("NavHome").Visible = xlSheetVeryHidden)
+    transcript = transcript & "|persistedDefault=" & _
+        CStr(ReDimUI.App("navsettings").State("alertsOn"))
+
+    HandleBack
+    transcript = transcript & "|backHome=" & _
+        CStr(ReDimUI.ActiveWindowId = "navhome")
+    transcript = transcript & "|homeShownTwice=" & _
+        CStr(ReDimUI.App("navhome").State("homeShown") = 2)
+    ReDimUI.AutoPump True
+    SmokeNavigator = transcript
 End Function
 """
 
@@ -183,6 +220,9 @@ def test_mission_control_smoke(demo_paths):
             "toast must sit on the rail beside the content"
         )
         assert facts["toastInkOnSurface"] == "True"
+        assert facts["surfaceProtected"] == "True", (
+            "the demo dashboard must ship with its surface protected"
+        )
 
 
 def test_widget_gallery_smoke(demo_paths):
@@ -198,6 +238,24 @@ def test_widget_gallery_smoke(demo_paths):
         assert facts["regionPicked"] == "East"
         assert facts["asyncBusy"] == "True"
         assert facts["asyncDone"] == "True"
+
+
+def test_navigator_smoke(demo_paths):
+    with ExcelSession() as excel:
+        open_demo(excel, demo_paths, "ReDim_Navigator.xlsm")
+        result = excel.run_vba(SMOKE_NAVIGATOR, proc="SmokeNavigator", timeout=120)
+        assert result.outcome == "passed", result.error
+        facts = dict(t.split("=", 1) for t in result.value.split("|"))
+        assert facts["active"] == "navhome"
+        assert facts["homeVisible"] == "True"
+        assert facts["settingsHidden"] == "True"
+        assert facts["homeShownOnce"] == "True"
+        assert facts["homeProtected"] == "True"
+        assert facts["activeSettings"] == "True"
+        assert facts["homeNowHidden"] == "True"
+        assert facts["persistedDefault"] == "True"
+        assert facts["backHome"] == "True"
+        assert facts["homeShownTwice"] == "True"
 
 
 def test_snake_smoke(demo_paths):

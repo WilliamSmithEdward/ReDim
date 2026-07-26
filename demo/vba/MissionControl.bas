@@ -29,6 +29,9 @@ Public Sub BuildMissionControl()
 
     Set host = ThisWorkbook.Worksheets(1)
     Set app = ReDimUI.Mount(host, APP_ID)
+    ' UserInterfaceOnly protection does not survive reopen, so builds
+    ' unprotect first and re-protect at the end.
+    app.ProtectSurface False
     app.PrepareCanvas
 
     app.Label("title").AtRect(24, 16, 360, 30).Text("Mission Control") _
@@ -66,6 +69,7 @@ Public Sub BuildMissionControl()
     ResetFeedState app, 3
     app.Spinner("busy").BindVisible "anyRunning"
     app.Render
+    app.ProtectSurface
 End Sub
 
 Private Sub BuildFeedPanel(ByVal app As ReDimUI, ByVal feed As Long)

@@ -10,6 +10,7 @@ Private Declare PtrSafe Sub Sleep Lib "kernel32" (ByVal milliseconds As Long)
 Private gClickCount As Long
 Private gLastSenderId As String
 Private gLastSenderApp As String
+Private gNavLog As String
 
 Private Function NewCanvas() As Worksheet
     Set NewCanvas = ActiveWorkbook.Worksheets.Add
@@ -416,6 +417,102 @@ Public Function TestProtectSurface() As String
     transcript = transcript & "|unmountUnprotects=" & _
         CStr(Not host.ProtectContents)
     TestProtectSurface = transcript
+End Function
+
+Public Sub NavShowA()
+    gNavLog = gNavLog & "+A"
+End Sub
+
+Public Sub NavHideA()
+    gNavLog = gNavLog & "-A"
+End Sub
+
+Public Sub NavShowB()
+    gNavLog = gNavLog & "+B"
+End Sub
+
+Private Function EnsureSheetCore(ByVal sheetName As String) As Worksheet
+    Dim candidate As Worksheet
+
+    For Each candidate In ActiveWorkbook.Worksheets
+        If candidate.Name = sheetName Then
+            Set EnsureSheetCore = candidate
+            Exit Function
+        End If
+    Next candidate
+    Set EnsureSheetCore = ActiveWorkbook.Worksheets.Add
+    EnsureSheetCore.Name = sheetName
+End Function
+
+Public Function TestNavigation() As String
+    Dim appA As ReDimUI
+    Dim appB As ReDimUI
+    Dim appC As ReDimUI
+    Dim sheetA As Worksheet
+    Dim sheetB As Worksheet
+    Dim sheetC As Worksheet
+    Dim transcript As String
+
+    gNavLog = vbNullString
+    Set sheetA = EnsureSheetCore("NavTestA")
+    Set sheetB = EnsureSheetCore("NavTestB")
+    Set sheetC = EnsureSheetCore("NavTestC")
+    sheetA.Visible = xlSheetVisible
+    sheetB.Visible = xlSheetVisible
+    sheetC.Visible = xlSheetVisible
+
+    Set appA = ReDimUI.Mount(sheetA, "nava")
+    appA.AsWindow.OnShow "TestReDimCore.NavShowA"
+    appA.OnHide "TestReDimCore.NavHideA"
+    appA.Button("gob").At("B2:C3").Text("Go B").NavigatesTo "navb"
+    appA.Render
+    Set appB = ReDimUI.Mount(sheetB, "navb")
+    appB.AsWindow.OnShow "TestReDimCore.NavShowB"
+    Set appC = ReDimUI.Mount(sheetC, "navc")
+    appC.AsWindow
+
+    ReDimUI.Navigate "nava"
+    transcript = "activeA=" & CStr(ReDimUI.ActiveWindowId = "nava")
+    transcript = transcript & "|aVisible=" & _
+        CStr(sheetA.Visible = xlSheetVisible)
+    transcript = transcript & "|bHidden=" & _
+        CStr(sheetB.Visible = xlSheetVeryHidden)
+    transcript = transcript & "|cHidden=" & _
+        CStr(sheetC.Visible = xlSheetVeryHidden)
+
+    ' A button link navigates and fires lifecycle hooks in order.
+    ReDimUI.DispatchShape "rdm_nava_gob"
+    transcript = transcript & "|activeB=" & _
+        CStr(ReDimUI.ActiveWindowId = "navb")
+    transcript = transcript & "|aNowHidden=" & _
+        CStr(sheetA.Visible = xlSheetVeryHidden)
+    transcript = transcript & "|log=" & gNavLog
+
+    ReDimUI.Navigate "navc"
+    transcript = transcript & "|activeC=" & _
+        CStr(ReDimUI.ActiveWindowId = "navc")
+    transcript = transcript & "|backToB=" & CStr(ReDimUI.NavigateBack())
+    transcript = transcript & "|activeAfterBack=" & ReDimUI.ActiveWindowId
+    transcript = transcript & "|backToA=" & CStr(ReDimUI.NavigateBack())
+    transcript = transcript & "|backEmpty=" & CStr(Not ReDimUI.NavigateBack())
+
+    ' Non-window apps refuse navigation with a clear error.
+    Dim plain As ReDimUI
+    Set plain = ReDimUI.Mount(EnsureSheetCore("NavTestP"), "navplain")
+    On Error Resume Next
+    Err.Clear
+    ReDimUI.Navigate "navplain"
+    transcript = transcript & "|plainRefused=" & CStr(Err.Number <> 0)
+    On Error GoTo 0
+
+    ' Unmounting a window forgets it.
+    appC.Unmount True
+    On Error Resume Next
+    Err.Clear
+    ReDimUI.Navigate "navc"
+    transcript = transcript & "|goneRefused=" & CStr(Err.Number <> 0)
+    On Error GoTo 0
+    TestNavigation = transcript
 End Function
 
 Private Function ShapeExistsCore( _
