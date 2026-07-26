@@ -39,17 +39,14 @@ Private Sub BuildHome()
     Set app = ReDimUI.Mount(EnsureSheet("NavHome"), "navhome")
     app.ProtectSurface False
     app.PrepareCanvas
-    app.AsWindow.OnShow "Navigator.HandleHomeShown"
+    app.AsWindow.WindowTitle "Home"
+    app.OnShow "Navigator.HandleHomeShown"
+    app.NavBar
 
-    app.Label("title").AtRect(24, 16, 320, 30).Text("Navigator").FontSize(20).Bold
+    app.Label("title").AtRect(24, 48, 320, 30).Text("Navigator").FontSize(20).Bold
     app.Label("subtitle").Below("title", 2).Sized(420, 18) _
-        .Text("Sheets as forms: navigate, go back, keep state.")
-    app.Card("card").Below("subtitle", 16).Sized(360, 150).Text(vbNullString)
-    app.Button("gosettings").AtRect(40, 100, 150, 34).Text("Settings >") _
-        .Primary.NavigatesTo "navsettings"
-    app.Button("goabout").Below("gosettings", 10).Sized(150, 34) _
-        .Text("About >").Secondary.NavigatesTo "navabout"
-    app.Label("visits").Below("goabout", 12).Sized(300, 18) _
+        .Text("Sheets as forms: tabs navigate, back walks the stack.")
+    app.Label("visits").Below("subtitle", 16).Sized(300, 18) _
         .BindText "homeShown", "Home shown {0} times this session."
     app.SetState "homeShown", 0
     app.Render
@@ -62,11 +59,12 @@ Private Sub BuildSettings()
     Set app = ReDimUI.Mount(EnsureSheet("NavSettings"), "navsettings")
     app.ProtectSurface False
     app.PrepareCanvas
-    app.AsWindow
+    app.AsWindow.WindowTitle "Settings"
     app.Persist True
+    app.NavBar
 
-    app.Label("title").AtRect(24, 16, 320, 30).Text("Settings").FontSize(20).Bold
-    app.Toggle("alerts").AtRect(24, 70, 44, 22).WritesTo "alertsOn"
+    app.Label("title").AtRect(24, 48, 320, 30).Text("Settings").FontSize(20).Bold
+    app.Toggle("alerts").Below("title", 16).Sized(44, 22).WritesTo "alertsOn"
     app.Label("alertslbl").RightOf("alerts", 10).Sized(200, 18) _
         .Text("Alert notifications")
     app.Toggle("autosave").Below("alerts", 14).Sized(44, 22).WritesTo "autoSave"
@@ -74,8 +72,8 @@ Private Sub BuildSettings()
         .Text("Autosave results")
     app.Label("hint").Below("autosave", 20).Sized(360, 18) _
         .Text("These choices persist across closing the workbook.")
-    app.Button("back").AtRect(24, 170, 110, 30).Text("< Back").Secondary _
-        .OnClick "Navigator.HandleBack"
+    app.Button("back").Below("hint", 14).Sized(110, 30).Text("< Back") _
+        .Secondary.OnClick "Navigator.HandleBack"
     app.SetStateDefault "alertsOn", True
     app.SetStateDefault "autoSave", False
     app.Toggle("alerts").Checked CBool(app.State("alertsOn"))
@@ -90,9 +88,10 @@ Private Sub BuildAbout()
     Set app = ReDimUI.Mount(EnsureSheet("NavAbout"), "navabout")
     app.ProtectSurface False
     app.PrepareCanvas
-    app.AsWindow
+    app.AsWindow.WindowTitle "About"
+    app.NavBar
 
-    app.Label("title").AtRect(24, 16, 320, 30).Text("About").FontSize(20).Bold
+    app.Label("title").AtRect(24, 48, 320, 30).Text("About").FontSize(20).Bold
     app.Card("card").Below("title", 14).Sized(380, 110) _
         .Text("ReDim " & ReDimUI.Version & vbLf & vbLf & _
             "A stateful UI framework for Excel worksheets, built on ROneCOne." & _

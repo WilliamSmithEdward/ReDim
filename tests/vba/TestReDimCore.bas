@@ -470,6 +470,8 @@ Public Function TestNavigation() As String
     appB.AsWindow.OnShow "TestReDimCore.NavShowB"
     Set appC = ReDimUI.Mount(sheetC, "navc")
     appC.AsWindow
+    appA.WindowTitle "Alpha"
+    appA.NavBar
 
     ReDimUI.Navigate "nava"
     transcript = "activeA=" & CStr(ReDimUI.ActiveWindowId = "nava")
@@ -479,6 +481,15 @@ Public Function TestNavigation() As String
         CStr(sheetB.Visible = xlSheetVeryHidden)
     transcript = transcript & "|cHidden=" & _
         CStr(sheetC.Visible = xlSheetVeryHidden)
+    transcript = transcript & "|navBarTabs=" & _
+        CStr(ShapeExistsCore(sheetA, "rdm_nava_nvb_nava") And _
+             ShapeExistsCore(sheetA, "rdm_nava_nvb_navb") And _
+             ShapeExistsCore(sheetA, "rdm_nava_nvb_navc"))
+    transcript = transcript & "|activeTabPrimary=" & _
+        CStr(sheetA.Shapes("rdm_nava_nvb_nava").Fill.ForeColor.RGB = _
+            appA.Theme.PrimaryColor)
+    transcript = transcript & "|tabTitleText=" & _
+        sheetA.Shapes("rdm_nava_nvb_nava").TextFrame2.TextRange.Text
 
     ' A button link navigates and fires lifecycle hooks in order.
     ReDimUI.DispatchShape "rdm_nava_gob"
@@ -487,6 +498,9 @@ Public Function TestNavigation() As String
     transcript = transcript & "|aNowHidden=" & _
         CStr(sheetA.Visible = xlSheetVeryHidden)
     transcript = transcript & "|log=" & gNavLog
+    transcript = transcript & "|tabSwapped=" & _
+        CStr(sheetA.Shapes("rdm_nava_nvb_navb").Fill.ForeColor.RGB = _
+            appA.Theme.PrimaryColor)
 
     ReDimUI.Navigate "navc"
     transcript = transcript & "|activeC=" & _
@@ -505,13 +519,20 @@ Public Function TestNavigation() As String
     transcript = transcript & "|plainRefused=" & CStr(Err.Number <> 0)
     On Error GoTo 0
 
-    ' Unmounting a window forgets it.
+    ' Unmounting a window forgets it, and the next navigation prunes its
+    ' tab from every bar.
     appC.Unmount True
     On Error Resume Next
     Err.Clear
     ReDimUI.Navigate "navc"
     transcript = transcript & "|goneRefused=" & CStr(Err.Number <> 0)
     On Error GoTo 0
+    ReDimUI.Navigate "navb"
+    transcript = transcript & "|staleTabPruned=" & _
+        CStr(Not ShapeExistsCore(sheetA, "rdm_nava_nvb_navc"))
+    transcript = transcript & "|liveTabsRemain=" & _
+        CStr(ShapeExistsCore(sheetA, "rdm_nava_nvb_nava") And _
+             ShapeExistsCore(sheetA, "rdm_nava_nvb_navb"))
     TestNavigation = transcript
 End Function
 

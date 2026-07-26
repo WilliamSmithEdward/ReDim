@@ -45,8 +45,9 @@ user keeps working in the workbook.
   so iterating on app code never litters the sheet.
 - **Windows.** Sheets as forms: `AsWindow` registers a window, `Navigate` shows one at a time
   (others go very-hidden), `NavigateBack` walks the stack, `OnShow` and `OnHide` fire like
-  form lifecycle events, and a button becomes a nav link with `NavigatesTo`. Background
-  windows keep pumping. `ProtectSurface` turns an app sheet into a true application surface.
+  form lifecycle events, a button becomes a nav link with `NavigatesTo`, and `NavBar` renders
+  window tabs with the active one highlighted. Background windows keep pumping.
+  `ProtectSurface` turns an app sheet into a true application surface.
 - **Genuinely async.** A SetTimer pump ticks whenever Excel idles and steps ROneCOne tasks
   without anyone blocking on `Await`. Fire-and-forget ops disable their controls, spin a spinner,
   and fire done, fail, or cancel handlers. HTTP, database, shell, and delay tasks overlap for

@@ -111,9 +111,15 @@ def test_navigation(run_core):
     assert facts["aVisible"] == "True"
     assert facts["bHidden"] == "True", "inactive windows must be very-hidden"
     assert facts["cHidden"] == "True"
+    assert facts["navBarTabs"] == "True", "the bar must show one tab per window"
+    assert facts["activeTabPrimary"] == "True"
+    assert facts["tabTitleText"] == "Alpha", "tabs must show WindowTitle"
     assert facts["activeB"] == "True", "NavigatesTo must switch windows"
     assert facts["aNowHidden"] == "True"
     assert facts["log"] == "+A-A+B", "lifecycle hooks must fire in order"
+    assert facts["tabSwapped"] == "True", (
+        "the highlight must follow navigation onto every bar"
+    )
     assert facts["activeC"] == "True"
     assert facts["backToB"] == "True"
     assert facts["activeAfterBack"] == "navb"
@@ -121,6 +127,8 @@ def test_navigation(run_core):
     assert facts["backEmpty"] == "True", "an empty back stack must report False"
     assert facts["plainRefused"] == "True"
     assert facts["goneRefused"] == "True"
+    assert facts["staleTabPruned"] == "True"
+    assert facts["liveTabsRemain"] == "True"
 
 
 def test_protect_surface(run_core):
@@ -143,4 +151,4 @@ def test_hotkey_lifecycle_and_version(run_core):
     facts = parse_transcript(run_core("TestHotKeyLifecycle"))
     assert facts["procCallable"] == "True"
     assert facts["unmountClean"] == "True"
-    assert facts["version"] == "0.3.0"
+    assert facts["version"] == "0.3.1"

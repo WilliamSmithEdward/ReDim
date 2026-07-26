@@ -32,6 +32,8 @@ window at a time among the registered set.
 | `ReDimUI.ActiveWindowId` | The currently shown window's app id. |
 | `app.OnShow "Module.Proc"` / `app.OnHide "Module.Proc"` | Lifecycle hooks fired after navigation shows or hides the window. |
 | `component.NavigatesTo "appId"` | One-declaration nav link: navigates after any OnClick handler. |
+| `app.WindowTitle "Home"` | Display name used by navigation chrome; the app id is the fallback. |
+| `app.NavBar left, top, tabWidth, tabHeight` | One tab per registered window across the top of this sheet, active tab highlighted. Bars refresh on every Navigate, picking up late registrations and pruning removed windows. |
 
 The target is shown before others hide, because Excel requires one visible sheet at all times.
 Very-hidden windows cannot be unhidden from the tab bar, and their pumps keep running: a

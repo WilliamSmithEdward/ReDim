@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.1 - 2026-07-26
+
+- `NavBar`: one tab per registered window across the top of a sheet, active tab highlighted,
+  refreshed on every navigation, stale tabs pruned when windows unmount. `WindowTitle` gives
+  windows display names. The Navigator demo now navigates by tabs.
+
 ## 0.3.0 - 2026-07-26
 
 - Window system: `AsWindow` registers an app's sheet as a form-like window; `Navigate` shows

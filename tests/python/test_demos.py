@@ -101,11 +101,23 @@ Public Function SmokeNavigator() As String
     transcript = transcript & "|homeProtected=" & _
         CStr(ThisWorkbook.Worksheets("NavHome").ProtectContents)
 
-    ReDimUI.DispatchShape "rdm_navhome_gosettings"
+    transcript = transcript & "|homeTabActive=" & _
+        CStr(ThisWorkbook.Worksheets("NavHome").Shapes( _
+            "rdm_navhome_nvb_navhome").Fill.ForeColor.RGB = _
+            ReDimUI.App("navhome").Theme.PrimaryColor)
+    transcript = transcript & "|tabTitle=" & _
+        ThisWorkbook.Worksheets("NavHome").Shapes( _
+            "rdm_navhome_nvb_navsettings").TextFrame2.TextRange.Text
+
+    ReDimUI.DispatchShape "rdm_navhome_nvb_navsettings"
     transcript = transcript & "|activeSettings=" & _
         CStr(ReDimUI.ActiveWindowId = "navsettings")
     transcript = transcript & "|homeNowHidden=" & _
         CStr(ThisWorkbook.Worksheets("NavHome").Visible = xlSheetVeryHidden)
+    transcript = transcript & "|settingsTabActive=" & _
+        CStr(ThisWorkbook.Worksheets("NavSettings").Shapes( _
+            "rdm_navsettings_nvb_navsettings").Fill.ForeColor.RGB = _
+            ReDimUI.App("navsettings").Theme.PrimaryColor)
     transcript = transcript & "|persistedDefault=" & _
         CStr(ReDimUI.App("navsettings").State("alertsOn"))
 
@@ -251,8 +263,13 @@ def test_navigator_smoke(demo_paths):
         assert facts["settingsHidden"] == "True"
         assert facts["homeShownOnce"] == "True"
         assert facts["homeProtected"] == "True"
+        assert facts["homeTabActive"] == "True", (
+            "the active window's tab must carry the primary fill"
+        )
+        assert facts["tabTitle"] == "Settings"
         assert facts["activeSettings"] == "True"
         assert facts["homeNowHidden"] == "True"
+        assert facts["settingsTabActive"] == "True"
         assert facts["persistedDefault"] == "True"
         assert facts["backHome"] == "True"
         assert facts["homeShownTwice"] == "True"

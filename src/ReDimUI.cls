@@ -62,7 +62,7 @@ Private Const REL_NONE As Long = 0
 Private Const REL_BELOW As Long = 1
 Private Const REL_RIGHT_OF As Long = 2
 Private Const PERSIST_PREFIX As String = "rdm_s_"
-Private Const REDIM_VERSION As String = "0.3.0"
+Private Const REDIM_VERSION As String = "0.3.1"
 
 Private mRole As Long
 
@@ -104,6 +104,12 @@ Private mIsWindow As Boolean
 Private mOnShowProc As String
 Private mOnHideProc As String
 Private mCanvasPrepared As Boolean
+Private mWindowTitle As String
+Private mHasNavBar As Boolean
+Private mNavBarLeft As Double
+Private mNavBarTop As Double
+Private mNavBarTabWidth As Double
+Private mNavBarTabHeight As Double
 
 ' Component fields.
 Private mComponentId As String
@@ -556,8 +562,28 @@ Private Sub NavigateCore(ByVal appId As String, ByVal pushCurrent As Boolean)
         If TryGetObject(mApps, previousId, previous) Then previous.InvokeHide
     End If
     mActiveWindowId = appId
+    For Each windowId In mWindows
+        If TryGetObject(mApps, CStr(windowId), windowApp) Then
+            windowApp.RefreshNavBar
+        End If
+    Next windowId
     target.InvokeShow
 End Sub
+
+Friend Function WindowIds() As Collection
+    Dim windowId As Variant
+
+    If Not IsFactory(Me) Then
+        Set WindowIds = ReDimUI.WindowIds
+        Exit Function
+    End If
+    EnsureFactory
+    Set WindowIds = New Collection
+    If mWindows Is Nothing Then Exit Function
+    For Each windowId In mWindows
+        WindowIds.Add CStr(windowId)
+    Next windowId
+End Function
 
 Friend Sub RegisterWindow(ByVal appId As String)
     Dim windowId As Variant
@@ -1311,6 +1337,86 @@ Public Property Get IsWindow() As Boolean
     RequireRole ROLE_APP, "IsWindow"
     IsWindow = mIsWindow
 End Property
+
+' Display name for navigation chrome; the app id is the fallback.
+Public Function WindowTitle(ByVal title As String) As ReDimUI
+    RequireRole ROLE_APP, "WindowTitle"
+    mWindowTitle = title
+    Set WindowTitle = Me
+End Function
+
+Friend Property Get WindowTitleOrId() As String
+    If LenB(mWindowTitle) > 0 Then
+        WindowTitleOrId = mWindowTitle
+    Else
+        WindowTitleOrId = mAppId
+    End If
+End Property
+
+' Renders one tab per registered window across the top of this app's
+' sheet, active tab highlighted. Bars refresh on every Navigate, so late
+' registrations and removed windows are picked up automatically.
+Public Function NavBar( _
+    Optional ByVal leftPoints As Double = 24, _
+    Optional ByVal topPoints As Double = 8, _
+    Optional ByVal tabWidth As Double = 110, _
+    Optional ByVal tabHeight As Double = 26 _
+) As ReDimUI
+    RequireRole ROLE_APP, "NavBar"
+    mHasNavBar = True
+    mNavBarLeft = leftPoints
+    mNavBarTop = topPoints
+    mNavBarTabWidth = tabWidth
+    mNavBarTabHeight = tabHeight
+    RefreshNavBar
+    Set NavBar = Me
+End Function
+
+Friend Sub RefreshNavBar()
+    Dim windowIds As Collection
+    Dim windowId As Variant
+    Dim componentValue As ReDimUI
+    Dim staleIds As Collection
+    Dim staleId As Variant
+    Dim known As Boolean
+    Dim position As Long
+    Dim tabButton As ReDimUI
+
+    If Not mHasNavBar Then Exit Sub
+    Set windowIds = ReDimUI.WindowIds
+    BeginUpdate
+    ' Tabs for windows that no longer exist get removed before rebuilding.
+    Set staleIds = New Collection
+    For Each componentValue In mComponents
+        If Left$(componentValue.ComponentId, 4) = "nvb_" Then
+            known = False
+            For Each windowId In windowIds
+                If "nvb_" & CStr(windowId) = componentValue.ComponentId Then
+                    known = True
+                    Exit For
+                End If
+            Next windowId
+            If Not known Then staleIds.Add componentValue.ComponentId
+        End If
+    Next componentValue
+    For Each staleId In staleIds
+        Component(CStr(staleId)).Remove
+    Next staleId
+    For Each windowId In windowIds
+        position = position + 1
+        Set tabButton = Button("nvb_" & CStr(windowId))
+        tabButton.AtRect mNavBarLeft + (position - 1) * (mNavBarTabWidth + 6), _
+            mNavBarTop, mNavBarTabWidth, mNavBarTabHeight
+        tabButton.Text ReDimUI.App(CStr(windowId)).WindowTitleOrId
+        tabButton.NavigatesTo CStr(windowId)
+        If ReDimUI.ActiveWindowId = CStr(windowId) Then
+            tabButton.Primary
+        Else
+            tabButton.Secondary
+        End If
+    Next windowId
+    EndUpdate
+End Sub
 
 ' Zero-argument workbook procedures run after this window is shown or
 ' hidden by navigation, in the spirit of form Load and Deactivate.
