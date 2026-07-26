@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.1 - 2026-07-26
+
+- The pump pins `Application.Cursor` while armed and restores it on stop, ending the rapid
+  busy-cursor strobe Excel produces when VBA executes at pump frequency
+- Every framework shape carries the dispatcher `OnAction`, so plain clicks can no longer
+  select and drag modal cards, labels, or other chrome; Ctrl+click remains for design work
+- Geometry diffs against the live shape instead of a cache, so manually moved shapes snap
+  back to their declared rectangles on the next render
+- `FlushDirty` no longer re-assigns `ScreenUpdating` it never changed
+
 ## 0.2.0 - 2026-07-25
 
 - SelectBox: a fully drawn themed picker, because Excel fixes the native dropdown's list font

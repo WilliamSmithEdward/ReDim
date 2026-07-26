@@ -58,7 +58,7 @@ Private Const REL_NONE As Long = 0
 Private Const REL_BELOW As Long = 1
 Private Const REL_RIGHT_OF As Long = 2
 Private Const PERSIST_PREFIX As String = "rdm_s_"
-Private Const REDIM_VERSION As String = "0.2.0"
+Private Const REDIM_VERSION As String = "0.2.1"
 
 Private mRole As Long
 
@@ -136,7 +136,8 @@ Private mRelGap As Double
 Private mGeometryResolving As Boolean
 
 ' Applied-property cache. Empty until the first Apply so adopted shapes are
-' fully restyled exactly once.
+' fully restyled exactly once. Geometry is deliberately absent: it diffs
+' against the live shape so manual drags are corrected.
 Private mAppliedValid As Boolean
 Private mAppliedText As String
 Private mAppliedFill As Long
@@ -144,10 +145,6 @@ Private mAppliedTextColor As Long
 Private mAppliedFontSize As Double
 Private mAppliedFontBold As Boolean
 Private mAppliedVisible As Boolean
-Private mAppliedLeft As Double
-Private mAppliedTop As Double
-Private mAppliedWidth As Double
-Private mAppliedHeight As Double
 Private mAppliedOnAction As String
 Private mAppliedValue As Double
 Private mAppliedChecked As Boolean
@@ -1062,12 +1059,14 @@ Public Sub FlushDirty()
     Dim componentValue As ReDimUI
     Dim componentId As Variant
     Dim priorScreenUpdating As Boolean
+    Dim toggledScreen As Boolean
 
     RequireRole ROLE_APP, "FlushDirty"
     If mDirtyIds.Count = 0 Then Exit Sub
     priorScreenUpdating = Application.ScreenUpdating
     If mDirtyIds.Count > 1 And Not ReDimUI.InPumpTick Then
         Application.ScreenUpdating = False
+        toggledScreen = True
     End If
     On Error GoTo RestoreScreen
     For Each componentId In mDirtyIds
@@ -1076,7 +1075,7 @@ Public Sub FlushDirty()
         End If
     Next componentId
     Set mDirtyIds = New Collection
-    Application.ScreenUpdating = priorScreenUpdating
+    If toggledScreen Then Application.ScreenUpdating = priorScreenUpdating
     Exit Sub
 
 RestoreScreen:
@@ -1086,7 +1085,7 @@ RestoreScreen:
     capturedNumber = Err.Number
     capturedSource = Err.Source
     capturedDescription = Err.Description
-    Application.ScreenUpdating = priorScreenUpdating
+    If toggledScreen Then Application.ScreenUpdating = priorScreenUpdating
     Err.Raise capturedNumber, capturedSource, capturedDescription
 End Sub
 
@@ -2121,15 +2120,14 @@ Private Function EnsurePartShape( _
     Set EnsurePartShape = target
 End Function
 
+' Geometry diffs against the shape's actual position rather than a cache, so
+' a shape moved by hand (Ctrl+drag) snaps back to its declared rectangle on
+' the next render.
 Private Sub ApplyGeometry(ByVal target As Shape)
-    If Not mAppliedValid Or mAppliedLeft <> mLeft Then target.Left = mLeft
-    If Not mAppliedValid Or mAppliedTop <> mTop Then target.Top = mTop
-    If Not mAppliedValid Or mAppliedWidth <> mWidth Then target.Width = mWidth
-    If Not mAppliedValid Or mAppliedHeight <> mHeight Then target.Height = mHeight
-    mAppliedLeft = mLeft
-    mAppliedTop = mTop
-    mAppliedWidth = mWidth
-    mAppliedHeight = mHeight
+    If Abs(target.Left - mLeft) > 0.01 Then target.Left = mLeft
+    If Abs(target.Top - mTop) > 0.01 Then target.Top = mTop
+    If Abs(target.Width - mWidth) > 0.01 Then target.Width = mWidth
+    If Abs(target.Height - mHeight) > 0.01 Then target.Height = mHeight
     If Not mAppliedValid Or mAppliedVisible <> mVisible Then
         target.Visible = BoolToMso(mVisible)
         mAppliedVisible = mVisible
@@ -2355,18 +2353,14 @@ Private Sub ApplyText(ByVal target As Shape, ByVal themeValue As ReDimUI)
     End If
 End Sub
 
+' Every framework shape routes through the dispatcher, including kinds with
+' no click behavior. A shape with a macro assigned runs it instead of being
+' selected, so a plain click can never drag a modal card or any other piece
+' of chrome out of position. Ctrl+click still selects for design work.
 Private Sub ApplyBehavior(ByVal target As Shape, ByVal hostSheet As Worksheet)
     Dim desiredAction As String
 
-    Select Case mKind
-        Case KIND_BUTTON, KIND_TOGGLE, KIND_CHECKBOX, KIND_DROPDOWN, _
-            KIND_SLIDER, KIND_TOAST, KIND_OVERLAY, KIND_SELECT
-            desiredAction = "'" & hostSheet.Parent.Name & "'!RdxDispatch"
-        Case Else
-            If LenB(mClickProc) > 0 Or LenB(mAsyncClickProc) > 0 Then
-                desiredAction = "'" & hostSheet.Parent.Name & "'!RdxDispatch"
-            End If
-    End Select
+    desiredAction = "'" & hostSheet.Parent.Name & "'!RdxDispatch"
     If Not mAppliedValid Or mAppliedOnAction <> desiredAction Then
         target.OnAction = desiredAction
         mAppliedOnAction = desiredAction

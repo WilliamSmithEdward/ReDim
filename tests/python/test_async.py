@@ -69,9 +69,13 @@ def test_job_cancel(run_async):
 def test_real_timer_end_to_end(run_async):
     facts = parse_transcript(run_async("TestRealTimerEndToEnd"))
     assert facts["armedAfterStart"] == "True"
+    assert facts["cursorPinned"] == "True", (
+        "an armed pump must pin the cursor so busy-cursor strobing cannot happen"
+    )
     assert facts["statusNoManualPump"] == "done", (
         "the armed SetTimer alone must complete the op"
     )
     assert facts["autoDisarmed"] == "True", (
         "the pump must kill its own timer once work drains"
     )
+    assert facts["cursorRestored"] == "True"

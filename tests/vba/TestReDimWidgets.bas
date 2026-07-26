@@ -330,6 +330,45 @@ Public Function TestToastSlots() As String
     TestToastSlots = transcript
 End Function
 
+' A dragged modal piece (or any component) must snap back to its declared
+' rectangle, and framework shapes must swallow plain clicks so accidental
+' drags cannot happen in the first place.
+Public Function TestDragResilience() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim cardShape As Shape
+    Dim declaredLeft As Double
+    Dim transcript As String
+
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "wid9")
+    app.Label("info").AtRect(24, 24, 200, 20).Text("Info")
+    app.Render
+    app.Confirm "Move me", "Try to drag this.", vbNullString
+
+    Set cardShape = host.Shapes("rdm_wid9_mdl_card")
+    declaredLeft = cardShape.Left
+    transcript = "cardSwallowsClicks=" & _
+        CStr(InStr(cardShape.OnAction, "RdxDispatch") > 0)
+    transcript = transcript & "|labelSwallowsClicks=" & _
+        CStr(InStr(host.Shapes("rdm_wid9_info").OnAction, "RdxDispatch") > 0)
+
+    ' Simulate a manual drag, then reopen: geometry must snap back.
+    cardShape.Left = declaredLeft + 140
+    cardShape.Top = cardShape.Top + 60
+    app.Confirm "Move me", "Try to drag this.", vbNullString
+    transcript = transcript & "|cardSnappedBack=" & _
+        CStr(Abs(host.Shapes("rdm_wid9_mdl_card").Left - declaredLeft) < 0.5)
+
+    ' The same snap applies to ordinary components on Render.
+    host.Shapes("rdm_wid9_info").Left = 300
+    app.Render
+    transcript = transcript & "|labelSnappedBack=" & _
+        CStr(Abs(host.Shapes("rdm_wid9_info").Left - 24) < 0.01)
+    app.CloseModal
+    TestDragResilience = transcript
+End Function
+
 Public Function TestModalConfirm() As String
     Dim app As ReDimUI
     Dim host As Worksheet

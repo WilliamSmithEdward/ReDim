@@ -79,6 +79,15 @@ the small system size and expose no Font setting. ReDim compensates where it can
   Prefer it when type consistency matters; keep `Dropdown` when the native Excel look is wanted.
 - `Slider` has no text. Pair it with a bound `Label`, as the gallery does.
 
+## Shapes are framework-owned
+
+Every ReDim shape carries the dispatcher as its `OnAction`, including kinds with no click
+behavior. A shape with a macro assigned runs it instead of being selected, so plain clicks
+cannot drag a modal card, label, or progress bar out of position. For deliberate design-time
+manipulation, Ctrl+click selects a shape as usual; geometry diffs against the live shape, so
+the next `Render` (or the next flush touching that component) snaps it back to its declared
+rectangle.
+
 ## Statement-form chaining rule
 
 VBA accepts a fluent chain as a statement only when the final call uses bare arguments or a

@@ -72,13 +72,24 @@ Public Sub RdxEnsurePump(Optional ByVal intervalMs As Long = PUMP_DEFAULT_INTERV
     RdxKillOrphanTimer
     gConsecutiveErrors = 0
     gTimerId = SetTimer(0, 0, intervalMs, AddressOf RdxPumpCallback)
-    If gTimerId <> 0 Then RdxStoreTimerId gTimerId
+    If gTimerId <> 0 Then
+        RdxStoreTimerId gTimerId
+        ' Excel flips to the busy cursor whenever VBA executes, which at
+        ' pump frequency reads as a strobe. Pinning the cursor while the
+        ' timer is armed keeps it steady; StopPump restores the default.
+        On Error Resume Next
+        Application.Cursor = xlNorthwestArrow
+        On Error GoTo 0
+    End If
 End Sub
 
 Public Sub RdxStopPump()
     If gTimerId <> 0 Then
         KillTimer 0, gTimerId
         gTimerId = 0
+        On Error Resume Next
+        Application.Cursor = xlDefault
+        On Error GoTo 0
     End If
     RdxClearStoredTimerId
 End Sub

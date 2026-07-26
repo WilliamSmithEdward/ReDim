@@ -109,6 +109,16 @@ def test_toast_slots(run_widgets):
     assert facts["thirdAboveSecond"] == "True"
 
 
+def test_drag_resilience(run_widgets):
+    facts = parse_transcript(run_widgets("TestDragResilience"))
+    assert facts["cardSwallowsClicks"] == "True", (
+        "the modal card must carry the dispatcher so plain clicks cannot drag it"
+    )
+    assert facts["labelSwallowsClicks"] == "True"
+    assert facts["cardSnappedBack"] == "True"
+    assert facts["labelSnappedBack"] == "True"
+
+
 def test_modal_confirm(run_widgets):
     facts = parse_transcript(run_widgets("TestModalConfirm"))
     assert facts["overlayShown"] == "True"

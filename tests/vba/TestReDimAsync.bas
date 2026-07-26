@@ -262,9 +262,13 @@ Public Function TestRealTimerEndToEnd() As String
     app.Async("real").Start
 
     transcript = "armedAfterStart=" & CStr(RdxPumpArmed())
+    transcript = transcript & "|cursorPinned=" & _
+        CStr(Application.Cursor = xlNorthwestArrow)
     ignored = ROneCOne.Task.Delay(700).Await
     transcript = transcript & "|statusNoManualPump=" & app.State("est")
     transcript = transcript & "|autoDisarmed=" & CStr(Not RdxPumpArmed())
+    transcript = transcript & "|cursorRestored=" & _
+        CStr(Application.Cursor = xlDefault)
     RdxStopPump
     TestRealTimerEndToEnd = transcript
 End Function

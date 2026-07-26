@@ -68,6 +68,10 @@ the job through its fail handler and the app error sink instead of surfacing a d
 - Renders that happen inside a tick never toggle `Application.ScreenUpdating`: flipping it at
   pump frequency redraws scroll bars and blips the cursor. Batched flushes outside ticks still
   use it.
+- While the timer is armed, `Application.Cursor` is pinned to the arrow and restored to default
+  on stop. Excel otherwise flips to the busy cursor on every VBA execution, which at pump
+  frequency reads as a strobe. The steady arrow over the grid doubles as the "work is running"
+  signal.
 - The pump stops itself when no ops, jobs, toasts, or visible spinners remain, and re-arms on
   the next `Start`.
 - The armed timer id is stored in a workbook-scoped name. After VBA state loss, the next arm
