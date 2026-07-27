@@ -129,8 +129,12 @@ dependencies:
 - `TransferList`: a dual listbox - two panels with counted headers, selectable rows, and
   four move buttons (`>`, `>>`, `<`, `<<`). `Items`/`ItemsFrom` and the item APIs feed the
   available side, `ChosenFrom` seeds the chosen side, `Captions` names the headers, and
-  `ChosenCount`/`ChosenTextAt` read the result. `WritesTo` carries the chosen items joined
-  with a comma and space; `OnChange` fires once per user transfer, and selecting a row
+  `ChosenCount`/`ChosenTextAt` read the result. Rows multi-select by click-to-toggle:
+  each plain click adds or removes that row from the panel's selection, and `>`/`<` move
+  every selected row in list order. (Ctrl+click cannot exist on a drawn control - Excel
+  reserves modifier-clicks on macro shapes for selecting the shape itself, the same rule
+  behind the design-time escape hatch below.) `WritesTo` carries the chosen items joined
+  with a comma and space; `OnChange` fires once per user transfer, and selecting rows
   fires nothing. Rows render up to the panel's height; the header counts stay honest when
   a list overflows what fits.
 - `ComboBox`: an editable combo with a caret and a filtered drop list, sharing the item

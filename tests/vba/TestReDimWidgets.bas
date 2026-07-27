@@ -1027,20 +1027,36 @@ Public Function TestTransferList() As String
             host.Shapes("rdm_wid22_teams__hr").TextFrame2.TextRange.Text _
             = "Roster (2)")
 
-    ' Selecting a row shows the accent and fires nothing.
+    ' Selecting a row shows the accent and fires nothing; clicking it
+    ' again toggles it back out of the selection set.
     ReDimUI.DispatchShape "rdm_wid22_teams__al2"
     transcript = transcript & "|rowSelected=" & _
         CStr(host.Shapes("rdm_wid22_teams__al2").Fill.ForeColor.RGB = _
             app.Theme.PrimaryColor)
     transcript = transcript & "|selectNoChange=" & CStr(gChangeCount = 0)
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid22_teams__al2"
+    transcript = transcript & "|toggledOff=" & _
+        CStr(host.Shapes("rdm_wid22_teams__al2").Fill.ForeColor.RGB <> _
+            app.Theme.PrimaryColor)
 
-    ' Move it right: appended to the roster, state written, change fired.
+    ' Multi-select: toggle two rows, both carry the accent, one move
+    ' transfers both in list order.
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid22_teams__al1"
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid22_teams__al3"
+    transcript = transcript & "|multiSelected=" & _
+        CStr(host.Shapes("rdm_wid22_teams__al1").Fill.ForeColor.RGB = _
+            app.Theme.PrimaryColor And _
+            host.Shapes("rdm_wid22_teams__al3").Fill.ForeColor.RGB = _
+            app.Theme.PrimaryColor)
     Sleep 200
     ReDimUI.DispatchShape "rdm_wid22_teams__mvr"
     transcript = transcript & "|movedState=" & app.State("roster")
     transcript = transcript & "|movedCounts=" & _
-        CStr(app.TransferList("teams").ItemCount = 2 And _
-             app.TransferList("teams").ChosenCount = 3)
+        CStr(app.TransferList("teams").ItemCount = 1 And _
+             app.TransferList("teams").ChosenCount = 4)
     transcript = transcript & "|changeRan=" & gChangeCount
 
     ' Move all right, then all back; empty panels sweep their rows.
@@ -1064,17 +1080,21 @@ Public Function TestTransferList() As String
     transcript = transcript & "|noSelNoOp=" & _
         CStr(app.TransferList("teams").ChosenCount = 0 And gChangeCount = 3)
 
-    ' Pull one back left from the right panel.
+    ' Pull two back left from the right panel in one move.
     Sleep 200
     ReDimUI.DispatchShape "rdm_wid22_teams__mvar"
     Sleep 200
     ReDimUI.DispatchShape "rdm_wid22_teams__cl1"
     Sleep 200
+    ReDimUI.DispatchShape "rdm_wid22_teams__cl2"
+    Sleep 200
     ReDimUI.DispatchShape "rdm_wid22_teams__mvl"
-    transcript = transcript & "|oneBack=" & _
-        CStr(app.TransferList("teams").ItemCount = 1 And _
+    transcript = transcript & "|multiBack=" & _
+        CStr(app.TransferList("teams").ItemCount = 2 And _
              app.TransferList("teams").ItemTextAt(1) = "Charlie" And _
-             app.TransferList("teams").ChosenTextAt(1) = "Delta")
+             app.TransferList("teams").ItemTextAt(2) = "Delta" And _
+             app.TransferList("teams").ChosenTextAt(1) = "Alpha")
+    transcript = transcript & "|changeFinal=" & gChangeCount
     TestTransferList = transcript
 End Function
 

@@ -86,7 +86,7 @@ Private Const REL_NONE As Long = 0
 Private Const REL_BELOW As Long = 1
 Private Const REL_RIGHT_OF As Long = 2
 Private Const PERSIST_PREFIX As String = "rdm_s_"
-Private Const REDIM_VERSION As String = "0.11.0"
+Private Const REDIM_VERSION As String = "0.11.1"
 
 Private mRole As Long
 
@@ -185,9 +185,12 @@ Private mExitRemaining As Double
 Private mItems As Collection
 ' Transfer list: the right-hand (chosen) side and its selections. mItems
 ' carries the left-hand (available) side, so the item APIs work unchanged.
+' Selections are sets of row indices: Excel reserves Ctrl+click on macro
+' shapes for selecting the shape itself (the macro never runs), so rows
+' multi-select by plain click-to-toggle instead of a modifier.
 Private mChosenItems As Collection
-Private mSelLeft As Long
-Private mSelRight As Long
+Private mSelLeft As Collection
+Private mSelRight As Collection
 Private mCaptionLeft As String
 Private mCaptionRight As String
 Private mAppliedLeftRows As Long
@@ -2462,7 +2465,7 @@ Public Function ChosenFrom(ByVal source As Variant) As ReDimUI
         RaiseError ERROR_INVALID_ARGUMENT, "ChosenFrom", _
             "ChosenFrom accepts an array, a Collection, or a Range."
     End If
-    mSelRight = 0
+    Set mSelRight = New Collection
     Touch
     Set ChosenFrom = Me
 End Function
@@ -2858,23 +2861,90 @@ End Function
 Private Sub EnsureTransferCollections()
     If mItems Is Nothing Then Set mItems = New Collection
     If mChosenItems Is Nothing Then Set mChosenItems = New Collection
+    If mSelLeft Is Nothing Then Set mSelLeft = New Collection
+    If mSelRight Is Nothing Then Set mSelRight = New Collection
 End Sub
 
-Private Sub TransferOne(ByVal hostApp As ReDimUI, ByVal toRight As Boolean)
-    Dim moved As String
+Private Function TransferSelectionHas( _
+    ByVal selectionSet As Collection, _
+    ByVal rowIndex As Long _
+) As Boolean
+    Dim entry As Variant
+
+    For Each entry In selectionSet
+        If CLng(entry) = rowIndex Then
+            TransferSelectionHas = True
+            Exit Function
+        End If
+    Next entry
+End Function
+
+Private Sub TransferSelectionToggle( _
+    ByVal selectionSet As Collection, _
+    ByVal rowIndex As Long _
+)
+    Dim position As Long
+
+    For position = 1 To selectionSet.Count
+        If CLng(selectionSet.Item(position)) = rowIndex Then
+            selectionSet.Remove position
+            Exit Sub
+        End If
+    Next position
+    selectionSet.Add rowIndex
+End Sub
+
+Private Sub PruneTransferSelection( _
+    ByVal selectionSet As Collection, _
+    ByVal maxIndex As Long _
+)
+    Dim position As Long
+
+    For position = selectionSet.Count To 1 Step -1
+        If CLng(selectionSet.Item(position)) > maxIndex Then
+            selectionSet.Remove position
+        End If
+    Next position
+End Sub
+
+' Moves every selected row. The ascending pass keeps the rows' relative
+' order in the target; the descending removal pass keeps yet-unremoved
+' source indices stable.
+Private Sub TransferSelected(ByVal hostApp As ReDimUI, ByVal toRight As Boolean)
+    Dim sourceItems As Collection
+    Dim targetItems As Collection
+    Dim selectionSet As Collection
+    Dim ordered As Collection
+    Dim position As Long
 
     If toRight Then
-        If mSelLeft < 1 Or mSelLeft > mItems.Count Then Exit Sub
-        moved = CStr(mItems.Item(mSelLeft))
-        mItems.Remove mSelLeft
-        mChosenItems.Add moved
-        mSelLeft = 0
+        Set sourceItems = mItems
+        Set targetItems = mChosenItems
+        Set selectionSet = mSelLeft
     Else
-        If mSelRight < 1 Or mSelRight > mChosenItems.Count Then Exit Sub
-        moved = CStr(mChosenItems.Item(mSelRight))
-        mChosenItems.Remove mSelRight
-        mItems.Add moved
-        mSelRight = 0
+        Set sourceItems = mChosenItems
+        Set targetItems = mItems
+        Set selectionSet = mSelRight
+    End If
+    Set ordered = New Collection
+    For position = 1 To sourceItems.Count
+        If TransferSelectionHas(selectionSet, position) Then
+            ordered.Add CStr(sourceItems.Item(position))
+        End If
+    Next position
+    If ordered.Count = 0 Then Exit Sub
+    For position = sourceItems.Count To 1 Step -1
+        If TransferSelectionHas(selectionSet, position) Then
+            sourceItems.Remove position
+        End If
+    Next position
+    For position = 1 To ordered.Count
+        targetItems.Add CStr(ordered.Item(position))
+    Next position
+    If toRight Then
+        Set mSelLeft = New Collection
+    Else
+        Set mSelRight = New Collection
     End If
     Touch
     CommitTransferChange hostApp
@@ -2896,8 +2966,8 @@ Private Sub TransferAll(ByVal hostApp As ReDimUI, ByVal toRight As Boolean)
         Next position
         Set mChosenItems = New Collection
     End If
-    mSelLeft = 0
-    mSelRight = 0
+    Set mSelLeft = New Collection
+    Set mSelRight = New Collection
     Touch
     CommitTransferChange hostApp
 End Sub
@@ -2988,27 +3058,19 @@ Friend Sub RunClickBehavior()
             If Left$(transferPart, 2) = "al" Then
                 If IsNumeric(Mid$(transferPart, 3)) Then
                     transferRow = CLng(Mid$(transferPart, 3))
-                    If mSelLeft = transferRow Then
-                        mSelLeft = 0
-                    Else
-                        mSelLeft = transferRow
-                    End If
+                    TransferSelectionToggle mSelLeft, transferRow
                     Touch
                 End If
             ElseIf Left$(transferPart, 2) = "cl" Then
                 If IsNumeric(Mid$(transferPart, 3)) Then
                     transferRow = CLng(Mid$(transferPart, 3))
-                    If mSelRight = transferRow Then
-                        mSelRight = 0
-                    Else
-                        mSelRight = transferRow
-                    End If
+                    TransferSelectionToggle mSelRight, transferRow
                     Touch
                 End If
             ElseIf transferPart = "mvr" Then
-                TransferOne hostApp, True
+                TransferSelected hostApp, True
             ElseIf transferPart = "mvl" Then
-                TransferOne hostApp, False
+                TransferSelected hostApp, False
             ElseIf transferPart = "mvar" Then
                 TransferAll hostApp, True
             ElseIf transferPart = "mval" Then
@@ -3982,8 +4044,8 @@ Private Sub ApplyTransferParts( _
     Dim header As Shape
 
     EnsureTransferCollections
-    If mSelLeft > mItems.Count Then mSelLeft = 0
-    If mSelRight > mChosenItems.Count Then mSelRight = 0
+    PruneTransferSelection mSelLeft, mItems.Count
+    PruneTransferSelection mSelRight, mChosenItems.Count
     panelW = (mWidth - BTN_W - 4 * GAP) / 2
     If panelW < 40 Then panelW = 40
     panelTop = mTop + HEADER_H
@@ -4094,7 +4156,7 @@ Private Sub SyncTransferRows( _
     ByVal panelTop As Double, _
     ByVal panelW As Double, _
     ByVal panelH As Double, _
-    ByVal selectedRow As Long, _
+    ByVal selectionSet As Collection, _
     ByRef appliedRows As Long _
 )
     Const ROW_H As Double = 20
@@ -4118,7 +4180,7 @@ Private Sub SyncTransferRows( _
         rowShape.Width = panelW - 6
         rowShape.Height = ROW_H
         rowShape.Fill.Visible = msoTrue
-        If position = selectedRow Then
+        If TransferSelectionHas(selectionSet, position) Then
             rowShape.Fill.ForeColor.RGB = themeValue.PrimaryColor
         Else
             rowShape.Fill.ForeColor.RGB = ResolveSurfaceFill(themeValue)
@@ -4136,7 +4198,7 @@ Private Sub SyncTransferRows( _
                 .Name = themeValue.FontName
                 .Size = resolvedSize
                 .Bold = msoFalse
-                If position = selectedRow Then
+                If TransferSelectionHas(selectionSet, position) Then
                     .Fill.ForeColor.RGB = themeValue.OnPrimaryColor
                 Else
                     .Fill.ForeColor.RGB = themeValue.OnSurfaceColor

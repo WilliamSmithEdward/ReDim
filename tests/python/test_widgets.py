@@ -317,18 +317,26 @@ def test_transfer_list(run_widgets):
     assert facts["selectNoChange"] == "True", (
         "selecting a row must not fire OnChange; only transfers do"
     )
-    assert facts["movedState"] == "Charlie, Delta, Bravo", (
-        "a moved item appends to the chosen list and writes joined state"
+    assert facts["toggledOff"] == "True", (
+        "clicking a selected row must toggle it back out of the set"
+    )
+    assert facts["multiSelected"] == "True", (
+        "plain clicks accumulate a multi-selection - Excel reserves"
+        " Ctrl+click on macro shapes, so toggling replaces the modifier"
+    )
+    assert facts["movedState"] == "Charlie, Delta, Alpha, Echo", (
+        "moved items append to the chosen list in list order"
     )
     assert facts["movedCounts"] == "True"
-    assert facts["changeRan"] == "1"
+    assert facts["changeRan"] == "1", "one multi-move fires OnChange once"
     assert facts["allRight"] == "True", (
         "move-all must empty the available panel and sweep its row shapes"
     )
     assert facts["allLeft"] == "True"
     assert facts["changeTotal"] == "3"
     assert facts["noSelNoOp"] == "True"
-    assert facts["oneBack"] == "True"
+    assert facts["multiBack"] == "True"
+    assert facts["changeFinal"] == "5"
 
 
 def test_modal_confirm(run_widgets):

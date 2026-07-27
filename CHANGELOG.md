@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.11.1 - 2026-07-26
+
+- TransferList rows multi-select. Ctrl+click cannot work on a drawn
+  control: Excel reserves Ctrl+click (and Shift+click) on a
+  macro-assigned shape for selecting the shape itself, so the macro
+  never runs - the same platform rule the framework documents as the
+  design-time escape hatch. Plain clicks toggle rows in and out of the
+  selection set instead, both panels independently; the single move
+  buttons transfer every selected row in list order with one state
+  write and one OnChange. The single-item flow is unchanged: click
+  one, move it.
+
 ## 0.11.0 - 2026-07-26
 
 - `TransferList`: a drawn dual listbox (transfer list). Two panels with
