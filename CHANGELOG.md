@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.9.1 - 2026-07-26
+
+- Fix invisible typing in float fields: a field left on the default variant
+  implicitly carried the primary style, whose white ink landed on the field's
+  white surface fill - the buffer took every keystroke but the text and the
+  insertion bar were unreadable, presenting as "typing does not work". Float
+  fields now always read in surface ink, like every surface-filled kind. The
+  live test asserts ink and ring colors, not just text content.
+- TextInput and ComboBox faces are rounded rectangles matching the rest of
+  the control family; shapes adopted from older builds are coerced on first
+  render.
+- Verified with real (message-level) keystrokes end to end, including on a
+  ProtectSurface sheet: OnKey capture receives keys with protection active,
+  so protection now stays on during focus. Keys outside the bound typing set
+  fall through to the grid, where the protected surface answers with Excel's
+  usual notice instead of silently entering cell edit.
+
 ## 0.9.0 - 2026-07-26
 
 - Cell-free fields. `TextInput` and `ComboBox` placed with `AtRect`, `Below`, or `RightOf`

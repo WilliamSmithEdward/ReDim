@@ -257,6 +257,14 @@ def test_float_field(run_widgets):
         "a focused float field must show the insertion bar"
     )
     assert facts["focusRing"] == "True"
+    assert facts["inkOnSurface"] == "True", (
+        "float field ink must be surface ink, not the primary variant's"
+        " white-on-white"
+    )
+    assert facts["roundedFace"] == "True", (
+        "field faces share the family's rounded profile"
+    )
+    assert facts["roundedCombo"] == "True"
     assert facts["typed"] == "True"
     assert facts["committed"] == "Hey"
     assert facts["changeRan"] == "1"

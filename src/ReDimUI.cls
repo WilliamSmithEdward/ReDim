@@ -84,7 +84,7 @@ Private Const REL_NONE As Long = 0
 Private Const REL_BELOW As Long = 1
 Private Const REL_RIGHT_OF As Long = 2
 Private Const PERSIST_PREFIX As String = "rdm_s_"
-Private Const REDIM_VERSION As String = "0.9.0"
+Private Const REDIM_VERSION As String = "0.9.1"
 
 Private mRole As Long
 
@@ -2968,6 +2968,10 @@ Private Function CreateShapeForKind(ByVal hostSheet As Worksheet) As Shape
             Set target = hostSheet.Shapes.AddShape( _
                 msoShapeRoundedRectangle, mLeft, mTop, mWidth, 6)
             target.Adjustments(1) = 0.5
+        Case KIND_INPUT, KIND_COMBO
+            Set target = hostSheet.Shapes.AddShape( _
+                msoShapeRoundedRectangle, mLeft, mTop, mWidth, mHeight)
+            target.Adjustments(1) = 0.15
         Case Else
             Set target = hostSheet.Shapes.AddShape( _
                 msoShapeRectangle, mLeft, mTop, mWidth, mHeight)
@@ -3059,6 +3063,14 @@ Private Sub ApplyStyle(ByVal target As Shape, ByVal themeValue As ReDimUI)
                 mAppliedFill = ResolveToggleFill(themeValue)
             End If
         Case KIND_INPUT, KIND_COMBO
+            ' Shapes adopted from builds older than 0.9.1 are square;
+            ' coerce them to the rounded profile the family shares.
+            If Not mAppliedValid Then
+                If target.AutoShapeType <> msoShapeRoundedRectangle Then
+                    target.AutoShapeType = msoShapeRoundedRectangle
+                    target.Adjustments(1) = 0.15
+                End If
+            End If
             If IsFloatField() Then
                 ' Float fields are their own editor: surface fill so the
                 ' face takes clicks, accent border while focused.
@@ -3165,9 +3177,13 @@ Private Function ResolveTextColor(ByVal themeValue As ReDimUI) As Long
         Exit Function
     End If
     Select Case mKind
-        Case KIND_LABEL, KIND_CARD, KIND_SELECT, KIND_TOAST
+        Case KIND_LABEL, KIND_CARD, KIND_SELECT, KIND_TOAST, _
+            KIND_INPUT, KIND_COMBO
             ' Surface-filled kinds read in surface ink regardless of variant;
             ' the variant fall-through below is for filled buttons only.
+            ' Float fields especially: their implicit variant is primary,
+            ' which would put the primary's white ink on the surface fill
+            ' and render typed text and the caret invisible.
             ResolveTextColor = themeValue.OnSurfaceColor
         Case Else
             Select Case mStyleVariant

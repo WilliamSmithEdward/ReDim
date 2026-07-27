@@ -158,7 +158,10 @@ Capture uses `Application.OnKey`, bound only while a field is focused and releas
 so sheet typing is untouched the rest of the time. The bound set is the practical typing
 subset - letters (with Shift capitals), digits, space, minus, period, comma, Backspace,
 Enter, Esc. OnKey cannot see more than that (no arrows-within-text, no selection), so the
-model is append-and-backspace, honest and predictable. `ReDimUI.HasKeyboardFocus` and
+model is append-and-backspace, honest and predictable. Keys outside the bound set fall
+through to the grid as usual; on a `ProtectSurface` sheet Excel answers those with its
+protected-cell notice, and protection stays on the whole time - OnKey capture works fine
+under protection (verified with message-level keystrokes). `ReDimUI.HasKeyboardFocus` and
 `ReDimUI.FocusedComponentId` report the current holder; `RdxReleaseKeys` is the panic
 release that unbinds everything regardless of state.
 

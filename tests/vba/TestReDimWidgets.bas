@@ -844,6 +844,17 @@ Public Function TestFloatField() As String
         CStr(fieldShape.TextFrame2.TextRange.Text = "|")
     transcript = transcript & "|focusRing=" & _
         CStr(fieldShape.Line.ForeColor.RGB = app.Theme.PrimaryColor)
+    ' The face is surface-filled, so the ink must be surface ink; the
+    ' implicit primary variant would paint white-on-white and typing
+    ' would be invisible even though the buffer works.
+    transcript = transcript & "|inkOnSurface=" & _
+        CStr(fieldShape.TextFrame2.TextRange.Font.Fill.ForeColor.RGB = _
+            app.Theme.OnSurfaceColor)
+    transcript = transcript & "|roundedFace=" & _
+        CStr(fieldShape.AutoShapeType = msoShapeRoundedRectangle)
+    transcript = transcript & "|roundedCombo=" & _
+        CStr(host.Shapes("rdm_wid21_color").AutoShapeType = _
+            msoShapeRoundedRectangle)
 
     RdxKeyChar "H"
     RdxKeyChar "i"
