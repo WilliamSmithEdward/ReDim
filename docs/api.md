@@ -66,6 +66,7 @@ controls in the framework. Also:
 | `Async(opId)` / `CancelAsync opId` / `AsyncError(opId)` | Async ops (see [async.md](async.md)). |
 | `Job(jobId)` / `CancelJob jobId` | Chunked or paced background work. |
 | `OnError "Module.Proc"` | One-argument sink for swallowed handler failures. |
+| `TickFaultCount` / `ResetTickFaults` (on `ReDimUI`) | The pump and key dispatch trap errors silently by design; every trapped fault increments this factory counter. Read it in tests or diagnostics to prove a run was clean, reset it to scope a measurement. |
 | `ProtectSurface enabled, allowCellSelection` | Opt-in app-sheet protection (UserInterfaceOnly): users cannot enter cell edit mode or drag shapes there, framework writes keep working, cell-anchored TextInput cells stay editable, and float fields type normally since they never enter cell edit. By default locked canvas cells are also unselectable - no selection rectangle on the app surface, no protected-cell warnings for stray keys - while unlocked TextInput cells stay selectable; pass `allowCellSelection:=True` to keep the whole grid selectable. OnKey capture (fields, HotKey) is unaffected. Protection state does not persist across reopen, so builds should call `ProtectSurface False` first and `ProtectSurface` after Render, as every demo does. Unmount unprotects. |
 | `Unmount deleteShapes` | Remove components (and shapes) and forget the app. |
 

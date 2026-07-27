@@ -49,7 +49,12 @@ Private gCursorPinned As Boolean
 ' here into the runtime. Never raises.
 Public Sub RdxKeyChar(ByVal keyText As String)
     On Error Resume Next
+    Err.Clear
     ReDimUI.DispatchKey keyText
+    If Err.Number <> 0 Then
+        Err.Clear
+        ReDimUI.NoteTickFault
+    End If
 End Sub
 
 ' Arms character capture for a focused field. Letters bind twice so shift

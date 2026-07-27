@@ -95,7 +95,7 @@ Private Const VARIANT_NEUTRAL As Long = 4
 Private Const REL_NONE As Long = 0
 Private Const REL_BELOW As Long = 1
 Private Const REL_RIGHT_OF As Long = 2
-Private Const REDIM_VERSION As String = "0.17.3"
+Private Const REDIM_VERSION As String = "0.18.0"
 
 Private mRole As Long
 
@@ -116,6 +116,9 @@ Private mFocusComponentId As String
 ' Test seam: the next real tick treats the field-watch press edge as
 ' fired, so in-tick blur paths are testable without physical input.
 Private mForcePressEdge As Boolean
+' Guarded-swallow observability: every silently trapped tick or key
+' dispatch fault counts here, so tests can prove a run was clean.
+Private mTickFaults As Long
 Private WithEvents mExcelApp As Excel.Application
 Attribute mExcelApp.VB_VarHelpID = -1
 
@@ -212,9 +215,12 @@ Private mAppliedImageSource As String
 ' committing; Tab, Ctrl+Enter, and clicking away commit.
 Private mMultiLine As Boolean
 ' Diff caches for the typing hot path: the float focus ring state and
-' the combo option list signature last painted.
+' the combo option list signature last painted, plus the composite
+' repaint signatures for the transfer list and checkbox list.
 Private mAppliedFocusRing As Boolean
 Private mAppliedComboSig As String
+Private mAppliedTransferSig As String
+Private mAppliedCheckSig As String
 ' The caret index: characters before the caret, 0 through Len(mText).
 Private mCaretPos As Long
 ' Windowed long lists: the combo shows at most COMBO_MAX_ROWS matches
@@ -533,6 +539,33 @@ Friend Function ConsumeForcedPressEdge() As Boolean
     mForcePressEdge = False
 End Function
 
+' The count of silently trapped faults since the last reset. The pump
+' and key dispatch never surface errors to the user; this counter is
+' how tests (and diagnostics) prove that silence was earned.
+Friend Sub NoteTickFault()
+    If Not IsFactory(Me) Then
+        ReDimUI.NoteTickFault
+        Exit Sub
+    End If
+    mTickFaults = mTickFaults + 1
+End Sub
+
+Public Property Get TickFaultCount() As Long
+    If Not IsFactory(Me) Then
+        TickFaultCount = ReDimUI.TickFaultCount
+        Exit Property
+    End If
+    TickFaultCount = mTickFaults
+End Property
+
+Public Sub ResetTickFaults()
+    If Not IsFactory(Me) Then
+        ReDimUI.ResetTickFaults
+        Exit Sub
+    End If
+    mTickFaults = 0
+End Sub
+
 Public Property Get HasKeyboardFocus() As Boolean
     If Not IsFactory(Me) Then
         HasKeyboardFocus = ReDimUI.HasKeyboardFocus
@@ -611,11 +644,16 @@ Friend Sub TickAll(Optional ByVal forceWork As Boolean = False)
     ' Renders inside a tick skip the ScreenUpdating toggle: flipping it at
     ' pump frequency redraws scroll bars and blips the cursor.
     mInPumpTick = True
-    On Error Resume Next
     For Each appValue In mApps
+        On Error Resume Next
+        Err.Clear
         appValue.TickApp nowMs, elapsedMs, runWork
+        If Err.Number <> 0 Then
+            Err.Clear
+            NoteTickFault
+        End If
+        On Error GoTo 0
     Next appValue
-    On Error GoTo 0
     mInPumpTick = False
 End Sub
 
@@ -1796,41 +1834,74 @@ Public Sub OnError(ByVal procName As String)
     mErrorHandlerProc = procName
 End Sub
 
+' One app tick, split into isolated sections so a fault in one duty can
+' never silently skip the rest: the compaction bug hid for months
+' inside exactly that kind of swallowed abort. Faults stay silent to
+' the user but count on the factory, where tests can prove there were
+' none.
 Friend Sub TickApp( _
     ByVal nowMs As LongLong, _
     ByVal elapsedMs As Long, _
     ByVal runWork As Boolean _
 )
+    TickOpsSection runWork
+    TickJobsSection nowMs, runWork
+    TickComponentsSection nowMs, elapsedMs, runWork
+End Sub
+
+Private Sub TickOpsSection(ByVal runWork As Boolean)
     Dim opValue As ReDimUI
+
+    On Error GoTo Fault
+    If Not runWork Then Exit Sub
+    For Each opValue In mAsyncOps
+        If opValue.OpIsRunning Then opValue.TickOp Me
+    Next opValue
+    Exit Sub
+Fault:
+    ReDimUI.NoteTickFault
+End Sub
+
+' Paced jobs self-gate on the wall clock, so sampling them every frame
+' tightens their timing; budget jobs stay on the work cadence and give
+' animations room while they run.
+Private Sub TickJobsSection(ByVal nowMs As LongLong, ByVal runWork As Boolean)
     Dim jobValue As ReDimUI
     Dim componentValue As ReDimUI
-    Dim expiredIds As Collection
-
     Dim animating As Boolean
+
+    On Error GoTo Fault
     For Each componentValue In mComponents
         If componentValue.NeedsAnimation Then
             animating = True
             Exit For
         End If
     Next componentValue
-    If runWork Then
-        For Each opValue In mAsyncOps
-            If opValue.OpIsRunning Then opValue.TickOp Me
-        Next opValue
-    End If
-    ' Paced jobs self-gate on the wall clock, so sampling them every frame
-    ' tightens their timing; budget jobs stay on the work cadence and give
-    ' animations room while they run.
     For Each jobValue In mJobs
         If jobValue.JobIsRunning Then
             jobValue.TickJob Me, nowMs, runWork, animating
         End If
     Next jobValue
-    ' Sliders drag with the left button only; the field blur watch treats
-    ' a press of either button as clicking away.
+    Exit Sub
+Fault:
+    ReDimUI.NoteTickFault
+End Sub
+
+Private Sub TickComponentsSection( _
+    ByVal nowMs As LongLong, _
+    ByVal elapsedMs As Long, _
+    ByVal runWork As Boolean _
+)
+    Dim componentValue As ReDimUI
+    Dim expiredIds As Collection
+    Dim expiredId As Variant
     Dim leftButtonDown As Boolean
     Dim anyButtonDown As Boolean
     Dim pressEdge As Boolean
+
+    On Error GoTo Fault
+    ' Sliders drag with the left button only; the field blur watch treats
+    ' a press of either button as clicking away.
     leftButtonDown = (GetAsyncKeyState(VK_LEFT_BUTTON) < 0)
     anyButtonDown = leftButtonDown _
         Or (GetAsyncKeyState(VK_RIGHT_BUTTON) < 0)
@@ -1841,7 +1912,7 @@ Friend Sub TickApp( _
     For Each componentValue In mComponents
         componentValue.TickAnimation mSheet, elapsedMs
         componentValue.TickSlideDrag Me, leftButtonDown
-        componentValue.TickFieldWatch Me, anyButtonDown, pressEdge
+        componentValue.TickFieldWatch Me, anyButtonDown, pressEdge, runWork
         If runWork Then
             If componentValue.IsExpiredToast(nowMs) Then
                 componentValue.BeginToastExit
@@ -1851,13 +1922,15 @@ Friend Sub TickApp( _
             expiredIds.Add componentValue.ComponentId
         End If
     Next componentValue
-    Dim expiredId As Variant
     For Each expiredId In expiredIds
         If TryGetComponent(CStr(expiredId), componentValue) Then
             componentValue.Remove
         End If
     Next expiredId
     If expiredIds.Count > 0 Then CompactToastSlots
+    Exit Sub
+Fault:
+    ReDimUI.NoteTickFault
 End Sub
 
 ' After any toast leaves, survivors renumber to slots 1..N in their current
@@ -3006,6 +3079,16 @@ End Function
 Private Sub EnsureCheckedSet()
     If mCheckedSet Is Nothing Then Set mCheckedSet = New Collection
 End Sub
+
+' Collection values joined into a repaint signature; values only, so no
+' late-bound member access is involved.
+Private Function JoinedSig(ByVal source As Collection) As String
+    Dim position As Long
+
+    For position = 1 To source.Count
+        JoinedSig = JoinedSig & "|" & CStr(source.Item(position))
+    Next position
+End Function
 
 ' Checked item texts in list order, joined for the WritesTo state value.
 Private Function CheckedJoined() As String
@@ -4363,6 +4446,15 @@ Private Sub ApplyCheckListParts( _
     rowCount = mItems.Count
     If rowCount = 0 Then Exit Sub
     PruneTransferSelection mCheckedSet, rowCount
+    ' Skip the shape work when nothing visible changed.
+    Dim checkSig As String
+    checkSig = CStr(ObjPtr(themeValue)) & ":" & CStr(mLeft) & ":" & _
+        CStr(mTop) & ":" & CStr(mWidth) & ":" & CStr(mHeight) & ":" & _
+        CStr(mVisible) & ":" & CStr(mEnabled) & ":" & _
+        CStr(mSelectAllRow) & ":" & CStr(mFontSize) & ":" & _
+        JoinedSig(mItems) & "#" & JoinedSig(mCheckedSet)
+    If mAppliedValid And checkSig = mAppliedCheckSig Then Exit Sub
+    mAppliedCheckSig = checkSig
     checkedTotal = mCheckedSet.Count
     headerRows = 0
     If mSelectAllRow Then headerRows = 1
@@ -4601,6 +4693,19 @@ Private Sub ApplyTransferParts( _
         mRightOffset = mChosenItems.Count - TransferRowCapacity()
     End If
     If mRightOffset < 0 Then mRightOffset = 0
+    ' A repaint that changes nothing visible skips all the shape work:
+    ' both panels, headers, rows, and buttons carry dozens of COM
+    ' writes, and most touches change only one side or nothing.
+    Dim transferSig As String
+    transferSig = CStr(ObjPtr(themeValue)) & ":" & CStr(mLeft) & ":" & _
+        CStr(mTop) & ":" & CStr(mWidth) & ":" & CStr(mHeight) & ":" & _
+        CStr(mVisible) & ":" & mCaptionLeft & "/" & mCaptionRight & ":" & _
+        CStr(mLeftOffset) & ":" & CStr(mRightOffset) & ":" & _
+        CStr(mFontSize) & ":" & _
+        JoinedSig(mItems) & "#" & JoinedSig(mChosenItems) & "#" & _
+        JoinedSig(mSelLeft) & "#" & JoinedSig(mSelRight)
+    If mAppliedValid And transferSig = mAppliedTransferSig Then Exit Sub
+    mAppliedTransferSig = transferSig
     panelW = (mWidth - BTN_W - 4 * GAP) / 2
     If panelW < 40 Then panelW = 40
     panelTop = mTop + HEADER_H
@@ -5749,13 +5854,19 @@ End Sub
 Friend Sub TickFieldWatch( _
     ByVal hostApp As ReDimUI, _
     ByVal buttonDown As Boolean, _
-    ByVal pressEdge As Boolean _
+    ByVal pressEdge As Boolean, _
+    ByVal pollSelection As Boolean _
 )
     If Not IsFloatField() Then Exit Sub
     If Not ReDimUI.IsComponentFocused(hostApp.AppId, mComponentId) Then Exit Sub
-    If CurrentSelectionKey() <> mFieldSelAtFocus Then
-        BlurField hostApp, True
-        Exit Sub
+    ' The selection compare costs three COM reads, so it rides the work
+    ' cadence; a 50 ms commit latency is imperceptible. The press edge
+    ' stays at frame rate.
+    If pollSelection Then
+        If CurrentSelectionKey() <> mFieldSelAtFocus Then
+            BlurField hostApp, True
+            Exit Sub
+        End If
     End If
     If Not pressEdge Then Exit Sub
     If CursorOverField() Then Exit Sub

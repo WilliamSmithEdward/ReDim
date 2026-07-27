@@ -261,6 +261,7 @@ Public Function TestToastSlots() As String
 
     Set host = NewCanvas()
     ReDimUI.AutoPump False
+    ReDimUI.ResetTickFaults
     Set app = ReDimUI.Mount(host, "wid8")
     app.Label("anchor").AtRect(24, 24, 200, 20).Text("x")
     app.Render
@@ -348,6 +349,9 @@ Public Function TestToastSlots() As String
         CStr(Abs((fourthShape.Top - thirdShape.Top) - 46) < 0.1)
     transcript = transcript & "|settledPitchB=" & _
         CStr(Abs((fifthShape.Top - fourthShape.Top) - 46) < 0.1)
+    ' The pump swallows faults silently by design; this proves the
+    ' silence across the scenario's dozens of forced ticks was earned.
+    transcript = transcript & "|tickFaults=" & ReDimUI.TickFaultCount
     ReDimUI.AutoPump True
     TestToastSlots = transcript
 End Function

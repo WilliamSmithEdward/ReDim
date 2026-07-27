@@ -105,6 +105,9 @@ def test_toast_slots(run_widgets):
     )
     assert facts["settledPitchA"] == "True"
     assert facts["settledPitchB"] == "True"
+    assert facts["tickFaults"] == "0", (
+        "the pump swallowed an error somewhere in this scenario's ticks"
+    )
 
 
 def test_toast_tray(run_widgets):

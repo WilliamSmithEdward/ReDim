@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.18.0 - 2026-07-26
+
+- Hardening: the pump's silent error handling becomes observable and
+  isolated. TickApp splits into guarded sections (ops, jobs, the
+  component watch loop with toast expiry), so a fault in one duty can
+  never silently skip the rest - the failure shape behind the
+  long-lived compaction bug. Every silently trapped fault, including
+  key-dispatch faults, now increments a factory counter exposed as
+  `TickFaultCount` with `ResetTickFaults`; the toast slots scenario
+  asserts zero across its dozens of forced ticks, so the suite proves
+  the swallowed-error silence was earned.
+- Performance: the focused field's selection poll (three COM reads)
+  rides the 50 ms work cadence instead of every frame; TransferList
+  and CheckList repaints are signature-skipped, so a touch that
+  changes nothing visible costs no shape writes at all - both panels,
+  headers, rows, buttons, and fonts previously rewrote on every touch.
+
 ## 0.17.3 - 2026-07-26
 
 - Fix a press on floating chrome also engaging the slider underneath
