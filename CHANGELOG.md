@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.14.1 - 2026-07-26
+
+- The gallery's generated demo image was a solid-color PNG, which is
+  indistinguishable from a plain filled shape and read as "nothing
+  showing". The Image control was loading it correctly; the fixture
+  could not prove it. The demo logo is now composed from overlapping
+  shapes and text on a chart canvas before export, so the picture is
+  unmistakable.
+
 ## 0.14.0 - 2026-07-26
 
 - `Image`: a picture control drawn the family way - a rounded rectangle

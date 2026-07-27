@@ -146,10 +146,13 @@ Public Sub HandleCrewChange()
     GalleryApp().SetState "lastAction", "crew transferred"
 End Sub
 
-' A stand-in logo generated on the spot: a chart area filled with the
-' theme green, exported as a PNG the Image control can load.
+' A stand-in logo generated on the spot: overlapping shapes and text
+' composed on a chart canvas and exported as a PNG. A solid-color image
+' is indistinguishable from a plain filled shape, so the logo layers
+' elements no shape fill could fake.
 Private Function EnsureDemoImage(ByVal host As Worksheet) As String
     Dim chartHost As ChartObject
+    Dim canvas As Chart
     Dim targetPath As String
 
     targetPath = Environ$("TEMP") & "\rdm_gallery_logo.png"
@@ -157,8 +160,25 @@ Private Function EnsureDemoImage(ByVal host As Worksheet) As String
     Kill targetPath
     On Error GoTo 0
     Set chartHost = host.ChartObjects.Add(0, 0, 160, 74)
-    chartHost.Chart.ChartArea.Format.Fill.ForeColor.RGB = RGB(31, 111, 76)
-    chartHost.Chart.Export targetPath, "PNG"
+    Set canvas = chartHost.Chart
+    canvas.ChartArea.Format.Fill.ForeColor.RGB = RGB(24, 56, 42)
+    With canvas.Shapes.AddShape(msoShapeOval, 8, 10, 54, 54)
+        .Fill.ForeColor.RGB = RGB(31, 111, 76)
+        .Line.Visible = msoFalse
+    End With
+    With canvas.Shapes.AddShape(msoShapeOval, 34, 22, 34, 34)
+        .Fill.ForeColor.RGB = RGB(240, 178, 54)
+        .Line.Visible = msoFalse
+    End With
+    With canvas.Shapes.AddTextbox(msoTextOrientationHorizontal, 72, 22, 84, 30)
+        .TextFrame2.TextRange.Text = "ReDim"
+        .TextFrame2.TextRange.Font.Size = 16
+        .TextFrame2.TextRange.Font.Bold = msoTrue
+        .TextFrame2.TextRange.Font.Fill.ForeColor.RGB = RGB(255, 255, 255)
+        .Fill.Visible = msoFalse
+        .Line.Visible = msoFalse
+    End With
+    canvas.Export targetPath, "PNG"
     chartHost.Delete
     EnsureDemoImage = targetPath
 End Function
