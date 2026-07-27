@@ -291,6 +291,28 @@ Public Function TestToastSlots() As String
     transcript = transcript & "|thirdJoinsBelow=" & _
         CStr(Abs(host.Shapes("rdm_wid8_" & thirdToast.ComponentId).Top - _
             secondSettledTop) < 0.1)
+
+    ' The rail is sticky while toasts live: scrolling between spawns moved
+    ' the recomputed viewport-clamped origin, and a newcomer placed from
+    ' the fresh origin could land on top of live toasts. A newcomer must
+    ' join the existing column exactly one slot pitch below.
+    Dim thirdShape As Shape
+    Dim fourthToast As ReDimUI
+    Dim fourthShape As Shape
+    Dim priorScrollRow As Long
+    Set thirdShape = host.Shapes("rdm_wid8_" & thirdToast.ComponentId)
+    priorScrollRow = ActiveWindow.ScrollRow
+    ActiveWindow.ScrollRow = 40
+    Set fourthToast = app.Toast("four", 60000)
+    For ticks = 1 To 10
+        ReDimUI.PumpOnce
+    Next ticks
+    Set fourthShape = host.Shapes("rdm_wid8_" & fourthToast.ComponentId)
+    transcript = transcript & "|railSticksLeft=" & _
+        CStr(Abs(fourthShape.Left - thirdShape.Left) < 0.1)
+    transcript = transcript & "|railSticksTop=" & _
+        CStr(Abs((fourthShape.Top - thirdShape.Top) - 46) < 0.1)
+    ActiveWindow.ScrollRow = priorScrollRow
     ReDimUI.AutoPump True
     TestToastSlots = transcript
 End Function

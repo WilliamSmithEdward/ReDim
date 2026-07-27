@@ -85,7 +85,7 @@ Private Const REL_NONE As Long = 0
 Private Const REL_BELOW As Long = 1
 Private Const REL_RIGHT_OF As Long = 2
 Private Const PERSIST_PREFIX As String = "rdm_s_"
-Private Const REDIM_VERSION As String = "0.10.0"
+Private Const REDIM_VERSION As String = "0.10.1"
 
 Private mRole As Long
 
@@ -126,6 +126,9 @@ Private mErrorHandlerProc As String
 Private mToastCounter As Long
 Private mFieldPrevButtonDown As Boolean
 Private mToastTrayAnchor As String
+Private mToastRailLeft As Double
+Private mToastRailTop As Double
+Private mToastRailStored As Boolean
 Private mPersistOn As Boolean
 Private mHotKeys As Collection
 Private mSurfaceProtected As Boolean
@@ -953,6 +956,42 @@ Friend Function ToastTrayOrigin( _
     originTop = anchorRange.Top
     ToastTrayOrigin = True
 End Function
+
+' The tray origin is sticky while any toast is alive: survivors and
+' newcomers must share one column, so the origin computed by the toast
+' that opened the tray is reused until the tray empties. Recomputing per
+' spawn let scroll, zoom, and content-bounds shifts move the rail
+' mid-stream, landing a new toast on top of live ones. The claimant is
+' excluded from the liveness scan because it is already registered by
+' the time it asks.
+Friend Function ActiveToastRail( _
+    ByVal claimantId As String, _
+    ByRef originLeft As Double, _
+    ByRef originTop As Double _
+) As Boolean
+    Dim componentValue As ReDimUI
+
+    If Not mToastRailStored Then Exit Function
+    For Each componentValue In mComponents
+        If componentValue.IsPendingToast Then
+            If componentValue.ComponentId <> claimantId Then
+                originLeft = mToastRailLeft
+                originTop = mToastRailTop
+                ActiveToastRail = True
+                Exit Function
+            End If
+        End If
+    Next componentValue
+End Function
+
+Friend Sub RecordToastRail( _
+    ByVal originLeft As Double, _
+    ByVal originTop As Double _
+)
+    mToastRailLeft = originLeft
+    mToastRailTop = originTop
+    mToastRailStored = True
+End Sub
 
 ' Lowest slot not held by a live toast, so slot one is reused the moment the
 ' previous toast expires instead of the stack growing downward forever.
@@ -2556,24 +2595,30 @@ Friend Sub ConfigureToast( _
     Dim originTop As Double
     Dim viewLeft As Double
     Dim viewTop As Double
+    ' An explicit ToastTray anchor is already a stable pin and always
+    ' wins; the sticky rail applies only to the computed, clamped rail.
     If Not hostApp.ToastTrayOrigin(originLeft, originTop) Then
-        If hostApp.ContentBounds(boundLeft, boundTop, boundRight) Then
-            originLeft = boundRight + 12
-            originTop = boundTop
-        Else
-            hostApp.ResolveViewport boundLeft, boundTop, viewWidth, viewHeight
-            originLeft = boundLeft + viewWidth - mWidth - 12
-            originTop = boundTop + 8
+        If Not hostApp.ActiveToastRail(mComponentId, originLeft, originTop) Then
+            If hostApp.ContentBounds(boundLeft, boundTop, boundRight) Then
+                originLeft = boundRight + 12
+                originTop = boundTop
+            Else
+                hostApp.ResolveViewport boundLeft, boundTop, viewWidth, _
+                    viewHeight
+                originLeft = boundLeft + viewWidth - mWidth - 12
+                originTop = boundTop + 8
+            End If
+            hostApp.ResolveViewport viewLeft, viewTop, viewWidth, viewHeight
+            If originLeft + mWidth + 12 > viewLeft + viewWidth Then
+                originLeft = viewLeft + viewWidth - mWidth - 12
+            End If
+            If originLeft < viewLeft + 12 Then originLeft = viewLeft + 12
+            If originTop + mHeight + 8 > viewTop + viewHeight Then
+                originTop = viewTop + viewHeight - mHeight - 8
+            End If
+            If originTop < viewTop + 8 Then originTop = viewTop + 8
         End If
-        hostApp.ResolveViewport viewLeft, viewTop, viewWidth, viewHeight
-        If originLeft + mWidth + 12 > viewLeft + viewWidth Then
-            originLeft = viewLeft + viewWidth - mWidth - 12
-        End If
-        If originLeft < viewLeft + 12 Then originLeft = viewLeft + 12
-        If originTop + mHeight + 8 > viewTop + viewHeight Then
-            originTop = viewTop + viewHeight - mHeight - 8
-        End If
-        If originTop < viewTop + 8 Then originTop = viewTop + 8
+        hostApp.RecordToastRail originLeft, originTop
     End If
     mLeft = originLeft
     mTop = originTop + (slot - 1) * (mHeight + 6)

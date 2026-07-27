@@ -90,6 +90,12 @@ def test_toast_slots(run_widgets):
     assert facts["thirdJoinsBelow"] == "True", (
         "a new toast must join below the compacted stack"
     )
+    assert facts["railSticksLeft"] == "True", (
+        "the rail must not move while toasts live, even after scrolling"
+    )
+    assert facts["railSticksTop"] == "True", (
+        "a newcomer must join the live column exactly one slot pitch below"
+    )
 
 
 def test_toast_tray(run_widgets):

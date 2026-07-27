@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.10.1 - 2026-07-26
+
+- Fix a new toast sometimes landing on top of live ones (reported as a
+  fresh toast in slot one while others were on screen). Slots were always
+  consistent; the tray ORIGIN was not - every spawn recomputed the
+  viewport-clamped rail, so a scroll, zoom, or content-bounds shift
+  between spawns moved the rail mid-stream and the newcomer's slot was
+  measured from a different origin than the survivors'. The rail is now
+  sticky while any toast is alive: the toast that opens the tray fixes
+  the origin, newcomers join that column, and the next toast after the
+  tray empties re-establishes a fresh clamped origin. Regression test
+  scrolls between spawns and asserts the newcomer joins the live column
+  exactly one slot pitch below.
+
 ## 0.10.0 - 2026-07-26
 
 - `ProtectSurface` makes locked canvas cells unselectable by default
