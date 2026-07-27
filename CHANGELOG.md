@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.9.0 - 2026-07-26
+
+- Cell-free fields. `TextInput` and `ComboBox` placed with `AtRect`, `Below`, or `RightOf`
+  are float fields: text lives in the component buffer and renders on the shape, edited
+  through a keyboard focus layer instead of a cell. Click to focus (accent ring, blinking
+  insertion bar), type, Enter commits (state write plus OnChange on change), Esc reverts,
+  and a press anywhere off the field commits - watched by the same pump frames as slider
+  drags. One field holds focus at a time. `At` keeps the cell-backed mode of both controls.
+- Live combo filtering, the payoff cells could never give: the framework sees every
+  keystroke in a float field, so the drop list re-filters as you type instead of waiting
+  for a commit. Float fields also type normally on `ProtectSurface` sheets, which lock out
+  cell edit entirely.
+- Capture uses `Application.OnKey`, bound only while a field is focused and released on
+  blur: letters with Shift capitals, digits, space, minus, period, comma, Backspace, Enter,
+  Esc. The editing model is append-and-backspace - OnKey cannot report cursor movement.
+  `RdxReleaseKeys` unbinds everything regardless of surviving state.
+- Focus ring now always uses the theme primary color; previously a default-variant field
+  would have drawn a muted ring.
+- The gallery's input row goes cell-free and demonstrates live filtering on the protected
+  surface. With that, no shipped control or demo needs a worksheet cell.
+
+## 0.8.0 - 2026-07-26
+
+- `ComboBox`: an editable combo built from existing parts - a cell-backed text face with a
+  caret and a drawn, filtered drop list, sharing the item APIs. Excel pauses all VBA during
+  cell edit mode, so filtering applies at the moments the platform grants: the caret opens
+  the list filtered by the typed text, and an Enter commit auto-suggests partial matches,
+  takes an exact match outright, or stays closed as free text. Picking writes the cell, the
+  state, and fires OnChange. The gallery gains a fruit combo beside the text input.
+
 ## 0.7.3 - 2026-07-26
 
 - Programmatic item APIs for SelectBox and RadioGroup: `AddItem` with optional position,

@@ -737,6 +737,168 @@ Public Function TestItemApi() As String
     TestItemApi = transcript
 End Function
 
+Public Function TestComboBox() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim combo As ReDimUI
+    Dim eventsWereOn As Boolean
+    Dim transcript As String
+
+    Set host = NewCanvas()
+    gChangeCount = 0
+    ReDimUI.AutoPump False
+    Set app = ReDimUI.Mount(host, "wid20")
+    app.ComboBox("color").At("E3").WritesTo("color") _
+        .OnChange "TestReDimWidgets.RecordChange"
+    app.ComboBox("color").Items "Red", "Green", "Gray", "Blue"
+    app.Render
+    Set combo = app.Component("color")
+
+    transcript = "frameAndCaret=" & _
+        CStr(ShapeExists(host, "rdm_wid20_color") And _
+             ShapeExists(host, "rdm_wid20_color__caret"))
+
+    ' Caret with empty text opens everything.
+    ReDimUI.DispatchShape "rdm_wid20_color__caret"
+    transcript = transcript & "|openAll=" & _
+        CStr(ShapeExists(host, "rdm_wid20_color__opt4"))
+    transcript = transcript & "|optText=" & _
+        host.Shapes("rdm_wid20_color__opt2").TextFrame2.TextRange.Text
+
+    ' Picking writes the cell, the state, fires OnChange, and closes.
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid20_color__opt2"
+    transcript = transcript & "|pickedCell=" & combo.InputValue
+    transcript = transcript & "|pickedState=" & app.State("color")
+    transcript = transcript & "|pickChangeRan=" & gChangeCount
+    transcript = transcript & "|closedAfterPick=" & _
+        CStr(Not ShapeExists(host, "rdm_wid20_color__opt1"))
+    transcript = transcript & "|pickedIndex=" & combo.CurrentValue
+
+    ' Programmatic text plus caret: the list opens filtered.
+    combo.InputValue = "Bl"
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid20_color__caret"
+    transcript = transcript & "|filteredCount=" & _
+        CStr(ShapeExists(host, "rdm_wid20_color__opt1") And _
+             Not ShapeExists(host, "rdm_wid20_color__opt2"))
+    transcript = transcript & "|filteredText=" & _
+        host.Shapes("rdm_wid20_color__opt1").TextFrame2.TextRange.Text
+
+    ' A real Enter commit with partial text auto-drops the suggestions.
+    eventsWereOn = Application.EnableEvents
+    Application.EnableEvents = True
+    host.Range("E3").Value = "gr"
+    Application.EnableEvents = eventsWereOn
+    transcript = transcript & "|suggestOpened=" & _
+        CStr(ShapeExists(host, "rdm_wid20_color__opt2") And _
+             Not ShapeExists(host, "rdm_wid20_color__opt3"))
+    transcript = transcript & "|freeTextState=" & app.State("color")
+
+    ' Exact-match commit takes the item and closes.
+    Application.EnableEvents = True
+    host.Range("E3").Value = "red"
+    Application.EnableEvents = eventsWereOn
+    transcript = transcript & "|exactClosed=" & _
+        CStr(Not ShapeExists(host, "rdm_wid20_color__opt1"))
+    transcript = transcript & "|exactIndex=" & combo.CurrentValue
+
+    ' No-match commit stays closed as free text.
+    Application.EnableEvents = True
+    host.Range("E3").Value = "zzz"
+    Application.EnableEvents = eventsWereOn
+    transcript = transcript & "|noMatchClosed=" & _
+        CStr(Not ShapeExists(host, "rdm_wid20_color__opt1"))
+    transcript = transcript & "|noMatchState=" & app.State("color")
+    ReDimUI.AutoPump True
+    TestComboBox = transcript
+End Function
+
+' Cell-free fields: focus on click, characters through the key layer,
+' live combo filtering per keystroke, Enter commit, Escape revert, and
+' key release on blur. RdxKeyChar is the same entry OnKey drives.
+Public Function TestFloatField() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim fieldShape As Shape
+    Dim transcript As String
+
+    Set host = NewCanvas()
+    gChangeCount = 0
+    ReDimUI.AutoPump False
+    Set app = ReDimUI.Mount(host, "wid21")
+    app.TextInput("name").AtRect 24, 24, 150, 20
+    app.TextInput("name").WritesTo("who").OnChange _
+        "TestReDimWidgets.RecordChange"
+    app.ComboBox("color").AtRect 24, 60, 150, 20
+    app.ComboBox("color").Items("Red", "Green", "Gray", "Blue") _
+        .WritesTo "hue"
+    app.Render
+    Set fieldShape = host.Shapes("rdm_wid21_name")
+
+    ' Click focuses; the face shows the insertion bar and the focus ring.
+    ReDimUI.DispatchShape "rdm_wid21_name"
+    transcript = "focused=" & _
+        CStr(ReDimUI.FocusedComponentId = "name")
+    transcript = transcript & "|caretShown=" & _
+        CStr(fieldShape.TextFrame2.TextRange.Text = "|")
+    transcript = transcript & "|focusRing=" & _
+        CStr(fieldShape.Line.ForeColor.RGB = app.Theme.PrimaryColor)
+
+    RdxKeyChar "H"
+    RdxKeyChar "i"
+    transcript = transcript & "|typed=" & _
+        CStr(fieldShape.TextFrame2.TextRange.Text = "Hi|")
+    RdxKeyChar "{BS}"
+    RdxKeyChar "e"
+    RdxKeyChar "y"
+    RdxKeyChar "{ENTER}"
+    transcript = transcript & "|committed=" & app.State("who")
+    transcript = transcript & "|changeRan=" & gChangeCount
+    transcript = transcript & "|blurred=" & CStr(Not ReDimUI.HasKeyboardFocus)
+    transcript = transcript & "|plainText=" & _
+        CStr(fieldShape.TextFrame2.TextRange.Text = "Hey")
+
+    ' Escape reverts and fires nothing.
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid21_name"
+    RdxKeyChar "x"
+    RdxKeyChar "{ESC}"
+    transcript = transcript & "|reverted=" & _
+        CStr(app.TextInput("name").InputValue = "Hey" And gChangeCount = 1)
+
+    ' Float combo: focus opens, keys filter live, pick commits and blurs.
+    ReDimUI.DispatchShape "rdm_wid21_color"
+    transcript = transcript & "|comboOpenAll=" & _
+        CStr(ShapeExists(host, "rdm_wid21_color__opt4"))
+    RdxKeyChar "g"
+    transcript = transcript & "|liveFiltered=" & _
+        CStr(ShapeExists(host, "rdm_wid21_color__opt2") And _
+             Not ShapeExists(host, "rdm_wid21_color__opt3"))
+    RdxKeyChar "r"
+    RdxKeyChar "e"
+    transcript = transcript & "|narrowed=" & _
+        CStr(ShapeExists(host, "rdm_wid21_color__opt1") And _
+             Not ShapeExists(host, "rdm_wid21_color__opt2"))
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid21_color__opt1"
+    transcript = transcript & "|picked=" & app.State("hue")
+    transcript = transcript & "|pickBlurred=" & _
+        CStr(Not ReDimUI.HasKeyboardFocus)
+    transcript = transcript & "|pickClosed=" & _
+        CStr(Not ShapeExists(host, "rdm_wid21_color__opt1"))
+
+    ' Outside-press blur through the watch seam commits the field.
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid21_name"
+    RdxKeyChar "o"
+    app.TextInput("name").BlurField app, True
+    transcript = transcript & "|outsideCommit=" & app.State("who")
+    RdxReleaseKeys
+    ReDimUI.AutoPump True
+    TestFloatField = transcript
+End Function
+
 Public Function TestModalConfirm() As String
     Dim app As ReDimUI
     Dim host As Worksheet

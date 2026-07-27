@@ -55,10 +55,13 @@ Public Sub BuildWidgetGallery()
     app.Stepper("volume").AtRect(350, 206, 120, 24).SliderRange(0, 100, 5) _
         .Value(35).WritesTo("volume").BindValue "volume"
 
-    app.Label("lblInput").AtRect(24, 280, 200, 16).Text("Cell-backed input").Bold
-    app.TextInput("username").At("C20").WritesTo "userName"
-    app.Label("inputHint").AtRect(24, 324, 260, 16) _
-        .Text("Type in the framed cell and press Enter.")
+    app.Label("lblInput").AtRect(24, 280, 200, 16).Text("Cell-free fields").Bold
+    app.TextInput("username").AtRect(24, 304, 150, 22).WritesTo "userName"
+    app.ComboBox("fruit").AtRect(196, 304, 150, 22).WritesTo "fruit"
+    app.ComboBox("fruit").Items "Apple", "Apricot", "Banana", "Cherry", _
+        "Grape", "Grapefruit"
+    app.Label("inputHint").AtRect(24, 332, 480, 16) _
+        .Text("Click a field and type: the combo filters live, Enter commits, Esc reverts.")
 
     app.Label("lblProgress").AtRect(24, 356, 200, 16) _
         .Text("Slider, stepper, and meter share one state key").Bold
@@ -78,6 +81,7 @@ Public Sub BuildWidgetGallery()
     app.SetState "priority", "Medium"
     app.SetState "volume", 35
     app.SetState "userName", vbNullString
+    app.SetState "fruit", vbNullString
     app.SetState "lastAction", "none yet"
     app.SetState "oplog", "no run yet"
     RefreshInspector

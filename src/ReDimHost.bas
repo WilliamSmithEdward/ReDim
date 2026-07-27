@@ -44,6 +44,64 @@ Private gTimerResolutionRaised As Boolean
 Private gPinCursor As Boolean
 Private gCursorPinned As Boolean
 
+' Keyboard capture target. Application.OnKey can only call a standard
+' module procedure, so focused text entry routes every character through
+' here into the runtime. Never raises.
+Public Sub RdxKeyChar(ByVal keyText As String)
+    On Error Resume Next
+    ReDimUI.DispatchKey keyText
+End Sub
+
+' Arms character capture for a focused field. Letters bind twice so shift
+' yields capitals; the rest is the practical typing set for search fields.
+Public Sub RdxBindKeys()
+    Dim code As Long
+    Dim lower As String
+
+    On Error Resume Next
+    For code = Asc("A") To Asc("Z")
+        lower = LCase$(Chr$(code))
+        Application.OnKey lower, "'RdxKeyChar """ & lower & """'"
+        Application.OnKey "+" & lower, "'RdxKeyChar """ & Chr$(code) & """'"
+    Next code
+    For code = Asc("0") To Asc("9")
+        Application.OnKey Chr$(code), "'RdxKeyChar """ & Chr$(code) & """'"
+    Next code
+    Application.OnKey " ", "'RdxKeyChar "" ""'"
+    Application.OnKey "-", "'RdxKeyChar ""-""'"
+    Application.OnKey ".", "'RdxKeyChar "".""'"
+    Application.OnKey ",", "'RdxKeyChar "",""'"
+    Application.OnKey "{BS}", "'RdxKeyChar ""{BS}""'"
+    Application.OnKey "{ENTER}", "'RdxKeyChar ""{ENTER}""'"
+    Application.OnKey "~", "'RdxKeyChar ""{ENTER}""'"
+    Application.OnKey "{ESC}", "'RdxKeyChar ""{ESC}""'"
+    On Error GoTo 0
+End Sub
+
+' Panic release: restores every key ReDim may have bound, whether or not
+' any focus state survives. Safe to call at any time.
+Public Sub RdxReleaseKeys()
+    Dim code As Long
+
+    On Error Resume Next
+    For code = Asc("A") To Asc("Z")
+        Application.OnKey LCase$(Chr$(code))
+        Application.OnKey "+" & LCase$(Chr$(code))
+    Next code
+    For code = Asc("0") To Asc("9")
+        Application.OnKey Chr$(code)
+    Next code
+    Application.OnKey " "
+    Application.OnKey "-"
+    Application.OnKey "."
+    Application.OnKey ","
+    Application.OnKey "{BS}"
+    Application.OnKey "{ENTER}"
+    Application.OnKey "~"
+    Application.OnKey "{ESC}"
+    On Error GoTo 0
+End Sub
+
 ' Shape.OnAction target for every ReDim component. Application.Caller carries
 ' the clicked shape's name.
 Public Sub RdxDispatch()

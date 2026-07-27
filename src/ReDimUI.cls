@@ -72,6 +72,7 @@ Private Const KIND_TICKBOX As Long = 14
 Private Const KIND_RADIO As Long = 15
 Private Const KIND_STEPPER As Long = 16
 Private Const KIND_SLIDEBAR As Long = 17
+Private Const KIND_COMBO As Long = 18
 
 Private Const VARIANT_PRIMARY As Long = 0
 Private Const VARIANT_SECONDARY As Long = 1
@@ -83,7 +84,7 @@ Private Const REL_NONE As Long = 0
 Private Const REL_BELOW As Long = 1
 Private Const REL_RIGHT_OF As Long = 2
 Private Const PERSIST_PREFIX As String = "rdm_s_"
-Private Const REDIM_VERSION As String = "0.7.3"
+Private Const REDIM_VERSION As String = "0.9.0"
 
 Private mRole As Long
 
@@ -99,6 +100,8 @@ Private mWorkDebtMs As Long
 Private mWindows As Collection
 Private mNavStack As Collection
 Private mActiveWindowId As String
+Private mFocusAppId As String
+Private mFocusComponentId As String
 Private WithEvents mExcelApp As Excel.Application
 Attribute mExcelApp.VB_VarHelpID = -1
 
@@ -117,6 +120,7 @@ Private mAsyncOps As Collection
 Private mJobs As Collection
 Private mErrorHandlerProc As String
 Private mToastCounter As Long
+Private mFieldPrevButtonDown As Boolean
 Private mToastTrayAnchor As String
 Private mPersistOn As Boolean
 Private mHotKeys As Collection
@@ -179,6 +183,10 @@ Private mSlideTracking As Boolean
 Private mSlidePrevButtonDown As Boolean
 Private mSlideValueAtEngage As Double
 Private mSlideSuppressUntilMs As LongLong
+Private mComboMatches As Collection
+Private mFieldTextAtFocus As String
+Private mCaretOn As Boolean
+Private mCaretAccumMs As Long
 Private mRelMode As Long
 Private mRelTargetId As String
 Private mRelGap As Double
@@ -381,6 +389,101 @@ Public Property Get SenderPart() As String
     SenderPart = ReDimUI.FactorySenderPart
 End Property
 
+' ---------------------------------------------------------------
+' Keyboard focus: one field at a time owns typed characters, routed
+' through ReDimHost.RdxKeyChar because OnKey can only target a standard
+' module. Keys are bound only while a field is focused, so ordinary sheet
+' typing is untouched the rest of the time.
+' ---------------------------------------------------------------
+
+Friend Sub DispatchKey(ByVal keyText As String)
+    Dim appValue As ReDimUI
+    Dim componentValue As ReDimUI
+
+    If Not IsFactory(Me) Then
+        ReDimUI.DispatchKey keyText
+        Exit Sub
+    End If
+    EnsureFactory
+    If LenB(mFocusComponentId) = 0 Then Exit Sub
+    Set appValue = FindApp(mFocusAppId)
+    If appValue Is Nothing Then
+        ClearKeyboardFocus
+        Exit Sub
+    End If
+    Set componentValue = appValue.PeekComponent(mFocusComponentId)
+    If componentValue Is Nothing Then
+        ClearKeyboardFocus
+        Exit Sub
+    End If
+    On Error Resume Next
+    componentValue.HandleKey appValue, keyText
+    On Error GoTo 0
+End Sub
+
+Friend Sub SetKeyboardFocus(ByVal hostApp As ReDimUI, ByVal componentValue As ReDimUI)
+    Dim previousApp As ReDimUI
+    Dim previousComponent As ReDimUI
+
+    If Not IsFactory(Me) Then
+        ReDimUI.SetKeyboardFocus hostApp, componentValue
+        Exit Sub
+    End If
+    EnsureFactory
+    If LenB(mFocusComponentId) > 0 Then
+        Set previousApp = FindApp(mFocusAppId)
+        If Not previousApp Is Nothing Then
+            Set previousComponent = _
+                previousApp.PeekComponent(mFocusComponentId)
+            If Not previousComponent Is Nothing Then
+                previousComponent.BlurField previousApp, True
+            End If
+        End If
+    End If
+    mFocusAppId = hostApp.AppId
+    mFocusComponentId = componentValue.ComponentId
+    RdxBindKeys
+    RequestPump
+End Sub
+
+Friend Sub ClearKeyboardFocus()
+    If Not IsFactory(Me) Then
+        ReDimUI.ClearKeyboardFocus
+        Exit Sub
+    End If
+    mFocusAppId = vbNullString
+    mFocusComponentId = vbNullString
+    RdxReleaseKeys
+End Sub
+
+Public Property Get HasKeyboardFocus() As Boolean
+    If Not IsFactory(Me) Then
+        HasKeyboardFocus = ReDimUI.HasKeyboardFocus
+        Exit Property
+    End If
+    HasKeyboardFocus = (LenB(mFocusComponentId) > 0)
+End Property
+
+Public Property Get FocusedComponentId() As String
+    If Not IsFactory(Me) Then
+        FocusedComponentId = ReDimUI.FocusedComponentId
+        Exit Property
+    End If
+    FocusedComponentId = mFocusComponentId
+End Property
+
+Friend Function IsComponentFocused( _
+    ByVal appId As String, _
+    ByVal componentId As String _
+) As Boolean
+    If Not IsFactory(Me) Then
+        IsComponentFocused = ReDimUI.IsComponentFocused(appId, componentId)
+        Exit Function
+    End If
+    IsComponentFocused = (mFocusAppId = appId _
+        And mFocusComponentId = componentId)
+End Function
+
 Friend Property Get FactorySenderPart() As String
     FactorySenderPart = mSenderPartName
 End Property
@@ -502,6 +605,7 @@ Public Sub Shutdown()
     End If
     EnsureFactory
     RdxStopPump
+    ClearKeyboardFocus
     On Error Resume Next
     For Each appValue In mApps
         appValue.ReleaseAppResources
@@ -770,6 +874,15 @@ Public Function SlideBar(ByVal componentId As String) As ReDimUI
     Set SlideBar = GetOrCreateComponent(componentId, KIND_SLIDEBAR)
 End Function
 
+' Editable combo: a cell-backed text face with a caret and a drawn option
+' list. Excel pauses all VBA during cell edit mode, so filtering applies
+' at the moments the platform grants: opening the list filters by the
+' typed text, and committing with Enter auto-suggests matches (an exact
+' match simply takes it). Free text is always allowed.
+Public Function ComboBox(ByVal componentId As String) As ReDimUI
+    Set ComboBox = GetOrCreateComponent(componentId, KIND_COMBO)
+End Function
+
 Public Function TextInput(ByVal componentId As String) As ReDimUI
     Set TextInput = GetOrCreateComponent(componentId, KIND_INPUT)
 End Function
@@ -1020,6 +1133,10 @@ Friend Function TryGetComponent( _
     ByRef result As ReDimUI _
 ) As Boolean
     TryGetComponent = TryGetObject(mComponents, componentId, result)
+End Function
+
+Friend Function PeekComponent(ByVal componentId As String) As ReDimUI
+    Set PeekComponent = FindKeyed(mComponents, componentId)
 End Function
 
 Public Property Get Component(ByVal componentId As String) As ReDimUI
@@ -1569,6 +1686,11 @@ Public Sub Unmount(Optional ByVal deleteShapes As Boolean = True)
 
     RequireRole ROLE_APP, "Unmount"
     ClearHotKeys
+    If ReDimUI.FocusedComponentId <> vbNullString Then
+        If ReDimUI.IsComponentFocused(mAppId, ReDimUI.FocusedComponentId) Then
+            ReDimUI.ClearKeyboardFocus
+        End If
+    End If
     If mSurfaceProtected Then ProtectSurface False
     If deleteShapes Then
         For Each componentValue In mComponents
@@ -1641,11 +1763,15 @@ Friend Sub TickApp( _
         End If
     Next jobValue
     Dim leftButtonDown As Boolean
+    Dim pressEdge As Boolean
     leftButtonDown = (GetAsyncKeyState(VK_LEFT_BUTTON) < 0)
+    pressEdge = (leftButtonDown And Not mFieldPrevButtonDown)
+    mFieldPrevButtonDown = leftButtonDown
     Set expiredIds = New Collection
     For Each componentValue In mComponents
         componentValue.TickAnimation mSheet, elapsedMs
         componentValue.TickSlideDrag Me, leftButtonDown
+        componentValue.TickFieldWatch Me, leftButtonDown, pressEdge
         If runWork Then
             If componentValue.IsExpiredToast(nowMs) Then
                 expiredIds.Add componentValue.ComponentId
@@ -1842,6 +1968,8 @@ Friend Sub ConfigureComponent( _
             mWidth = 44: mHeight = 22
         Case KIND_INPUT
             mWidth = 140: mHeight = 20
+        Case KIND_COMBO
+            mWidth = 150: mHeight = 20
         Case KIND_SELECT
             mWidth = 130: mHeight = 24
         Case KIND_TICKBOX
@@ -2288,17 +2416,26 @@ End Function
 ' SheetChange pipeline.
 Public Property Get InputValue() As String
     RequireRole ROLE_COMPONENT, "InputValue"
-    InputValue = CStr(InputCell(OwnerApp.Sheet).Value)
+    If IsFloatField() Then
+        InputValue = mText
+    Else
+        InputValue = CStr(InputCell(OwnerApp.Sheet).Value)
+    End If
 End Property
 
 Public Property Let InputValue(ByVal newValue As String)
     Dim priorEvents As Boolean
 
     RequireRole ROLE_COMPONENT, "InputValue"
-    priorEvents = Application.EnableEvents
-    Application.EnableEvents = False
-    InputCell(OwnerApp.Sheet).Value = newValue
-    Application.EnableEvents = priorEvents
+    If IsFloatField() Then
+        mText = newValue
+        Touch
+    Else
+        priorEvents = Application.EnableEvents
+        Application.EnableEvents = False
+        InputCell(OwnerApp.Sheet).Value = newValue
+        Application.EnableEvents = priorEvents
+    End If
     If LenB(mWritesToKey) > 0 Then OwnerApp.SetState mWritesToKey, newValue
 End Property
 
@@ -2313,8 +2450,9 @@ End Function
 Friend Sub SyncInputFromSheet(ByVal ownerApp As ReDimUI, ByVal changed As Range)
     Dim cell As Range
     Dim newValue As String
+    Dim exactAt As Long
 
-    If mKind <> KIND_INPUT Then Exit Sub
+    If mKind <> KIND_INPUT And mKind <> KIND_COMBO Then Exit Sub
     If LenB(mAnchor) = 0 Then Exit Sub
     On Error Resume Next
     Set cell = InputCell(ownerApp.Sheet)
@@ -2327,6 +2465,24 @@ Friend Sub SyncInputFromSheet(ByVal ownerApp As ReDimUI, ByVal changed As Range)
         On Error Resume Next
         Application.Run mClickProc
         On Error GoTo 0
+    End If
+    ' Combo auto-suggest at commit time, the moment Excel hands control
+    ' back: an exact match takes the item and closes; partial matches drop
+    ' the filtered list; no match stays closed as free text.
+    If mKind = KIND_COMBO Then
+        exactAt = ExactItemMatch(newValue)
+        If exactAt > 0 Then
+            mValue = exactAt
+            mSelectOpen = False
+        ElseIf LenB(newValue) > 0 _
+            And BuildComboMatches(newValue).Count > 0 Then
+            mValue = 0
+            mSelectOpen = True
+        Else
+            mValue = 0
+            mSelectOpen = False
+        End If
+        Touch
     End If
 End Sub
 
@@ -2489,6 +2645,27 @@ Friend Sub RunClickBehavior()
             mChecked = Not mChecked
             If LenB(mWritesToKey) > 0 Then hostApp.SetState mWritesToKey, mChecked
             Touch
+        Case KIND_INPUT
+            If IsFloatField() Then
+                FocusField hostApp
+                Exit Sub
+            End If
+        Case KIND_COMBO
+            If Left$(ReDimUI.SenderPart, 3) = "opt" Then
+                PickComboItem hostApp, CLng(Mid$(ReDimUI.SenderPart, 4))
+            ElseIf IsFloatField() Then
+                If ReDimUI.IsComponentFocused(hostApp.AppId, mComponentId) Then
+                    mSelectOpen = Not mSelectOpen
+                    Touch
+                Else
+                    FocusField hostApp
+                End If
+                Exit Sub
+            Else
+                mSelectOpen = Not mSelectOpen
+                Touch
+                Exit Sub
+            End If
         Case KIND_SELECT
             If Left$(ReDimUI.SenderPart, 3) = "opt" Then
                 mValue = CLng(Mid$(ReDimUI.SenderPart, 4))
@@ -2881,8 +3058,21 @@ Private Sub ApplyStyle(ByVal target As Shape, ByVal themeValue As ReDimUI)
                 target.Line.Visible = msoFalse
                 mAppliedFill = ResolveToggleFill(themeValue)
             End If
-        Case KIND_INPUT
-            If Not mAppliedValid Then
+        Case KIND_INPUT, KIND_COMBO
+            If IsFloatField() Then
+                ' Float fields are their own editor: surface fill so the
+                ' face takes clicks, accent border while focused.
+                target.Fill.Visible = msoTrue
+                target.Fill.ForeColor.RGB = ResolveSurfaceFill(themeValue)
+                target.Line.Visible = msoTrue
+                If ReDimUI.IsComponentFocused(mOwnerAppId, mComponentId) Then
+                    target.Line.ForeColor.RGB = themeValue.PrimaryColor
+                    target.Line.Weight = 1.5
+                Else
+                    target.Line.ForeColor.RGB = themeValue.BorderColor
+                    target.Line.Weight = 1
+                End If
+            ElseIf Not mAppliedValid Then
                 target.Fill.Visible = msoFalse
                 target.Line.Visible = msoTrue
                 target.Line.ForeColor.RGB = themeValue.BorderColor
@@ -2999,6 +3189,13 @@ Friend Function ResolveText(ByVal ownerApp As ReDimUI) As String
         If LenB(ResolveText) = 0 Then ResolveText = mText
         Exit Function
     End If
+    ' A focused float field shows the blinking insertion bar in-text.
+    If IsFloatField() Then
+        If ReDimUI.IsComponentFocused(mOwnerAppId, mComponentId) Then
+            ResolveText = mText & IIf(mCaretOn, "|", " ")
+            Exit Function
+        End If
+    End If
     ResolveText = mText
 End Function
 
@@ -3017,7 +3214,10 @@ Private Sub ApplyText(ByVal target As Shape, ByVal themeValue As ReDimUI)
     Dim textChanged As Boolean
 
     If mKind = KIND_SPINNER Or mKind = KIND_TOGGLE Or mKind = KIND_OVERLAY _
-        Or mKind = KIND_INPUT Or IsCompositeDrawnKind() Then Exit Sub
+        Or IsCompositeDrawnKind() Then Exit Sub
+    If (mKind = KIND_INPUT Or mKind = KIND_COMBO) And Not IsFloatField() Then
+        Exit Sub
+    End If
     resolved = ResolveText(Nothing)
     resolvedColor = ResolveTextColor(themeValue)
     resolvedSize = mFontSize
@@ -3090,7 +3290,10 @@ Private Sub ApplyKindExtras( _
             ApplyProgressFill hostSheet, themeValue
             mAppliedValue = mValue
         Case KIND_INPUT
-            ApplyInputCell hostSheet, themeValue
+            If Not IsFloatField() Then ApplyInputCell hostSheet, themeValue
+        Case KIND_COMBO
+            If Not IsFloatField() Then ApplyInputCell hostSheet, themeValue
+            ApplyComboParts hostSheet, themeValue
         Case KIND_SELECT
             ApplySelectParts hostSheet, themeValue
         Case KIND_TICKBOX
@@ -3794,6 +3997,274 @@ Private Function ScreenPixelsPerPoint() As Double
     If ScreenPixelsPerPoint = 0 Then ScreenPixelsPerPoint = dotsPerInch / 72#
 End Function
 
+Private Sub ApplyComboParts( _
+    ByVal hostSheet As Worksheet, _
+    ByVal themeValue As ReDimUI _
+)
+    Dim caret As Shape
+
+    Set caret = EnsurePartShape(hostSheet, "caret", msoShapeIsoscelesTriangle)
+    caret.Width = 8
+    caret.Height = 5
+    caret.Left = mLeft + mWidth - 12
+    caret.Top = mTop + (mHeight - 5) / 2
+    caret.Rotation = 180
+    caret.Fill.Visible = msoTrue
+    caret.Fill.ForeColor.RGB = themeValue.OnMutedColor
+    caret.Visible = BoolToMso(mVisible)
+    caret.OnAction = mAppliedOnAction
+    SyncComboOptions hostSheet, themeValue
+End Sub
+
+' The open list shows items filtered by the typed text: contains-match,
+' case-insensitive, everything when the text is empty. Option rows map
+' back to item indexes through mComboMatches.
+Private Sub SyncComboOptions( _
+    ByVal hostSheet As Worksheet, _
+    ByVal themeValue As ReDimUI _
+)
+    Dim optionShape As Shape
+    Dim position As Long
+    Dim wanted As Long
+    Dim itemIndex As Long
+    Dim resolvedSize As Double
+
+    Set mComboMatches = BuildComboMatches(FieldText(hostSheet))
+    If mSelectOpen And mVisible Then wanted = mComboMatches.Count
+    resolvedSize = mFontSize
+    If resolvedSize <= 0 Then resolvedSize = themeValue.BaseFontSize
+    For position = 1 To wanted
+        itemIndex = CLng(mComboMatches.Item(position))
+        Set optionShape = EnsurePartShape( _
+            hostSheet, "opt" & position, msoShapeRectangle)
+        optionShape.Left = mLeft
+        optionShape.Top = mTop + mHeight + (position - 1) * (mHeight + 2)
+        optionShape.Width = mWidth
+        optionShape.Height = mHeight + 2
+        optionShape.Fill.Visible = msoTrue
+        If itemIndex = CLng(mValue) Then
+            optionShape.Fill.ForeColor.RGB = themeValue.MutedColor
+        Else
+            optionShape.Fill.ForeColor.RGB = themeValue.SurfaceColor
+        End If
+        optionShape.Line.Visible = msoTrue
+        optionShape.Line.ForeColor.RGB = themeValue.BorderColor
+        optionShape.Line.Weight = 1
+        With optionShape.TextFrame2
+            .MarginLeft = 6
+            .MarginRight = 6
+            .MarginTop = 2
+            .MarginBottom = 2
+            .VerticalAnchor = msoAnchorMiddle
+            .WordWrap = msoFalse
+            .TextRange.Text = ItemAt(itemIndex)
+            .TextRange.ParagraphFormat.Alignment = msoAlignLeft
+            With .TextRange.Font
+                .Name = themeValue.FontName
+                .Size = resolvedSize
+                .Bold = msoFalse
+                .Fill.ForeColor.RGB = themeValue.OnSurfaceColor
+            End With
+        End With
+        optionShape.Visible = msoTrue
+        optionShape.OnAction = mAppliedOnAction
+        optionShape.ZOrder msoBringToFront
+    Next position
+    For position = wanted + 1 To mAppliedOptionCount
+        On Error Resume Next
+        hostSheet.Shapes(ShapeName & PART_SEPARATOR & "opt" & position).Delete
+        On Error GoTo 0
+    Next position
+    mAppliedOptionCount = wanted
+End Sub
+
+' A field without a cell anchor is a float field: its text lives in the
+' component buffer, rendered on the shape itself, edited through the
+' keyboard focus layer. Anchoring to a cell with At keeps the original
+' cell-backed behavior.
+Friend Function IsFloatField() As Boolean
+    IsFloatField = ((mKind = KIND_INPUT Or mKind = KIND_COMBO) _
+        And LenB(mAnchor) = 0)
+End Function
+
+Private Function FieldText(ByVal hostSheet As Worksheet) As String
+    Dim cell As Range
+
+    If IsFloatField() Then
+        FieldText = mText
+        Exit Function
+    End If
+    On Error Resume Next
+    Set cell = InputCell(hostSheet)
+    If Not cell Is Nothing Then FieldText = CStr(cell.Value)
+    On Error GoTo 0
+End Function
+
+Friend Sub FocusField(ByVal hostApp As ReDimUI)
+    If Not IsFloatField() Then Exit Sub
+    mFieldTextAtFocus = mText
+    mCaretOn = True
+    mCaretAccumMs = 0
+    ReDimUI.SetKeyboardFocus hostApp, Me
+    If mKind = KIND_COMBO Then mSelectOpen = True
+    Touch
+End Sub
+
+' Commit-blur keeps the text and fires events; revert-blur restores what
+' was there when focus arrived and fires nothing.
+Friend Sub BlurField(ByVal hostApp As ReDimUI, ByVal commitChanges As Boolean)
+    Dim exactAt As Long
+
+    If Not ReDimUI.IsComponentFocused(hostApp.AppId, mComponentId) Then Exit Sub
+    ReDimUI.ClearKeyboardFocus
+    mCaretOn = False
+    If commitChanges Then
+        If mKind = KIND_COMBO Then
+            exactAt = ExactItemMatch(mText)
+            If exactAt > 0 Then
+                mValue = exactAt
+                mText = ItemAt(exactAt)
+            Else
+                mValue = 0
+            End If
+        End If
+        If mText <> mFieldTextAtFocus Then
+            If LenB(mWritesToKey) > 0 Then
+                hostApp.SetState mWritesToKey, mText
+            End If
+            If LenB(mClickProc) > 0 Then
+                On Error Resume Next
+                Application.Run mClickProc
+                On Error GoTo 0
+            End If
+        End If
+    Else
+        mText = mFieldTextAtFocus
+    End If
+    mSelectOpen = False
+    Touch
+End Sub
+
+Friend Sub HandleKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
+    If Not IsFloatField() Then Exit Sub
+    Select Case keyText
+        Case "{ENTER}"
+            BlurField hostApp, True
+            Exit Sub
+        Case "{ESC}"
+            BlurField hostApp, False
+            Exit Sub
+        Case "{BS}"
+            If Len(mText) > 0 Then mText = Left$(mText, Len(mText) - 1)
+        Case Else
+            mText = mText & keyText
+    End Select
+    mCaretOn = True
+    mCaretAccumMs = 0
+    ' Live filtering, the payoff cells could never give: the option list
+    ' re-filters on every keystroke.
+    If mKind = KIND_COMBO Then mSelectOpen = True
+    Touch
+End Sub
+
+' Outside-press blur, watched by the same pump frames as slider drags: a
+' press anywhere off the field commits and releases focus.
+Friend Sub TickFieldWatch( _
+    ByVal hostApp As ReDimUI, _
+    ByVal buttonDown As Boolean, _
+    ByVal pressEdge As Boolean _
+)
+    If Not IsFloatField() Then Exit Sub
+    If Not ReDimUI.IsComponentFocused(hostApp.AppId, mComponentId) Then Exit Sub
+    If Not pressEdge Then Exit Sub
+    If CursorOverField() Then Exit Sub
+    BlurField hostApp, True
+End Sub
+
+Private Function CursorOverField() As Boolean
+    Dim cursor As RdxScreenPoint
+    Dim pointsX As Double
+    Dim pointsY As Double
+    Dim listDepth As Double
+
+    If GetCursorPos(cursor) = 0 Then Exit Function
+    pointsX = ScreenXToSheetPoints(cursor.X)
+    If pointsX = UNMAPPABLE_POINTS Then Exit Function
+    pointsY = ScreenYToSheetPoints(cursor.Y)
+    If pointsY = UNMAPPABLE_POINTS Then Exit Function
+    ' The open option list counts as part of the field.
+    listDepth = 0
+    If mSelectOpen And Not mComboMatches Is Nothing Then
+        listDepth = mComboMatches.Count * (mHeight + 2)
+    End If
+    If pointsX < mLeft - 2 Or pointsX > mLeft + mWidth + 2 Then Exit Function
+    If pointsY < mTop - 2 Or pointsY > mTop + mHeight + listDepth + 2 Then
+        Exit Function
+    End If
+    CursorOverField = True
+End Function
+
+Private Function BuildComboMatches(ByVal filterText As String) As Collection
+    Dim position As Long
+
+    Set BuildComboMatches = New Collection
+    If mItems Is Nothing Then Exit Function
+    For position = 1 To mItems.Count
+        If LenB(filterText) = 0 Then
+            BuildComboMatches.Add position
+        ElseIf InStr(1, CStr(mItems.Item(position)), filterText, _
+            vbTextCompare) > 0 Then
+            BuildComboMatches.Add position
+        End If
+    Next position
+End Function
+
+Private Function ExactItemMatch(ByVal candidate As String) As Long
+    Dim position As Long
+
+    If mItems Is Nothing Then Exit Function
+    For position = 1 To mItems.Count
+        If StrComp(CStr(mItems.Item(position)), candidate, _
+            vbTextCompare) = 0 Then
+            ExactItemMatch = position
+            Exit Function
+        End If
+    Next position
+End Function
+
+' An option pick writes the cell without re-entering SheetChange, updates
+' selection and state, and closes the list.
+Friend Sub PickComboItem(ByVal hostApp As ReDimUI, ByVal matchRow As Long)
+    Dim itemIndex As Long
+    Dim priorEvents As Boolean
+    Dim picked As String
+    Dim cell As Range
+
+    If mComboMatches Is Nothing Then Exit Sub
+    If matchRow < 1 Or matchRow > mComboMatches.Count Then Exit Sub
+    itemIndex = CLng(mComboMatches.Item(matchRow))
+    picked = ItemAt(itemIndex)
+    If IsFloatField() Then
+        mText = picked
+        If ReDimUI.IsComponentFocused(hostApp.AppId, mComponentId) Then
+            ReDimUI.ClearKeyboardFocus
+            mCaretOn = False
+        End If
+    Else
+        priorEvents = Application.EnableEvents
+        Application.EnableEvents = False
+        On Error Resume Next
+        Set cell = InputCell(hostApp.Sheet)
+        If Not cell Is Nothing Then cell.Value = picked
+        On Error GoTo 0
+        Application.EnableEvents = priorEvents
+    End If
+    mValue = itemIndex
+    mSelectOpen = False
+    If LenB(mWritesToKey) > 0 Then hostApp.SetState mWritesToKey, picked
+    Touch
+End Sub
+
 Private Sub ApplyInputCell( _
     ByVal hostSheet As Worksheet, _
     ByVal themeValue As ReDimUI _
@@ -3815,7 +4286,7 @@ End Sub
 Friend Sub UnlockInputCell(ByVal hostSheet As Worksheet)
     Dim cell As Range
 
-    If mKind <> KIND_INPUT Then Exit Sub
+    If mKind <> KIND_INPUT And mKind <> KIND_COMBO Then Exit Sub
     If LenB(mAnchor) = 0 Then Exit Sub
     On Error Resume Next
     Set cell = InputCell(hostSheet)
@@ -3851,7 +4322,9 @@ End Sub
 
 Friend Function NeedsAnimation() As Boolean
     NeedsAnimation = (mKind = KIND_SPINNER And mVisible) _
-        Or (mKind = KIND_TOAST And mSlideRemaining > 0)
+        Or (mKind = KIND_TOAST And mSlideRemaining > 0) _
+        Or (IsFloatField() And _
+            ReDimUI.IsComponentFocused(mOwnerAppId, mComponentId))
 End Function
 
 ' Animation bypasses the diff cache: rotation and the toast slide are
@@ -3868,6 +4341,14 @@ Friend Sub TickAnimation(ByVal hostSheet As Worksheet, ByVal elapsedMs As Long)
             mSlideRemaining = mSlideRemaining * (0.55 ^ (elapsedMs / 50#))
             If mSlideRemaining < 0.75 Then mSlideRemaining = 0
             hostSheet.Shapes(ShapeName).Top = mTop + mSlideRemaining
+        Case KIND_INPUT, KIND_COMBO
+            ' Insertion bar blink for the focused float field.
+            mCaretAccumMs = mCaretAccumMs + elapsedMs
+            If mCaretAccumMs >= 500 Then
+                mCaretAccumMs = 0
+                mCaretOn = Not mCaretOn
+                Touch
+            End If
     End Select
     On Error GoTo 0
 End Sub

@@ -226,6 +226,54 @@ def test_item_api(run_widgets):
     assert facts["radioSelectionCleared"] == "True"
 
 
+def test_combo_box(run_widgets):
+    facts = parse_transcript(run_widgets("TestComboBox"))
+    assert facts["frameAndCaret"] == "True"
+    assert facts["openAll"] == "True"
+    assert facts["optText"] == "Green"
+    assert facts["pickedCell"] == "Green"
+    assert facts["pickedState"] == "Green"
+    assert facts["pickChangeRan"] == "1"
+    assert facts["closedAfterPick"] == "True"
+    assert facts["pickedIndex"] == "2"
+    assert facts["filteredCount"] == "True", (
+        "the caret must open the list filtered by the typed text"
+    )
+    assert facts["filteredText"] == "Blue"
+    assert facts["suggestOpened"] == "True", (
+        "an Enter commit with partial text must auto-drop the suggestions"
+    )
+    assert facts["freeTextState"] == "gr"
+    assert facts["exactClosed"] == "True"
+    assert facts["exactIndex"] == "1"
+    assert facts["noMatchClosed"] == "True"
+    assert facts["noMatchState"] == "zzz"
+
+
+def test_float_field(run_widgets):
+    facts = parse_transcript(run_widgets("TestFloatField"))
+    assert facts["focused"] == "True"
+    assert facts["caretShown"] == "True", (
+        "a focused float field must show the insertion bar"
+    )
+    assert facts["focusRing"] == "True"
+    assert facts["typed"] == "True"
+    assert facts["committed"] == "Hey"
+    assert facts["changeRan"] == "1"
+    assert facts["blurred"] == "True", "Enter must commit and release the keys"
+    assert facts["plainText"] == "True"
+    assert facts["reverted"] == "True", "Escape must revert and fire nothing"
+    assert facts["comboOpenAll"] == "True"
+    assert facts["liveFiltered"] == "True", (
+        "the float combo must re-filter on every keystroke"
+    )
+    assert facts["narrowed"] == "True"
+    assert facts["picked"] == "Green"
+    assert facts["pickBlurred"] == "True"
+    assert facts["pickClosed"] == "True"
+    assert facts["outsideCommit"] == "Heyo"
+
+
 def test_modal_confirm(run_widgets):
     facts = parse_transcript(run_widgets("TestModalConfirm"))
     assert facts["overlayShown"] == "True"

@@ -44,9 +44,9 @@ demo is the working reference.
 ## App
 
 Component factories, get-or-create by id: `Button`, `Label`, `Card`, `Spinner`, `ProgressBar`,
-`Toggle`, `TickBox`, `RadioGroup`, `Stepper`, `SlideBar`, `SelectBox`, `TextInput`. Every
-control is drawn from shapes and fully themed; there are no native form controls in the
-framework. Also:
+`Toggle`, `TickBox`, `RadioGroup`, `Stepper`, `SlideBar`, `SelectBox`, `ComboBox`,
+`TextInput`. Every control is drawn from shapes and fully themed; there are no native form
+controls in the framework. Also:
 
 | Member | Purpose |
 |---|---|
@@ -67,7 +67,7 @@ framework. Also:
 | `Async(opId)` / `CancelAsync opId` / `AsyncError(opId)` | Async ops (see [async.md](async.md)). |
 | `Job(jobId)` / `CancelJob jobId` | Chunked or paced background work. |
 | `OnError "Module.Proc"` | One-argument sink for swallowed handler failures. |
-| `ProtectSurface enabled` | Opt-in app-sheet protection (UserInterfaceOnly): users cannot enter cell edit mode or drag shapes there, framework writes keep working, TextInput cells stay editable. UserInterfaceOnly does not persist across reopen, so builds should call `ProtectSurface False` first and `ProtectSurface` after Render, as every demo does. Unmount unprotects. |
+| `ProtectSurface enabled` | Opt-in app-sheet protection (UserInterfaceOnly): users cannot enter cell edit mode or drag shapes there, framework writes keep working, cell-anchored TextInput cells stay editable, and float fields type normally since they never enter cell edit. UserInterfaceOnly does not persist across reopen, so builds should call `ProtectSurface False` first and `ProtectSurface` after Render, as every demo does. Unmount unprotects. |
 | `Unmount deleteShapes` | Remove components (and shapes) and forget the app. |
 
 ## Component builders
@@ -95,7 +95,8 @@ All fluent, all return the component:
   serves the disable-while-busy pattern: `BindEnabled "anyRunning", True`.
 - Behavior: `OnClick "Module.Proc"`, `OnClickAsync "Module.Proc"`, `OnChange "Module.Proc"`.
 - Reads: `CurrentValue`, `CurrentText`, `IsChecked`, `IsEnabled`, `IsBusy`, `InputValue`
-  (TextInput; assigning it writes the cell without firing change events).
+  (TextInput and ComboBox; reads the float buffer or the backing cell, and assigning it
+  writes without firing change events).
 - `Remove` deletes the component and its shapes.
 
 Handlers are zero-argument public procedures referenced as `"Module.Proc"`. Inside a handler,
@@ -125,7 +126,41 @@ dependencies:
   `PointsToScreenPixels`; frozen-pane splits skew that calibration, so keep app surfaces
   unsplit. Use `Stepper` for precision.
 - `SelectBox`: a themed face, caret, and option list in place of the native dropdown.
+- `ComboBox`: an editable combo with a caret and a filtered drop list, sharing the item
+  APIs. Place it with `AtRect` (or `Below`/`RightOf`) and it is a float field: click to
+  focus, type, and the list re-filters on every keystroke. Anchoring to a cell with `At`
+  keeps the 0.8.0 cell-backed mode, where Excel's edit-mode VBA pause limits filtering to
+  commit moments. In both modes picking an option writes the value, the `WritesTo` state,
+  and fires `OnChange`.
+- `TextInput`: a text field. Float by default (`AtRect`), cell-backed with `At` when you
+  want the value to live in the grid.
 - `Toggle`: the pill switch for booleans.
+
+## Float fields and keyboard focus
+
+As of 0.9.0 no control needs a cell. `TextInput` and `ComboBox` placed with `AtRect`,
+`Below`, or `RightOf` render and edit entirely on their shapes: clicking a field gives it
+keyboard focus, an accent ring and a blinking insertion bar appear, and characters go to the
+component's text buffer instead of a cell. That sidesteps Excel's edit-mode VBA pause - the
+framework sees every keystroke, which is what makes live combo filtering possible - and it
+means typing works on `ProtectSurface` sheets, where cell edit is locked out.
+
+Focus mechanics, all automatic:
+
+- One field holds focus at a time; focusing another commits the first.
+- Enter commits: the buffer becomes the value, `WritesTo` state is written and `OnChange`
+  fires if the text changed. A combo commit that exactly matches an item takes that item.
+- Esc reverts to the text the field had when focus arrived and fires nothing.
+- Clicking anywhere off the field commits, watched by the same pump frames as slider drags.
+- `InputValue` reads and writes the buffer in float mode, the cell in cell mode.
+
+Capture uses `Application.OnKey`, bound only while a field is focused and released on blur,
+so sheet typing is untouched the rest of the time. The bound set is the practical typing
+subset - letters (with Shift capitals), digits, space, minus, period, comma, Backspace,
+Enter, Esc. OnKey cannot see more than that (no arrows-within-text, no selection), so the
+model is append-and-backspace, honest and predictable. `ReDimUI.HasKeyboardFocus` and
+`ReDimUI.FocusedComponentId` report the current holder; `RdxReleaseKeys` is the panic
+release that unbinds everything regardless of state.
 
 ## Shapes are framework-owned
 
