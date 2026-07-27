@@ -85,7 +85,7 @@ Private Const REL_NONE As Long = 0
 Private Const REL_BELOW As Long = 1
 Private Const REL_RIGHT_OF As Long = 2
 Private Const PERSIST_PREFIX As String = "rdm_s_"
-Private Const REDIM_VERSION As String = "0.10.1"
+Private Const REDIM_VERSION As String = "0.10.2"
 
 Private mRole As Long
 
@@ -179,6 +179,8 @@ Private mWritesToKey As String
 Private mLastClickMs As LongLong
 Private mExpiresAtMs As LongLong
 Private mSlideRemaining As Double
+Private mToastExiting As Boolean
+Private mExitRemaining As Double
 Private mItems As Collection
 Private mSliderMin As Long
 Private mSliderMax As Long
@@ -992,6 +994,23 @@ Friend Sub RecordToastRail( _
     mToastRailTop = originTop
     mToastRailStored = True
 End Sub
+
+' The lowest visual position any live toast currently occupies, glides
+' included. -1 when the tray is otherwise empty.
+Friend Function MaxToastVisualTop(ByVal claimantId As String) As Double
+    Dim componentValue As ReDimUI
+
+    MaxToastVisualTop = -1
+    For Each componentValue In mComponents
+        If componentValue.IsPendingToast Then
+            If componentValue.ComponentId <> claimantId Then
+                If componentValue.ToastVisualTop > MaxToastVisualTop Then
+                    MaxToastVisualTop = componentValue.ToastVisualTop
+                End If
+            End If
+        End If
+    Next componentValue
+End Function
 
 ' Lowest slot not held by a live toast, so slot one is reused the moment the
 ' previous toast expires instead of the stack growing downward forever.
@@ -1857,8 +1876,11 @@ Friend Sub TickApp( _
         componentValue.TickFieldWatch Me, anyButtonDown, pressEdge
         If runWork Then
             If componentValue.IsExpiredToast(nowMs) Then
-                expiredIds.Add componentValue.ComponentId
+                componentValue.BeginToastExit
             End If
+        End If
+        If componentValue.IsToastExitDone Then
+            expiredIds.Add componentValue.ComponentId
         End If
     Next componentValue
     Dim expiredId As Variant
@@ -1885,12 +1907,18 @@ Private Sub CompactToastSlots()
     For Each componentValue In mComponents
         If componentValue.IsPendingToast Then live.Add componentValue
     Next componentValue
+    ' Collection.Item returns a Variant, and Friend members are invisible
+    ' to late binding (error 438), so every candidate goes through a typed
+    ' local before any member access. The failure only surfaces with two
+    ' or more survivors, when the comparison loop actually runs.
+    Dim candidate As ReDimUI
     Do While live.Count > 0
         Set lowest = live.Item(1)
         lowestAt = 1
         For position = 2 To live.Count
-            If live.Item(position).ToastSlot < lowest.ToastSlot Then
-                Set lowest = live.Item(position)
+            Set candidate = live.Item(position)
+            If candidate.ToastSlot < lowest.ToastSlot Then
+                Set lowest = candidate
                 lowestAt = position
             End If
         Next position
@@ -2622,15 +2650,51 @@ Friend Sub ConfigureToast( _
     End If
     mLeft = originLeft
     mTop = originTop + (slot - 1) * (mHeight + 6)
-    ' Entrance animation: the shape spawns this far below its slot and the
-    ' pump eases it up into place.
+    ' Entrance animation: the shape spawns below its slot and the pump
+    ' eases it up into place. During a compaction glide the newcomer's
+    ' slot may still be visually occupied by a survivor easing upward, so
+    ' the entrance starts below the column as drawn, not just the model:
+    ' one full pitch under the lowest live toast when that is deeper than
+    ' the default hop.
+    Dim occupiedTop As Double
     mSlideRemaining = 14
+    mToastExiting = False
+    mExitRemaining = 0
+    occupiedTop = hostApp.MaxToastVisualTop(mComponentId)
+    If occupiedTop >= 0 Then
+        If occupiedTop + mHeight + 6 - mTop > mSlideRemaining Then
+            mSlideRemaining = occupiedTop + mHeight + 6 - mTop
+        End If
+    End If
     mHasRect = True
     mVisible = True
 End Sub
 
 Friend Property Get ToastSlot() As Long
     If mKind = KIND_TOAST Then ToastSlot = CLng(mValue)
+End Property
+
+Friend Property Get ToastVisualTop() As Double
+    If mKind = KIND_TOAST Then ToastVisualTop = mTop + mSlideRemaining
+End Property
+
+Friend Property Get IsToastExiting() As Boolean
+    IsToastExiting = (mKind = KIND_TOAST And mToastExiting)
+End Property
+
+' An expired or dismissed toast fades for a beat instead of popping out
+' of existence; removal and compaction follow when the fade completes.
+Friend Sub BeginToastExit()
+    If mKind <> KIND_TOAST Then Exit Sub
+    If mToastExiting Then Exit Sub
+    mToastExiting = True
+    mExitRemaining = 1
+    ReDimUI.RequestPump
+End Sub
+
+Friend Property Get IsToastExitDone() As Boolean
+    IsToastExitDone = (mKind = KIND_TOAST And mToastExiting _
+        And mExitRemaining <= 0)
 End Property
 
 ' Moves this toast to a new slot, easing from wherever it currently sits
@@ -3035,8 +3099,11 @@ Private Function CreateShapeForKind(ByVal hostSheet As Worksheet) As Shape
                 msoShapeRoundedRectangle, mLeft, mTop, mWidth, mHeight)
             target.Adjustments(1) = 0.5
         Case KIND_TOAST
+            ' Born at the entrance position, so the first paint cannot
+            ' flash the shape at its settled slot before the offset lands.
             Set target = hostSheet.Shapes.AddShape( _
-                msoShapeRoundedRectangle, mLeft, mTop, mWidth, mHeight)
+                msoShapeRoundedRectangle, mLeft, mTop + mSlideRemaining, _
+                mWidth, mHeight)
             target.Adjustments(1) = 0.2
         Case KIND_SELECT
             Set target = hostSheet.Shapes.AddShape( _
@@ -4452,7 +4519,7 @@ End Sub
 
 Friend Function NeedsAnimation() As Boolean
     NeedsAnimation = (mKind = KIND_SPINNER And mVisible) _
-        Or (mKind = KIND_TOAST And mSlideRemaining > 0) _
+        Or (mKind = KIND_TOAST And (mSlideRemaining > 0 Or mToastExiting)) _
         Or (IsFloatField() And _
             ReDimUI.IsComponentFocused(mOwnerAppId, mComponentId))
 End Function
@@ -4471,6 +4538,16 @@ Friend Sub TickAnimation(ByVal hostSheet As Worksheet, ByVal elapsedMs As Long)
             mSlideRemaining = mSlideRemaining * (0.55 ^ (elapsedMs / 50#))
             If mSlideRemaining < 0.75 Then mSlideRemaining = 0
             hostSheet.Shapes(ShapeName).Top = mTop + mSlideRemaining
+            If mToastExiting And mExitRemaining > 0 Then
+                mExitRemaining = mExitRemaining - elapsedMs / 180#
+                If mExitRemaining < 0 Then mExitRemaining = 0
+                With hostSheet.Shapes(ShapeName)
+                    .Fill.Transparency = 1 - mExitRemaining
+                    .Line.Transparency = 1 - mExitRemaining
+                    .TextFrame2.TextRange.Font.Fill.Transparency = _
+                        1 - mExitRemaining
+                End With
+            End If
         Case KIND_INPUT, KIND_COMBO
             ' Insertion bar blink for the focused float field.
             mCaretAccumMs = mCaretAccumMs + elapsedMs

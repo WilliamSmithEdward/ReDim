@@ -200,15 +200,27 @@ Public Function TestToastLifecycle() As String
     ReDimUI.PumpOnce
     transcript = transcript & "|aliveBeforeTtl=" & CStr(ShapeExists(host, toastName))
     Sleep 200
+    ' Expiry starts a fade instead of popping the shape out of existence;
+    ' removal and compaction follow when the fade completes.
     ReDimUI.PumpOnce
+    ReDimUI.PumpOnce
+    transcript = transcript & "|fadesOut=" & _
+        CStr(ShapeExists(host, toastName) And _
+            host.Shapes(toastName).Fill.Transparency > 0.05)
+    Dim fadeTicks As Long
+    For fadeTicks = 1 To 7
+        ReDimUI.PumpOnce
+    Next fadeTicks
     transcript = transcript & "|removedAfterTtl=" & _
         CStr(Not ShapeExists(host, toastName))
 
-    ' Click dismissal: a fresh toast dies on the tick after its click.
+    ' Click dismissal: the click starts the same fade-out.
     Set toastValue = app.Toast("Click me.", 60000)
     toastName = "rdm_wid5_" & toastValue.ComponentId
     ReDimUI.DispatchShape toastName
-    ReDimUI.PumpOnce
+    For fadeTicks = 1 To 8
+        ReDimUI.PumpOnce
+    Next fadeTicks
     transcript = transcript & "|clickDismissed=" & _
         CStr(Not ShapeExists(host, toastName))
 
@@ -273,10 +285,10 @@ Public Function TestToastSlots() As String
     transcript = transcript & "|secondBelowFirst=" & _
         CStr(secondSettledTop > firstSettledTop)
 
-    ' Dismissing the first toast compacts the stack: the survivor slides up
-    ' into slot one.
+    ' Dismissing the first toast fades it, then compacts the stack: the
+    ' survivor slides up into slot one.
     ReDimUI.DispatchShape firstName
-    For ticks = 1 To 12
+    For ticks = 1 To 18
         ReDimUI.PumpOnce
     Next ticks
     transcript = transcript & "|survivorSlidUp=" & _
@@ -313,6 +325,29 @@ Public Function TestToastSlots() As String
     transcript = transcript & "|railSticksTop=" & _
         CStr(Abs((fourthShape.Top - thirdShape.Top) - 46) < 0.1)
     ActiveWindow.ScrollRow = priorScrollRow
+
+    ' A newcomer spawned mid-glide must enter BELOW the column as drawn:
+    ' its slot is model-correct, but a survivor easing upward may still
+    ' visually occupy it. Dismiss the slot-one toast, pump exactly into
+    ' the survivors' glide, spawn - the newcomer starts one full pitch
+    ' under the lowest gliding survivor, never on top of it.
+    Dim fifthToast As ReDimUI
+    Dim fifthShape As Shape
+    ReDimUI.DispatchShape "rdm_wid8_" & secondToast.ComponentId
+    For ticks = 1 To 6
+        ReDimUI.PumpOnce
+    Next ticks
+    Set fifthToast = app.Toast("five", 60000)
+    Set fifthShape = host.Shapes("rdm_wid8_" & fifthToast.ComponentId)
+    transcript = transcript & "|glideEntryBelow=" & _
+        CStr(fifthShape.Top - fourthShape.Top >= 45.5)
+    For ticks = 1 To 16
+        ReDimUI.PumpOnce
+    Next ticks
+    transcript = transcript & "|settledPitchA=" & _
+        CStr(Abs((fourthShape.Top - thirdShape.Top) - 46) < 0.1)
+    transcript = transcript & "|settledPitchB=" & _
+        CStr(Abs((fifthShape.Top - fourthShape.Top) - 46) < 0.1)
     ReDimUI.AutoPump True
     TestToastSlots = transcript
 End Function

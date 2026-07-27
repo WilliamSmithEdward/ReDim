@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.10.2 - 2026-07-26
+
+- Fix the root cause of new toasts landing in occupied positions:
+  CompactToastSlots read `ToastSlot` through `Collection.Item(...)`
+  directly, and Friend members are invisible to late binding, so with
+  two or more survivors the comparison loop raised error 438 and the
+  swallowed error killed the whole compaction - survivors kept their
+  slots, the freed low slot went to the next newcomer. The failure
+  needed 2+ survivors, which no prior test ever staged; the new
+  mid-glide scenario staged it and caught the crash. Candidates now go
+  through a typed local (the codebase carries no other late-bound
+  member chains).
+- Toast choreography tightened around the remaining visual races:
+  - A newcomer spawned during a compaction glide entered a slot that was
+    model-correct but still visually occupied by a survivor easing
+    upward. Newcomers now enter from below the column as drawn - one
+    full pitch under the lowest live toast when that is deeper than the
+    default entrance hop - so overlap is impossible at any frame.
+  - Expired and dismissed toasts fade out over 180 ms before removal and
+    compaction, instead of popping out of existence mid-scene.
+  - The toast shape is created at its entrance position rather than its
+    settled slot, removing a one-paint flash at the target position.
+
 ## 0.10.1 - 2026-07-26
 
 - Fix a new toast sometimes landing on top of live ones (reported as a

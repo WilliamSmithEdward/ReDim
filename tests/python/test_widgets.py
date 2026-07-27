@@ -70,6 +70,9 @@ def test_toast_lifecycle(run_widgets):
     assert facts["shown"] == "True"
     assert facts["pendingWork"] == "True"
     assert facts["aliveBeforeTtl"] == "True"
+    assert facts["fadesOut"] == "True", (
+        "an expired toast must fade for a beat, not pop out of existence"
+    )
     assert facts["removedAfterTtl"] == "True"
     assert facts["clickDismissed"] == "True"
     assert facts["lightInk"] == "True"
@@ -96,6 +99,12 @@ def test_toast_slots(run_widgets):
     assert facts["railSticksTop"] == "True", (
         "a newcomer must join the live column exactly one slot pitch below"
     )
+    assert facts["glideEntryBelow"] == "True", (
+        "a mid-glide newcomer must enter below the column as drawn, not"
+        " on top of a survivor still easing through its slot"
+    )
+    assert facts["settledPitchA"] == "True"
+    assert facts["settledPitchB"] == "True"
 
 
 def test_toast_tray(run_widgets):
