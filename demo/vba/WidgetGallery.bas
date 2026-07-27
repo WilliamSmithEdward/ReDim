@@ -60,8 +60,8 @@ Public Sub BuildWidgetGallery()
     app.ComboBox("fruit").AtRect(196, 304, 150, 22).WritesTo "fruit"
     app.ComboBox("fruit").Items "Apple", "Apricot", "Banana", "Cherry", _
         "Grape", "Grapefruit"
-    app.TextInput("notes").AtRect(360, 296, 150, 34).MultiLine.WritesTo "notes"
-    app.Label("inputHint").AtRect(24, 332, 520, 16) _
+    app.TextInput("notes").AtRect(360, 288, 150, 44).MultiLine.WritesTo "notes"
+    app.Label("inputHint").AtRect(24, 336, 520, 16) _
         .Text("Click a field and type: the combo filters live; multi-line notes commit with Tab or Ctrl+Enter.")
 
     app.Label("lblTransfer").AtRect(24, 356, 300, 16) _

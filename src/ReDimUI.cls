@@ -91,7 +91,7 @@ Private Const VARIANT_NEUTRAL As Long = 4
 Private Const REL_NONE As Long = 0
 Private Const REL_BELOW As Long = 1
 Private Const REL_RIGHT_OF As Long = 2
-Private Const REDIM_VERSION As String = "0.15.0"
+Private Const REDIM_VERSION As String = "0.15.1"
 
 Private mRole As Long
 
@@ -207,6 +207,10 @@ Private mAppliedImageSource As String
 ' Multi-line float TextInput: Enter inserts a newline instead of
 ' committing; Tab, Ctrl+Enter, and clicking away commit.
 Private mMultiLine As Boolean
+' Diff caches for the typing hot path: the float focus ring state and
+' the combo option list signature last painted.
+Private mAppliedFocusRing As Boolean
+Private mAppliedComboSig As String
 Private mCaptionLeft As String
 Private mCaptionRight As String
 Private mAppliedLeftRows As Long
@@ -3629,16 +3633,25 @@ Private Sub ApplyStyle(ByVal target As Shape, ByVal themeValue As ReDimUI)
             End If
             If IsFloatField() Then
                 ' Float fields are their own editor: surface fill so the
-                ' face takes clicks, accent border while focused.
-                target.Fill.Visible = msoTrue
-                target.Fill.ForeColor.RGB = ResolveSurfaceFill(themeValue)
-                target.Line.Visible = msoTrue
-                If ReDimUI.IsComponentFocused(mOwnerAppId, mComponentId) Then
-                    target.Line.ForeColor.RGB = themeValue.PrimaryColor
-                    target.Line.Weight = 1.5
-                Else
-                    target.Line.ForeColor.RGB = themeValue.BorderColor
-                    target.Line.Weight = 1
+                ' face takes clicks, accent border while focused. Diffed
+                ' so a keystroke repaint costs no style writes at all.
+                Dim ringOn As Boolean
+                ringOn = ReDimUI.IsComponentFocused(mOwnerAppId, mComponentId)
+                If Not mAppliedValid _
+                    Or mAppliedFill <> ResolveSurfaceFill(themeValue) _
+                    Or mAppliedFocusRing <> ringOn Then
+                    target.Fill.Visible = msoTrue
+                    target.Fill.ForeColor.RGB = ResolveSurfaceFill(themeValue)
+                    target.Line.Visible = msoTrue
+                    If ringOn Then
+                        target.Line.ForeColor.RGB = themeValue.PrimaryColor
+                        target.Line.Weight = 1.5
+                    Else
+                        target.Line.ForeColor.RGB = themeValue.BorderColor
+                        target.Line.Weight = 1
+                    End If
+                    mAppliedFill = ResolveSurfaceFill(themeValue)
+                    mAppliedFocusRing = ringOn
                 End If
             ElseIf Not mAppliedValid Then
                 target.Fill.Visible = msoFalse
@@ -3860,15 +3873,25 @@ Private Sub ApplyText(ByVal target As Shape, ByVal themeValue As ReDimUI)
             target.TextFrame2.VerticalAnchor = msoAnchorTop
         End If
     End If
+    ' Measured, not assumed: replacing shape text preserves uniform
+    ' character formatting, so the font block runs only when the style
+    ' itself changed or the text crossed an empty transition (the one
+    ' case the measurement did not cover). Steady-state typing is a
+    ' single text write per keystroke.
+    Dim mustRestyle As Boolean
+    mustRestyle = (Not mAppliedValid) _
+        Or mAppliedTextColor <> resolvedColor _
+        Or mAppliedFontSize <> resolvedSize _
+        Or mAppliedFontBold <> mFontBold
     textChanged = (Not mAppliedValid) Or (mAppliedText <> resolved)
     If textChanged Then
+        If LenB(mAppliedText) = 0 Or LenB(resolved) = 0 Then
+            mustRestyle = True
+        End If
         target.TextFrame2.TextRange.Text = resolved
         mAppliedText = resolved
     End If
-    ' Replacing shape text can drop character formatting, so the font is
-    ' reapplied on any text change, not only on style changes.
-    If textChanged Or mAppliedTextColor <> resolvedColor _
-        Or mAppliedFontSize <> resolvedSize Or mAppliedFontBold <> mFontBold Then
+    If mustRestyle Then
         With target.TextFrame2.TextRange.Font
             .Name = themeValue.FontName
             .Size = resolvedSize
@@ -4984,6 +5007,17 @@ Private Sub SyncComboOptions( _
     If mSelectOpen And mVisible Then wanted = mComboMatches.Count
     resolvedSize = mFontSize
     If resolvedSize <= 0 Then resolvedSize = themeValue.BaseFontSize
+    ' Keystrokes that leave the visible list identical (same matches,
+    ' selection, and geometry) skip the shape work entirely.
+    Dim listSig As String
+    listSig = CStr(wanted) & ":" & CStr(mValue) & ":" & _
+        CStr(mLeft) & ":" & CStr(mTop) & ":" & CStr(mWidth) & ":" & _
+        CStr(mHeight) & ":" & CStr(resolvedSize)
+    For position = 1 To wanted
+        listSig = listSig & "|" & CStr(mComboMatches.Item(position))
+    Next position
+    If mAppliedValid And listSig = mAppliedComboSig Then Exit Sub
+    mAppliedComboSig = listSig
     For position = 1 To wanted
         itemIndex = CLng(mComboMatches.Item(position))
         Set optionShape = EnsurePartShape( _

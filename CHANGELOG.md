@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.15.1 - 2026-07-26
+
+- Typing hot path slimmed, addressing keystroke lag and the busy-cursor
+  blink. Measured first: replacing shape text preserves uniform
+  character formatting, so the defensive font reapply on every text
+  change is gone (kept only across empty-text transitions, the one case
+  the measurement did not cover). The float field's fill and focus ring
+  are diff-cached, and the combo option list skips its shape work when
+  a keystroke leaves the visible list unchanged. Steady-state typing is
+  now a single COM write per keystroke. The busy-cursor flip itself is
+  Excel's macro indicator - every keystroke runs a macro by design -
+  but with the light path it lasts a frame. A render debounce was
+  considered and rejected: delaying the character echo trades a cursor
+  blink for perceived input latency.
+- The gallery notes field was two points too short for its second line;
+  a line that cannot fully fit is not drawn at all. The field grew, and
+  the MultiLine docs now carry the sizing rule of thumb.
+
 ## 0.15.0 - 2026-07-26
 
 - Multi-line float TextInput: `.MultiLine` switches a field to textarea
