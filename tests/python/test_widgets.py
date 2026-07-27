@@ -376,6 +376,24 @@ def test_check_list(run_widgets):
     assert facts["headerOff"] == "True"
 
 
+def test_image(run_widgets):
+    facts = parse_transcript(run_widgets("TestImage"))
+    assert facts["picFill"] == "True", (
+        "the image must render as a picture fill on the rounded shape"
+    )
+    assert facts["rounded"] == "True"
+    assert facts["placeholder"] == "True", (
+        "a missing source must render the themed placeholder"
+    )
+    assert facts["clickRan"] == "1"
+    assert facts["boundSwap"] == "True", (
+        "a state-bound source must swap the picture"
+    )
+    assert facts["embeddedKept"] == "True", (
+        "the embedded picture must survive its source file's deletion"
+    )
+
+
 def test_modal_confirm(run_widgets):
     facts = parse_transcript(run_widgets("TestModalConfirm"))
     assert facts["overlayShown"] == "True"

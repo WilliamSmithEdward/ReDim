@@ -76,6 +76,11 @@ Private Const KIND_SLIDEBAR As Long = 17
 Private Const KIND_COMBO As Long = 18
 Private Const KIND_TRANSFER As Long = 19
 Private Const KIND_CHECKLIST As Long = 20
+Private Const KIND_IMAGE As Long = 21
+
+' Sentinel for "the source could not be loaded"; contains characters no
+' real path can, so it never collides with one.
+Private Const IMAGE_MISSING As String = "?missing?"
 
 Private Const VARIANT_PRIMARY As Long = 0
 Private Const VARIANT_SECONDARY As Long = 1
@@ -86,7 +91,7 @@ Private Const VARIANT_NEUTRAL As Long = 4
 Private Const REL_NONE As Long = 0
 Private Const REL_BELOW As Long = 1
 Private Const REL_RIGHT_OF As Long = 2
-Private Const REDIM_VERSION As String = "0.13.0"
+Private Const REDIM_VERSION As String = "0.14.0"
 
 Private mRole As Long
 
@@ -194,6 +199,11 @@ Private mSelRight As Collection
 ' select-all header row renders (on by default).
 Private mCheckedSet As Collection
 Private mSelectAllRow As Boolean
+' Image control: the source file path, its optional state binding, and
+' the last source actually painted (so files load once, not per flush).
+Private mImageSource As String
+Private mBindSourceKey As String
+Private mAppliedImageSource As String
 Private mCaptionLeft As String
 Private mCaptionRight As String
 Private mAppliedLeftRows As Long
@@ -915,6 +925,16 @@ End Function
 ' once per user toggle, including the select-all bulk toggle.
 Public Function CheckList(ByVal componentId As String) As ReDimUI
     Set CheckList = GetOrCreateComponent(componentId, KIND_CHECKLIST)
+End Function
+
+' Drawn image: a rounded rectangle whose fill is the picture, so corners,
+' geometry, adoption, and clicks behave like every other control and the
+' picture embeds in the workbook. Source takes a file path (no URLs);
+' the image stretches to the declared rectangle; a missing file renders
+' a themed placeholder, but an already-embedded picture is kept even if
+' its source file has since gone away.
+Public Function Image(ByVal componentId As String) As ReDimUI
+    Set Image = GetOrCreateComponent(componentId, KIND_IMAGE)
 End Function
 
 ' Drawn single-select option rows. Items supplies the rows, Value the
@@ -2027,6 +2047,8 @@ Friend Sub ConfigureComponent( _
         Case KIND_CHECKLIST
             mWidth = 170: mHeight = 100
             mSelectAllRow = True
+        Case KIND_IMAGE
+            mWidth = 120: mHeight = 80
         Case Else
             mWidth = 120: mHeight = 24
     End Select
@@ -2154,6 +2176,23 @@ Public Function TextColor(ByVal color As Long) As ReDimUI
     mTextColor = color
     Touch
     Set TextColor = Me
+End Function
+
+' The image's source file path. Loaded once per distinct path, embedded
+' with the workbook, stretched to the declared rectangle.
+Public Function Source(ByVal sourcePath As String) As ReDimUI
+    RequireRole ROLE_COMPONENT, "Source"
+    mImageSource = sourcePath
+    Touch
+    Set Source = Me
+End Function
+
+' Drives the image source from a state key, like the other bindings.
+Public Function BindSource(ByVal stateKey As String) As ReDimUI
+    RequireRole ROLE_COMPONENT, "BindSource"
+    mBindSourceKey = stateKey
+    Touch
+    Set BindSource = Me
 End Function
 
 Public Function Primary() As ReDimUI
@@ -2881,7 +2920,8 @@ End Sub
 
 Friend Function IsBoundTo(ByVal stateKey As String) As Boolean
     IsBoundTo = (mBindTextKey = stateKey) Or (mBindValueKey = stateKey) _
-        Or (mBindVisibleKey = stateKey) Or (mBindEnabledKey = stateKey)
+        Or (mBindVisibleKey = stateKey) Or (mBindEnabledKey = stateKey) _
+        Or (LenB(mBindSourceKey) > 0 And mBindSourceKey = stateKey)
 End Function
 
 ' =====================================================================
@@ -3288,6 +3328,11 @@ Private Sub ResolveBindings(ByVal ownerApp As ReDimUI)
             mVisible = CBool(ownerApp.State(mBindVisibleKey)) Xor mBindVisibleInvert
         End If
     End If
+    If LenB(mBindSourceKey) > 0 Then
+        If ownerApp.HasState(mBindSourceKey) Then
+            mImageSource = CStr(ownerApp.State(mBindSourceKey))
+        End If
+    End If
     If LenB(mBindEnabledKey) > 0 Then
         If ownerApp.HasState(mBindEnabledKey) Then
             mEnabled = CBool(ownerApp.State(mBindEnabledKey)) Xor mBindEnabledInvert
@@ -3459,6 +3504,10 @@ Private Function CreateShapeForKind(ByVal hostSheet As Worksheet) As Shape
             Set target = hostSheet.Shapes.AddShape( _
                 msoShapeRoundedRectangle, mLeft, mTop, 14, 14)
             target.Adjustments(1) = 0.2
+        Case KIND_IMAGE
+            Set target = hostSheet.Shapes.AddShape( _
+                msoShapeRoundedRectangle, mLeft, mTop, mWidth, mHeight)
+            target.Adjustments(1) = 0.08
         Case Else
             Set target = hostSheet.Shapes.AddShape( _
                 msoShapeRectangle, mLeft, mTop, mWidth, mHeight)
@@ -3550,6 +3599,8 @@ Private Sub ApplyStyle(ByVal target As Shape, ByVal themeValue As ReDimUI)
                 target.Line.Visible = msoFalse
                 mAppliedFill = ResolveToggleFill(themeValue)
             End If
+        Case KIND_IMAGE
+            ApplyImageFill target, themeValue
         Case KIND_INPUT, KIND_COMBO
             ' Shapes adopted from builds older than 0.9.1 are square;
             ' coerce them to the rounded profile the family shares.
@@ -3626,6 +3677,56 @@ Private Function ResolveToggleFill(ByVal themeValue As ReDimUI) As Long
     Else
         ResolveToggleFill = themeValue.MutedColor
     End If
+End Function
+
+' Paints the picture fill, loading the file only when the source path
+' changed. A missing or unloadable source renders a themed placeholder,
+' except when the shape already carries an embedded picture: the picture
+' saved with the workbook outlives its source file by design.
+Private Sub ApplyImageFill(ByVal target As Shape, ByVal themeValue As ReDimUI)
+    Dim resolvedSource As String
+    Dim loaded As Boolean
+
+    resolvedSource = mImageSource
+    If LenB(resolvedSource) > 0 Then
+        If FileExistsSafe(resolvedSource) Then
+            If mAppliedImageSource = resolvedSource Then Exit Sub
+            On Error Resume Next
+            Err.Clear
+            target.Fill.Visible = msoTrue
+            target.Fill.UserPicture resolvedSource
+            loaded = (Err.Number = 0)
+            On Error GoTo 0
+            If loaded Then
+                target.Line.Visible = msoFalse
+                StyleGlyphText target, vbNullString, _
+                    themeValue.OnMutedColor, themeValue.BaseFontSize, _
+                    themeValue
+                mAppliedImageSource = resolvedSource
+                Exit Sub
+            End If
+        End If
+    End If
+    If target.Fill.Type = msoFillPicture Then
+        mAppliedImageSource = IMAGE_MISSING
+        Exit Sub
+    End If
+    If mAppliedImageSource = IMAGE_MISSING And mAppliedValid Then Exit Sub
+    target.Fill.Visible = msoTrue
+    target.Fill.Solid
+    target.Fill.ForeColor.RGB = themeValue.MutedColor
+    target.Line.Visible = msoTrue
+    target.Line.ForeColor.RGB = themeValue.BorderColor
+    target.Line.Weight = 1
+    StyleGlyphText target, "(image not found)", themeValue.OnMutedColor, _
+        themeValue.BaseFontSize - 2, themeValue
+    mAppliedImageSource = IMAGE_MISSING
+End Sub
+
+Private Function FileExistsSafe(ByVal candidatePath As String) As Boolean
+    On Error Resume Next
+    FileExistsSafe = (LenB(Dir$(candidatePath)) > 0)
+    On Error GoTo 0
 End Function
 
 Private Function ResolveFill(ByVal themeValue As ReDimUI) As Long
@@ -3718,7 +3819,7 @@ Private Sub ApplyText(ByVal target As Shape, ByVal themeValue As ReDimUI)
     Dim textChanged As Boolean
 
     If mKind = KIND_SPINNER Or mKind = KIND_TOGGLE Or mKind = KIND_OVERLAY _
-        Or IsCompositeDrawnKind() Then Exit Sub
+        Or mKind = KIND_IMAGE Or IsCompositeDrawnKind() Then Exit Sub
     If (mKind = KIND_INPUT Or mKind = KIND_COMBO) And Not IsFloatField() Then
         Exit Sub
     End If

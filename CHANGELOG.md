@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.14.0 - 2026-07-26
+
+- `Image`: a picture control drawn the family way - a rounded rectangle
+  whose fill is the picture, so corners, geometry, adoption, snap-back,
+  and click dispatch all behave like every other control, and the
+  picture embeds in the workbook. `Source` takes a file path (no URLs -
+  the honest VBA primitive) and loads it once per distinct path;
+  `BindSource` drives the source from a state key like the other
+  bindings. The image stretches to the declared rectangle. A missing or
+  unloadable source renders a themed placeholder, except when the shape
+  already carries an embedded picture: a picture saved with the
+  workbook outlives its source file by design. The gallery shows a
+  self-generated logo (chart-area export) beside the checkbox list.
+
 ## 0.13.0 - 2026-07-26
 
 - BREAKING: the persistence layer is removed entirely. `Persist` and

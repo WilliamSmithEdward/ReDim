@@ -1183,6 +1183,76 @@ Public Function TestCheckList() As String
     TestCheckList = transcript
 End Function
 
+' Image control: picture fill from a file path, a themed placeholder for
+' missing files, click dispatch, a state-bound source swap, and the
+' embedded picture surviving its source file's deletion.
+Public Function TestImage() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim imgA As String
+    Dim imgB As String
+    Dim transcript As String
+
+    Set host = NewCanvas()
+    gChangeCount = 0
+    imgA = Environ$("TEMP") & "\rdm_img_a.png"
+    imgB = Environ$("TEMP") & "\rdm_img_b.png"
+    ExportColorPng host, imgA, RGB(31, 111, 76)
+    ExportColorPng host, imgB, RGB(180, 60, 40)
+
+    Set app = ReDimUI.Mount(host, "wid24")
+    app.Image("pic").AtRect(24, 24, 120, 80).Source(imgA) _
+        .OnClick "TestReDimWidgets.RecordChange"
+    app.Image("lost").AtRect(160, 24, 120, 60).Source "C:\nope\gone.png"
+    app.Render
+
+    transcript = "picFill=" & _
+        CStr(host.Shapes("rdm_wid24_pic").Fill.Type = msoFillPicture)
+    transcript = transcript & "|rounded=" & _
+        CStr(host.Shapes("rdm_wid24_pic").AutoShapeType = _
+            msoShapeRoundedRectangle)
+    transcript = transcript & "|placeholder=" & _
+        CStr(host.Shapes("rdm_wid24_lost").Fill.Type <> msoFillPicture And _
+            InStr(1, host.Shapes("rdm_wid24_lost").TextFrame2.TextRange.Text, _
+            "not found") > 0)
+
+    ' Clicks dispatch like any control.
+    ReDimUI.DispatchShape "rdm_wid24_pic"
+    transcript = transcript & "|clickRan=" & gChangeCount
+
+    ' A state-bound source turns the placeholder into a picture.
+    app.Image("lost").BindSource "logo"
+    app.SetState "logo", imgB
+    transcript = transcript & "|boundSwap=" & _
+        CStr(host.Shapes("rdm_wid24_lost").Fill.Type = msoFillPicture)
+
+    ' The embedded picture survives its source file going away.
+    Kill imgB
+    app.SetState "logo", imgB
+    transcript = transcript & "|embeddedKept=" & _
+        CStr(host.Shapes("rdm_wid24_lost").Fill.Type = msoFillPicture)
+    On Error Resume Next
+    Kill imgA
+    On Error GoTo 0
+    TestImage = transcript
+End Function
+
+Private Sub ExportColorPng( _
+    ByVal host As Worksheet, _
+    ByVal targetPath As String, _
+    ByVal fillColor As Long _
+)
+    Dim chartHost As ChartObject
+
+    On Error Resume Next
+    Kill targetPath
+    On Error GoTo 0
+    Set chartHost = host.ChartObjects.Add(0, 0, 120, 80)
+    chartHost.Chart.ChartArea.Format.Fill.ForeColor.RGB = fillColor
+    chartHost.Chart.Export targetPath, "PNG"
+    chartHost.Delete
+End Sub
+
 Public Function TestModalConfirm() As String
     Dim app As ReDimUI
     Dim host As Worksheet

@@ -152,6 +152,12 @@ dependencies:
   `CheckedCount` are the silent programmatic surface; checks follow their items through
   `AddItem`/`RemoveItem`. `WritesTo` carries checked items joined with ", "; `OnChange`
   fires once per toggle, select-all included.
+- `Image`: a picture as a control - a rounded rectangle whose fill is the picture, so it
+  clicks, adopts, and snaps back like everything else, and the picture embeds in the
+  workbook. `Source(path)` takes a file path (no URLs) and loads once per distinct path;
+  `BindSource(key)` drives it from state. The image stretches to the declared rectangle;
+  a missing source renders a themed placeholder, but an already-embedded picture is kept
+  even after its source file goes away.
 - `Toggle`: the pill switch for booleans.
 
 ## Float fields and keyboard focus

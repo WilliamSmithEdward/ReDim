@@ -80,6 +80,10 @@ Public Sub BuildWidgetGallery()
         .WritesTo "crew"
     app.TransferList("crew").OnChange "WidgetGallery.HandleCrewChange"
 
+    app.Label("lblImage").AtRect(420, 507, 150, 14).Text("Image").Bold
+    app.Image("logo").AtRect 420, 524, 160, 74
+    app.Image("logo").Source EnsureDemoImage(host)
+
     app.Label("lblProgress").AtRect(24, 526, 200, 16) _
         .Text("Slider, stepper, and meter share one state key").Bold
     app.SlideBar("volumeslide").AtRect(24, 548, 240, 18) _
@@ -141,6 +145,23 @@ End Sub
 Public Sub HandleCrewChange()
     GalleryApp().SetState "lastAction", "crew transferred"
 End Sub
+
+' A stand-in logo generated on the spot: a chart area filled with the
+' theme green, exported as a PNG the Image control can load.
+Private Function EnsureDemoImage(ByVal host As Worksheet) As String
+    Dim chartHost As ChartObject
+    Dim targetPath As String
+
+    targetPath = Environ$("TEMP") & "\rdm_gallery_logo.png"
+    On Error Resume Next
+    Kill targetPath
+    On Error GoTo 0
+    Set chartHost = host.ChartObjects.Add(0, 0, 160, 74)
+    chartHost.Chart.ChartArea.Format.Fill.ForeColor.RGB = RGB(31, 111, 76)
+    chartHost.Chart.Export targetPath, "PNG"
+    chartHost.Delete
+    EnsureDemoImage = targetPath
+End Function
 
 Public Sub HandlePing()
     Dim app As ReDimUI
