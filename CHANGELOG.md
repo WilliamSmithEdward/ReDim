@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.17.0 - 2026-07-26
+
+- Long lists become navigable. The combo drop list windows to eight
+  rows: Up and Down walk a keyboard highlight that scrolls the window,
+  Enter takes the highlighted match, typing re-filters and rewinds, an
+  inert indicator row counts the matches outside the window, and
+  clicked rows map through the scroll offset. Transfer panels gain
+  paging arrows on their right edge (shown only when the list outgrows
+  the panel) that move the window a page at a time, with row selection
+  mapped through each panel's offset; the header counts stay the
+  truth-tellers for totals.
+
 ## 0.16.1 - 2026-07-26
 
 - Esc on a combo clears instead of reverting: the first Esc empties the

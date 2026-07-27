@@ -453,6 +453,32 @@ def test_caret_editing(run_widgets):
     )
 
 
+def test_long_lists(run_widgets):
+    facts = parse_transcript(run_widgets("TestLongLists"))
+    assert facts["comboWindow"] == "True", (
+        "an open combo must window to eight rows plus the indicator"
+    )
+    assert facts["moreText"] == "… 4 more"
+    assert facts["scrolledRow1"] == "Item02", (
+        "walking the highlight past the window edge must scroll it"
+    )
+    assert facts["highlightLast"] == "True"
+    assert facts["enterTakes"] == "Item09", (
+        "Enter must take the highlighted match"
+    )
+    assert facts["clickMaps"] == "Item02", (
+        "clicked window rows must map through the scroll offset"
+    )
+    assert facts["poolRows"] == "True"
+    assert facts["pagedRow1"] == "Item05", (
+        "the panel scroll button must page the window"
+    )
+    assert facts["offsetMovedState"] == "Item06", (
+        "row selection must map through the panel scroll offset"
+    )
+    assert facts["scrollerGoneWhenFits"] == "True"
+
+
 def test_modal_confirm(run_widgets):
     facts = parse_transcript(run_widgets("TestModalConfirm"))
     assert facts["overlayShown"] == "True"

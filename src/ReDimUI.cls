@@ -78,6 +78,10 @@ Private Const KIND_TRANSFER As Long = 19
 Private Const KIND_CHECKLIST As Long = 20
 Private Const KIND_IMAGE As Long = 21
 
+' The most option rows a combo drop list draws; typing narrows, and
+' Up/Down walk a highlight that scrolls this window.
+Private Const COMBO_MAX_ROWS As Long = 8
+
 ' Sentinel for "the source could not be loaded"; contains characters no
 ' real path can, so it never collides with one.
 Private Const IMAGE_MISSING As String = "?missing?"
@@ -91,7 +95,7 @@ Private Const VARIANT_NEUTRAL As Long = 4
 Private Const REL_NONE As Long = 0
 Private Const REL_BELOW As Long = 1
 Private Const REL_RIGHT_OF As Long = 2
-Private Const REDIM_VERSION As String = "0.16.1"
+Private Const REDIM_VERSION As String = "0.17.0"
 
 Private mRole As Long
 
@@ -213,6 +217,14 @@ Private mAppliedFocusRing As Boolean
 Private mAppliedComboSig As String
 ' The caret index: characters before the caret, 0 through Len(mText).
 Private mCaretPos As Long
+' Windowed long lists: the combo shows at most COMBO_MAX_ROWS matches
+' from mListOffset with mListHighlight as the keyboard cursor (1-based
+' into the matches, 0 for none); transfer panels scroll through
+' per-side offsets.
+Private mListOffset As Long
+Private mListHighlight As Long
+Private mLeftOffset As Long
+Private mRightOffset As Long
 Private mCaptionLeft As String
 Private mCaptionRight As String
 Private mAppliedLeftRows As Long
@@ -2958,6 +2970,18 @@ Private Sub EnsureTransferCollections()
     If mSelRight Is Nothing Then Set mSelRight = New Collection
 End Sub
 
+' Rows a transfer panel can draw; mirrors the renderer's header height
+' (18), row height (20), and row inset (6). Keep in sync with
+' ApplyTransferParts and SyncTransferRows.
+Private Function TransferRowCapacity() As Long
+    Dim panelH As Double
+
+    panelH = mHeight - 18
+    If panelH < 30 Then panelH = 30
+    TransferRowCapacity = Int((panelH - 6) / 20)
+    If TransferRowCapacity < 1 Then TransferRowCapacity = 1
+End Function
+
 Private Sub EnsureCheckedSet()
     If mCheckedSet Is Nothing Then Set mCheckedSet = New Collection
 End Sub
@@ -3130,8 +3154,15 @@ Friend Sub RunClickBehavior()
                 Exit Sub
             End If
         Case KIND_COMBO
-            If Left$(ReDimUI.SenderPart, 3) = "opt" Then
-                PickComboItem hostApp, CLng(Mid$(ReDimUI.SenderPart, 4))
+            If Left$(ReDimUI.SenderPart, 3) = "opt" _
+                And IsNumeric(Mid$(ReDimUI.SenderPart, 4)) Then
+                ' Clicked window rows map through the scroll offset to
+                ' their absolute match index.
+                PickComboItem hostApp, _
+                    mListOffset + CLng(Mid$(ReDimUI.SenderPart, 4))
+            ElseIf ReDimUI.SenderPart = "optm" Then
+                ' The overflow indicator row is inert.
+                Exit Sub
             ElseIf IsFloatField() Then
                 If ReDimUI.IsComponentFocused(hostApp.AppId, mComponentId) Then
                     mSelectOpen = Not mSelectOpen
@@ -3198,15 +3229,33 @@ Friend Sub RunClickBehavior()
             Dim transferRow As Long
             transferPart = ReDimUI.SenderPart
             EnsureTransferCollections
-            If Left$(transferPart, 2) = "al" Then
+            Dim transferPage As Long
+            transferPage = TransferRowCapacity() - 1
+            If transferPage < 1 Then transferPage = 1
+            If transferPart = "alu" Then
+                mLeftOffset = mLeftOffset - transferPage
+                If mLeftOffset < 0 Then mLeftOffset = 0
+                Touch
+            ElseIf transferPart = "ald" Then
+                mLeftOffset = mLeftOffset + transferPage
+                Touch
+            ElseIf transferPart = "clu" Then
+                mRightOffset = mRightOffset - transferPage
+                If mRightOffset < 0 Then mRightOffset = 0
+                Touch
+            ElseIf transferPart = "cld" Then
+                mRightOffset = mRightOffset + transferPage
+                Touch
+            ElseIf Left$(transferPart, 2) = "al" Then
                 If IsNumeric(Mid$(transferPart, 3)) Then
-                    transferRow = CLng(Mid$(transferPart, 3))
+                    ' Window rows map through the scroll offset.
+                    transferRow = mLeftOffset + CLng(Mid$(transferPart, 3))
                     TransferSelectionToggle mSelLeft, transferRow
                     Touch
                 End If
             ElseIf Left$(transferPart, 2) = "cl" Then
                 If IsNumeric(Mid$(transferPart, 3)) Then
-                    transferRow = CLng(Mid$(transferPart, 3))
+                    transferRow = mRightOffset + CLng(Mid$(transferPart, 3))
                     TransferSelectionToggle mSelRight, transferRow
                     Touch
                 End If
@@ -4510,6 +4559,14 @@ Private Sub ApplyTransferParts( _
     EnsureTransferCollections
     PruneTransferSelection mSelLeft, mItems.Count
     PruneTransferSelection mSelRight, mChosenItems.Count
+    If mLeftOffset > mItems.Count - TransferRowCapacity() Then
+        mLeftOffset = mItems.Count - TransferRowCapacity()
+    End If
+    If mLeftOffset < 0 Then mLeftOffset = 0
+    If mRightOffset > mChosenItems.Count - TransferRowCapacity() Then
+        mRightOffset = mChosenItems.Count - TransferRowCapacity()
+    End If
+    If mRightOffset < 0 Then mRightOffset = 0
     panelW = (mWidth - BTN_W - 4 * GAP) / 2
     If panelW < 40 Then panelW = 40
     panelTop = mTop + HEADER_H
@@ -4577,9 +4634,65 @@ Private Sub ApplyTransferParts( _
         btnX, btnTop + 3 * (BTN_H + GAP), BTN_W, BTN_H
 
     SyncTransferRows hostSheet, themeValue, mItems, "al", _
-        mLeft, panelTop, panelW, panelH, mSelLeft, mAppliedLeftRows
+        mLeft, panelTop, panelW, panelH, mSelLeft, mLeftOffset, _
+        mAppliedLeftRows
     SyncTransferRows hostSheet, themeValue, mChosenItems, "cl", _
-        rightX, panelTop, panelW, panelH, mSelRight, mAppliedRightRows
+        rightX, panelTop, panelW, panelH, mSelRight, mRightOffset, _
+        mAppliedRightRows
+    ApplyTransferScroller hostSheet, themeValue, "alu", "ald", _
+        mLeft, panelTop, panelW, panelH, mItems.Count
+    ApplyTransferScroller hostSheet, themeValue, "clu", "cld", _
+        rightX, panelTop, panelW, panelH, mChosenItems.Count
+End Sub
+
+' Small paging arrows on a panel's right edge, shown only when the list
+' outgrows the panel.
+Private Sub ApplyTransferScroller( _
+    ByVal hostSheet As Worksheet, _
+    ByVal themeValue As ReDimUI, _
+    ByVal upPart As String, _
+    ByVal downPart As String, _
+    ByVal panelX As Double, _
+    ByVal panelTop As Double, _
+    ByVal panelW As Double, _
+    ByVal panelH As Double, _
+    ByVal itemTotal As Long _
+)
+    Dim scrollButton As Shape
+
+    If itemTotal > TransferRowCapacity() And mVisible Then
+        Set scrollButton = EnsurePartShape( _
+            hostSheet, upPart, msoShapeRoundedRectangle)
+        scrollButton.Left = panelX + panelW - 17
+        scrollButton.Top = panelTop + 3
+        scrollButton.Width = 14
+        scrollButton.Height = 14
+        scrollButton.Fill.Visible = msoTrue
+        scrollButton.Fill.ForeColor.RGB = themeValue.MutedColor
+        StyleGlyphText scrollButton, ChrW(9650), _
+            ResolveDrawnInk(themeValue), 7, themeValue
+        scrollButton.Visible = msoTrue
+        scrollButton.OnAction = mAppliedOnAction
+        scrollButton.ZOrder msoBringToFront
+        Set scrollButton = EnsurePartShape( _
+            hostSheet, downPart, msoShapeRoundedRectangle)
+        scrollButton.Left = panelX + panelW - 17
+        scrollButton.Top = panelTop + panelH - 17
+        scrollButton.Width = 14
+        scrollButton.Height = 14
+        scrollButton.Fill.Visible = msoTrue
+        scrollButton.Fill.ForeColor.RGB = themeValue.MutedColor
+        StyleGlyphText scrollButton, ChrW(9660), _
+            ResolveDrawnInk(themeValue), 7, themeValue
+        scrollButton.Visible = msoTrue
+        scrollButton.OnAction = mAppliedOnAction
+        scrollButton.ZOrder msoBringToFront
+    Else
+        On Error Resume Next
+        hostSheet.Shapes(ShapeName & PART_SEPARATOR & upPart).Delete
+        hostSheet.Shapes(ShapeName & PART_SEPARATOR & downPart).Delete
+        On Error GoTo 0
+    End If
 End Sub
 
 Private Sub ApplyTransferButton( _
@@ -4621,30 +4734,42 @@ Private Sub SyncTransferRows( _
     ByVal panelW As Double, _
     ByVal panelH As Double, _
     ByVal selectionSet As Collection, _
+    ByVal rowOffset As Long, _
     ByRef appliedRows As Long _
 )
     Const ROW_H As Double = 20
     Dim rowShape As Shape
     Dim position As Long
     Dim wanted As Long
+    Dim itemIndex As Long
+    Dim rowWidth As Double
     Dim resolvedSize As Double
+    Dim rowSelected As Boolean
 
-    wanted = itemsRef.Count
+    wanted = itemsRef.Count - rowOffset
     If wanted > Int((panelH - 6) / ROW_H) Then
         wanted = Int((panelH - 6) / ROW_H)
     End If
+    If wanted < 0 Then wanted = 0
     If Not mVisible Then wanted = 0
+    rowWidth = panelW - 6
+    If itemsRef.Count > Int((panelH - 6) / ROW_H) Then
+        ' Leave room for the paging arrows.
+        rowWidth = rowWidth - 16
+    End If
     resolvedSize = mFontSize
     If resolvedSize <= 0 Then resolvedSize = themeValue.BaseFontSize
     For position = 1 To wanted
+        itemIndex = rowOffset + position
+        rowSelected = TransferSelectionHas(selectionSet, itemIndex)
         Set rowShape = EnsurePartShape( _
             hostSheet, partPrefix & position, msoShapeRectangle)
         rowShape.Left = panelX + 3
         rowShape.Top = panelTop + 3 + (position - 1) * ROW_H
-        rowShape.Width = panelW - 6
+        rowShape.Width = rowWidth
         rowShape.Height = ROW_H
         rowShape.Fill.Visible = msoTrue
-        If TransferSelectionHas(selectionSet, position) Then
+        If rowSelected Then
             rowShape.Fill.ForeColor.RGB = themeValue.PrimaryColor
         Else
             rowShape.Fill.ForeColor.RGB = ResolveSurfaceFill(themeValue)
@@ -4656,13 +4781,13 @@ Private Sub SyncTransferRows( _
             .MarginBottom = 1
             .VerticalAnchor = msoAnchorMiddle
             .WordWrap = msoFalse
-            .TextRange.Text = CStr(itemsRef.Item(position))
+            .TextRange.Text = CStr(itemsRef.Item(itemIndex))
             .TextRange.ParagraphFormat.Alignment = msoAlignLeft
             With .TextRange.Font
                 .Name = themeValue.FontName
                 .Size = resolvedSize
                 .Bold = msoFalse
-                If TransferSelectionHas(selectionSet, position) Then
+                If rowSelected Then
                     .Fill.ForeColor.RGB = themeValue.OnPrimaryColor
                 Else
                     .Fill.ForeColor.RGB = themeValue.OnSurfaceColor
@@ -5110,23 +5235,42 @@ Private Sub SyncComboOptions( _
     Dim itemIndex As Long
     Dim resolvedSize As Double
 
+    Dim matchTotal As Long
+    Dim visibleRows As Long
+    Dim hiddenCount As Long
+    Dim matchIndex As Long
+
     Set mComboMatches = BuildComboMatches(FieldText(hostSheet))
-    If mSelectOpen And mVisible Then wanted = mComboMatches.Count
+    matchTotal = mComboMatches.Count
+    If mListOffset > matchTotal - COMBO_MAX_ROWS Then
+        mListOffset = matchTotal - COMBO_MAX_ROWS
+    End If
+    If mListOffset < 0 Then mListOffset = 0
+    If mListHighlight > matchTotal Then mListHighlight = 0
+    If mSelectOpen And mVisible Then
+        visibleRows = matchTotal - mListOffset
+        If visibleRows > COMBO_MAX_ROWS Then visibleRows = COMBO_MAX_ROWS
+        wanted = visibleRows
+        hiddenCount = matchTotal - visibleRows
+    End If
     resolvedSize = mFontSize
     If resolvedSize <= 0 Then resolvedSize = themeValue.BaseFontSize
-    ' Keystrokes that leave the visible list identical (same matches,
-    ' selection, and geometry) skip the shape work entirely.
+    ' Keystrokes that leave the visible list identical (same window,
+    ' highlight, selection, and geometry) skip the shape work entirely.
     Dim listSig As String
     listSig = CStr(wanted) & ":" & CStr(mValue) & ":" & _
+        CStr(mListOffset) & ":" & CStr(mListHighlight) & ":" & _
+        CStr(hiddenCount) & ":" & _
         CStr(mLeft) & ":" & CStr(mTop) & ":" & CStr(mWidth) & ":" & _
         CStr(mHeight) & ":" & CStr(resolvedSize)
     For position = 1 To wanted
-        listSig = listSig & "|" & CStr(mComboMatches.Item(position))
+        listSig = listSig & "|" & CStr(mComboMatches.Item(mListOffset + position))
     Next position
     If mAppliedValid And listSig = mAppliedComboSig Then Exit Sub
     mAppliedComboSig = listSig
     For position = 1 To wanted
-        itemIndex = CLng(mComboMatches.Item(position))
+        matchIndex = mListOffset + position
+        itemIndex = CLng(mComboMatches.Item(matchIndex))
         Set optionShape = EnsurePartShape( _
             hostSheet, "opt" & position, msoShapeRectangle)
         optionShape.Left = mLeft
@@ -5134,7 +5278,9 @@ Private Sub SyncComboOptions( _
         optionShape.Width = mWidth
         optionShape.Height = mHeight + 2
         optionShape.Fill.Visible = msoTrue
-        If itemIndex = CLng(mValue) Then
+        If matchIndex = mListHighlight Then
+            optionShape.Fill.ForeColor.RGB = themeValue.PrimaryColor
+        ElseIf itemIndex = CLng(mValue) Then
             optionShape.Fill.ForeColor.RGB = themeValue.MutedColor
         Else
             optionShape.Fill.ForeColor.RGB = themeValue.SurfaceColor
@@ -5155,7 +5301,11 @@ Private Sub SyncComboOptions( _
                 .Name = themeValue.FontName
                 .Size = resolvedSize
                 .Bold = msoFalse
-                .Fill.ForeColor.RGB = themeValue.OnSurfaceColor
+                If matchIndex = mListHighlight Then
+                    .Fill.ForeColor.RGB = themeValue.OnPrimaryColor
+                Else
+                    .Fill.ForeColor.RGB = themeValue.OnSurfaceColor
+                End If
             End With
         End With
         optionShape.Visible = msoTrue
@@ -5168,6 +5318,31 @@ Private Sub SyncComboOptions( _
         On Error GoTo 0
     Next position
     mAppliedOptionCount = wanted
+    ' Overflow indicator: an inert row noting how many matches sit
+    ' outside the window; typing or arrows bring them in.
+    If hiddenCount > 0 Then
+        Set optionShape = EnsurePartShape( _
+            hostSheet, "optm", msoShapeRectangle)
+        optionShape.Left = mLeft
+        optionShape.Top = mTop + mHeight + wanted * (mHeight + 2)
+        optionShape.Width = mWidth
+        optionShape.Height = mHeight
+        optionShape.Fill.Visible = msoTrue
+        optionShape.Fill.ForeColor.RGB = themeValue.MutedColor
+        optionShape.Line.Visible = msoTrue
+        optionShape.Line.ForeColor.RGB = themeValue.BorderColor
+        optionShape.Line.Weight = 1
+        StyleGlyphText optionShape, ChrW(8230) & " " & _
+            CStr(hiddenCount) & " more", themeValue.OnMutedColor, _
+            resolvedSize - 1, themeValue
+        optionShape.Visible = msoTrue
+        optionShape.OnAction = mAppliedOnAction
+        optionShape.ZOrder msoBringToFront
+    Else
+        On Error Resume Next
+        hostSheet.Shapes(ShapeName & PART_SEPARATOR & "optm").Delete
+        On Error GoTo 0
+    End If
 End Sub
 
 ' A field without a cell anchor is a float field: its text lives in the
@@ -5200,7 +5375,11 @@ Friend Sub FocusField(ByVal hostApp As ReDimUI)
     mCaretOn = True
     mCaretAccumMs = 0
     ReDimUI.SetKeyboardFocus hostApp, Me
-    If mKind = KIND_COMBO Then mSelectOpen = True
+    If mKind = KIND_COMBO Then
+        mSelectOpen = True
+        mListOffset = 0
+        mListHighlight = 0
+    End If
     Touch
 End Sub
 
@@ -5250,14 +5429,23 @@ Friend Sub BlurField(ByVal hostApp As ReDimUI, ByVal commitChanges As Boolean)
 End Sub
 
 Friend Sub HandleKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
+    Dim textBeforeKey As String
+
     If Not IsFloatField() Then Exit Sub
     If mCaretPos > Len(mText) Then mCaretPos = Len(mText)
+    textBeforeKey = mText
     Select Case keyText
         Case "{ENTER}"
-            ' Single-line: Enter commits. Multi-line: Enter is a newline
-            ' and committing moves to Tab, Ctrl+Enter, or clicking away.
+            ' Single-line: Enter commits - except a combo with a
+            ' highlighted option, which takes that option. Multi-line:
+            ' Enter is a newline and committing moves to Tab,
+            ' Ctrl+Enter, or clicking away.
             If mMultiLine Then
                 InsertAtCaret vbLf
+            ElseIf mKind = KIND_COMBO And mSelectOpen _
+                And mListHighlight >= 1 Then
+                PickComboItem hostApp, mListHighlight
+                Exit Sub
             Else
                 BlurField hostApp, True
                 Exit Sub
@@ -5300,9 +5488,17 @@ Friend Sub HandleKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
         Case "{RIGHT}"
             If mCaretPos < Len(mText) Then mCaretPos = mCaretPos + 1
         Case "{UP}"
-            If mMultiLine Then MoveCaretLine -1
+            If mMultiLine Then
+                MoveCaretLine -1
+            ElseIf mKind = KIND_COMBO Then
+                ComboListNav hostApp, -1
+            End If
         Case "{DOWN}"
-            If mMultiLine Then MoveCaretLine 1
+            If mMultiLine Then
+                MoveCaretLine 1
+            ElseIf mKind = KIND_COMBO Then
+                ComboListNav hostApp, 1
+            End If
         Case "{HOME}"
             MoveCaretLineEdge False
         Case "{END}"
@@ -5313,9 +5509,39 @@ Friend Sub HandleKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
     mCaretOn = True
     mCaretAccumMs = 0
     ' Live filtering, the payoff cells could never give: the option list
-    ' re-filters on every keystroke.
-    If mKind = KIND_COMBO Then mSelectOpen = True
+    ' re-filters on every keystroke, and an edited filter rewinds the
+    ' window and drops the keyboard highlight.
+    If mKind = KIND_COMBO Then
+        mSelectOpen = True
+        If mText <> textBeforeKey Then
+            mListOffset = 0
+            mListHighlight = 0
+        End If
+    End If
     Touch
+End Sub
+
+' Up/Down walk the drop list: the highlight moves through the matches
+' and the visible window follows it. Down on a closed list opens it.
+Private Sub ComboListNav(ByVal hostApp As ReDimUI, ByVal delta As Long)
+    Dim matchCount As Long
+
+    If Not mSelectOpen Then
+        mSelectOpen = True
+        mListOffset = 0
+        mListHighlight = 0
+    End If
+    If mComboMatches Is Nothing Then Exit Sub
+    matchCount = mComboMatches.Count
+    If matchCount = 0 Then Exit Sub
+    mListHighlight = mListHighlight + delta
+    If mListHighlight < 1 Then mListHighlight = 1
+    If mListHighlight > matchCount Then mListHighlight = matchCount
+    If mListHighlight > mListOffset + COMBO_MAX_ROWS Then
+        mListOffset = mListHighlight - COMBO_MAX_ROWS
+    ElseIf mListHighlight <= mListOffset Then
+        mListOffset = mListHighlight - 1
+    End If
 End Sub
 
 Private Sub InsertAtCaret(ByVal insertText As String)
@@ -5421,10 +5647,14 @@ Private Function CursorOverField() As Boolean
     If pointsX = UNMAPPABLE_POINTS Then Exit Function
     pointsY = ScreenYToSheetPoints(cursor.Y)
     If pointsY = UNMAPPABLE_POINTS Then Exit Function
-    ' The open option list counts as part of the field.
+    ' The open option list counts as part of the field; the list is
+    ' windowed, so depth caps at the window plus the indicator row.
     listDepth = 0
     If mSelectOpen And Not mComboMatches Is Nothing Then
-        listDepth = mComboMatches.Count * (mHeight + 2)
+        Dim depthRows As Long
+        depthRows = mComboMatches.Count
+        If depthRows > COMBO_MAX_ROWS Then depthRows = COMBO_MAX_ROWS + 1
+        listDepth = depthRows * (mHeight + 2)
     End If
     If pointsX < mLeft - 2 Or pointsX > mLeft + mWidth + 2 Then Exit Function
     If pointsY < mTop - 2 Or pointsY > mTop + mHeight + listDepth + 2 Then

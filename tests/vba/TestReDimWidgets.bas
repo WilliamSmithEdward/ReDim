@@ -1470,6 +1470,89 @@ Private Function NormalizedFace(ByVal fieldShape As Shape) As String
     NormalizedFace = faceRaw
 End Function
 
+' Long lists: the combo drop list windows to eight rows with an inert
+' overflow indicator, Up/Down walk a highlight that scrolls the window,
+' Enter takes the highlighted match, and clicked rows map through the
+' scroll offset. Transfer panels page through scroll buttons with
+' offset-mapped row selection.
+Public Function TestLongLists() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim items(1 To 12) As Variant
+    Dim position As Long
+    Dim keyNo As Long
+    Dim transcript As String
+
+    Set host = NewCanvas()
+    ReDimUI.AutoPump False
+    Set app = ReDimUI.Mount(host, "wid27")
+    For position = 1 To 12
+        items(position) = "Item" & Format$(position, "00")
+    Next position
+    app.ComboBox("pick").AtRect 24, 24, 150, 22
+    app.ComboBox("pick").ItemsFrom(items).WritesTo "pickState"
+    app.TransferList("pool").AtRect 24, 240, 380, 128
+    app.TransferList("pool").ItemsFrom(items).WritesTo "poolState"
+    app.Render
+
+    ' The open list windows to eight rows plus the overflow indicator.
+    ReDimUI.DispatchShape "rdm_wid27_pick"
+    transcript = "comboWindow=" & _
+        CStr(ShapeExists(host, "rdm_wid27_pick__opt8") And _
+            Not ShapeExists(host, "rdm_wid27_pick__opt9") And _
+            ShapeExists(host, "rdm_wid27_pick__optm"))
+    transcript = transcript & "|moreText=" & _
+        host.Shapes("rdm_wid27_pick__optm").TextFrame2.TextRange.Text
+
+    ' Nine Downs walk the highlight past the window edge; the window
+    ' scrolls and the first visible row becomes the second item.
+    For keyNo = 1 To 9
+        RdxKeyChar "{DOWN}"
+    Next keyNo
+    transcript = transcript & "|scrolledRow1=" & _
+        host.Shapes("rdm_wid27_pick__opt1").TextFrame2.TextRange.Text
+    transcript = transcript & "|highlightLast=" & _
+        CStr(host.Shapes("rdm_wid27_pick__opt8").Fill.ForeColor.RGB = _
+            app.Theme.PrimaryColor)
+
+    ' Enter takes the highlighted match.
+    RdxKeyChar "{ENTER}"
+    transcript = transcript & "|enterTakes=" & app.State("pickState")
+
+    ' A clicked window row maps through the offset: reopen, walk down
+    ' nine again, click the first visible row.
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid27_pick"
+    RdxKeyChar "{ESC}"
+    For keyNo = 1 To 9
+        RdxKeyChar "{DOWN}"
+    Next keyNo
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid27_pick__opt1"
+    transcript = transcript & "|clickMaps=" & app.State("pickState")
+
+    ' Transfer panel: five rows fit, arrows page, selection maps
+    ' through the offset.
+    transcript = transcript & "|poolRows=" & _
+        CStr(ShapeExists(host, "rdm_wid27_pool__al5") And _
+            Not ShapeExists(host, "rdm_wid27_pool__al6") And _
+            ShapeExists(host, "rdm_wid27_pool__ald"))
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid27_pool__ald"
+    transcript = transcript & "|pagedRow1=" & _
+        host.Shapes("rdm_wid27_pool__al1").TextFrame2.TextRange.Text
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid27_pool__al2"
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid27_pool__mvr"
+    transcript = transcript & "|offsetMovedState=" & app.State("poolState")
+    transcript = transcript & "|scrollerGoneWhenFits=" & _
+        CStr(Not ShapeExists(host, "rdm_wid27_pool__cld"))
+    RdxReleaseKeys
+    ReDimUI.AutoPump True
+    TestLongLists = transcript
+End Function
+
 Public Function TestModalConfirm() As String
     Dim app As ReDimUI
     Dim host As Worksheet

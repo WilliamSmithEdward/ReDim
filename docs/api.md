@@ -134,14 +134,17 @@ dependencies:
   reserves modifier-clicks on macro shapes for selecting the shape itself, the same rule
   behind the design-time escape hatch below.) `WritesTo` carries the chosen items joined
   with a comma and space; `OnChange` fires once per user transfer, and selecting rows
-  fires nothing. Rows render up to the panel's height; the header counts stay honest when
-  a list overflows what fits.
+  fires nothing. Rows render up to the panel's height; when a list outgrows its panel,
+  paging arrows appear on the panel's right edge and move the window a page at a time,
+  and the header counts stay honest about totals.
 - `ComboBox`: an editable combo with a caret and a filtered drop list, sharing the item
   APIs. Place it with `AtRect` (or `Below`/`RightOf`) and it is a float field: click to
   focus, type, and the list re-filters on every keystroke. Anchoring to a cell with `At`
   keeps the 0.8.0 cell-backed mode, where Excel's edit-mode VBA pause limits filtering to
   commit moments. In both modes picking an option writes the value, the `WritesTo` state,
-  and fires `OnChange`.
+  and fires `OnChange`. The drop list windows to eight rows: Up and Down walk a highlight
+  that scrolls the window, Enter takes the highlighted match, typing re-filters, and an
+  inert indicator row counts the matches outside the window.
 - `TextInput`: a text field. Float by default (`AtRect`), cell-backed with `At` when you
   want the value to live in the grid.
 - `CheckList`: a checkbox list - one box-and-caption row per item, any number checked,
