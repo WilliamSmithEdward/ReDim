@@ -280,6 +280,8 @@ def test_float_field(run_widgets):
     assert facts["pickBlurred"] == "True"
     assert facts["pickClosed"] == "True"
     assert facts["outsideCommit"] == "Heyo"
+    assert facts["tabCommit"] == "Heyox", "Tab must commit exactly like Enter"
+    assert facts["tabBlurred"] == "True"
 
 
 def test_modal_confirm(run_widgets):

@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.9.2 - 2026-07-26
+
+- Clicking away from a focused float field commits with either mouse button:
+  the blur watch now treats a right-button press as clicking away too, so a
+  context-menu click cannot leave a field silently holding focus. (Left-click
+  away has committed since 0.9.0 via the pump press-edge watch; in 0.9.0 the
+  invisible-ink bug merely hid it happening.)
+- Tab commits and leaves the field, matching the form convention alongside
+  Enter; Esc still reverts.
+
 ## 0.9.1 - 2026-07-26
 
 - Fix invisible typing in float fields: a field left on the default variant

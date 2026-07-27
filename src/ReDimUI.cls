@@ -40,6 +40,7 @@ Private Declare PtrSafe Function GetAsyncKeyState Lib "user32" ( _
 Private Const LOGPIXELSX As Long = 88
 Private Const LOGPIXELSY As Long = 90
 Private Const VK_LEFT_BUTTON As Long = 1
+Private Const VK_RIGHT_BUTTON As Long = 2
 
 Private Const SHAPE_PREFIX As String = "rdm_"
 Private Const PART_SEPARATOR As String = "__"
@@ -84,7 +85,7 @@ Private Const REL_NONE As Long = 0
 Private Const REL_BELOW As Long = 1
 Private Const REL_RIGHT_OF As Long = 2
 Private Const PERSIST_PREFIX As String = "rdm_s_"
-Private Const REDIM_VERSION As String = "0.9.1"
+Private Const REDIM_VERSION As String = "0.9.2"
 
 Private mRole As Long
 
@@ -1762,16 +1763,21 @@ Friend Sub TickApp( _
             jobValue.TickJob Me, nowMs, runWork, animating
         End If
     Next jobValue
+    ' Sliders drag with the left button only; the field blur watch treats
+    ' a press of either button as clicking away.
     Dim leftButtonDown As Boolean
+    Dim anyButtonDown As Boolean
     Dim pressEdge As Boolean
     leftButtonDown = (GetAsyncKeyState(VK_LEFT_BUTTON) < 0)
-    pressEdge = (leftButtonDown And Not mFieldPrevButtonDown)
-    mFieldPrevButtonDown = leftButtonDown
+    anyButtonDown = leftButtonDown _
+        Or (GetAsyncKeyState(VK_RIGHT_BUTTON) < 0)
+    pressEdge = (anyButtonDown And Not mFieldPrevButtonDown)
+    mFieldPrevButtonDown = anyButtonDown
     Set expiredIds = New Collection
     For Each componentValue In mComponents
         componentValue.TickAnimation mSheet, elapsedMs
         componentValue.TickSlideDrag Me, leftButtonDown
-        componentValue.TickFieldWatch Me, leftButtonDown, pressEdge
+        componentValue.TickFieldWatch Me, anyButtonDown, pressEdge
         If runWork Then
             If componentValue.IsExpiredToast(nowMs) Then
                 expiredIds.Add componentValue.ComponentId
@@ -4164,7 +4170,9 @@ End Sub
 Friend Sub HandleKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
     If Not IsFloatField() Then Exit Sub
     Select Case keyText
-        Case "{ENTER}"
+        Case "{ENTER}", "{TAB}"
+            ' Tab commits like Enter: the form-field convention for
+            ' leaving a field with its value kept.
             BlurField hostApp, True
             Exit Sub
         Case "{ESC}"

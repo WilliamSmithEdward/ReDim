@@ -905,6 +905,15 @@ Public Function TestFloatField() As String
     RdxKeyChar "o"
     app.TextInput("name").BlurField app, True
     transcript = transcript & "|outsideCommit=" & app.State("who")
+
+    ' Tab is the form-field leave key: commit exactly like Enter.
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid21_name"
+    RdxKeyChar "x"
+    RdxKeyChar "{TAB}"
+    transcript = transcript & "|tabCommit=" & app.State("who")
+    transcript = transcript & "|tabBlurred=" & _
+        CStr(Not ReDimUI.HasKeyboardFocus)
     RdxReleaseKeys
     ReDimUI.AutoPump True
     TestFloatField = transcript

@@ -148,10 +148,12 @@ means typing works on `ProtectSurface` sheets, where cell edit is locked out.
 Focus mechanics, all automatic:
 
 - One field holds focus at a time; focusing another commits the first.
-- Enter commits: the buffer becomes the value, `WritesTo` state is written and `OnChange`
-  fires if the text changed. A combo commit that exactly matches an item takes that item.
+- Enter and Tab commit: the buffer becomes the value, `WritesTo` state is written and
+  `OnChange` fires if the text changed. A combo commit that exactly matches an item takes
+  that item.
 - Esc reverts to the text the field had when focus arrived and fires nothing.
-- Clicking anywhere off the field commits, watched by the same pump frames as slider drags.
+- Clicking anywhere off the field commits - either mouse button, watched by the same pump
+  frames as slider drags.
 - `InputValue` reads and writes the buffer in float mode, the cell in cell mode.
 
 Capture uses `Application.OnKey`, bound only while a field is focused and released on blur,
