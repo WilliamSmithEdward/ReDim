@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.15.2 - 2026-07-26
+
+- Focused fields follow the caret when their text overflows. Shape text
+  cannot scroll, so the focused view renders the tail window of the
+  buffer instead: the last lines that fit a multi-line field, the
+  rightmost characters that fit a single-line field or combo, always
+  including the caret, with a leading ellipsis marking trimmed content.
+  Window sizes are estimated conservatively from the font size, the
+  buffer keeps the complete text, and commits are untouched. Unfocused
+  fields still show their beginning.
+
 ## 0.15.1 - 2026-07-26
 
 - Typing hot path slimmed, addressing keystroke lag and the busy-cursor

@@ -91,7 +91,7 @@ Private Const VARIANT_NEUTRAL As Long = 4
 Private Const REL_NONE As Long = 0
 Private Const REL_BELOW As Long = 1
 Private Const REL_RIGHT_OF As Long = 2
-Private Const REDIM_VERSION As String = "0.15.1"
+Private Const REDIM_VERSION As String = "0.15.2"
 
 Private mRole As Long
 
@@ -3834,6 +3834,69 @@ Friend Function ResolveText(ByVal ownerApp As ReDimUI) As String
     ResolveText = mText
 End Function
 
+' The tail of the buffer that fits the field, estimated from the font
+' size: a character column is roughly 0.58 of the size, a line roughly
+' 1.35. Estimates run conservative so the tail is always in view; a
+' leading ellipsis marks trimmed content. Hard lines are walked from
+' the end, counting the visual lines each one wraps to.
+Private Function WindowFieldText( _
+    ByVal resolved As String, _
+    ByVal resolvedSize As Double _
+) As String
+    Dim charsPerLine As Long
+    Dim maxLines As Long
+    Dim hardLines() As String
+    Dim segment As String
+    Dim segmentVisual As Long
+    Dim usedLines As Long
+    Dim keepChars As Long
+    Dim result As String
+    Dim position As Long
+    Dim trimmed As Boolean
+
+    charsPerLine = Int((mWidth - 12) / (resolvedSize * 0.58))
+    If charsPerLine < 4 Then charsPerLine = 4
+    If mMultiLine Then
+        maxLines = Int((mHeight - 6) / (resolvedSize * 1.35))
+        If maxLines < 1 Then maxLines = 1
+    Else
+        maxLines = 1
+    End If
+    hardLines = Split(resolved, vbLf)
+    For position = UBound(hardLines) To LBound(hardLines) Step -1
+        segment = hardLines(position)
+        segmentVisual = 1 + (Len(segment) \ charsPerLine)
+        If Len(segment) > 0 And (Len(segment) Mod charsPerLine) = 0 Then
+            segmentVisual = segmentVisual - 1
+        End If
+        If usedLines + segmentVisual > maxLines Then
+            keepChars = (maxLines - usedLines) * charsPerLine
+            If keepChars > 0 Then
+                segment = Right$(segment, keepChars)
+                If LenB(result) = 0 Then
+                    result = segment
+                Else
+                    result = segment & vbLf & result
+                End If
+            End If
+            trimmed = True
+            Exit For
+        End If
+        usedLines = usedLines + segmentVisual
+        If LenB(result) = 0 Then
+            result = segment
+        Else
+            result = segment & vbLf & result
+        End If
+        If usedLines = maxLines And position > LBound(hardLines) Then
+            trimmed = True
+            Exit For
+        End If
+    Next position
+    If trimmed Then result = ChrW(8230) & result
+    WindowFieldText = result
+End Function
+
 Private Function ResolveSpinnerColor(ByVal themeValue As ReDimUI) As Long
     If mFillColor >= 0 Then
         ResolveSpinnerColor = mFillColor
@@ -3857,6 +3920,14 @@ Private Sub ApplyText(ByVal target As Shape, ByVal themeValue As ReDimUI)
     resolvedColor = ResolveTextColor(themeValue)
     resolvedSize = mFontSize
     If resolvedSize <= 0 Then resolvedSize = themeValue.BaseFontSize
+    ' Shape text cannot scroll, so a focused field renders the tail
+    ' window of its buffer: the caret lives at the end, and the view
+    ' follows it. The full text stays in the buffer and commits intact.
+    If IsFloatField() Then
+        If ReDimUI.IsComponentFocused(mOwnerAppId, mComponentId) Then
+            resolved = WindowFieldText(resolved, resolvedSize)
+        End If
+    End If
     If Not mAppliedValid Then
         target.TextFrame2.MarginLeft = 6
         target.TextFrame2.MarginRight = 6

@@ -179,6 +179,11 @@ Focus mechanics, all automatic:
   carries its newlines into state. Size the rectangle for the lines you expect - roughly
   15 points per line plus 6 points of margin; a line that cannot fully fit is not drawn
   at all, which reads as a missing line.
+- Overflow follows the caret. Shape text cannot scroll, so a focused field renders the
+  tail window of its buffer - the last lines that fit (multi-line) or the rightmost
+  characters that fit (single-line and combo) - with a leading ellipsis marking trimmed
+  content. The buffer keeps the complete text and commits intact; unfocused fields show
+  their beginning.
 - Esc reverts to the text the field had when focus arrived and fires nothing.
 - Clicking anywhere off the field commits, through two frame-driven signals. A cell click
   moves the selection, and the focused field's frames poll the selection - the press

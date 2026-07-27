@@ -410,6 +410,17 @@ def test_multi_line_input(run_widgets):
     assert facts["singleLineEnterCommits"] == "True", (
         "single-line fields keep the Enter-commits convention"
     )
+    assert facts["tailWindow"] == "True", (
+        "an overflowing multi-line field must window to the caret's tail"
+        " lines with a leading ellipsis"
+    )
+    assert facts["fullCommit"] == "True", (
+        "windowing is render-only; the committed value stays complete"
+    )
+    assert facts["lineWindow"] == "True", (
+        "an overflowing single line must window to its rightmost chars"
+    )
+    assert facts["lineFullCommit"] == "True"
 
 
 def test_modal_confirm(run_widgets):

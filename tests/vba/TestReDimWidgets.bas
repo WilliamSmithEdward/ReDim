@@ -1305,6 +1305,45 @@ Public Function TestMultiLineInput() As String
     RdxKeyChar "{ENTER}"
     transcript = transcript & "|singleLineEnterCommits=" & _
         CStr(Not ReDimUI.HasKeyboardFocus And app.State("oneLine") = "x")
+
+    ' Overflow follows the caret: the focused view windows the tail of
+    ' the buffer, with a leading ellipsis for trimmed content, while the
+    ' buffer and the committed value stay complete. 200x60 at 11pt holds
+    ' three visual lines; four hard lines window to the last three.
+    Sleep 200
+    app.TextInput("notes").InputValue = vbNullString
+    ReDimUI.DispatchShape "rdm_wid25_notes"
+    Dim lineNo As Long
+    For lineNo = 1 To 4
+        RdxKeyChar "L"
+        RdxKeyChar CStr(lineNo)
+        If lineNo < 4 Then RdxKeyChar "{ENTER}"
+    Next lineNo
+    faceRaw = fieldShape.TextFrame2.TextRange.Text
+    faceRaw = Replace(faceRaw, vbCrLf, vbLf)
+    faceRaw = Replace(faceRaw, vbCr, vbLf)
+    faceRaw = Replace(faceRaw, Chr$(11), vbLf)
+    transcript = transcript & "|tailWindow=" & _
+        CStr(faceRaw = ChrW(8230) & "L2" & vbLf & "L3" & vbLf & "L4|")
+    RdxKeyChar "{CTRLENTER}"
+    transcript = transcript & "|fullCommit=" & _
+        CStr(app.State("noteText") = _
+            "L1" & vbLf & "L2" & vbLf & "L3" & vbLf & "L4")
+
+    ' A long single line windows to its rightmost characters.
+    Sleep 200
+    app.TextInput("one").InputValue = vbNullString
+    ReDimUI.DispatchShape "rdm_wid25_one"
+    Dim keyNo As Long
+    For keyNo = 1 To 30
+        RdxKeyChar "x"
+    Next keyNo
+    faceRaw = host.Shapes("rdm_wid25_one").TextFrame2.TextRange.Text
+    transcript = transcript & "|lineWindow=" & _
+        CStr(faceRaw = ChrW(8230) & String$(20, "x") & "|")
+    RdxKeyChar "{ENTER}"
+    transcript = transcript & "|lineFullCommit=" & _
+        CStr(Len(CStr(app.State("oneLine"))) = 30)
     RdxReleaseKeys
     ReDimUI.AutoPump True
     TestMultiLineInput = transcript
