@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.17.2 - 2026-07-26
+
+- The combo's inert overflow row is replaced by clickable pagers, on
+  design feedback: the dead-end row gave mouse users no path to the
+  overflow. Both list edges now page - a bottom row with a down arrow
+  and the count below, and, once scrolled, a top row with an up arrow
+  and the count above - keeping the list open, clamping at the ends,
+  and swapping roles at the clamps. The same arrow vocabulary as the
+  transfer panels. A Down after mouse paging starts the keyboard
+  highlight at the window's first visible row instead of snapping back
+  to the top, and the superseded indicator part is swept from adopted
+  sheets.
+
 ## 0.17.1 - 2026-07-26
 
 - Gallery long-list fixtures: the fruit combo grows to twenty items so

@@ -456,9 +456,9 @@ def test_caret_editing(run_widgets):
 def test_long_lists(run_widgets):
     facts = parse_transcript(run_widgets("TestLongLists"))
     assert facts["comboWindow"] == "True", (
-        "an open combo must window to eight rows plus the indicator"
+        "an open combo must window to eight rows plus the bottom pager"
     )
-    assert facts["moreText"] == "… 4 more"
+    assert facts["moreText"] == "▼ 4 more"
     assert facts["scrolledRow1"] == "Item02", (
         "walking the highlight past the window edge must scroll it"
     )
@@ -469,6 +469,17 @@ def test_long_lists(run_widgets):
     assert facts["clickMaps"] == "Item02", (
         "clicked window rows must map through the scroll offset"
     )
+    assert facts["comboPagedRow1"] == "Item05", (
+        "the bottom pager must page the window, clamped to the tail"
+    )
+    assert facts["optuText"] == "▲ 4 more"
+    assert facts["optdGoneAtEnd"] == "True", (
+        "the bottom pager disappears when nothing lies below"
+    )
+    assert facts["downStartsInWindow"] == "True", (
+        "a Down after mouse paging starts the highlight in the window"
+    )
+    assert facts["pagedBack"] == "True"
     assert facts["poolRows"] == "True"
     assert facts["pagedRow1"] == "Item05", (
         "the panel scroll button must page the window"

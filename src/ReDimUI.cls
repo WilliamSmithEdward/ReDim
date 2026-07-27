@@ -95,7 +95,7 @@ Private Const VARIANT_NEUTRAL As Long = 4
 Private Const REL_NONE As Long = 0
 Private Const REL_BELOW As Long = 1
 Private Const REL_RIGHT_OF As Long = 2
-Private Const REDIM_VERSION As String = "0.17.1"
+Private Const REDIM_VERSION As String = "0.17.2"
 
 Private mRole As Long
 
@@ -3160,8 +3160,21 @@ Friend Sub RunClickBehavior()
                 ' their absolute match index.
                 PickComboItem hostApp, _
                     mListOffset + CLng(Mid$(ReDimUI.SenderPart, 4))
-            ElseIf ReDimUI.SenderPart = "optm" Then
-                ' The overflow indicator row is inert.
+            ElseIf ReDimUI.SenderPart = "optu" _
+                Or ReDimUI.SenderPart = "optd" Then
+                ' The edge rows page the window; the list stays open and
+                ' focus stays put. The keyboard highlight resets so the
+                ' next arrow press starts from the visible window.
+                Dim comboPage As Long
+                comboPage = COMBO_MAX_ROWS - 1
+                If ReDimUI.SenderPart = "optu" Then
+                    mListOffset = mListOffset - comboPage
+                    If mListOffset < 0 Then mListOffset = 0
+                Else
+                    mListOffset = mListOffset + comboPage
+                End If
+                mListHighlight = 0
+                Touch
                 Exit Sub
             ElseIf IsFloatField() Then
                 If ReDimUI.IsComponentFocused(hostApp.AppId, mComponentId) Then
@@ -5237,7 +5250,9 @@ Private Sub SyncComboOptions( _
 
     Dim matchTotal As Long
     Dim visibleRows As Long
-    Dim hiddenCount As Long
+    Dim aboveCount As Long
+    Dim belowCount As Long
+    Dim rowShift As Long
     Dim matchIndex As Long
 
     Set mComboMatches = BuildComboMatches(FieldText(hostSheet))
@@ -5251,8 +5266,10 @@ Private Sub SyncComboOptions( _
         visibleRows = matchTotal - mListOffset
         If visibleRows > COMBO_MAX_ROWS Then visibleRows = COMBO_MAX_ROWS
         wanted = visibleRows
-        hiddenCount = matchTotal - visibleRows
+        aboveCount = mListOffset
+        belowCount = matchTotal - mListOffset - visibleRows
     End If
+    If aboveCount > 0 Then rowShift = 1
     resolvedSize = mFontSize
     If resolvedSize <= 0 Then resolvedSize = themeValue.BaseFontSize
     ' Keystrokes that leave the visible list identical (same window,
@@ -5260,7 +5277,7 @@ Private Sub SyncComboOptions( _
     Dim listSig As String
     listSig = CStr(wanted) & ":" & CStr(mValue) & ":" & _
         CStr(mListOffset) & ":" & CStr(mListHighlight) & ":" & _
-        CStr(hiddenCount) & ":" & _
+        CStr(aboveCount) & ":" & CStr(belowCount) & ":" & _
         CStr(mLeft) & ":" & CStr(mTop) & ":" & CStr(mWidth) & ":" & _
         CStr(mHeight) & ":" & CStr(resolvedSize)
     For position = 1 To wanted
@@ -5268,13 +5285,16 @@ Private Sub SyncComboOptions( _
     Next position
     If mAppliedValid And listSig = mAppliedComboSig Then Exit Sub
     mAppliedComboSig = listSig
+    SyncComboPager hostSheet, themeValue, "optu", ChrW(9650), _
+        aboveCount, mTop + mHeight, resolvedSize
     For position = 1 To wanted
         matchIndex = mListOffset + position
         itemIndex = CLng(mComboMatches.Item(matchIndex))
         Set optionShape = EnsurePartShape( _
             hostSheet, "opt" & position, msoShapeRectangle)
         optionShape.Left = mLeft
-        optionShape.Top = mTop + mHeight + (position - 1) * (mHeight + 2)
+        optionShape.Top = mTop + mHeight + _
+            (rowShift + position - 1) * (mHeight + 2)
         optionShape.Width = mWidth
         optionShape.Height = mHeight + 2
         optionShape.Fill.Visible = msoTrue
@@ -5318,29 +5338,50 @@ Private Sub SyncComboOptions( _
         On Error GoTo 0
     Next position
     mAppliedOptionCount = wanted
-    ' Overflow indicator: an inert row noting how many matches sit
-    ' outside the window; typing or arrows bring them in.
-    If hiddenCount > 0 Then
-        Set optionShape = EnsurePartShape( _
-            hostSheet, "optm", msoShapeRectangle)
-        optionShape.Left = mLeft
-        optionShape.Top = mTop + mHeight + wanted * (mHeight + 2)
-        optionShape.Width = mWidth
-        optionShape.Height = mHeight
-        optionShape.Fill.Visible = msoTrue
-        optionShape.Fill.ForeColor.RGB = themeValue.MutedColor
-        optionShape.Line.Visible = msoTrue
-        optionShape.Line.ForeColor.RGB = themeValue.BorderColor
-        optionShape.Line.Weight = 1
-        StyleGlyphText optionShape, ChrW(8230) & " " & _
-            CStr(hiddenCount) & " more", themeValue.OnMutedColor, _
+    SyncComboPager hostSheet, themeValue, "optd", ChrW(9660), _
+        belowCount, mTop + mHeight + (rowShift + wanted) * (mHeight + 2), _
+        resolvedSize
+    ' The 0.17.0 inert indicator row is superseded by the pagers.
+    On Error Resume Next
+    hostSheet.Shapes(ShapeName & PART_SEPARATOR & "optm").Delete
+    On Error GoTo 0
+End Sub
+
+' A clickable paging row at a list edge: the arrow plus the count of
+' matches beyond that edge. Clicking pages the window; absent when
+' nothing lies beyond.
+Private Sub SyncComboPager( _
+    ByVal hostSheet As Worksheet, _
+    ByVal themeValue As ReDimUI, _
+    ByVal partName As String, _
+    ByVal arrowGlyph As String, _
+    ByVal beyondCount As Long, _
+    ByVal rowTop As Double, _
+    ByVal resolvedSize As Double _
+)
+    Dim pagerShape As Shape
+
+    If beyondCount > 0 Then
+        Set pagerShape = EnsurePartShape( _
+            hostSheet, partName, msoShapeRectangle)
+        pagerShape.Left = mLeft
+        pagerShape.Top = rowTop
+        pagerShape.Width = mWidth
+        pagerShape.Height = mHeight
+        pagerShape.Fill.Visible = msoTrue
+        pagerShape.Fill.ForeColor.RGB = themeValue.MutedColor
+        pagerShape.Line.Visible = msoTrue
+        pagerShape.Line.ForeColor.RGB = themeValue.BorderColor
+        pagerShape.Line.Weight = 1
+        StyleGlyphText pagerShape, arrowGlyph & " " & _
+            CStr(beyondCount) & " more", themeValue.OnSurfaceColor, _
             resolvedSize - 1, themeValue
-        optionShape.Visible = msoTrue
-        optionShape.OnAction = mAppliedOnAction
-        optionShape.ZOrder msoBringToFront
+        pagerShape.Visible = msoTrue
+        pagerShape.OnAction = mAppliedOnAction
+        pagerShape.ZOrder msoBringToFront
     Else
         On Error Resume Next
-        hostSheet.Shapes(ShapeName & PART_SEPARATOR & "optm").Delete
+        hostSheet.Shapes(ShapeName & PART_SEPARATOR & partName).Delete
         On Error GoTo 0
     End If
 End Sub
@@ -5534,7 +5575,13 @@ Private Sub ComboListNav(ByVal hostApp As ReDimUI, ByVal delta As Long)
     If mComboMatches Is Nothing Then Exit Sub
     matchCount = mComboMatches.Count
     If matchCount = 0 Then Exit Sub
-    mListHighlight = mListHighlight + delta
+    If mListHighlight = 0 Then
+        ' After mouse paging (or on the first press) the walk starts at
+        ' the window's first visible row, not back at the top.
+        mListHighlight = mListOffset + 1
+    Else
+        mListHighlight = mListHighlight + delta
+    End If
     If mListHighlight < 1 Then mListHighlight = 1
     If mListHighlight > matchCount Then mListHighlight = matchCount
     If mListHighlight > mListOffset + COMBO_MAX_ROWS Then
@@ -5648,12 +5695,12 @@ Private Function CursorOverField() As Boolean
     pointsY = ScreenYToSheetPoints(cursor.Y)
     If pointsY = UNMAPPABLE_POINTS Then Exit Function
     ' The open option list counts as part of the field; the list is
-    ' windowed, so depth caps at the window plus the indicator row.
+    ' windowed, so depth caps at the window plus the two pager rows.
     listDepth = 0
     If mSelectOpen And Not mComboMatches Is Nothing Then
         Dim depthRows As Long
         depthRows = mComboMatches.Count
-        If depthRows > COMBO_MAX_ROWS Then depthRows = COMBO_MAX_ROWS + 1
+        If depthRows > COMBO_MAX_ROWS Then depthRows = COMBO_MAX_ROWS + 2
         listDepth = depthRows * (mHeight + 2)
     End If
     If pointsX < mLeft - 2 Or pointsX > mLeft + mWidth + 2 Then Exit Function

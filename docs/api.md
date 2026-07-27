@@ -143,8 +143,9 @@ dependencies:
   keeps the 0.8.0 cell-backed mode, where Excel's edit-mode VBA pause limits filtering to
   commit moments. In both modes picking an option writes the value, the `WritesTo` state,
   and fires `OnChange`. The drop list windows to eight rows: Up and Down walk a highlight
-  that scrolls the window, Enter takes the highlighted match, typing re-filters, and an
-  inert indicator row counts the matches outside the window.
+  that scrolls the window, Enter takes the highlighted match, typing re-filters, and
+  clickable pager rows at the list edges (arrow plus the count beyond that edge) page the
+  window for the mouse, appearing only when something lies beyond them.
 - `TextInput`: a text field. Float by default (`AtRect`), cell-backed with `At` when you
   want the value to live in the grid.
 - `CheckList`: a checkbox list - one box-and-caption row per item, any number checked,

@@ -1495,14 +1495,15 @@ Public Function TestLongLists() As String
     app.TransferList("pool").ItemsFrom(items).WritesTo "poolState"
     app.Render
 
-    ' The open list windows to eight rows plus the overflow indicator.
+    ' The open list windows to eight rows plus the bottom pager row.
     ReDimUI.DispatchShape "rdm_wid27_pick"
     transcript = "comboWindow=" & _
         CStr(ShapeExists(host, "rdm_wid27_pick__opt8") And _
             Not ShapeExists(host, "rdm_wid27_pick__opt9") And _
-            ShapeExists(host, "rdm_wid27_pick__optm"))
+            ShapeExists(host, "rdm_wid27_pick__optd") And _
+            Not ShapeExists(host, "rdm_wid27_pick__optu"))
     transcript = transcript & "|moreText=" & _
-        host.Shapes("rdm_wid27_pick__optm").TextFrame2.TextRange.Text
+        host.Shapes("rdm_wid27_pick__optd").TextFrame2.TextRange.Text
 
     ' Nine Downs walk the highlight past the window edge; the window
     ' scrolls and the first visible row becomes the second item.
@@ -1530,6 +1531,31 @@ Public Function TestLongLists() As String
     Sleep 200
     ReDimUI.DispatchShape "rdm_wid27_pick__opt1"
     transcript = transcript & "|clickMaps=" & app.State("pickState")
+
+    ' Mouse paging: the bottom pager pages the window (clamped), the
+    ' top pager appears with its count and pages back, and a Down after
+    ' paging starts the highlight inside the visible window.
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid27_pick"
+    RdxKeyChar "{ESC}"
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid27_pick__optd"
+    transcript = transcript & "|comboPagedRow1=" & _
+        host.Shapes("rdm_wid27_pick__opt1").TextFrame2.TextRange.Text
+    transcript = transcript & "|optuText=" & _
+        host.Shapes("rdm_wid27_pick__optu").TextFrame2.TextRange.Text
+    transcript = transcript & "|optdGoneAtEnd=" & _
+        CStr(Not ShapeExists(host, "rdm_wid27_pick__optd"))
+    RdxKeyChar "{DOWN}"
+    transcript = transcript & "|downStartsInWindow=" & _
+        CStr(host.Shapes("rdm_wid27_pick__opt1").Fill.ForeColor.RGB = _
+            app.Theme.PrimaryColor)
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid27_pick__optu"
+    transcript = transcript & "|pagedBack=" & _
+        CStr(host.Shapes("rdm_wid27_pick__opt1").TextFrame2.TextRange.Text _
+            = "Item01" And Not ShapeExists(host, "rdm_wid27_pick__optu"))
+    RdxKeyChar "{ESC}"
 
     ' Transfer panel: five rows fit, arrows page, selection maps
     ' through the offset.
