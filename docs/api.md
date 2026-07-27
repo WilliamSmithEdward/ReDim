@@ -123,7 +123,9 @@ dependencies:
   pump armed so presses are never missed - the idle cost is that one poll per frame.
   Coordinates come from `GetCursorPos` plus a DPI-and-zoom-aware inversion of
   `PointsToScreenPixels`; frozen-pane splits skew that calibration, so keep app surfaces
-  unsplit. Use `Stepper` for precision.
+  unsplit. Floating chrome claims the points it covers, so a press on an open drop list
+  or a modal overlay never reaches a track painted underneath. Use `Stepper` for
+  precision.
 - `SelectBox`: a themed face, caret, and option list in place of the native dropdown.
 - `TransferList`: a dual listbox - two panels with counted headers, selectable rows, and
   four move buttons (`>`, `>>`, `<`, `<<`). `Items`/`ItemsFrom` and the item APIs feed the

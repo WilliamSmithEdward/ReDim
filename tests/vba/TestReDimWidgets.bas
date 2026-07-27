@@ -1579,6 +1579,57 @@ Public Function TestLongLists() As String
     TestLongLists = transcript
 End Function
 
+' Floating chrome claims the points it covers, so pump watches cannot
+' hit-test through an open drop list or a modal overlay into controls
+' painted underneath.
+Public Function TestChromeClaim() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim items(1 To 12) As Variant
+    Dim position As Long
+    Dim transcript As String
+
+    Set host = NewCanvas()
+    ReDimUI.AutoPump False
+    Set app = ReDimUI.Mount(host, "wid28")
+    For position = 1 To 12
+        items(position) = "Item" & Format$(position, "00")
+    Next position
+    app.ComboBox("pick").AtRect 24, 24, 150, 22
+    app.ComboBox("pick").ItemsFrom items
+    app.SlideBar("vol").AtRect 24, 200, 200, 18
+    app.SlideBar("vol").SliderRange 0, 100, 5
+    app.Render
+
+    ' A closed list claims nothing.
+    transcript = "closedClaimsNothing=" & _
+        CStr(Not app.PointClaimedByChrome(30, 150, "vol"))
+
+    ' The open list claims its dropped zone, but not points beside it,
+    ' and the asking component itself is excluded from the scan.
+    ReDimUI.DispatchShape "rdm_wid28_pick"
+    transcript = transcript & "|openClaims=" & _
+        CStr(app.PointClaimedByChrome(30, 150, "vol"))
+    transcript = transcript & "|besideNotClaimed=" & _
+        CStr(Not app.PointClaimedByChrome(400, 150, "vol"))
+    transcript = transcript & "|exceptSelf=" & _
+        CStr(Not app.PointClaimedByChrome(30, 150, "pick"))
+    RdxKeyChar "{ESC}"
+    transcript = transcript & "|closedAgain=" & _
+        CStr(Not app.PointClaimedByChrome(30, 150, "vol"))
+
+    ' A modal overlay claims everything it covers until it closes.
+    app.Confirm "Sure?", "Chrome claim check.", vbNullString
+    transcript = transcript & "|overlayClaims=" & _
+        CStr(app.PointClaimedByChrome(120, 210, "vol"))
+    ReDimUI.DispatchShape "rdm_wid28_mdl_cancel"
+    transcript = transcript & "|overlayReleased=" & _
+        CStr(Not app.PointClaimedByChrome(120, 210, "vol"))
+    RdxReleaseKeys
+    ReDimUI.AutoPump True
+    TestChromeClaim = transcript
+End Function
+
 Public Function TestModalConfirm() As String
     Dim app As ReDimUI
     Dim host As Worksheet

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.17.3 - 2026-07-26
+
+- Fix a press on floating chrome also engaging the slider underneath
+  (reported: clicking the combo's pager row set the slider it
+  overlapped). The slider's press watch is a geometric hit test with
+  no notion of layering, so floating chrome now claims the points it
+  covers: an open drop list claims its face, rows, and pagers, and a
+  modal overlay claims everything it spans. The watch asks before
+  engaging and skips claimed presses - which also closes the latent
+  version of the same bug for sliders under modals.
+
 ## 0.17.2 - 2026-07-26
 
 - The combo's inert overflow row is replaced by clickable pagers, on

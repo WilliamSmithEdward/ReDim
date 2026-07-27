@@ -95,7 +95,7 @@ Private Const VARIANT_NEUTRAL As Long = 4
 Private Const REL_NONE As Long = 0
 Private Const REL_BELOW As Long = 1
 Private Const REL_RIGHT_OF As Long = 2
-Private Const REDIM_VERSION As String = "0.17.2"
+Private Const REDIM_VERSION As String = "0.17.3"
 
 Private mRole As Long
 
@@ -2970,6 +2970,27 @@ Private Sub EnsureTransferCollections()
     If mSelRight Is Nothing Then Set mSelRight = New Collection
 End Sub
 
+' True when floating chrome above the canvas claims the point, asked by
+' the pump watches before a geometric hit test engages a control that
+' the chrome may be covering.
+Friend Function PointClaimedByChrome( _
+    ByVal pointsX As Double, _
+    ByVal pointsY As Double, _
+    ByVal exceptComponentId As String _
+) As Boolean
+    Dim componentValue As ReDimUI
+
+    RequireRole ROLE_APP, "PointClaimedByChrome"
+    For Each componentValue In mComponents
+        If componentValue.ComponentId <> exceptComponentId Then
+            If componentValue.ChromeClaimsPoint(pointsX, pointsY) Then
+                PointClaimedByChrome = True
+                Exit Function
+            End If
+        End If
+    Next componentValue
+End Function
+
 ' Rows a transfer panel can draw; mirrors the renderer's header height
 ' (18), row height (20), and row inset (6). Keep in sync with
 ' ApplyTransferParts and SyncTransferRows.
@@ -5034,14 +5055,72 @@ Friend Sub TickSlideDrag(ByVal hostApp As ReDimUI, ByVal buttonDown As Boolean)
         End If
     ElseIf buttonDown And Not mSlidePrevButtonDown Then
         If mVisible And mEnabled Then
-            If CursorOverTrack() Then
-                fraction = CursorTrackFraction()
-                If fraction >= 0 Then BeginSlideDrag hostApp, fraction
+            ' Floating chrome paints above the track: a press that lands
+            ' on an open drop list or a modal overlay belongs to the
+            ' chrome, and the geometric track test must not reach
+            ' through it.
+            If Not PressClaimedByChrome(hostApp) Then
+                If CursorOverTrack() Then
+                    fraction = CursorTrackFraction()
+                    If fraction >= 0 Then BeginSlideDrag hostApp, fraction
+                End If
             End If
         End If
     End If
     mSlidePrevButtonDown = buttonDown
 End Sub
+
+Private Function PressClaimedByChrome(ByVal hostApp As ReDimUI) As Boolean
+    Dim cursor As RdxScreenPoint
+    Dim pointsX As Double
+    Dim pointsY As Double
+
+    If GetCursorPos(cursor) = 0 Then Exit Function
+    pointsX = ScreenXToSheetPoints(cursor.X)
+    If pointsX = UNMAPPABLE_POINTS Then Exit Function
+    pointsY = ScreenYToSheetPoints(cursor.Y)
+    If pointsY = UNMAPPABLE_POINTS Then Exit Function
+    PressClaimedByChrome = hostApp.PointClaimedByChrome( _
+        pointsX, pointsY, mComponentId)
+End Function
+
+' True when this component projects floating chrome over the given
+' sheet point: a visible modal overlay claims everything it covers, an
+' open drop list claims its face plus the dropped rows and pagers.
+Friend Function ChromeClaimsPoint( _
+    ByVal pointsX As Double, _
+    ByVal pointsY As Double _
+) As Boolean
+    Dim listDepth As Double
+    Dim depthRows As Long
+
+    If Not mVisible Then Exit Function
+    If mKind = KIND_OVERLAY Then
+        If pointsX >= mLeft And pointsX <= mLeft + mWidth _
+            And pointsY >= mTop And pointsY <= mTop + mHeight Then
+            ChromeClaimsPoint = True
+        End If
+        Exit Function
+    End If
+    If (mKind = KIND_COMBO Or mKind = KIND_SELECT) And mSelectOpen Then
+        If mKind = KIND_COMBO Then
+            If Not mComboMatches Is Nothing Then
+                depthRows = mComboMatches.Count
+            End If
+            If depthRows > COMBO_MAX_ROWS Then
+                depthRows = COMBO_MAX_ROWS + 2
+            End If
+        ElseIf Not mItems Is Nothing Then
+            depthRows = mItems.Count
+        End If
+        listDepth = depthRows * (mHeight + 2)
+        If pointsX >= mLeft - 2 And pointsX <= mLeft + mWidth + 2 _
+            And pointsY >= mTop _
+            And pointsY <= mTop + mHeight + listDepth + 2 Then
+            ChromeClaimsPoint = True
+        End If
+    End If
+End Function
 
 Friend Sub BeginSlideDrag(ByVal hostApp As ReDimUI, ByVal fraction As Double)
     mSlideTracking = True

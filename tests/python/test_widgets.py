@@ -490,6 +490,22 @@ def test_long_lists(run_widgets):
     assert facts["scrollerGoneWhenFits"] == "True"
 
 
+def test_chrome_claim(run_widgets):
+    facts = parse_transcript(run_widgets("TestChromeClaim"))
+    assert facts["closedClaimsNothing"] == "True"
+    assert facts["openClaims"] == "True", (
+        "an open drop list must claim the points it covers so watches"
+        " cannot hit-test through it"
+    )
+    assert facts["besideNotClaimed"] == "True"
+    assert facts["exceptSelf"] == "True"
+    assert facts["closedAgain"] == "True"
+    assert facts["overlayClaims"] == "True", (
+        "a modal overlay must claim everything it covers"
+    )
+    assert facts["overlayReleased"] == "True"
+
+
 def test_modal_confirm(run_widgets):
     facts = parse_transcript(run_widgets("TestModalConfirm"))
     assert facts["overlayShown"] == "True"
