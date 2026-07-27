@@ -74,6 +74,8 @@ Public Sub RdxBindKeys()
     Application.OnKey "{BS}", "'RdxKeyChar ""{BS}""'"
     Application.OnKey "{ENTER}", "'RdxKeyChar ""{ENTER}""'"
     Application.OnKey "~", "'RdxKeyChar ""{ENTER}""'"
+    Application.OnKey "^{ENTER}", "'RdxKeyChar ""{CTRLENTER}""'"
+    Application.OnKey "^~", "'RdxKeyChar ""{CTRLENTER}""'"
     Application.OnKey "{TAB}", "'RdxKeyChar ""{TAB}""'"
     Application.OnKey "{ESC}", "'RdxKeyChar ""{ESC}""'"
     On Error GoTo 0
@@ -99,6 +101,8 @@ Public Sub RdxReleaseKeys()
     Application.OnKey "{BS}"
     Application.OnKey "{ENTER}"
     Application.OnKey "~"
+    Application.OnKey "^{ENTER}"
+    Application.OnKey "^~"
     Application.OnKey "{TAB}"
     Application.OnKey "{ESC}"
     On Error GoTo 0

@@ -174,7 +174,9 @@ Focus mechanics, all automatic:
 - One field holds focus at a time; focusing another commits the first.
 - Enter and Tab commit: the buffer becomes the value, `WritesTo` state is written and
   `OnChange` fires if the text changed. A combo commit that exactly matches an item takes
-  that item.
+  that item. A `MultiLine` TextInput follows textarea conventions instead: Enter inserts
+  a newline and keeps focus, while Tab, Ctrl+Enter, and clicking away commit; the value
+  carries its newlines into state.
 - Esc reverts to the text the field had when focus arrived and fires nothing.
 - Clicking anywhere off the field commits, through two frame-driven signals. A cell click
   moves the selection, and the focused field's frames poll the selection - the press

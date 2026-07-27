@@ -1253,6 +1253,63 @@ Private Sub ExportColorPng( _
     chartHost.Delete
 End Sub
 
+' Multi-line float input: Enter inserts a newline and keeps focus,
+' Ctrl+Enter commits, the text anchors to the top, and single-line
+' fields keep the Enter-commits convention.
+Public Function TestMultiLineInput() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim fieldShape As Shape
+    Dim faceRaw As String
+    Dim transcript As String
+
+    Set host = NewCanvas()
+    gChangeCount = 0
+    ReDimUI.AutoPump False
+    Set app = ReDimUI.Mount(host, "wid25")
+    app.TextInput("notes").AtRect(24, 24, 200, 60).MultiLine _
+        .WritesTo("noteText").OnChange "TestReDimWidgets.RecordChange"
+    app.Render
+    Set fieldShape = host.Shapes("rdm_wid25_notes")
+
+    transcript = "topAnchored=" & _
+        CStr(fieldShape.TextFrame2.VerticalAnchor = msoAnchorTop)
+
+    ReDimUI.DispatchShape "rdm_wid25_notes"
+    RdxKeyChar "a"
+    RdxKeyChar "{ENTER}"
+    transcript = transcript & "|enterStaysFocused=" & _
+        CStr(ReDimUI.HasKeyboardFocus)
+    RdxKeyChar "b"
+    ' Shape text may normalize the newline character; normalize back
+    ' before comparing.
+    faceRaw = fieldShape.TextFrame2.TextRange.Text
+    faceRaw = Replace(faceRaw, vbCrLf, vbLf)
+    faceRaw = Replace(faceRaw, vbCr, vbLf)
+    faceRaw = Replace(faceRaw, Chr$(11), vbLf)
+    transcript = transcript & "|newlineInFace=" & _
+        CStr(faceRaw = "a" & vbLf & "b|")
+    RdxKeyChar "{CTRLENTER}"
+    transcript = transcript & "|ctrlEnterCommits=" & _
+        CStr(Not ReDimUI.HasKeyboardFocus And _
+            app.State("noteText") = "a" & vbLf & "b")
+    transcript = transcript & "|changeRan=" & gChangeCount
+
+    ' Single-line fields keep the Enter-commits convention.
+    app.TextInput("one").AtRect 24, 100, 150, 22
+    app.TextInput("one").WritesTo "oneLine"
+    app.Render
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid25_one"
+    RdxKeyChar "x"
+    RdxKeyChar "{ENTER}"
+    transcript = transcript & "|singleLineEnterCommits=" & _
+        CStr(Not ReDimUI.HasKeyboardFocus And app.State("oneLine") = "x")
+    RdxReleaseKeys
+    ReDimUI.AutoPump True
+    TestMultiLineInput = transcript
+End Function
+
 Public Function TestModalConfirm() As String
     Dim app As ReDimUI
     Dim host As Worksheet

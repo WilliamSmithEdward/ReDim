@@ -394,6 +394,24 @@ def test_image(run_widgets):
     )
 
 
+def test_multi_line_input(run_widgets):
+    facts = parse_transcript(run_widgets("TestMultiLineInput"))
+    assert facts["topAnchored"] == "True", (
+        "a multi-line field must anchor its text to the top"
+    )
+    assert facts["enterStaysFocused"] == "True", (
+        "Enter in a multi-line field must insert a newline, not commit"
+    )
+    assert facts["newlineInFace"] == "True"
+    assert facts["ctrlEnterCommits"] == "True", (
+        "Ctrl+Enter must commit the multi-line buffer with its newlines"
+    )
+    assert facts["changeRan"] == "1"
+    assert facts["singleLineEnterCommits"] == "True", (
+        "single-line fields keep the Enter-commits convention"
+    )
+
+
 def test_modal_confirm(run_widgets):
     facts = parse_transcript(run_widgets("TestModalConfirm"))
     assert facts["overlayShown"] == "True"

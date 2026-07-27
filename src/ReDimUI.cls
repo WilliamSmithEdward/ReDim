@@ -91,7 +91,7 @@ Private Const VARIANT_NEUTRAL As Long = 4
 Private Const REL_NONE As Long = 0
 Private Const REL_BELOW As Long = 1
 Private Const REL_RIGHT_OF As Long = 2
-Private Const REDIM_VERSION As String = "0.14.1"
+Private Const REDIM_VERSION As String = "0.15.0"
 
 Private mRole As Long
 
@@ -204,6 +204,9 @@ Private mSelectAllRow As Boolean
 Private mImageSource As String
 Private mBindSourceKey As String
 Private mAppliedImageSource As String
+' Multi-line float TextInput: Enter inserts a newline instead of
+' committing; Tab, Ctrl+Enter, and clicking away commit.
+Private mMultiLine As Boolean
 Private mCaptionLeft As String
 Private mCaptionRight As String
 Private mAppliedLeftRows As Long
@@ -2195,6 +2198,20 @@ Public Function BindSource(ByVal stateKey As String) As ReDimUI
     Set BindSource = Me
 End Function
 
+' Multi-line editing for a float TextInput: Enter inserts a newline,
+' and committing moves to Tab, Ctrl+Enter, or clicking away. Esc still
+' reverts. Size the rectangle for the lines you expect.
+Public Function MultiLine(Optional ByVal enabled As Boolean = True) As ReDimUI
+    RequireRole ROLE_COMPONENT, "MultiLine"
+    If mKind <> KIND_INPUT Then
+        RaiseError ERROR_INVALID_OPERATION, "MultiLine", _
+            "MultiLine applies to TextInput only."
+    End If
+    mMultiLine = enabled
+    Touch
+    Set MultiLine = Me
+End Function
+
 Public Function Primary() As ReDimUI
     Set Primary = SetVariant(VARIANT_PRIMARY)
 End Function
@@ -3839,7 +3856,7 @@ Private Sub ApplyText(ByVal target As Shape, ByVal themeValue As ReDimUI)
         Else
             target.TextFrame2.TextRange.ParagraphFormat.Alignment = msoAlignLeft
         End If
-        If mKind = KIND_CARD Then
+        If mKind = KIND_CARD Or mMultiLine Then
             target.TextFrame2.VerticalAnchor = msoAnchorTop
         End If
     End If
@@ -5093,7 +5110,16 @@ End Sub
 Friend Sub HandleKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
     If Not IsFloatField() Then Exit Sub
     Select Case keyText
-        Case "{ENTER}", "{TAB}"
+        Case "{ENTER}"
+            ' Single-line: Enter commits. Multi-line: Enter is a newline
+            ' and committing moves to Tab, Ctrl+Enter, or clicking away.
+            If mMultiLine Then
+                mText = mText & vbLf
+            Else
+                BlurField hostApp, True
+                Exit Sub
+            End If
+        Case "{TAB}", "{CTRLENTER}"
             ' Tab commits like Enter: the form-field convention for
             ' leaving a field with its value kept.
             BlurField hostApp, True

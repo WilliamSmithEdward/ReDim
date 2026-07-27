@@ -60,8 +60,9 @@ Public Sub BuildWidgetGallery()
     app.ComboBox("fruit").AtRect(196, 304, 150, 22).WritesTo "fruit"
     app.ComboBox("fruit").Items "Apple", "Apricot", "Banana", "Cherry", _
         "Grape", "Grapefruit"
-    app.Label("inputHint").AtRect(24, 332, 480, 16) _
-        .Text("Click a field and type: the combo filters live, Enter commits, Esc reverts.")
+    app.TextInput("notes").AtRect(360, 296, 150, 34).MultiLine.WritesTo "notes"
+    app.Label("inputHint").AtRect(24, 332, 520, 16) _
+        .Text("Click a field and type: the combo filters live; multi-line notes commit with Tab or Ctrl+Enter.")
 
     app.Label("lblTransfer").AtRect(24, 356, 300, 16) _
         .Text("Transfer list (dual listbox)").Bold
@@ -103,6 +104,7 @@ Public Sub BuildWidgetGallery()
     app.SetState "volume", 35
     app.SetState "userName", vbNullString
     app.SetState "fruit", vbNullString
+    app.SetState "notes", vbNullString
     app.SetState "crew", "Barbara"
     app.SetState "options", "Auto-save"
     app.SetState "lastAction", "none yet"

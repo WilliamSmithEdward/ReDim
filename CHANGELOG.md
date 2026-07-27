@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.15.0 - 2026-07-26
+
+- Multi-line float TextInput: `.MultiLine` switches a field to textarea
+  conventions - Enter inserts a newline and keeps focus, Tab and the
+  newly bound Ctrl+Enter commit, clicking away commits, Esc reverts.
+  Multi-line fields anchor their text to the top; the committed value
+  carries its newlines into state and bindings. Single-line fields keep
+  the Enter-commits convention unchanged. The gallery gains a notes
+  field beside the combo.
+
 ## 0.14.1 - 2026-07-26
 
 - The gallery's generated demo image was a solid-color PNG, which is
