@@ -245,6 +245,27 @@ Public Function SmokePokeDex() As String
             ShapeThere("DexTrainer", "rdm_dextrainer_reset"))
     transcript = transcript & "|themedPrimary=" & _
         CStr(ReDimUI.App("dextrainer").Theme.PrimaryColor = RGB(214, 55, 46))
+
+    ReDimUI.App("dextrainer").SetState "darkMode", True
+    ApplyThemeChoice
+    transcript = transcript & "|nightCanvas=" & _
+        CStr(ThisWorkbook.Worksheets("DexBrowse").Cells(1, 1).Interior.Color _
+            = ReDimUI.App("dexbrowse").Theme.CanvasColor)
+    transcript = transcript & "|nightTrack=" & _
+        CStr(ThisWorkbook.Worksheets("DexBrowse").Shapes( _
+            "rdm_dexbrowse_statb1").Fill.ForeColor.RGB _
+            = ReDimUI.App("dexbrowse").Theme.MutedColor)
+    transcript = transcript & "|nightIsDark=" & _
+        CStr(ReDimUI.App("dexbrowse").Theme.PrimaryColor <> RGB(214, 55, 46))
+
+    Dim slim As String
+    slim = SlimDetailPayload( _
+        "{""id"":25,""moves"":[{""m"":{""n"":""a[b]"",""u"":""x\\""y""}}]" & _
+        ",""name"":""pikachu"",""other"":{""z"":[1,2]}}")
+    transcript = transcript & "|slimmed=" & _
+        CStr(slim = "{""id"":25,""name"":""pikachu""}")
+    transcript = transcript & "|slimParses=" & CStr(CStr( _
+        ROneCOne.Json.Deserialize(slim).Item("name")) = "pikachu")
     RdxReleaseKeys
     RdxStopPump
     ReDimUI.AutoPump True
@@ -356,6 +377,17 @@ def test_pokedex_smoke(demo_paths):
         assert facts["themedPrimary"] == "True", (
             "the custom Pokedex theme must drive the whole app"
         )
+        assert facts["nightCanvas"] == "True", (
+            "night mode must repaint the browse canvas background"
+        )
+        assert facts["nightTrack"] == "True", (
+            "night mode must retint the stat bar tracks"
+        )
+        assert facts["nightIsDark"] == "True"
+        assert facts["slimmed"] == "True", (
+            "the payload slimmer must drop unused sections cleanly"
+        )
+        assert facts["slimParses"] == "True"
 
 
 def test_snake_smoke(demo_paths):

@@ -60,6 +60,19 @@ def test_batch_and_theme(run_core):
     assert facts["darkIsDark"] == "True"
 
 
+def test_theme_swap_repaint(run_core):
+    facts = parse_transcript(run_core("TestThemeSwapRepaint"))
+    assert facts["lightCanvas"] == "True"
+    assert facts["darkCanvas"] == "True", (
+        "SetTheme must repaint a painted canvas background"
+    )
+    assert facts["darkCard"] == "True", "cards must retint on a theme swap"
+    assert facts["darkTrack"] == "True", (
+        "the progress track must retint on a theme swap"
+    )
+    assert facts["swapChanged"] == "True"
+
+
 def test_state_handlers(run_core):
     facts = parse_transcript(run_core("TestStateHandlers"))
     assert facts["handlersRanOnSet"] == "2", (
@@ -157,4 +170,4 @@ def test_hotkey_lifecycle_and_version(run_core):
     facts = parse_transcript(run_core("TestHotKeyLifecycle"))
     assert facts["procCallable"] == "True"
     assert facts["unmountClean"] == "True"
-    assert facts["version"] == "0.18.2"
+    assert facts["version"] == "0.18.3"

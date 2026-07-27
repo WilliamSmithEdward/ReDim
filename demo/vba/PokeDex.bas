@@ -22,6 +22,16 @@ Private Const DEX_MAX As Long = 151
 ' itself keeps no public handle on its task.
 Private gNamesTask As ROneCOne
 Private gDetailTask As ROneCOne
+' Latest-wins switching. gWantPath is the newest selection, gFlightPath
+' the one the in-flight op is fetching, gShownPath the one on screen.
+' Payloads cache by request key plus canonical id and name, so revisits
+' apply instantly with no HTTP at all, and the nav cursor advances on
+' the keypress itself so held keys step through the dex.
+Private gDetailCache As Collection
+Private gWantPath As String
+Private gFlightPath As String
+Private gShownPath As String
+Private gNavId As Long
 ' The stat tween model: bars ease from now toward target every frame.
 Private gStatNow(1 To 6) As Double
 Private gStatTarget(1 To 6) As Double
@@ -288,18 +298,33 @@ Private Sub StepDex(ByVal delta As Long)
     Dim dexId As Long
 
     Set app = ReDimUI.App("dexbrowse")
-    dexId = CLng(app.StateOrDefault("dexId", 0)) + delta
+    dexId = gNavId
+    If dexId < 1 Then dexId = CLng(app.StateOrDefault("dexId", 0))
+    dexId = dexId + delta
     If dexId < 1 Then dexId = DEX_MAX
     If dexId > DEX_MAX Then dexId = 1
+    gNavId = dexId
     FetchByPath CStr(dexId)
 End Sub
 
+' Latest wins: a cached payload applies instantly, and a busy op just
+' records the newest intent, which the op chases when it settles.
 Private Sub FetchByPath(ByVal pathPart As String)
     Dim app As ReDimUI
+    Dim payload As String
 
     If LenB(pathPart) = 0 Then Exit Sub
+    pathPart = LCase$(pathPart)
+    gWantPath = pathPart
+    If pathPart = gShownPath Then Exit Sub
+    If TryCachedDetail(pathPart, payload) Then
+        gShownPath = pathPart
+        ApplyDetailPayload payload
+        Exit Sub
+    End If
     Set app = ReDimUI.App("dexbrowse")
     If app.IsOpRunning("detail") Then Exit Sub
+    gFlightPath = pathPart
     Set gDetailTask = ROneCOne.HttpClient.GetStringAsync(API_BASE & pathPart)
     With app.Async("detail")
         .RunsTask gDetailTask
@@ -312,6 +337,20 @@ Private Sub FetchByPath(ByVal pathPart As String)
 End Sub
 
 Public Sub ApplyDetails()
+    Dim payload As String
+
+    payload = SlimDetailPayload(CStr(gDetailTask.Result))
+    CacheDetail gFlightPath, payload
+    If gFlightPath = gWantPath Then
+        gShownPath = gFlightPath
+        ApplyDetailPayload payload
+    ElseIf gWantPath <> gShownPath Then
+        ' The user moved on mid-flight; chase the newest intent.
+        FetchByPath gWantPath
+    End If
+End Sub
+
+Private Sub ApplyDetailPayload(ByVal payload As String)
     Dim app As ReDimUI
     Dim doc As ROneCOne
     Dim typesList As ROneCOne
@@ -324,9 +363,12 @@ Public Sub ApplyDetails()
     Dim statIndex As Long
 
     Set app = ReDimUI.App("dexbrowse")
-    Set doc = ROneCOne.Json.Deserialize(CStr(gDetailTask.Result))
+    Set doc = ROneCOne.Json.Deserialize(payload)
     dexId = CLng(doc.Item("id"))
     displayName = StrConv(CStr(doc.Item("name")), vbProperCase)
+    CacheDetail CStr(dexId), payload
+    CacheDetail LCase$(CStr(doc.Item("name"))), payload
+    gNavId = dexId
 
     app.BeginUpdate
     app.SetState "dexId", dexId
@@ -361,6 +403,100 @@ Public Sub DetailFailed()
 
     Set app = ReDimUI.App("dexbrowse")
     app.Toast "Fetch failed: " & app.AsyncError("detail"), 5000
+    If gWantPath <> gFlightPath And gWantPath <> gShownPath Then
+        FetchByPath gWantPath
+    End If
+End Sub
+
+' A PokeAPI detail payload runs a couple hundred KB, dominated by move
+' lists and per-game sprite variants the dex never reads. VBA JSON
+' parsing is the slowest link in a switch, so dropping those sections
+' before the parse (and before caching) is the single biggest speedup.
+Public Function SlimDetailPayload(ByVal payload As String) As String
+    SlimDetailPayload = payload
+    SlimDetailPayload = StripJsonSection(SlimDetailPayload, "moves")
+    SlimDetailPayload = StripJsonSection(SlimDetailPayload, "game_indices")
+    SlimDetailPayload = StripJsonSection(SlimDetailPayload, "versions")
+    SlimDetailPayload = StripJsonSection(SlimDetailPayload, "other")
+    SlimDetailPayload = StripJsonSection(SlimDetailPayload, "abilities")
+    SlimDetailPayload = StripJsonSection(SlimDetailPayload, "held_items")
+    SlimDetailPayload = StripJsonSection(SlimDetailPayload, "cries")
+    SlimDetailPayload = StripJsonSection(SlimDetailPayload, "past_types")
+    SlimDetailPayload = StripJsonSection(SlimDetailPayload, "past_abilities")
+End Function
+
+' Removes one top-occurrence "key": value pair from a JSON string by
+' walking the value with a bracket-depth scan that skips string
+' literals, then tidying whichever comma the removal orphans.
+Public Function StripJsonSection( _
+    ByVal payload As String, _
+    ByVal keyName As String _
+) As String
+    Dim startPos As Long
+    Dim scanPos As Long
+    Dim endPos As Long
+    Dim depth As Long
+    Dim inString As Boolean
+    Dim ch As String
+
+    StripJsonSection = payload
+    startPos = InStr(payload, """" & keyName & """:")
+    If startPos = 0 Then Exit Function
+    scanPos = startPos + Len(keyName) + 3
+    Do While scanPos <= Len(payload)
+        ch = Mid$(payload, scanPos, 1)
+        If inString Then
+            If ch = "\" Then
+                scanPos = scanPos + 1
+            ElseIf ch = """" Then
+                inString = False
+            End If
+        ElseIf ch = """" Then
+            inString = True
+        ElseIf ch = "[" Or ch = "{" Then
+            depth = depth + 1
+        ElseIf ch = "]" Or ch = "}" Then
+            If depth = 0 Then
+                ' The enclosing object closed: a primitive value ended.
+                scanPos = scanPos - 1
+                Exit Do
+            End If
+            depth = depth - 1
+            If depth = 0 Then Exit Do
+        ElseIf depth = 0 And ch = "," Then
+            scanPos = scanPos - 1
+            Exit Do
+        End If
+        scanPos = scanPos + 1
+    Loop
+    endPos = scanPos
+    If endPos > Len(payload) Then endPos = Len(payload)
+    If Mid$(payload, endPos + 1, 1) = "," Then
+        endPos = endPos + 1
+    ElseIf startPos > 1 Then
+        If Mid$(payload, startPos - 1, 1) = "," Then startPos = startPos - 1
+    End If
+    StripJsonSection = Left$(payload, startPos - 1) & Mid$(payload, endPos + 1)
+End Function
+
+Private Function TryCachedDetail( _
+    ByVal key As String, _
+    ByRef payload As String _
+) As Boolean
+    If gDetailCache Is Nothing Then Set gDetailCache = New Collection
+    On Error Resume Next
+    payload = gDetailCache.Item("k" & key)
+    TryCachedDetail = (Err.Number = 0)
+    Err.Clear
+    On Error GoTo 0
+End Function
+
+Private Sub CacheDetail(ByVal key As String, ByVal payload As String)
+    Dim existing As String
+
+    If LenB(key) = 0 Then Exit Sub
+    If TryCachedDetail(key, existing) Then Exit Sub
+    gDetailCache.Add payload, "k" & key
 End Sub
 
 Private Sub ApplyTypeBadge( _
@@ -419,7 +555,7 @@ Private Sub StartStatTween()
     Set app = ReDimUI.App("dexbrowse")
     If CBool(app.StateOrDefault("tweening", False)) Then Exit Sub
     app.SetState "tweening", True
-    app.Job("tween").Steps("PokeDex.TweenStats").PacedMs 16
+    app.Job("tween").Steps("PokeDex.TweenStats").PacedMs 33
     app.Job("tween").StartJob
 End Sub
 
@@ -433,7 +569,7 @@ Public Function TweenStats() As Boolean
     app.BeginUpdate
     For statIndex = 1 To 6
         gStatNow(statIndex) = gStatNow(statIndex) + _
-            (gStatTarget(statIndex) - gStatNow(statIndex)) * 0.22
+            (gStatTarget(statIndex) - gStatNow(statIndex)) * 0.35
         If Abs(gStatTarget(statIndex) - gStatNow(statIndex)) > 0.8 Then
             allDone = False
         Else

@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.18.3 - 2026-07-27
+
+- Theme swaps repaint everything. SetTheme now repaints a canvas that
+  PrepareCanvas painted, so dark mode no longer leaves dark controls
+  floating on the old light background, and the fills that were only
+  styled on first apply (the progress track, the non-float input
+  border, the anchored input cell) retint when the theme changes. A
+  new core scenario locks the contract in.
+- Progress bars skip their fill-part shape writes when nothing about
+  the fill would change, keyed on value, color, visibility, and
+  geometry. Tween loops and paced feeds stop paying for repaints of
+  settled bars.
+- ReDex switches fast. Detail payloads are slimmed before parsing
+  (the unused move lists and per-game sprite variants carry most of a
+  couple hundred KB, and the VBA JSON parse was the slowest link),
+  then cached by request key, id, and name, so revisits apply
+  instantly with no HTTP and rapid steps only parse what they show.
+  Switching is latest-wins: a busy op records the newest selection
+  and chases it when it settles instead of dropping the input, and
+  F2/F3 advance a nav cursor on the keypress itself so held keys walk
+  the dex. The stat tween runs at 30fps with faster convergence.
+
 ## 0.18.2 - 2026-07-26
 
 - ReDex builds itself on open. The other demos already carried an

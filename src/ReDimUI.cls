@@ -95,7 +95,7 @@ Private Const VARIANT_NEUTRAL As Long = 4
 Private Const REL_NONE As Long = 0
 Private Const REL_BELOW As Long = 1
 Private Const REL_RIGHT_OF As Long = 2
-Private Const REDIM_VERSION As String = "0.18.2"
+Private Const REDIM_VERSION As String = "0.18.3"
 
 Private mRole As Long
 
@@ -148,6 +148,7 @@ Private mIsWindow As Boolean
 Private mOnShowProc As String
 Private mOnHideProc As String
 Private mCanvasPrepared As Boolean
+Private mCanvasPainted As Boolean
 Private mWindowTitle As String
 Private mHasNavBar As Boolean
 Private mNavBarLeft As Double
@@ -221,6 +222,8 @@ Private mAppliedFocusRing As Boolean
 Private mAppliedComboSig As String
 Private mAppliedTransferSig As String
 Private mAppliedCheckSig As String
+Private mAppliedProgressSig As String
+Private mAppliedCellFill As Long
 ' The caret index: characters before the caret, 0 through Len(mText).
 Private mCaretPos As Long
 ' Windowed long lists: the combo shows at most COMBO_MAX_ROWS matches
@@ -1249,7 +1252,10 @@ Public Function PrepareCanvas( _
     Optional ByVal paintBackground As Boolean = True _
 ) As ReDimUI
     RequireRole ROLE_APP, "PrepareCanvas"
-    If paintBackground Then mSheet.Cells.Interior.Color = mTheme.CanvasColor
+    If paintBackground Then
+        mSheet.Cells.Interior.Color = mTheme.CanvasColor
+        mCanvasPainted = True
+    End If
     If hideGridlines Then
         mCanvasPrepared = True
         On Error Resume Next
@@ -1570,6 +1576,13 @@ Public Function SetTheme(ByVal themeValue As ReDimUI) As ReDimUI
         RaiseError ERROR_INVALID_ARGUMENT, "SetTheme", "SetTheme requires a theme."
     End If
     Set mTheme = themeValue
+    ' A painted canvas belongs to the theme too: without this, a theme
+    ' swap left dark controls floating on the old light background.
+    If mCanvasPainted Then
+        On Error Resume Next
+        mSheet.Cells.Interior.Color = mTheme.CanvasColor
+        On Error GoTo 0
+    End If
     Render
     Set SetTheme = Me
 End Function
@@ -3776,10 +3789,11 @@ Private Sub ApplyStyle(ByVal target As Shape, ByVal themeValue As ReDimUI)
                 mAppliedFill = ResolveSurfaceFill(themeValue)
             End If
         Case KIND_PROGRESS
-            If Not mAppliedValid Then
+            If Not mAppliedValid Or mAppliedFill <> themeValue.MutedColor Then
                 target.Fill.Visible = msoTrue
                 target.Fill.ForeColor.RGB = themeValue.MutedColor
                 target.Line.Visible = msoFalse
+                mAppliedFill = themeValue.MutedColor
             End If
         Case KIND_TOGGLE
             If Not mAppliedValid Or mAppliedFill <> ResolveToggleFill(themeValue) Then
@@ -3821,11 +3835,12 @@ Private Sub ApplyStyle(ByVal target As Shape, ByVal themeValue As ReDimUI)
                     mAppliedFill = ResolveSurfaceFill(themeValue)
                     mAppliedFocusRing = ringOn
                 End If
-            ElseIf Not mAppliedValid Then
+            ElseIf Not mAppliedValid Or mAppliedFill <> themeValue.BorderColor Then
                 target.Fill.Visible = msoFalse
                 target.Line.Visible = msoTrue
                 target.Line.ForeColor.RGB = themeValue.BorderColor
                 target.Line.Weight = 1
+                mAppliedFill = themeValue.BorderColor
             End If
         Case KIND_SELECT
             If Not mAppliedValid Or mAppliedFill <> ResolveSurfaceFill(themeValue) Then
@@ -4205,8 +4220,17 @@ Private Sub ApplyKindExtras( _
             ApplyToggleKnob hostSheet, themeValue
             mAppliedChecked = mChecked
         Case KIND_PROGRESS
-            ApplyProgressFill hostSheet, themeValue
-            mAppliedValue = mValue
+            ' Tween loops repaint bars at frame rate; skip the fill
+            ' part's shape writes when nothing about it would change.
+            Dim progressSig As String
+            progressSig = CStr(mValue) & "|" & CStr(ResolveFill(themeValue)) _
+                & "|" & CStr(mVisible) & "|" & CStr(mLeft) & "|" & CStr(mTop) _
+                & "|" & CStr(mWidth) & "|" & CStr(mHeight)
+            If Not mAppliedValid Or mAppliedProgressSig <> progressSig Then
+                ApplyProgressFill hostSheet, themeValue
+                mAppliedValue = mValue
+                mAppliedProgressSig = progressSig
+            End If
         Case KIND_INPUT
             If Not IsFloatField() Then ApplyInputCell hostSheet, themeValue
         Case KIND_COMBO
@@ -5967,7 +5991,7 @@ Private Sub ApplyInputCell( _
 )
     Dim cell As Range
 
-    If Not mAppliedValid Then
+    If Not mAppliedValid Or mAppliedCellFill <> themeValue.SurfaceColor Then
         Set cell = InputCell(hostSheet)
         cell.Font.Name = themeValue.FontName
         cell.Font.Size = themeValue.BaseFontSize
@@ -5976,6 +6000,7 @@ Private Sub ApplyInputCell( _
         cell.HorizontalAlignment = xlLeft
         ' Unlocked from birth so ProtectSurface keeps inputs editable.
         cell.Locked = False
+        mAppliedCellFill = themeValue.SurfaceColor
     End If
 End Sub
 

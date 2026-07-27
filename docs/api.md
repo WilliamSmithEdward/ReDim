@@ -57,7 +57,7 @@ controls in the framework. Also:
 | `OnStateChanged key, "Module.Proc"` | Zero-argument listener runs after the key changes. |
 | `BeginUpdate` / `EndUpdate` | Batch several changes into one flush. |
 | `Render` | Mark everything dirty and paint. Call once after building the UI. |
-| `SetTheme theme` | Restyle every component. |
+| `SetTheme theme` | Restyle every component, and repaint the canvas background if `PrepareCanvas` painted one. |
 | `PrepareCanvas` | Paint the sheet background and hide gridlines. |
 | `Toast message, ttlMs` | Transient card on a rail beside the content, clamped into the visible viewport. Toasts slide up on entrance, and when one leaves the survivors slide up to fill its slot; modal chrome never shifts the rail. |
 | `ToastTray anchor` | Pins the tray's top-left to a range, exactly and unclamped. |

@@ -230,6 +230,37 @@ Public Function TestBatchAndTheme() As String
     TestBatchAndTheme = transcript
 End Function
 
+' A theme swap must repaint everything already on screen, including the
+' painted canvas background and once-styled fills like the progress
+' track, not just the components whose colors happen to be diffed.
+Public Function TestThemeSwapRepaint() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim transcript As String
+
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "corethm")
+    app.PrepareCanvas
+    app.Card("panel").AtRect(20, 20, 200, 90).Text("Panel")
+    app.ProgressBar("bar").AtRect(30, 130, 160, 10).Value 40
+    app.Render
+    transcript = "lightCanvas=" & _
+        CStr(host.Cells(1, 1).Interior.Color = app.Theme.CanvasColor)
+
+    app.SetTheme ReDimUI.ThemeDark
+    transcript = transcript & "|darkCanvas=" & _
+        CStr(host.Cells(1, 1).Interior.Color = app.Theme.CanvasColor)
+    transcript = transcript & "|darkCard=" & _
+        CStr(host.Shapes("rdm_corethm_panel").Fill.ForeColor.RGB = _
+            app.Theme.SurfaceColor)
+    transcript = transcript & "|darkTrack=" & _
+        CStr(host.Shapes("rdm_corethm_bar").Fill.ForeColor.RGB = _
+            app.Theme.MutedColor)
+    transcript = transcript & "|swapChanged=" & _
+        CStr(app.Theme.CanvasColor <> ReDimUI.ThemeLight.CanvasColor)
+    TestThemeSwapRepaint = transcript
+End Function
+
 Public Function TestStateHandlers() As String
     Dim app As ReDimUI
     Dim host As Worksheet
