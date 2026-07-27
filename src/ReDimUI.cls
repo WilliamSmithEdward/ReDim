@@ -91,7 +91,7 @@ Private Const VARIANT_NEUTRAL As Long = 4
 Private Const REL_NONE As Long = 0
 Private Const REL_BELOW As Long = 1
 Private Const REL_RIGHT_OF As Long = 2
-Private Const REDIM_VERSION As String = "0.15.2"
+Private Const REDIM_VERSION As String = "0.16.0"
 
 Private mRole As Long
 
@@ -211,6 +211,8 @@ Private mMultiLine As Boolean
 ' the combo option list signature last painted.
 Private mAppliedFocusRing As Boolean
 Private mAppliedComboSig As String
+' The caret index: characters before the caret, 0 through Len(mText).
+Private mCaretPos As Long
 Private mCaptionLeft As String
 Private mCaptionRight As String
 Private mAppliedLeftRows As Long
@@ -3824,77 +3826,111 @@ Friend Function ResolveText(ByVal ownerApp As ReDimUI) As String
         If LenB(ResolveText) = 0 Then ResolveText = mText
         Exit Function
     End If
-    ' A focused float field shows the blinking insertion bar in-text.
+    ' A focused float field shows the blinking insertion bar at the
+    ' caret index; the blink swaps to a space so text never shifts.
     If IsFloatField() Then
         If ReDimUI.IsComponentFocused(mOwnerAppId, mComponentId) Then
-            ResolveText = mText & IIf(mCaretOn, "|", " ")
+            If mCaretPos > Len(mText) Then mCaretPos = Len(mText)
+            ResolveText = Left$(mText, mCaretPos) & _
+                IIf(mCaretOn, "|", " ") & Mid$(mText, mCaretPos + 1)
             Exit Function
         End If
     End If
     ResolveText = mText
 End Function
 
-' The tail of the buffer that fits the field, estimated from the font
-' size: a character column is roughly 0.58 of the size, a line roughly
-' 1.35. Estimates run conservative so the tail is always in view; a
-' leading ellipsis marks trimmed content. Hard lines are walked from
-' the end, counting the visual lines each one wraps to.
+' The viewport of the buffer that fits the field, always containing the
+' caret: the caret's hard line renders with a horizontal window around
+' the caret, neighboring lines fill the remaining rows (truncated with
+' an ellipsis when long, so line estimates stay exact), and ellipses at
+' the edges mark trimmed content above and below. Character columns are
+' estimated at 0.58 of the font size, lines at 1.35, conservatively.
 Private Function WindowFieldText( _
     ByVal resolved As String, _
     ByVal resolvedSize As Double _
 ) As String
     Dim charsPerLine As Long
     Dim maxLines As Long
+    Dim caretRender As Long
     Dim hardLines() As String
+    Dim caretLine As Long
+    Dim caretCol As Long
+    Dim probe As Long
+    Dim lineStart As Long
+    Dim startLine As Long
+    Dim endLine As Long
     Dim segment As String
-    Dim segmentVisual As Long
-    Dim usedLines As Long
-    Dim keepChars As Long
     Dim result As String
     Dim position As Long
-    Dim trimmed As Boolean
 
     charsPerLine = Int((mWidth - 12) / (resolvedSize * 0.58))
     If charsPerLine < 4 Then charsPerLine = 4
-    If mMultiLine Then
-        maxLines = Int((mHeight - 6) / (resolvedSize * 1.35))
-        If maxLines < 1 Then maxLines = 1
-    Else
-        maxLines = 1
+    caretRender = mCaretPos + 1
+    If Not mMultiLine Then
+        WindowFieldText = WindowLineAroundCaret( _
+            resolved, caretRender, charsPerLine)
+        Exit Function
     End If
+    maxLines = Int((mHeight - 6) / (resolvedSize * 1.35))
+    If maxLines < 1 Then maxLines = 1
     hardLines = Split(resolved, vbLf)
-    For position = UBound(hardLines) To LBound(hardLines) Step -1
-        segment = hardLines(position)
-        segmentVisual = 1 + (Len(segment) \ charsPerLine)
-        If Len(segment) > 0 And (Len(segment) Mod charsPerLine) = 0 Then
-            segmentVisual = segmentVisual - 1
+    caretLine = 0
+    lineStart = 0
+    For probe = 1 To caretRender - 1
+        If Mid$(resolved, probe, 1) = vbLf Then
+            caretLine = caretLine + 1
+            lineStart = probe
         End If
-        If usedLines + segmentVisual > maxLines Then
-            keepChars = (maxLines - usedLines) * charsPerLine
-            If keepChars > 0 Then
-                segment = Right$(segment, keepChars)
-                If LenB(result) = 0 Then
-                    result = segment
-                Else
-                    result = segment & vbLf & result
-                End If
-            End If
-            trimmed = True
-            Exit For
+    Next probe
+    caretCol = caretRender - lineStart
+    startLine = caretLine - maxLines + 1
+    If startLine < 0 Then startLine = 0
+    endLine = startLine + maxLines - 1
+    If endLine > UBound(hardLines) Then endLine = UBound(hardLines)
+    For position = startLine To endLine
+        If position = caretLine Then
+            segment = WindowLineAroundCaret( _
+                hardLines(position), caretCol, charsPerLine)
+        ElseIf Len(hardLines(position)) > charsPerLine Then
+            segment = Left$(hardLines(position), charsPerLine - 1) & _
+                ChrW(8230)
+        Else
+            segment = hardLines(position)
         End If
-        usedLines = usedLines + segmentVisual
         If LenB(result) = 0 Then
             result = segment
         Else
-            result = segment & vbLf & result
-        End If
-        If usedLines = maxLines And position > LBound(hardLines) Then
-            trimmed = True
-            Exit For
+            result = result & vbLf & segment
         End If
     Next position
-    If trimmed Then result = ChrW(8230) & result
+    If startLine > 0 Then result = ChrW(8230) & result
+    If endLine < UBound(hardLines) Then result = result & ChrW(8230)
     WindowFieldText = result
+End Function
+
+Private Function WindowLineAroundCaret( _
+    ByVal lineText As String, _
+    ByVal caretIndexInLine As Long, _
+    ByVal charsPerLine As Long _
+) As String
+    Dim startChar As Long
+    Dim windowText As String
+
+    If Len(lineText) <= charsPerLine Then
+        WindowLineAroundCaret = lineText
+        Exit Function
+    End If
+    startChar = caretIndexInLine - charsPerLine + 2
+    If startChar < 1 Then startChar = 1
+    If startChar + charsPerLine - 1 > Len(lineText) Then
+        startChar = Len(lineText) - charsPerLine + 1
+    End If
+    windowText = Mid$(lineText, startChar, charsPerLine)
+    If startChar > 1 Then windowText = ChrW(8230) & windowText
+    If startChar + charsPerLine - 1 < Len(lineText) Then
+        windowText = windowText & ChrW(8230)
+    End If
+    WindowLineAroundCaret = windowText
 End Function
 
 Private Function ResolveSpinnerColor(ByVal themeValue As ReDimUI) As Long
@@ -5160,6 +5196,7 @@ Friend Sub FocusField(ByVal hostApp As ReDimUI)
     If Not IsFloatField() Then Exit Sub
     mFieldTextAtFocus = mText
     mFieldSelAtFocus = CurrentSelectionKey()
+    mCaretPos = Len(mText)
     mCaretOn = True
     mCaretAccumMs = 0
     ReDimUI.SetKeyboardFocus hostApp, Me
@@ -5214,12 +5251,13 @@ End Sub
 
 Friend Sub HandleKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
     If Not IsFloatField() Then Exit Sub
+    If mCaretPos > Len(mText) Then mCaretPos = Len(mText)
     Select Case keyText
         Case "{ENTER}"
             ' Single-line: Enter commits. Multi-line: Enter is a newline
             ' and committing moves to Tab, Ctrl+Enter, or clicking away.
             If mMultiLine Then
-                mText = mText & vbLf
+                InsertAtCaret vbLf
             Else
                 BlurField hostApp, True
                 Exit Sub
@@ -5233,9 +5271,28 @@ Friend Sub HandleKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
             BlurField hostApp, False
             Exit Sub
         Case "{BS}"
-            If Len(mText) > 0 Then mText = Left$(mText, Len(mText) - 1)
+            If mCaretPos > 0 Then
+                mText = Left$(mText, mCaretPos - 1) & Mid$(mText, mCaretPos + 1)
+                mCaretPos = mCaretPos - 1
+            End If
+        Case "{DEL}"
+            If mCaretPos < Len(mText) Then
+                mText = Left$(mText, mCaretPos) & Mid$(mText, mCaretPos + 2)
+            End If
+        Case "{LEFT}"
+            If mCaretPos > 0 Then mCaretPos = mCaretPos - 1
+        Case "{RIGHT}"
+            If mCaretPos < Len(mText) Then mCaretPos = mCaretPos + 1
+        Case "{UP}"
+            If mMultiLine Then MoveCaretLine -1
+        Case "{DOWN}"
+            If mMultiLine Then MoveCaretLine 1
+        Case "{HOME}"
+            MoveCaretLineEdge False
+        Case "{END}"
+            MoveCaretLineEdge True
         Case Else
-            mText = mText & keyText
+            InsertAtCaret keyText
     End Select
     mCaretOn = True
     mCaretAccumMs = 0
@@ -5243,6 +5300,72 @@ Friend Sub HandleKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
     ' re-filters on every keystroke.
     If mKind = KIND_COMBO Then mSelectOpen = True
     Touch
+End Sub
+
+Private Sub InsertAtCaret(ByVal insertText As String)
+    mText = Left$(mText, mCaretPos) & insertText & Mid$(mText, mCaretPos + 1)
+    mCaretPos = mCaretPos + Len(insertText)
+End Sub
+
+' The caret's hard-line index and column, walking newline characters up
+' to the caret. Vertical moves work in hard lines: a wrapped visual line
+' counts as one, which keeps the model honest and the math exact.
+Private Sub CaretLineCol(ByRef lineIndex As Long, ByRef lineStart As Long, _
+    ByRef columnIndex As Long)
+    Dim probe As Long
+
+    lineIndex = 0
+    lineStart = 0
+    For probe = 1 To mCaretPos
+        If Mid$(mText, probe, 1) = vbLf Then
+            lineIndex = lineIndex + 1
+            lineStart = probe
+        End If
+    Next probe
+    columnIndex = mCaretPos - lineStart
+End Sub
+
+Private Sub MoveCaretLine(ByVal delta As Long)
+    Dim hardLines() As String
+    Dim lineIndex As Long
+    Dim lineStart As Long
+    Dim columnIndex As Long
+    Dim targetLine As Long
+    Dim newPos As Long
+    Dim walk As Long
+
+    hardLines = Split(mText, vbLf)
+    CaretLineCol lineIndex, lineStart, columnIndex
+    targetLine = lineIndex + delta
+    If targetLine < 0 Then targetLine = 0
+    If targetLine > UBound(hardLines) Then targetLine = UBound(hardLines)
+    If targetLine = lineIndex Then Exit Sub
+    If columnIndex > Len(hardLines(targetLine)) Then
+        columnIndex = Len(hardLines(targetLine))
+    End If
+    newPos = 0
+    For walk = 0 To targetLine - 1
+        newPos = newPos + Len(hardLines(walk)) + 1
+    Next walk
+    mCaretPos = newPos + columnIndex
+End Sub
+
+Private Sub MoveCaretLineEdge(ByVal toEnd As Boolean)
+    Dim hardLines() As String
+    Dim lineIndex As Long
+    Dim lineStart As Long
+    Dim columnIndex As Long
+    Dim newPos As Long
+    Dim walk As Long
+
+    hardLines = Split(mText, vbLf)
+    CaretLineCol lineIndex, lineStart, columnIndex
+    newPos = 0
+    For walk = 0 To lineIndex - 1
+        newPos = newPos + Len(hardLines(walk)) + 1
+    Next walk
+    If toEnd Then newPos = newPos + Len(hardLines(lineIndex))
+    mCaretPos = newPos
 End Sub
 
 ' Outside-press blur, watched by the same pump frames as slider drags.

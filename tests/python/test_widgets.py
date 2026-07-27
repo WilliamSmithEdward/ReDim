@@ -423,6 +423,29 @@ def test_multi_line_input(run_widgets):
     assert facts["lineFullCommit"] == "True"
 
 
+def test_caret_editing(run_widgets):
+    facts = parse_transcript(run_widgets("TestCaretEditing"))
+    assert facts["midInsert"] == "True", (
+        "arrows must move the caret and characters must insert at it"
+    )
+    assert facts["bsAndDel"] == "True", (
+        "Backspace deletes before the caret, Del deletes at it"
+    )
+    assert facts["homeJump"] == "True"
+    assert facts["endJump"] == "True"
+    assert facts["upClampsColumn"] == "True", (
+        "vertical moves work in hard lines and keep the column"
+    )
+    assert facts["endOfLine"] == "True"
+    assert facts["downClampsColumn"] == "True", (
+        "a vertical move onto a shorter line clamps to its end"
+    )
+    assert facts["upScrolled"] == "True", (
+        "the viewport must follow the caret upward with a trailing"
+        " ellipsis for the lines below"
+    )
+
+
 def test_modal_confirm(run_widgets):
     facts = parse_transcript(run_widgets("TestModalConfirm"))
     assert facts["overlayShown"] == "True"

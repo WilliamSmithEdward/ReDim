@@ -189,8 +189,8 @@ Focus mechanics, all automatic:
   moves the selection, and the focused field's frames poll the selection - the press
   itself can be invisible (the grid's selection mouse loop holds timer messages until the
   button is back up), but the selection it leaves behind is durable state the next frame
-  sees. Arrow-key moves and sheet navigation commit the same way, and none of it depends
-  on application events. Everything that changes no selection - either mouse button on
+  sees. Sheet navigation commits the same way, and none of it depends on application
+  events. (Arrow keys no longer move the selection while a field is focused - they edit.) Everything that changes no selection - either mouse button on
   shapes, chrome, or other windows - is caught by the same press-edge watch that drives
   slider drags. The one blind spot: re-clicking the already-selected cell during a starved
   moment changes nothing observable; the next keystroke, click, or frame resolves it. On a
@@ -200,14 +200,19 @@ Focus mechanics, all automatic:
 - `InputValue` reads and writes the buffer in float mode, the cell in cell mode.
 
 Capture uses `Application.OnKey`, bound only while a field is focused and released on blur,
-so sheet typing is untouched the rest of the time. The bound set is the practical typing
-subset - letters (with Shift capitals), digits, space, minus, period, comma, Backspace,
-Enter, Esc. OnKey cannot see more than that (no arrows-within-text, no selection), so the
-model is append-and-backspace, honest and predictable. Keys outside the bound set fall
+so sheet typing is untouched the rest of the time. The bound set is the practical editing
+set: letters (with Shift capitals), digits, space, minus, period, comma, Backspace, Del,
+the arrow keys, Home, End, Tab, Enter (and Ctrl+Enter), Esc. Editing is full caret
+editing: arrows move the insertion point, characters insert at it, Backspace and Del
+delete around it, Home and End jump the line edges, and Up and Down move across hard
+lines with the column clamped (a long wrapped line counts as one line). While a field is
+focused the arrows belong to editing, so they do not move the cell selection. Text
+selection (shift-selection, copy/paste) is not modeled. Keys outside the bound set fall
 through to the grid as usual; on a `ProtectSurface` sheet Excel answers those with its
 protected-cell notice, and protection stays on the whole time - OnKey capture works fine
-under protection (verified with message-level keystrokes). `ReDimUI.HasKeyboardFocus` and
-`ReDimUI.FocusedComponentId` report the current holder; `RdxReleaseKeys` is the panic
+under protection (verified with message-level keystrokes). Apps that bind arrow HotKeys
+should re-arm them after field focus sessions if they mix the two. `ReDimUI.HasKeyboardFocus`
+and `ReDimUI.FocusedComponentId` report the current holder; `RdxReleaseKeys` is the panic
 release that unbinds everything regardless of state.
 
 ## Shapes are framework-owned

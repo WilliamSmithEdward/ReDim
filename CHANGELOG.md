@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.16.0 - 2026-07-26
+
+- Full caret editing in float fields. The append-and-backspace model is
+  retired: a caret index now lives anywhere in the buffer, Left and
+  Right move it, Up and Down move it across hard lines with the column
+  clamped to the target line, Home and End jump the line edges, Del
+  deletes forward, Backspace deletes backward, and characters insert at
+  the caret. The blinking bar renders at the caret's position, and the
+  overflow viewport follows the caret in both directions - scrolling up
+  shows a trailing ellipsis for the lines below. While a field is
+  focused the arrow keys belong to editing, so they no longer move the
+  cell selection and no longer trigger the selection-change commit;
+  Home, End, and Del join the captured set and release on blur.
+- Honest limits: vertical moves work in hard lines (a long wrapped line
+  is one line to the caret), and apps that bind arrow HotKeys should
+  re-arm them after field focus sessions if they mix the two.
+
 ## 0.15.2 - 2026-07-26
 
 - Focused fields follow the caret when their text overflows. Shape text

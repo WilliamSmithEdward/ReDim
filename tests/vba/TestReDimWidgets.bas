@@ -1349,6 +1349,112 @@ Public Function TestMultiLineInput() As String
     TestMultiLineInput = transcript
 End Function
 
+' Full caret editing: arrows move the caret, Home/End jump the line
+' edges, Del deletes forward, characters insert mid-text, vertical
+' moves clamp their column, and the viewport follows the caret upward
+' as well as downward.
+Public Function TestCaretEditing() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim fieldShape As Shape
+    Dim faceRaw As String
+    Dim transcript As String
+    Dim keyNo As Long
+
+    Set host = NewCanvas()
+    ReDimUI.AutoPump False
+    Set app = ReDimUI.Mount(host, "wid26")
+    app.TextInput("line").AtRect 24, 24, 150, 22
+    app.TextInput("notes").AtRect(24, 60, 200, 60).MultiLine
+    app.Render
+    Set fieldShape = host.Shapes("rdm_wid26_line")
+
+    ' Insert mid-text: abcd, two lefts, X.
+    ReDimUI.DispatchShape "rdm_wid26_line"
+    RdxKeyChar "a"
+    RdxKeyChar "b"
+    RdxKeyChar "c"
+    RdxKeyChar "d"
+    RdxKeyChar "{LEFT}"
+    RdxKeyChar "{LEFT}"
+    RdxKeyChar "X"
+    transcript = "midInsert=" & _
+        CStr(app.TextInput("line").InputValue = "abXcd" And _
+            fieldShape.TextFrame2.TextRange.Text = "abX|cd")
+
+    ' Backspace deletes before the caret, Del deletes at it.
+    RdxKeyChar "{BS}"
+    RdxKeyChar "{DEL}"
+    transcript = transcript & "|bsAndDel=" & _
+        CStr(app.TextInput("line").InputValue = "abd" And _
+            fieldShape.TextFrame2.TextRange.Text = "ab|d")
+
+    ' Home and End jump the line edges.
+    RdxKeyChar "{HOME}"
+    transcript = transcript & "|homeJump=" & _
+        CStr(fieldShape.TextFrame2.TextRange.Text = "|abd")
+    RdxKeyChar "{END}"
+    transcript = transcript & "|endJump=" & _
+        CStr(fieldShape.TextFrame2.TextRange.Text = "abd|")
+    RdxKeyChar "{ESC}"
+
+    ' Vertical moves work in hard lines and clamp the column.
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid26_notes"
+    RdxKeyChar "A"
+    RdxKeyChar "B"
+    RdxKeyChar "C"
+    RdxKeyChar "D"
+    RdxKeyChar "E"
+    RdxKeyChar "{ENTER}"
+    RdxKeyChar "X"
+    RdxKeyChar "Y"
+    RdxKeyChar "{UP}"
+    Set fieldShape = host.Shapes("rdm_wid26_notes")
+    faceRaw = NormalizedFace(fieldShape)
+    transcript = transcript & "|upClampsColumn=" & _
+        CStr(faceRaw = "AB|CDE" & vbLf & "XY")
+    RdxKeyChar "{END}"
+    faceRaw = NormalizedFace(fieldShape)
+    transcript = transcript & "|endOfLine=" & _
+        CStr(faceRaw = "ABCDE|" & vbLf & "XY")
+    RdxKeyChar "{DOWN}"
+    faceRaw = NormalizedFace(fieldShape)
+    transcript = transcript & "|downClampsColumn=" & _
+        CStr(faceRaw = "ABCDE" & vbLf & "XY|")
+    RdxKeyChar "{ESC}"
+
+    ' The viewport follows the caret upward: four lines in a three-line
+    ' field, caret walked to the top line.
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid26_notes"
+    For keyNo = 1 To 4
+        RdxKeyChar "L"
+        RdxKeyChar CStr(keyNo)
+        If keyNo < 4 Then RdxKeyChar "{ENTER}"
+    Next keyNo
+    RdxKeyChar "{UP}"
+    RdxKeyChar "{UP}"
+    RdxKeyChar "{UP}"
+    faceRaw = NormalizedFace(fieldShape)
+    transcript = transcript & "|upScrolled=" & _
+        CStr(faceRaw = "L1|" & vbLf & "L2" & vbLf & "L3" & ChrW(8230))
+    RdxKeyChar "{CTRLENTER}"
+    RdxReleaseKeys
+    ReDimUI.AutoPump True
+    TestCaretEditing = transcript
+End Function
+
+Private Function NormalizedFace(ByVal fieldShape As Shape) As String
+    Dim faceRaw As String
+
+    faceRaw = fieldShape.TextFrame2.TextRange.Text
+    faceRaw = Replace(faceRaw, vbCrLf, vbLf)
+    faceRaw = Replace(faceRaw, vbCr, vbLf)
+    faceRaw = Replace(faceRaw, Chr$(11), vbLf)
+    NormalizedFace = faceRaw
+End Function
+
 Public Function TestModalConfirm() As String
     Dim app As ReDimUI
     Dim host As Worksheet
