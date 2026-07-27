@@ -915,19 +915,16 @@ Public Function TestFloatField() As String
     transcript = transcript & "|tabBlurred=" & _
         CStr(Not ReDimUI.HasKeyboardFocus)
 
-    ' Clicking a cell commits event-driven through SheetSelectionChange:
-    ' the grid's selection mouse loop can starve the pump's press-edge
-    ' watch, so the selection event is the reliable cell-click signal.
-    ' A programmatic Select fires the same real event; the harness keeps
-    ' application events off, so enable them for exactly this window.
+    ' A cell click leaves a moved selection behind, and the next frame's
+    ' selection poll commits on it - the press itself can be invisible
+    ' to the pump (the grid's selection mouse loop holds WM_TIMER), and
+    ' this works with application events off, exactly as the harness
+    ' runs. Select stands in for the click; one forced tick is the frame.
     Sleep 200
     ReDimUI.DispatchShape "rdm_wid21_name"
     RdxKeyChar "z"
-    Dim priorEvents As Boolean
-    priorEvents = Application.EnableEvents
-    Application.EnableEvents = True
     host.Range("A40").Select
-    Application.EnableEvents = priorEvents
+    RdxPumpOnce
     transcript = transcript & "|cellClickCommit=" & app.State("who")
     transcript = transcript & "|cellClickBlurred=" & _
         CStr(Not ReDimUI.HasKeyboardFocus)

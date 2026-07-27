@@ -85,7 +85,7 @@ Private Const REL_NONE As Long = 0
 Private Const REL_BELOW As Long = 1
 Private Const REL_RIGHT_OF As Long = 2
 Private Const PERSIST_PREFIX As String = "rdm_s_"
-Private Const REDIM_VERSION As String = "0.9.3"
+Private Const REDIM_VERSION As String = "0.9.4"
 
 Private mRole As Long
 
@@ -189,6 +189,7 @@ Private mSlideValueAtEngage As Double
 Private mSlideSuppressUntilMs As LongLong
 Private mComboMatches As Collection
 Private mFieldTextAtFocus As String
+Private mFieldSelAtFocus As String
 Private mCaretOn As Boolean
 Private mCaretAccumMs As Long
 Private mRelMode As Long
@@ -286,33 +287,6 @@ Private Sub mExcelApp_SheetChange(ByVal Sh As Object, ByVal Target As Range)
     For Each appValue In mApps
         If appValue.Sheet Is Sh Then appValue.HandleSheetChange Target
     Next appValue
-    On Error GoTo 0
-End Sub
-
-' Clicking a cell cannot be trusted to reach the press-edge watch: the
-' grid's selection mouse loop can hold WM_TIMER until the button is back
-' up, leaving the press invisible to polling (shape presses keep frames
-' running; cell presses are the exception). The selection change IS the
-' click signal, so it commits the focused field event-driven - no timer
-' involved. Keyboard selection moves (arrows) commit the same way.
-Private Sub mExcelApp_SheetSelectionChange( _
-    ByVal Sh As Object, ByVal Target As Range)
-    Dim appValue As ReDimUI
-    Dim componentValue As ReDimUI
-
-    If LenB(mFocusComponentId) = 0 Then Exit Sub
-    Set appValue = FindApp(mFocusAppId)
-    If appValue Is Nothing Then
-        ClearKeyboardFocus
-        Exit Sub
-    End If
-    Set componentValue = appValue.PeekComponent(mFocusComponentId)
-    If componentValue Is Nothing Then
-        ClearKeyboardFocus
-        Exit Sub
-    End If
-    On Error Resume Next
-    componentValue.BlurField appValue, True
     On Error GoTo 0
 End Sub
 
@@ -4176,12 +4150,23 @@ End Function
 Friend Sub FocusField(ByVal hostApp As ReDimUI)
     If Not IsFloatField() Then Exit Sub
     mFieldTextAtFocus = mText
+    mFieldSelAtFocus = CurrentSelectionKey()
     mCaretOn = True
     mCaretAccumMs = 0
     ReDimUI.SetKeyboardFocus hostApp, Me
     If mKind = KIND_COMBO Then mSelectOpen = True
     Touch
 End Sub
+
+' The grid selection as a comparable key. A non-range selection (a shape)
+' reads as the sentinel, so only real cell selections participate.
+Private Function CurrentSelectionKey() As String
+    On Error Resume Next
+    CurrentSelectionKey = "?"
+    CurrentSelectionKey = ActiveWindow.ActiveSheet.Name & "!" & _
+        Selection.Address
+    On Error GoTo 0
+End Function
 
 ' Commit-blur keeps the text and fires events; revert-blur restores what
 ' was there when focus arrived and fires nothing.
@@ -4242,8 +4227,16 @@ Friend Sub HandleKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
     Touch
 End Sub
 
-' Outside-press blur, watched by the same pump frames as slider drags: a
-' press anywhere off the field commits and releases focus.
+' Outside-press blur, watched by the same pump frames as slider drags.
+' Two independent signals, because neither alone covers everything:
+' - The selection moved since focus: a cell was clicked or arrowed to.
+'   The press itself can be invisible to polling (the grid's selection
+'   mouse loop holds WM_TIMER until the button is back up), but the
+'   selection it leaves behind is durable state the next frame sees.
+'   Event-free, so it works even when a host disables application
+'   events, and it runs in proven tick context.
+' - A press edge lands off the field: shapes, chrome, other windows -
+'   clicks that never touch the selection.
 Friend Sub TickFieldWatch( _
     ByVal hostApp As ReDimUI, _
     ByVal buttonDown As Boolean, _
@@ -4251,6 +4244,10 @@ Friend Sub TickFieldWatch( _
 )
     If Not IsFloatField() Then Exit Sub
     If Not ReDimUI.IsComponentFocused(hostApp.AppId, mComponentId) Then Exit Sub
+    If CurrentSelectionKey() <> mFieldSelAtFocus Then
+        BlurField hostApp, True
+        Exit Sub
+    End If
     If Not pressEdge Then Exit Sub
     If CursorOverField() Then Exit Sub
     BlurField hostApp, True

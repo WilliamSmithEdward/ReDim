@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.9.4 - 2026-07-26
+
+- Replace 0.9.3's event-driven cell-click commit with a frame-driven
+  selection poll, after a field report showed the event approach not
+  landing. SheetSelectionChange had two structural weaknesses: it runs
+  inside the grid's selection mouse loop, an execution context where the
+  framework's shape surgery was never proven, and it goes silent whenever
+  a host runs with application events off. The focused field's frames -
+  the same ticks that blink the caret, observably alive in the field
+  reports - now compare the selection against a snapshot taken at focus;
+  any move commits. Works with events disabled, runs in proven tick
+  context, and also commits on arrow-key moves and sheet navigation.
+- The live test drives the poll with events off, exactly as the harness
+  runs, so the covered path is the shipped path.
+
 ## 0.9.3 - 2026-07-26
 
 - Fix clicking a cell not committing a focused float field (user repro:
