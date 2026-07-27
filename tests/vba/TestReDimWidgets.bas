@@ -956,6 +956,21 @@ Public Function TestFloatField() As String
     transcript = transcript & "|pickClosed=" & _
         CStr(Not ShapeExists(host, "rdm_wid21_color__opt1"))
 
+    ' Esc on a combo clears first (value emptied, full list reopened,
+    ' focus kept), then a second Esc leaves and commits the clear.
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid21_color"
+    RdxKeyChar "{ESC}"
+    transcript = transcript & "|escCleared=" & _
+        CStr(app.ComboBox("color").InputValue = vbNullString And _
+            ReDimUI.HasKeyboardFocus And _
+            ShapeExists(host, "rdm_wid21_color__opt4"))
+    RdxKeyChar "{ESC}"
+    transcript = transcript & "|escEscCommits=" & _
+        CStr(Not ReDimUI.HasKeyboardFocus And _
+            LenB(CStr(app.State("hue"))) = 0 And _
+            Not ShapeExists(host, "rdm_wid21_color__opt1"))
+
     ' Outside-press blur through the watch seam commits the field.
     Sleep 200
     ReDimUI.DispatchShape "rdm_wid21_name"

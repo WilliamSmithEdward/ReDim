@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.16.1 - 2026-07-26
+
+- Esc on a combo clears instead of reverting: the first Esc empties the
+  value, reopens the unfiltered list, and keeps focus for a fresh
+  search; a second Esc on the empty combo blurs and commits the clear,
+  so state never disagrees with the face. TextInput keeps the
+  revert-on-Esc convention.
+
 ## 0.16.0 - 2026-07-26
 
 - Full caret editing in float fields. The append-and-backspace model is

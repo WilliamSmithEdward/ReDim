@@ -184,7 +184,9 @@ Focus mechanics, all automatic:
   characters that fit (single-line and combo) - with a leading ellipsis marking trimmed
   content. The buffer keeps the complete text and commits intact; unfocused fields show
   their beginning.
-- Esc reverts to the text the field had when focus arrived and fires nothing.
+- Esc reverts a TextInput to the text it had when focus arrived and fires nothing. On a
+  combo, Esc clears instead: the first press empties the value and reopens the full list
+  with focus kept; a second press on the empty combo leaves and commits the clear.
 - Clicking anywhere off the field commits, through two frame-driven signals. A cell click
   moves the selection, and the focused field's frames poll the selection - the press
   itself can be invisible (the grid's selection mouse loop holds timer messages until the

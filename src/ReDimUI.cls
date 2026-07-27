@@ -91,7 +91,7 @@ Private Const VARIANT_NEUTRAL As Long = 4
 Private Const REL_NONE As Long = 0
 Private Const REL_BELOW As Long = 1
 Private Const REL_RIGHT_OF As Long = 2
-Private Const REDIM_VERSION As String = "0.16.0"
+Private Const REDIM_VERSION As String = "0.16.1"
 
 Private mRole As Long
 
@@ -5268,8 +5268,24 @@ Friend Sub HandleKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
             BlurField hostApp, True
             Exit Sub
         Case "{ESC}"
-            BlurField hostApp, False
-            Exit Sub
+            ' A combo clears first, then leaves: the first Esc empties
+            ' the value and reopens the unfiltered list with focus kept;
+            ' a second Esc on the empty combo blurs and commits the
+            ' clear, so state never disagrees with the face. A TextInput
+            ' keeps the revert-on-Esc convention.
+            If mKind = KIND_COMBO Then
+                If LenB(mText) > 0 Then
+                    mText = vbNullString
+                    mValue = 0
+                    mCaretPos = 0
+                Else
+                    BlurField hostApp, True
+                    Exit Sub
+                End If
+            Else
+                BlurField hostApp, False
+                Exit Sub
+            End If
         Case "{BS}"
             If mCaretPos > 0 Then
                 mText = Left$(mText, mCaretPos - 1) & Mid$(mText, mCaretPos + 1)

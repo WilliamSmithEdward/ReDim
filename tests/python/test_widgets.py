@@ -294,6 +294,13 @@ def test_float_field(run_widgets):
     assert facts["picked"] == "Green"
     assert facts["pickBlurred"] == "True"
     assert facts["pickClosed"] == "True"
+    assert facts["escCleared"] == "True", (
+        "Esc on a combo must clear the value, reopen the full list, and"
+        " keep focus"
+    )
+    assert facts["escEscCommits"] == "True", (
+        "a second Esc on the empty combo must blur and commit the clear"
+    )
     assert facts["outsideCommit"] == "Heyo"
     assert facts["tabCommit"] == "Heyox", "Tab must commit exactly like Enter"
     assert facts["tabBlurred"] == "True"
