@@ -208,6 +208,60 @@ End Function
 """
 
 
+SMOKE_POKEDEX = """
+Public Function SmokePokeDex() As String
+    Dim transcript As String
+
+    ReDimUI.AutoPump False
+    BuildPokeDex
+    transcript = "active=" & ReDimUI.ActiveWindowId
+    transcript = transcript & "|browseVisible=" & _
+        CStr(ThisWorkbook.Worksheets("DexBrowse").Visible = xlSheetVisible)
+    transcript = transcript & "|teamHidden=" & _
+        CStr(ThisWorkbook.Worksheets("DexTeam").Visible = xlSheetVeryHidden)
+    transcript = transcript & "|protected=" & _
+        CStr(ThisWorkbook.Worksheets("DexBrowse").ProtectContents)
+    transcript = transcript & "|keyShapes=" & _
+        CStr(ShapeThere("DexBrowse", "rdm_dexbrowse_species") And _
+            ShapeThere("DexBrowse", "rdm_dexbrowse_sprite") And _
+            ShapeThere("DexBrowse", "rdm_dexbrowse_statb6") And _
+            ShapeThere("DexBrowse", "rdm_dexbrowse_nvb_dexteam"))
+    transcript = transcript & "|fetchKicked=" & _
+        CStr(ReDimUI.App("dexbrowse").IsOpRunning("names"))
+
+    ReDimUI.DispatchShape "rdm_dexbrowse_nvb_dexteam"
+    transcript = transcript & "|teamActive=" & _
+        CStr(ReDimUI.ActiveWindowId = "dexteam")
+    transcript = transcript & "|teamShapes=" & _
+        CStr(ShapeThere("DexTeam", "rdm_dexteam_team__mvr") And _
+            ShapeThere("DexTeam", "rdm_dexteam_prefs__mb") And _
+            ShapeThere("DexTeam", "rdm_dexteam_strategy"))
+    ReDimUI.DispatchShape "rdm_dexteam_nvb_dextrainer"
+    transcript = transcript & "|trainerActive=" & _
+        CStr(ReDimUI.ActiveWindowId = "dextrainer")
+    transcript = transcript & "|trainerShapes=" & _
+        CStr(ShapeThere("DexTrainer", "rdm_dextrainer_darkmode") And _
+            ShapeThere("DexTrainer", "rdm_dextrainer_starter") And _
+            ShapeThere("DexTrainer", "rdm_dextrainer_reset"))
+    transcript = transcript & "|themedPrimary=" & _
+        CStr(ReDimUI.App("dextrainer").Theme.PrimaryColor = RGB(214, 55, 46))
+    RdxReleaseKeys
+    RdxStopPump
+    ReDimUI.AutoPump True
+    SmokePokeDex = transcript
+End Function
+
+Private Function ShapeThere( _
+    ByVal sheetName As String, ByVal shapeName As String) As Boolean
+    Dim target As Shape
+    On Error Resume Next
+    Set target = ThisWorkbook.Worksheets(sheetName).Shapes(shapeName)
+    On Error GoTo 0
+    ShapeThere = Not target Is Nothing
+End Function
+"""
+
+
 def open_demo(excel, demo_paths, name):
     excel.open_workbook(str(demo_paths[name]))
 
@@ -273,6 +327,35 @@ def test_navigator_smoke(demo_paths):
         assert facts["defaultSeeded"] == "True"
         assert facts["backHome"] == "True"
         assert facts["homeShownTwice"] == "True"
+
+
+def test_pokedex_smoke(demo_paths):
+    with ExcelSession() as excel:
+        open_demo(excel, demo_paths, "ReDim_ReDex.xlsm")
+        result = excel.run_vba(SMOKE_POKEDEX, proc="SmokePokeDex", timeout=120)
+        assert result.outcome == "passed", result.error
+        facts = dict(t.split("=", 1) for t in result.value.split("|"))
+        assert facts["active"] == "dexbrowse"
+        assert facts["browseVisible"] == "True"
+        assert facts["teamHidden"] == "True"
+        assert facts["protected"] == "True"
+        assert facts["keyShapes"] == "True", (
+            "the browse window must carry the combo, sprite image, stat"
+            " bars, and nav tabs"
+        )
+        assert facts["fetchKicked"] == "True", (
+            "showing the browse window must start the species fetch op"
+        )
+        assert facts["teamActive"] == "True"
+        assert facts["teamShapes"] == "True", (
+            "the team window must carry the transfer list, checklist"
+            " header, and notes field"
+        )
+        assert facts["trainerActive"] == "True"
+        assert facts["trainerShapes"] == "True"
+        assert facts["themedPrimary"] == "True", (
+            "the custom Pokedex theme must drive the whole app"
+        )
 
 
 def test_snake_smoke(demo_paths):

@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.18.1 - 2026-07-26
+
+- ReDex: a fifth demo workbook and the full-framework showcase. A
+  living Pokedex fed by PokeAPI over ROneCOne HTTP tasks riding the
+  pump, parsed with ROneCOne JSON: a windowed 151-species combo with
+  live filtering and pagers, sprite downloads into Image controls,
+  base-stat bars that tween through a paced job, type badges restyled
+  at runtime, F2/F3 hotkeys, a cancellable shiny hunt, a team window
+  with the TransferList party builder and a house-rules CheckList, a
+  trainer card with a Confirm-guarded reset, a custom Pokedex-red
+  theme with a night-mode toggle flipping every window live, and
+  toasts throughout. Offline it degrades honestly to an error toast
+  and a retry on next show. The smoke test asserts structure,
+  navigation, theming, and the fetch-op kick without depending on the
+  network.
+
 ## 0.18.0 - 2026-07-26
 
 - Hardening: the pump's silent error handling becomes observable and

@@ -81,7 +81,8 @@ Built workbooks live in `demo/` after running `python tools/build_workbooks.py`:
 | `ReDim_Mission_Control.xlsm` | Three cancellable feeds with live progress, toasts, KPI cards, dark mode, confirm modal | `BuildMissionControl` |
 | `ReDim_Widget_Gallery.xlsm` | Every component wired to a live state inspector | `BuildWidgetGallery` |
 | `ReDim_Snake.xlsm` | A real game loop: paced pump job, arrow-key steering, score state, game-over modal | `BuildSnake` |
-| `ReDim_Navigator.xlsm` | Sheets as forms: Navigate, back stack, lifecycle hooks, persisted settings | `BuildNavigator` |
+| `ReDim_Navigator.xlsm` | Sheets as forms: Navigate, back stack, lifecycle hooks | `BuildNavigator` |
+| `ReDim_ReDex.xlsm` | The full-framework showcase: a living Pokedex on PokeAPI - async HTTP + JSON, sprite images, tweened stat bars, team building, custom theme with night mode | `BuildPokeDex` |
 
 ## Documentation
 
