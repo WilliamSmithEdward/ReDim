@@ -67,7 +67,7 @@ controls in the framework. Also:
 | `Async(opId)` / `CancelAsync opId` / `AsyncError(opId)` | Async ops (see [async.md](async.md)). |
 | `Job(jobId)` / `CancelJob jobId` | Chunked or paced background work. |
 | `OnError "Module.Proc"` | One-argument sink for swallowed handler failures. |
-| `ProtectSurface enabled` | Opt-in app-sheet protection (UserInterfaceOnly): users cannot enter cell edit mode or drag shapes there, framework writes keep working, cell-anchored TextInput cells stay editable, and float fields type normally since they never enter cell edit. UserInterfaceOnly does not persist across reopen, so builds should call `ProtectSurface False` first and `ProtectSurface` after Render, as every demo does. Unmount unprotects. |
+| `ProtectSurface enabled, allowCellSelection` | Opt-in app-sheet protection (UserInterfaceOnly): users cannot enter cell edit mode or drag shapes there, framework writes keep working, cell-anchored TextInput cells stay editable, and float fields type normally since they never enter cell edit. By default locked canvas cells are also unselectable - no selection rectangle on the app surface, no protected-cell warnings for stray keys - while unlocked TextInput cells stay selectable; pass `allowCellSelection:=True` to keep the whole grid selectable. OnKey capture (fields, HotKey) is unaffected. Protection state does not persist across reopen, so builds should call `ProtectSurface False` first and `ProtectSurface` after Render, as every demo does. Unmount unprotects. |
 | `Unmount deleteShapes` | Remove components (and shapes) and forget the app. |
 
 ## Component builders
@@ -160,7 +160,10 @@ Focus mechanics, all automatic:
   on application events. Everything that changes no selection - either mouse button on
   shapes, chrome, or other windows - is caught by the same press-edge watch that drives
   slider drags. The one blind spot: re-clicking the already-selected cell during a starved
-  moment changes nothing observable; the next keystroke, click, or frame resolves it.
+  moment changes nothing observable; the next keystroke, click, or frame resolves it. On a
+  default `ProtectSurface` sheet the canvas is unselectable, so grid clicks move no
+  selection at all - there, commit by Enter, Tab, or clicking any control, which is the
+  natural flow on an app surface anyway.
 - `InputValue` reads and writes the buffer in float mode, the cell in cell mode.
 
 Capture uses `Application.OnKey`, bound only while a field is focused and released on blur,

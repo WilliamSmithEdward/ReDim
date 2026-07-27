@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.10.0 - 2026-07-26
+
+- `ProtectSurface` makes locked canvas cells unselectable by default
+  (`EnableSelection = xlUnlockedCells`): no selection rectangle on the app
+  surface, no protected-cell warnings for stray keys, and deliberately
+  unlocked cell-backed TextInput cells stay selectable and editable. Pass
+  `allowCellSelection:=True` for the previous behavior. Verified with
+  message-level keystrokes that OnKey capture - float-field typing and
+  HotKey arrows - fires exactly as before with no selectable cell.
+- Since grid clicks on such a surface move no selection, click-away
+  commit there is Enter, Tab, or clicking any control; the press-edge
+  watch still covers shape and chrome clicks.
+
 ## 0.9.4 - 2026-07-26
 
 - Replace 0.9.3's event-driven cell-click commit with a frame-driven

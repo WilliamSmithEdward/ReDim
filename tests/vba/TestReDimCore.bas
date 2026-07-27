@@ -397,6 +397,10 @@ Public Function TestProtectSurface() As String
         CStr(host.Range("C7").Locked = False)
     transcript = transcript & "|otherCellsLocked=" & _
         CStr(host.Range("A1").Locked = True)
+    ' Locked canvas cells are unselectable by default; the unlocked input
+    ' cell remains selectable so cell-backed typing still works.
+    transcript = transcript & "|selectionLocked=" & _
+        CStr(host.EnableSelection = xlUnlockedCells)
 
     ' Framework writes keep working under UserInterfaceOnly protection.
     app.SetState "msg", "updated under protection"
@@ -412,6 +416,12 @@ Public Function TestProtectSurface() As String
 
     app.ProtectSurface False
     transcript = transcript & "|unprotects=" & CStr(Not host.ProtectContents)
+    transcript = transcript & "|selectionRestored=" & _
+        CStr(host.EnableSelection = xlNoRestrictions)
+    app.ProtectSurface True, True
+    transcript = transcript & "|optOutSelectable=" & _
+        CStr(host.EnableSelection = xlNoRestrictions)
+    app.ProtectSurface False
     app.ProtectSurface
     app.Unmount True
     transcript = transcript & "|unmountUnprotects=" & _

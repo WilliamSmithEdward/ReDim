@@ -85,7 +85,7 @@ Private Const REL_NONE As Long = 0
 Private Const REL_BELOW As Long = 1
 Private Const REL_RIGHT_OF As Long = 2
 Private Const PERSIST_PREFIX As String = "rdm_s_"
-Private Const REDIM_VERSION As String = "0.9.4"
+Private Const REDIM_VERSION As String = "0.10.0"
 
 Private mRole As Long
 
@@ -1651,9 +1651,16 @@ End Sub
 ' Treats the app sheet as an application surface: users cannot enter cell
 ' edit mode or drag shapes there, which also keeps the pump from stalling
 ' in edit mode, while UserInterfaceOnly leaves every framework write free.
-' TextInput cells stay unlocked and editable. Opt-in, and scoped to this
-' one sheet: the rest of the workbook is untouched. Call after Render.
-Public Function ProtectSurface(Optional ByVal enabled As Boolean = True) As ReDimUI
+' Locked canvas cells are also unselectable by default - no selection
+' rectangle on the app surface, no protected-cell warnings for stray
+' keys - while deliberately unlocked cells (cell-backed TextInput) stay
+' selectable and editable; pass allowCellSelection:=True to keep the
+' grid selectable. OnKey capture is unaffected either way. Opt-in, and
+' scoped to this one sheet. Call after Render.
+Public Function ProtectSurface( _
+    Optional ByVal enabled As Boolean = True, _
+    Optional ByVal allowCellSelection As Boolean = False _
+) As ReDimUI
     Dim componentValue As ReDimUI
 
     RequireRole ROLE_APP, "ProtectSurface"
@@ -1663,10 +1670,16 @@ Public Function ProtectSurface(Optional ByVal enabled As Boolean = True) As ReDi
         Next componentValue
         mSheet.Protect DrawingObjects:=True, Contents:=True, _
             UserInterfaceOnly:=True
+        If allowCellSelection Then
+            mSheet.EnableSelection = xlNoRestrictions
+        Else
+            mSheet.EnableSelection = xlUnlockedCells
+        End If
         mSurfaceProtected = True
     Else
         On Error Resume Next
         mSheet.Unprotect
+        mSheet.EnableSelection = xlNoRestrictions
         On Error GoTo 0
         mSurfaceProtected = False
     End If

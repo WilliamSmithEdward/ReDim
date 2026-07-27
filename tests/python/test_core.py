@@ -138,12 +138,19 @@ def test_protect_surface(run_core):
         "TextInput cells must stay editable under protection"
     )
     assert facts["otherCellsLocked"] == "True"
+    assert facts["selectionLocked"] == "True", (
+        "locked canvas cells must be unselectable on a protected surface"
+    )
     assert facts["renderWorks"] == "True", (
         "UserInterfaceOnly must leave framework writes free"
     )
     assert facts["dispatchWorks"] == "True"
     assert facts["toastCreates"] == "True"
     assert facts["unprotects"] == "True"
+    assert facts["selectionRestored"] == "True"
+    assert facts["optOutSelectable"] == "True", (
+        "allowCellSelection:=True must keep the grid selectable"
+    )
     assert facts["unmountUnprotects"] == "True"
 
 
@@ -151,4 +158,4 @@ def test_hotkey_lifecycle_and_version(run_core):
     facts = parse_transcript(run_core("TestHotKeyLifecycle"))
     assert facts["procCallable"] == "True"
     assert facts["unmountClean"] == "True"
-    assert facts["version"] == "0.9.4"
+    assert facts["version"] == "0.10.0"
