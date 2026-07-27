@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.9.3 - 2026-07-26
+
+- Fix clicking a cell not committing a focused float field (user repro:
+  focused combo kept its ring and open list after a cell click). Every
+  polled link verified clean under real timer ticks, real cursor
+  positions, and Excel's own RangeFromPoint ground truth on a scrolled
+  window - the failure is the press itself: the grid's selection mouse
+  loop can hold WM_TIMER until the button is already up, so a cell press
+  can be invisible to the pump's press-edge poll (shape presses keep
+  frames running, which is why sliders never missed). Cell clicks now
+  commit event-driven through Application.SheetSelectionChange - the
+  selection change is the click signal, no timer involved. Arrow-key
+  selection moves commit the same way. The press-edge watch remains for
+  clicks that change no selection (ribbon, title bar, other windows,
+  re-clicking the selected cell).
+- New test seam ForcePressEdge lets live tests drive the in-tick blur
+  path without physical input; the widget suite now covers the
+  selection-driven commit through a real SheetSelectionChange event.
+
 ## 0.9.2 - 2026-07-26
 
 - Clicking away from a focused float field commits with either mouse button:

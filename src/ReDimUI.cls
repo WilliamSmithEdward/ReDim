@@ -85,7 +85,7 @@ Private Const REL_NONE As Long = 0
 Private Const REL_BELOW As Long = 1
 Private Const REL_RIGHT_OF As Long = 2
 Private Const PERSIST_PREFIX As String = "rdm_s_"
-Private Const REDIM_VERSION As String = "0.9.2"
+Private Const REDIM_VERSION As String = "0.9.3"
 
 Private mRole As Long
 
@@ -103,6 +103,9 @@ Private mNavStack As Collection
 Private mActiveWindowId As String
 Private mFocusAppId As String
 Private mFocusComponentId As String
+' Test seam: the next real tick treats the field-watch press edge as
+' fired, so in-tick blur paths are testable without physical input.
+Private mForcePressEdge As Boolean
 Private WithEvents mExcelApp As Excel.Application
 Attribute mExcelApp.VB_VarHelpID = -1
 
@@ -286,6 +289,33 @@ Private Sub mExcelApp_SheetChange(ByVal Sh As Object, ByVal Target As Range)
     On Error GoTo 0
 End Sub
 
+' Clicking a cell cannot be trusted to reach the press-edge watch: the
+' grid's selection mouse loop can hold WM_TIMER until the button is back
+' up, leaving the press invisible to polling (shape presses keep frames
+' running; cell presses are the exception). The selection change IS the
+' click signal, so it commits the focused field event-driven - no timer
+' involved. Keyboard selection moves (arrows) commit the same way.
+Private Sub mExcelApp_SheetSelectionChange( _
+    ByVal Sh As Object, ByVal Target As Range)
+    Dim appValue As ReDimUI
+    Dim componentValue As ReDimUI
+
+    If LenB(mFocusComponentId) = 0 Then Exit Sub
+    Set appValue = FindApp(mFocusAppId)
+    If appValue Is Nothing Then
+        ClearKeyboardFocus
+        Exit Sub
+    End If
+    Set componentValue = appValue.PeekComponent(mFocusComponentId)
+    If componentValue Is Nothing Then
+        ClearKeyboardFocus
+        Exit Sub
+    End If
+    On Error Resume Next
+    componentValue.BlurField appValue, True
+    On Error GoTo 0
+End Sub
+
 Private Sub mExcelApp_WorkbookBeforeClose(ByVal Wb As Workbook, Cancel As Boolean)
     If Wb Is ThisWorkbook Then Shutdown
 End Sub
@@ -456,6 +486,26 @@ Friend Sub ClearKeyboardFocus()
     mFocusComponentId = vbNullString
     RdxReleaseKeys
 End Sub
+
+' Test seam: consumed by the first TickApp that polls after it is set.
+' Single-app scenarios only; with several apps mounted the first app in
+' registry order consumes the edge.
+Friend Sub ForcePressEdge()
+    If Not IsFactory(Me) Then
+        ReDimUI.ForcePressEdge
+        Exit Sub
+    End If
+    mForcePressEdge = True
+End Sub
+
+Friend Function ConsumeForcedPressEdge() As Boolean
+    If Not IsFactory(Me) Then
+        ConsumeForcedPressEdge = ReDimUI.ConsumeForcedPressEdge
+        Exit Function
+    End If
+    ConsumeForcedPressEdge = mForcePressEdge
+    mForcePressEdge = False
+End Function
 
 Public Property Get HasKeyboardFocus() As Boolean
     If Not IsFactory(Me) Then
@@ -1773,6 +1823,7 @@ Friend Sub TickApp( _
         Or (GetAsyncKeyState(VK_RIGHT_BUTTON) < 0)
     pressEdge = (anyButtonDown And Not mFieldPrevButtonDown)
     mFieldPrevButtonDown = anyButtonDown
+    If ReDimUI.ConsumeForcedPressEdge() Then pressEdge = True
     Set expiredIds = New Collection
     For Each componentValue In mComponents
         componentValue.TickAnimation mSheet, elapsedMs

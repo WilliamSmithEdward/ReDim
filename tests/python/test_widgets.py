@@ -282,6 +282,11 @@ def test_float_field(run_widgets):
     assert facts["outsideCommit"] == "Heyo"
     assert facts["tabCommit"] == "Heyox", "Tab must commit exactly like Enter"
     assert facts["tabBlurred"] == "True"
+    assert facts["cellClickCommit"] == "Heyoxz", (
+        "a selection change must commit the focused field - the cell-click"
+        " press can be invisible to the pump's poll"
+    )
+    assert facts["cellClickBlurred"] == "True"
 
 
 def test_modal_confirm(run_widgets):

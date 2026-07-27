@@ -152,8 +152,13 @@ Focus mechanics, all automatic:
   `OnChange` fires if the text changed. A combo commit that exactly matches an item takes
   that item.
 - Esc reverts to the text the field had when focus arrived and fires nothing.
-- Clicking anywhere off the field commits - either mouse button, watched by the same pump
-  frames as slider drags.
+- Clicking anywhere off the field commits. Cell clicks commit event-driven through
+  `SheetSelectionChange` (the grid's selection mouse loop can starve a timer poll, so the
+  selection change is the reliable signal; arrow-key moves commit the same way). Everything
+  else - either mouse button on shapes, chrome, or other windows - is caught by the same
+  pump press-edge watch that drives slider drags. The one blind spot: a click that changes
+  no selection and produces no frames, like re-clicking the already-selected cell during a
+  starved moment, may leave focus in place; the next keystroke, click, or frame resolves it.
 - `InputValue` reads and writes the buffer in float mode, the cell in cell mode.
 
 Capture uses `Application.OnKey`, bound only while a field is focused and released on blur,
