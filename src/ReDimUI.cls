@@ -86,8 +86,7 @@ Private Const VARIANT_NEUTRAL As Long = 4
 Private Const REL_NONE As Long = 0
 Private Const REL_BELOW As Long = 1
 Private Const REL_RIGHT_OF As Long = 2
-Private Const PERSIST_PREFIX As String = "rdm_s_"
-Private Const REDIM_VERSION As String = "0.12.0"
+Private Const REDIM_VERSION As String = "0.13.0"
 
 Private mRole As Long
 
@@ -131,7 +130,6 @@ Private mToastTrayAnchor As String
 Private mToastRailLeft As Double
 Private mToastRailTop As Double
 Private mToastRailStored As Boolean
-Private mPersistOn As Boolean
 Private mHotKeys As Collection
 Private mSurfaceProtected As Boolean
 Private mIsWindow As Boolean
@@ -1280,14 +1278,13 @@ End Property
 Public Sub SetState(ByVal stateKey As String, ByVal stateValue As Variant)
     RequireRole ROLE_APP, "SetState"
     ReplaceItem mStateValues, stateKey, stateValue
-    If mPersistOn Then WritePersistedValue stateKey, stateValue
     MarkBoundComponentsDirty stateKey
     InvokeStateHandlers stateKey
     If mBatchDepth = 0 And mRendered Then FlushDirty
 End Sub
 
-' Sets the key only when it has no value yet. Setup code uses this for
-' initial values so a persisted store keeps the user's last choices.
+' Sets the key only when it has no value yet, so setup code stays
+' idempotent: re-running a build never clobbers values already in play.
 Public Sub SetStateDefault(ByVal stateKey As String, ByVal stateValue As Variant)
     RequireRole ROLE_APP, "SetStateDefault"
     If HasState(stateKey) Then Exit Sub
@@ -1326,116 +1323,11 @@ Public Property Get HasState(ByVal stateKey As String) As Boolean
     HasState = TryGetItem(mStateValues, stateKey, stored)
 End Property
 
-' Persistence writes state through to hidden workbook names, so a reopened
-' workbook resumes where the user left off. Turning it on hydrates the store
-' from any values a previous session persisted; call it before Render and
-' use SetStateDefault for initial values.
-Public Function Persist(ByVal enabled As Boolean) As ReDimUI
-    RequireRole ROLE_APP, "Persist"
-    mPersistOn = enabled
-    If enabled Then HydratePersistedState
-    Set Persist = Me
-End Function
-
-Public Sub ClearPersisted()
-    Dim book As Workbook
-    Dim position As Long
-    Dim prefix As String
-
-    RequireRole ROLE_APP, "ClearPersisted"
-    Set book = mSheet.Parent
-    prefix = PERSIST_PREFIX & mAppId & "_"
-    For position = book.Names.Count To 1 Step -1
-        If Left$(book.Names(position).Name, Len(prefix)) = prefix Then
-            book.Names(position).Delete
-        End If
-    Next position
-End Sub
-
-Private Sub HydratePersistedState()
-    Dim book As Workbook
-    Dim entry As Name
-    Dim prefix As String
-    Dim stateKey As String
-    Dim decoded As Variant
-
-    Set book = mSheet.Parent
-    prefix = PERSIST_PREFIX & mAppId & "_"
-    For Each entry In book.Names
-        If Left$(entry.Name, Len(prefix)) = prefix Then
-            stateKey = Mid$(entry.Name, Len(prefix) + 1)
-            If TryDecodePersisted(entry.RefersTo, decoded) Then
-                ReplaceItem mStateValues, stateKey, decoded
-                MarkBoundComponentsDirty stateKey
-            End If
-        End If
-    Next entry
-    If mBatchDepth = 0 And mRendered Then FlushDirty
-End Sub
-
-Private Sub WritePersistedValue(ByVal stateKey As String, ByVal stateValue As Variant)
-    Dim encoded As String
-
-    If Not TryEncodePersisted(stateValue, encoded) Then Exit Sub
-    On Error Resume Next
-    mSheet.Parent.Names.Add PERSIST_PREFIX & mAppId & "_" & stateKey, _
-        "=""" & Replace(encoded, """", """""") & """", False
-    On Error GoTo 0
-End Sub
-
-' Scalars persist with a one-letter type tag. Objects and arrays are
-' in-memory only and are skipped silently.
-Private Function TryEncodePersisted( _
-    ByVal stateValue As Variant, _
-    ByRef encoded As String _
-) As Boolean
-    If IsObject(stateValue) Or IsArray(stateValue) Then Exit Function
-    Select Case VarType(stateValue)
-        Case vbBoolean
-            encoded = "B:" & CStr(CBool(stateValue))
-        Case vbByte, vbInteger, vbLong, vbLongLong
-            encoded = "L:" & CStr(stateValue)
-        Case vbSingle, vbDouble, vbCurrency, vbDecimal
-            encoded = "D:" & CStr(CDbl(stateValue))
-        Case vbDate
-            encoded = "T:" & CStr(CDbl(CDate(stateValue)))
-        Case vbString
-            encoded = "S:" & stateValue
-        Case Else
-            Exit Function
-    End Select
-    TryEncodePersisted = True
-End Function
-
-Private Function TryDecodePersisted( _
-    ByVal storedRefersTo As String, _
-    ByRef decoded As Variant _
-) As Boolean
-    Dim body As String
-
-    If Left$(storedRefersTo, 2) <> "=""" Then Exit Function
-    If Right$(storedRefersTo, 1) <> """" Then Exit Function
-    body = Mid$(storedRefersTo, 3, Len(storedRefersTo) - 3)
-    body = Replace(body, """""", """")
-    If Len(body) < 2 Then Exit Function
-    On Error GoTo BadValue
-    Select Case Left$(body, 2)
-        Case "B:"
-            decoded = CBool(Mid$(body, 3))
-        Case "L:"
-            decoded = CLng(Mid$(body, 3))
-        Case "D:"
-            decoded = CDbl(Mid$(body, 3))
-        Case "T:"
-            decoded = CDate(CDbl(Mid$(body, 3)))
-        Case "S:"
-            decoded = Mid$(body, 3)
-        Case Else
-            Exit Function
-    End Select
-    TryDecodePersisted = True
-BadValue:
-End Function
+' The state store is deliberately in-memory only. Durability is the host
+' application's concern: read the store with State/StateOrDefault and save
+' wherever fits (a hidden sheet, workbook names, a file), then reseed on
+' build with SetStateDefault. ROneCOne.Json serializes and parses if JSON
+' is the format of choice.
 
 ' Registers a zero-argument workbook procedure invoked after the key changes.
 Public Sub OnStateChanged(ByVal stateKey As String, ByVal procName As String)

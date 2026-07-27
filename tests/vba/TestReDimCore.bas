@@ -256,43 +256,27 @@ Public Sub CoreStateHandler()
     gClickCount = gClickCount + 1
 End Sub
 
-Public Function TestPersistence() As String
+' State is session-scoped by design: a rebuild starts empty, and
+' SetStateDefault only seeds keys that have no value yet.
+Public Function TestStateSessionScope() As String
     Dim app As ReDimUI
     Dim host As Worksheet
     Dim transcript As String
 
     Set host = NewCanvas()
     Set app = ReDimUI.Mount(host, "core9")
-    app.ClearPersisted
-    app.Persist True
     app.SetStateDefault "mode", "light"
-    app.SetStateDefault "runs", 0
     app.SetState "mode", "dark"
-    app.SetState "runs", 7
-    app.SetState "ratio", 2.5
-    app.SetState "flag", True
-    transcript = "beforeLoss=" & app.State("mode")
-
-    ' Simulated state loss and rebuild: the registry dies, hidden names do
-    ' not, and defaults must not clobber what the user had chosen.
-    ReDimUI.Shutdown
-    Set app = ReDimUI.Mount(host, "core9")
-    app.Persist True
     app.SetStateDefault "mode", "light"
-    app.SetStateDefault "runs", 0
-    transcript = transcript & "|modeKept=" & app.State("mode")
-    transcript = transcript & "|runsKept=" & app.State("runs")
-    transcript = transcript & "|runsType=" & TypeName(app.State("runs"))
-    transcript = transcript & "|ratioKept=" & CStr(app.State("ratio") = 2.5)
-    transcript = transcript & "|flagKept=" & CStr(app.State("flag") = True)
-    transcript = transcript & "|flagType=" & TypeName(app.State("flag"))
+    transcript = "defaultNoClobber=" & app.State("mode")
 
-    app.ClearPersisted
     ReDimUI.Shutdown
     Set app = ReDimUI.Mount(host, "core9")
-    app.Persist True
-    transcript = transcript & "|clearedGone=" & CStr(Not app.HasState("mode"))
-    TestPersistence = transcript
+    transcript = transcript & "|freshStoreEmpty=" & _
+        CStr(Not app.HasState("mode"))
+    app.SetStateDefault "mode", "light"
+    transcript = transcript & "|defaultSeeds=" & app.State("mode")
+    TestStateSessionScope = transcript
 End Function
 
 Public Function TestRelativeLayout() As String

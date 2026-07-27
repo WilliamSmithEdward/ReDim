@@ -40,9 +40,10 @@ user keeps working in the workbook.
   Excel 365 install.
 - **Stateful.** Each app owns a key-value store. `BindText`, `BindValue`, `BindVisible`, and
   `BindEnabled` re-render only what changed. `OnStateChanged` registers workbook procedures as
-  state listeners. `WritesTo` flows control values back into state. `Persist True` writes state
-  through to hidden workbook names, so a closed and reopened workbook resumes exactly where the
-  user left off; `SetStateDefault` keeps setup code from clobbering persisted choices.
+  state listeners. `WritesTo` flows control values back into state. The store is deliberately
+  in-memory and session-scoped: persistence belongs to the host application, which can read
+  the store, save it wherever fits (ROneCOne's JSON serializer is on board), and reseed on
+  build with `SetStateDefault`, which never clobbers a value already in play.
 - **Composable layout.** Anchor to ranges with `At`, to points with `AtRect`, or to other
   components with `Below` and `RightOf`. Render prunes shapes orphaned by renamed components,
   so iterating on app code never litters the sheet.

@@ -118,7 +118,7 @@ Public Function SmokeNavigator() As String
         CStr(ThisWorkbook.Worksheets("NavSettings").Shapes( _
             "rdm_navsettings_nvb_navsettings").Fill.ForeColor.RGB = _
             ReDimUI.App("navsettings").Theme.PrimaryColor)
-    transcript = transcript & "|persistedDefault=" & _
+    transcript = transcript & "|defaultSeeded=" & _
         CStr(ReDimUI.App("navsettings").State("alertsOn"))
 
     HandleBack
@@ -270,7 +270,7 @@ def test_navigator_smoke(demo_paths):
         assert facts["activeSettings"] == "True"
         assert facts["homeNowHidden"] == "True"
         assert facts["settingsTabActive"] == "True"
-        assert facts["persistedDefault"] == "True"
+        assert facts["defaultSeeded"] == "True"
         assert facts["backHome"] == "True"
         assert facts["homeShownTwice"] == "True"
 

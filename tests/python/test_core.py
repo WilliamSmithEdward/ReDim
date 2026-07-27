@@ -76,16 +76,15 @@ def test_unmount(run_core):
     assert facts["forgotten"] == "True"
 
 
-def test_persistence(run_core):
-    facts = parse_transcript(run_core("TestPersistence"))
-    assert facts["beforeLoss"] == "dark"
-    assert facts["modeKept"] == "dark", "defaults must not clobber persisted values"
-    assert facts["runsKept"] == "7"
-    assert facts["runsType"] == "Long"
-    assert facts["ratioKept"] == "True"
-    assert facts["flagKept"] == "True"
-    assert facts["flagType"] == "Boolean"
-    assert facts["clearedGone"] == "True"
+def test_state_session_scope(run_core):
+    facts = parse_transcript(run_core("TestStateSessionScope"))
+    assert facts["defaultNoClobber"] == "dark", (
+        "SetStateDefault must not overwrite a value already in play"
+    )
+    assert facts["freshStoreEmpty"] == "True", (
+        "state is session-scoped: a rebuilt app starts with an empty store"
+    )
+    assert facts["defaultSeeds"] == "light"
 
 
 def test_relative_layout(run_core):
@@ -158,4 +157,4 @@ def test_hotkey_lifecycle_and_version(run_core):
     facts = parse_transcript(run_core("TestHotKeyLifecycle"))
     assert facts["procCallable"] == "True"
     assert facts["unmountClean"] == "True"
-    assert facts["version"] == "0.12.0"
+    assert facts["version"] == "0.13.0"

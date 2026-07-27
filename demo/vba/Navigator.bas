@@ -60,7 +60,6 @@ Private Sub BuildSettings()
     app.ProtectSurface False
     app.PrepareCanvas
     app.AsWindow.WindowTitle "Settings"
-    app.Persist True
     app.NavBar
 
     app.Label("title").AtRect(24, 48, 320, 30).Text("Settings").FontSize(20).Bold
@@ -71,7 +70,7 @@ Private Sub BuildSettings()
     app.Label("autosavelbl").RightOf("autosave", 10).Sized(200, 18) _
         .Text("Autosave results")
     app.Label("hint").Below("autosave", 20).Sized(360, 18) _
-        .Text("These choices persist across closing the workbook.")
+        .Text("These choices live in app state for this session.")
     app.Button("back").Below("hint", 14).Sized(110, 30).Text("< Back") _
         .Secondary.OnClick "Navigator.HandleBack"
     app.SetStateDefault "alertsOn", True

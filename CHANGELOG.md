@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.13.0 - 2026-07-26
+
+- BREAKING: the persistence layer is removed entirely. `Persist` and
+  `ClearPersisted` are gone, and hidden `rdm_s_*` workbook names are no
+  longer written or read. The state store is deliberately in-memory and
+  session-scoped; durability belongs to the host application, which can
+  read the store with `State`/`StateOrDefault`, save it wherever fits (a
+  hidden sheet, workbook names, a file - ROneCOne's JSON serializer is
+  on board), and reseed on build with `SetStateDefault`, which never
+  clobbers a value already in play. The Navigator demo's settings are
+  session-scoped accordingly.
+
 ## 0.12.0 - 2026-07-26
 
 - `CheckList`: a drawn checkbox list. One box-and-caption row per item,

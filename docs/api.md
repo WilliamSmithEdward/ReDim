@@ -52,8 +52,7 @@ controls in the framework. Also:
 |---|---|
 | `SetState key, value` / `State(key)` / `StateOrDefault(key, fallback)` / `HasState(key)` | The store. |
 | `SetStateDefault key, value` | Sets only when the key has no value; the right form for initial values. |
-| `Persist enabled` | Writes state through to hidden workbook names and hydrates persisted values, so a reopened workbook resumes where the user left off. Scalars only; call before Render. |
-| `ClearPersisted` | Deletes this app's persisted names. |
+| (persistence) | The state store is deliberately in-memory and session-scoped; ReDim ships no persistence. Durability belongs to the host application: read the store with `State`/`StateOrDefault`, save wherever fits (a hidden sheet, workbook names, a file), and reseed on build with `SetStateDefault`, which never clobbers a value already in play. `ROneCOne.Json.Serialize`/`Deserialize` are available if JSON is the format of choice. |
 | `HotKey keyCode, "Module.Proc"` / `ClearHotKeys` | Application.OnKey with cleanup on Unmount and Shutdown. |
 | `OnStateChanged key, "Module.Proc"` | Zero-argument listener runs after the key changes. |
 | `BeginUpdate` / `EndUpdate` | Batch several changes into one flush. |
