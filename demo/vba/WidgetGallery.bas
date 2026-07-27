@@ -58,8 +58,10 @@ Public Sub BuildWidgetGallery()
     app.Label("lblInput").AtRect(24, 280, 200, 16).Text("Cell-free fields").Bold
     app.TextInput("username").AtRect(24, 304, 150, 22).WritesTo "userName"
     app.ComboBox("fruit").AtRect(196, 304, 150, 22).WritesTo "fruit"
-    app.ComboBox("fruit").Items "Apple", "Apricot", "Banana", "Cherry", _
-        "Grape", "Grapefruit"
+    app.ComboBox("fruit").Items "Apple", "Apricot", "Avocado", "Banana", _
+        "Blackberry", "Blueberry", "Cherry", "Coconut", "Cranberry", _
+        "Date", "Fig", "Grape", "Grapefruit", "Guava", "Kiwi", "Lemon", _
+        "Lime", "Mango", "Nectarine", "Orange"
     app.TextInput("notes").AtRect(360, 288, 150, 44).MultiLine.WritesTo "notes"
     app.Label("inputHint").AtRect(24, 336, 520, 16) _
         .Text("Click a field and type: the combo filters live; multi-line notes commit with Tab or Ctrl+Enter.")
@@ -75,7 +77,9 @@ Public Sub BuildWidgetGallery()
         .WritesTo "options"
     app.TransferList("crew").AtRect 24, 378, 380, 132
     app.TransferList("crew").ItemsFrom( _
-        Array("Ada", "Grace", "Edsger", "Alan")) _
+        Array("Ada", "Grace", "Edsger", "Alan", "Donald", "Katherine", _
+            "Margaret", "John", "Dennis", "Ken", "Bjarne", "Linus", _
+            "Guido", "Tim")) _
         .ChosenFrom(Array("Barbara")) _
         .Captions("Available", "On mission") _
         .WritesTo "crew"

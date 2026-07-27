@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.17.1 - 2026-07-26
+
+- Gallery long-list fixtures: the fruit combo grows to twenty items so
+  the open list shows the eight-row window, the overflow indicator,
+  the highlight walk, and live narrowing; the crew roster grows to
+  fourteen so the available panel pages through its scroll arrows.
+
 ## 0.17.0 - 2026-07-26
 
 - Long lists become navigable. The combo drop list windows to eight
