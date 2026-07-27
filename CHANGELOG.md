@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.18.2 - 2026-07-26
+
+- ReDex builds itself on open. The other demos already carried an
+  Auto_Open; the new workbook shipped without one, so a fresh open
+  showed a blank sheet until BuildPokeDex ran by hand. It now matches
+  the family: open with macros enabled and the app draws itself.
+  Automation opens skip Auto_Open by Excel's own rules, so the test
+  harness keeps deciding when builds run.
+
 ## 0.18.1 - 2026-07-26
 
 - ReDex: a fifth demo workbook and the full-framework showcase. A

@@ -27,6 +27,13 @@ Private gStatNow(1 To 6) As Double
 Private gStatTarget(1 To 6) As Double
 Private gHuntStep As Long
 
+' The workbook builds itself when a user opens it with macros enabled.
+' Automation opens (the test harness) skip Auto_Open, so scenarios stay
+' in control of when the build runs.
+Public Sub Auto_Open()
+    BuildPokeDex
+End Sub
+
 Public Sub BuildPokeDex()
     BuildBrowse
     BuildTeam

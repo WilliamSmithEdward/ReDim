@@ -74,7 +74,9 @@ as ROneCOne.
 
 ## Demos
 
-Built workbooks live in `demo/` after running `python tools/build_workbooks.py`:
+Built workbooks live in `demo/` after running `python tools/build_workbooks.py`. Open one
+with macros enabled and it builds itself (each ships an `Auto_Open`); the entry macro
+rebuilds on demand.
 
 | Workbook | Shows | Entry macro |
 |---|---|---|
