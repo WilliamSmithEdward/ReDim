@@ -75,6 +75,7 @@ Private Const KIND_STEPPER As Long = 16
 Private Const KIND_SLIDEBAR As Long = 17
 Private Const KIND_COMBO As Long = 18
 Private Const KIND_TRANSFER As Long = 19
+Private Const KIND_CHECKLIST As Long = 20
 
 Private Const VARIANT_PRIMARY As Long = 0
 Private Const VARIANT_SECONDARY As Long = 1
@@ -86,7 +87,7 @@ Private Const REL_NONE As Long = 0
 Private Const REL_BELOW As Long = 1
 Private Const REL_RIGHT_OF As Long = 2
 Private Const PERSIST_PREFIX As String = "rdm_s_"
-Private Const REDIM_VERSION As String = "0.11.1"
+Private Const REDIM_VERSION As String = "0.12.0"
 
 Private mRole As Long
 
@@ -191,6 +192,10 @@ Private mItems As Collection
 Private mChosenItems As Collection
 Private mSelLeft As Collection
 Private mSelRight As Collection
+' Checkbox list: the set of checked row indices, and whether the
+' select-all header row renders (on by default).
+Private mCheckedSet As Collection
+Private mSelectAllRow As Boolean
 Private mCaptionLeft As String
 Private mCaptionRight As String
 Private mAppliedLeftRows As Long
@@ -903,6 +908,15 @@ End Function
 ' the chosen items joined with ", "; OnChange fires once per user transfer.
 Public Function TransferList(ByVal componentId As String) As ReDimUI
     Set TransferList = GetOrCreateComponent(componentId, KIND_TRANSFER)
+End Function
+
+' Drawn checkbox list: one box-and-caption row per item, any number
+' checked, with a select-all header row (tri-state box: empty, check,
+' dash for mixed) on by default. Box and caption both toggle their row.
+' WritesTo carries the checked items joined with ", "; OnChange fires
+' once per user toggle, including the select-all bulk toggle.
+Public Function CheckList(ByVal componentId As String) As ReDimUI
+    Set CheckList = GetOrCreateComponent(componentId, KIND_CHECKLIST)
 End Function
 
 ' Drawn single-select option rows. Items supplies the rows, Value the
@@ -2118,6 +2132,9 @@ Friend Sub ConfigureComponent( _
             mWidth = 240: mHeight = 40
         Case KIND_TRANSFER
             mWidth = 360: mHeight = 140
+        Case KIND_CHECKLIST
+            mWidth = 170: mHeight = 100
+            mSelectAllRow = True
         Case Else
             mWidth = 120: mHeight = 24
     End Select
@@ -2436,6 +2453,7 @@ Public Function ItemsFrom(ByVal source As Variant) As ReDimUI
             "ItemsFrom accepts an array, a Collection, or a Range."
     End If
     ClampItemSelection
+    If Not mCheckedSet Is Nothing Then Set mCheckedSet = New Collection
     Touch
     Set ItemsFrom = Me
 End Function
@@ -2470,6 +2488,94 @@ Public Function ChosenFrom(ByVal source As Variant) As ReDimUI
     Set ChosenFrom = Me
 End Function
 
+' Seeds the checkbox list's checked rows by item text; names that match
+' no item are ignored. Programmatic, so no state write and no OnChange.
+Public Function CheckedFrom(ByVal source As Variant) As ReDimUI
+    Dim entry As Variant
+    Dim cell As Range
+    Dim position As Long
+    Dim wanted As Collection
+
+    RequireRole ROLE_COMPONENT, "CheckedFrom"
+    Set wanted = New Collection
+    If TypeName(source) = "Range" Then
+        For Each cell In source.Cells
+            If LenB(CStr(cell.Value)) > 0 Then wanted.Add CStr(cell.Value)
+        Next cell
+    ElseIf TypeName(source) = "Collection" Then
+        For Each entry In source
+            wanted.Add CStr(entry)
+        Next entry
+    ElseIf IsArray(source) Then
+        For position = LBound(source) To UBound(source)
+            wanted.Add CStr(source(position))
+        Next position
+    Else
+        RaiseError ERROR_INVALID_ARGUMENT, "CheckedFrom", _
+            "CheckedFrom accepts an array, a Collection, or a Range."
+    End If
+    Set mCheckedSet = New Collection
+    If Not mItems Is Nothing Then
+        For position = 1 To mItems.Count
+            For Each entry In wanted
+                If StrComp(CStr(mItems.Item(position)), CStr(entry), _
+                    vbTextCompare) = 0 Then
+                    If Not TransferSelectionHas(mCheckedSet, position) Then
+                        mCheckedSet.Add position
+                    End If
+                    Exit For
+                End If
+            Next entry
+        Next position
+    End If
+    Touch
+    Set CheckedFrom = Me
+End Function
+
+' Renders or hides the select-all header row (on by default).
+Public Function WithSelectAll( _
+    Optional ByVal enabled As Boolean = True _
+) As ReDimUI
+    RequireRole ROLE_COMPONENT, "WithSelectAll"
+    mSelectAllRow = enabled
+    Touch
+    Set WithSelectAll = Me
+End Function
+
+' Programmatic check state for one row: renders, but writes no state and
+' fires no OnChange, like every programmatic item mutation.
+Public Function SetItemChecked( _
+    ByVal position As Long, _
+    ByVal checkedFlag As Boolean _
+) As ReDimUI
+    RequireRole ROLE_COMPONENT, "SetItemChecked"
+    EnsureCheckedSet
+    If position >= 1 And position <= ItemCount Then
+        If checkedFlag Then
+            If Not TransferSelectionHas(mCheckedSet, position) Then
+                mCheckedSet.Add position
+            End If
+        Else
+            If TransferSelectionHas(mCheckedSet, position) Then
+                TransferSelectionToggle mCheckedSet, position
+            End If
+        End If
+        Touch
+    End If
+    Set SetItemChecked = Me
+End Function
+
+Public Property Get IsItemChecked(ByVal position As Long) As Boolean
+    RequireRole ROLE_COMPONENT, "IsItemChecked"
+    If mCheckedSet Is Nothing Then Exit Property
+    IsItemChecked = TransferSelectionHas(mCheckedSet, position)
+End Property
+
+Public Property Get CheckedCount() As Long
+    RequireRole ROLE_COMPONENT, "CheckedCount"
+    If Not mCheckedSet Is Nothing Then CheckedCount = mCheckedSet.Count
+End Property
+
 ' Header captions for the transfer list panels; each header also shows the
 ' live item count.
 Public Function Captions( _
@@ -2496,7 +2602,8 @@ Public Property Get ChosenTextAt(ByVal position As Long) As String
 End Property
 
 ' Appends, or inserts at a 1-based position. The selected item stays
-' selected: an insert at or before it shifts the index along with it.
+' selected, and checked rows stay checked: an insert at or before them
+' shifts their indices along with them.
 Public Function AddItem( _
     ByVal itemText As String, _
     Optional ByVal atPosition As Long = 0 _
@@ -2506,12 +2613,41 @@ Public Function AddItem( _
     If atPosition >= 1 And atPosition <= mItems.Count Then
         mItems.Add itemText, Before:=atPosition
         If CLng(mValue) >= atPosition Then mValue = mValue + 1
+        ShiftCheckedForInsert atPosition
     Else
         mItems.Add itemText
     End If
     Touch
     Set AddItem = Me
 End Function
+
+Private Sub ShiftCheckedForInsert(ByVal atPosition As Long)
+    Dim position As Long
+
+    If mCheckedSet Is Nothing Then Exit Sub
+    For position = 1 To mCheckedSet.Count
+        If CLng(mCheckedSet.Item(position)) >= atPosition Then
+            mCheckedSet.Add CLng(mCheckedSet.Item(position)) + 1, _
+                Before:=position
+            mCheckedSet.Remove position + 1
+        End If
+    Next position
+End Sub
+
+Private Sub ShiftCheckedForRemove(ByVal removedAt As Long)
+    Dim position As Long
+
+    If mCheckedSet Is Nothing Then Exit Sub
+    For position = mCheckedSet.Count To 1 Step -1
+        If CLng(mCheckedSet.Item(position)) = removedAt Then
+            mCheckedSet.Remove position
+        ElseIf CLng(mCheckedSet.Item(position)) > removedAt Then
+            mCheckedSet.Add CLng(mCheckedSet.Item(position)) - 1, _
+                Before:=position
+            mCheckedSet.Remove position + 1
+        End If
+    Next position
+End Sub
 
 ' Removes by 1-based position, or by first matching text. Removing an item
 ' before the selection shifts the index; removing the selected item clears
@@ -2545,6 +2681,7 @@ Public Function RemoveItem(ByVal indexOrText As Variant) As ReDimUI
     ElseIf CLng(mValue) > position Then
         mValue = mValue - 1
     End If
+    ShiftCheckedForRemove position
     Touch
     Set RemoveItem = Me
 End Function
@@ -2553,6 +2690,7 @@ Public Function ClearItems() As ReDimUI
     RequireRole ROLE_COMPONENT, "ClearItems"
     Set mItems = New Collection
     mValue = 0
+    If Not mCheckedSet Is Nothing Then Set mCheckedSet = New Collection
     Touch
     Set ClearItems = Me
 End Function
@@ -2865,6 +3003,25 @@ Private Sub EnsureTransferCollections()
     If mSelRight Is Nothing Then Set mSelRight = New Collection
 End Sub
 
+Private Sub EnsureCheckedSet()
+    If mCheckedSet Is Nothing Then Set mCheckedSet = New Collection
+End Sub
+
+' Checked item texts in list order, joined for the WritesTo state value.
+Private Function CheckedJoined() As String
+    Dim position As Long
+
+    If mItems Is Nothing Then Exit Function
+    For position = 1 To mItems.Count
+        If TransferSelectionHas(mCheckedSet, position) Then
+            If LenB(CheckedJoined) > 0 Then
+                CheckedJoined = CheckedJoined & ", "
+            End If
+            CheckedJoined = CheckedJoined & CStr(mItems.Item(position))
+        End If
+    Next position
+End Function
+
 Private Function TransferSelectionHas( _
     ByVal selectionSet As Collection, _
     ByVal rowIndex As Long _
@@ -3049,6 +3206,37 @@ Friend Sub RunClickBehavior()
         Case KIND_TICKBOX
             mChecked = Not mChecked
             If LenB(mWritesToKey) > 0 Then hostApp.SetState mWritesToKey, mChecked
+            Touch
+        Case KIND_CHECKLIST
+            ' Select-all follows the convention: mixed or none checks
+            ' everything, only the all-checked state unchecks. Falls
+            ' through so OnChange fires once per toggle, bulk included.
+            Dim checkPart As String
+            Dim checkRow As Long
+            checkPart = ReDimUI.SenderPart
+            EnsureCheckedSet
+            If checkPart = "mb" Or checkPart = "mt" Then
+                If ItemCount = 0 Then Exit Sub
+                If mCheckedSet.Count = ItemCount Then
+                    Set mCheckedSet = New Collection
+                Else
+                    Set mCheckedSet = New Collection
+                    For checkRow = 1 To ItemCount
+                        mCheckedSet.Add checkRow
+                    Next checkRow
+                End If
+            Else
+                If LenB(checkPart) = 0 Then
+                    checkRow = 1
+                ElseIf IsNumeric(Mid$(checkPart, 2)) Then
+                    checkRow = CLng(Mid$(checkPart, 2))
+                End If
+                If checkRow < 1 Or checkRow > ItemCount Then Exit Sub
+                TransferSelectionToggle mCheckedSet, checkRow
+            End If
+            If LenB(mWritesToKey) > 0 Then
+                hostApp.SetState mWritesToKey, CheckedJoined()
+            End If
             Touch
         Case KIND_TRANSFER
             Dim transferPart As String
@@ -3374,6 +3562,11 @@ Private Function CreateShapeForKind(ByVal hostSheet As Worksheet) As Shape
             Set target = hostSheet.Shapes.AddShape( _
                 msoShapeRoundedRectangle, mLeft, mTop, 100, 100)
             target.Adjustments(1) = 0.08
+        Case KIND_CHECKLIST
+            ' The main shape is the first row's box; extras own geometry.
+            Set target = hostSheet.Shapes.AddShape( _
+                msoShapeRoundedRectangle, mLeft, mTop, 14, 14)
+            target.Adjustments(1) = 0.2
         Case Else
             Set target = hostSheet.Shapes.AddShape( _
                 msoShapeRectangle, mLeft, mTop, mWidth, mHeight)
@@ -3406,7 +3599,7 @@ End Function
 Private Function IsCompositeDrawnKind() As Boolean
     IsCompositeDrawnKind = (mKind = KIND_TICKBOX Or mKind = KIND_RADIO _
         Or mKind = KIND_STEPPER Or mKind = KIND_SLIDEBAR _
-        Or mKind = KIND_TRANSFER)
+        Or mKind = KIND_TRANSFER Or mKind = KIND_CHECKLIST)
 End Function
 
 ' Geometry diffs against the shape's actual position rather than a cache, so
@@ -3725,6 +3918,8 @@ Private Sub ApplyKindExtras( _
             ApplySlideBar target, hostSheet, themeValue
         Case KIND_TRANSFER
             ApplyTransferParts target, hostSheet, themeValue
+        Case KIND_CHECKLIST
+            ApplyCheckListParts target, hostSheet, themeValue
         Case KIND_TOAST
             If mSlideRemaining > 0 Then target.Top = mTop + mSlideRemaining
     End Select
@@ -3920,6 +4115,135 @@ Private Sub ApplyRadioGroup( _
     Next position
     mAppliedOptionCount = rowCount
     mAppliedValue = mValue
+End Sub
+
+' One box-and-caption row per item, any number checked, plus an optional
+' select-all header whose box reads empty, checked, or dashed for mixed.
+Private Sub ApplyCheckListParts( _
+    ByVal target As Shape, _
+    ByVal hostSheet As Worksheet, _
+    ByVal themeValue As ReDimUI _
+)
+    Dim rowCount As Long
+    Dim headerRows As Long
+    Dim rowHeight As Double
+    Dim rowTop As Double
+    Dim position As Long
+    Dim box As Shape
+    Dim caption As Shape
+    Dim boxSize As Double
+    Dim isOn As Boolean
+    Dim checkedTotal As Long
+
+    EnsureCheckedSet
+    If mItems Is Nothing Then Exit Sub
+    rowCount = mItems.Count
+    If rowCount = 0 Then Exit Sub
+    PruneTransferSelection mCheckedSet, rowCount
+    checkedTotal = mCheckedSet.Count
+    headerRows = 0
+    If mSelectAllRow Then headerRows = 1
+    rowHeight = mHeight / (rowCount + headerRows)
+    boxSize = rowHeight - 6
+    If boxSize > 14 Then boxSize = 14
+    If boxSize < 10 Then boxSize = 10
+
+    If mSelectAllRow Then
+        Set box = EnsurePartShape(hostSheet, "mb", msoShapeRoundedRectangle)
+        On Error Resume Next
+        box.Adjustments(1) = 0.2
+        On Error GoTo 0
+        StyleCheckBoxFace box, boxSize, mTop, rowHeight, themeValue, _
+            (checkedTotal = rowCount), (checkedTotal > 0)
+        Set caption = EnsurePartShape(hostSheet, "mt", msoShapeRectangle)
+        caption.Left = mLeft + boxSize + 8
+        caption.Top = mTop
+        caption.Width = mWidth - boxSize - 8
+        caption.Height = rowHeight
+        StyleCaptionPart caption, _
+            "Select all (" & checkedTotal & "/" & rowCount & ")", themeValue
+        caption.Visible = BoolToMso(mVisible)
+        caption.OnAction = mAppliedOnAction
+    Else
+        On Error Resume Next
+        hostSheet.Shapes(ShapeName & PART_SEPARATOR & "mb").Delete
+        hostSheet.Shapes(ShapeName & PART_SEPARATOR & "mt").Delete
+        On Error GoTo 0
+    End If
+
+    For position = 1 To rowCount
+        rowTop = mTop + (position - 1 + headerRows) * rowHeight
+        isOn = TransferSelectionHas(mCheckedSet, position)
+        If position = 1 Then
+            Set box = target
+        Else
+            Set box = EnsurePartShape( _
+                hostSheet, "b" & position, msoShapeRoundedRectangle)
+            On Error Resume Next
+            box.Adjustments(1) = 0.2
+            On Error GoTo 0
+        End If
+        StyleCheckBoxFace box, boxSize, rowTop, rowHeight, themeValue, _
+            isOn, isOn
+        Set caption = EnsurePartShape( _
+            hostSheet, "t" & position, msoShapeRectangle)
+        caption.Left = mLeft + boxSize + 8
+        caption.Top = rowTop
+        caption.Width = mWidth - boxSize - 8
+        caption.Height = rowHeight
+        StyleCaptionPart caption, ItemAt(position), themeValue
+        caption.Visible = BoolToMso(mVisible)
+        caption.OnAction = mAppliedOnAction
+    Next position
+    For position = rowCount + 1 To mAppliedOptionCount
+        On Error Resume Next
+        hostSheet.Shapes(ShapeName & PART_SEPARATOR & "b" & position).Delete
+        hostSheet.Shapes(ShapeName & PART_SEPARATOR & "t" & position).Delete
+        On Error GoTo 0
+    Next position
+    mAppliedOptionCount = rowCount
+End Sub
+
+' A checkbox face in one of three reads: full (accent fill and a check),
+' partial (accent fill and a dash, the mixed state), or empty (surface
+' fill and a border). full implies partial.
+Private Sub StyleCheckBoxFace( _
+    ByVal box As Shape, _
+    ByVal boxSize As Double, _
+    ByVal rowTop As Double, _
+    ByVal rowHeight As Double, _
+    ByVal themeValue As ReDimUI, _
+    ByVal fullState As Boolean, _
+    ByVal partialState As Boolean _
+)
+    box.Left = mLeft
+    box.Top = rowTop + (rowHeight - boxSize) / 2
+    box.Width = boxSize
+    box.Height = boxSize
+    box.Fill.Visible = msoTrue
+    If partialState And mEnabled Then
+        box.Fill.ForeColor.RGB = ResolveFill(themeValue)
+        box.Line.Visible = msoFalse
+    Else
+        box.Fill.ForeColor.RGB = themeValue.SurfaceColor
+        box.Line.Visible = msoTrue
+        box.Line.ForeColor.RGB = themeValue.BorderColor
+        box.Line.Weight = 1.25
+    End If
+    If fullState Then
+        StyleGlyphText box, ChrW(10003), _
+            IIf(mEnabled, themeValue.OnPrimaryColor, themeValue.OnMutedColor), _
+            boxSize * 0.62, themeValue
+    ElseIf partialState Then
+        StyleGlyphText box, "-", _
+            IIf(mEnabled, themeValue.OnPrimaryColor, themeValue.OnMutedColor), _
+            boxSize * 0.8, themeValue
+    Else
+        StyleGlyphText box, vbNullString, themeValue.OnSurfaceColor, _
+            boxSize * 0.62, themeValue
+    End If
+    box.Visible = BoolToMso(mVisible)
+    box.OnAction = mAppliedOnAction
 End Sub
 
 ' Minus and plus squares around a bordered value face.

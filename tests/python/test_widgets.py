@@ -339,6 +339,43 @@ def test_transfer_list(run_widgets):
     assert facts["changeFinal"] == "5"
 
 
+def test_check_list(run_widgets):
+    facts = parse_transcript(run_widgets("TestCheckList"))
+    assert facts["parts"] == "True"
+    assert facts["headerText"] == "Select all (1/3)", (
+        "the select-all header must show the checked count"
+    )
+    assert facts["seeded"] == "True"
+    assert facts["mixedDash"] == "True", (
+        "a partially checked list must show the tri-state dash"
+    )
+    assert facts["captionToggled"] == "Alpha, Bravo", (
+        "the caption is a full-row hit target and must toggle its row"
+    )
+    assert facts["changeRan"] == "1"
+    assert facts["allChecked"] == "True", (
+        "select-all from a mixed state must check everything"
+    )
+    assert facts["masterCheckGlyph"] == "True"
+    assert facts["noneChecked"] == "True", (
+        "select-all from the all state must uncheck everything"
+    )
+    assert facts["changeAfterMaster"] == "3", (
+        "a bulk toggle fires OnChange once"
+    )
+    assert facts["mainShapeRow1"] == "True"
+    assert facts["progSilent"] == "True", (
+        "programmatic checks must not write state or fire OnChange"
+    )
+    assert facts["insertShift"] == "True", (
+        "checks must follow their items through inserts"
+    )
+    assert facts["removeShift"] == "True", (
+        "checks must follow their items through removals"
+    )
+    assert facts["headerOff"] == "True"
+
+
 def test_modal_confirm(run_widgets):
     facts = parse_transcript(run_widgets("TestModalConfirm"))
     assert facts["overlayShown"] == "True"

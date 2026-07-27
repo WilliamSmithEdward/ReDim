@@ -145,6 +145,14 @@ dependencies:
   and fires `OnChange`.
 - `TextInput`: a text field. Float by default (`AtRect`), cell-backed with `At` when you
   want the value to live in the grid.
+- `CheckList`: a checkbox list - one box-and-caption row per item, any number checked,
+  with a select-all header on by default (`WithSelectAll False` opts out). The header box
+  is tri-state (empty, check, dash for mixed), clicking it checks everything unless all
+  are already checked, and its caption counts (`Select all (2/4)`). Box and caption both
+  toggle their row. `CheckedFrom` seeds by text; `SetItemChecked`/`IsItemChecked`/
+  `CheckedCount` are the silent programmatic surface; checks follow their items through
+  `AddItem`/`RemoveItem`. `WritesTo` carries checked items joined with ", "; `OnChange`
+  fires once per toggle, select-all included.
 - `Toggle`: the pill switch for booleans.
 
 ## Float fields and keyboard focus

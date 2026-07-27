@@ -65,6 +65,13 @@ Public Sub BuildWidgetGallery()
 
     app.Label("lblTransfer").AtRect(24, 356, 300, 16) _
         .Text("Transfer list (dual listbox)").Bold
+    app.Label("lblCheck").AtRect(420, 356, 150, 16) _
+        .Text("Checkbox list").Bold
+    app.CheckList("options").AtRect 420, 378, 160, 125
+    app.CheckList("options").ItemsFrom( _
+        Array("Alerts", "Auto-save", "Dark mode", "Sync")) _
+        .CheckedFrom(Array("Auto-save")) _
+        .WritesTo "options"
     app.TransferList("crew").AtRect 24, 378, 380, 132
     app.TransferList("crew").ItemsFrom( _
         Array("Ada", "Grace", "Edsger", "Alan")) _
@@ -93,6 +100,7 @@ Public Sub BuildWidgetGallery()
     app.SetState "userName", vbNullString
     app.SetState "fruit", vbNullString
     app.SetState "crew", "Barbara"
+    app.SetState "options", "Auto-save"
     app.SetState "lastAction", "none yet"
     app.SetState "oplog", "no run yet"
     RefreshInspector

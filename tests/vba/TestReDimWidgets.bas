@@ -1098,6 +1098,91 @@ Public Function TestTransferList() As String
     TestTransferList = transcript
 End Function
 
+' Checkbox list: rows toggle from box or caption, the select-all header
+' is tri-state with standard semantics, programmatic checks are silent,
+' and checks follow their items through inserts and removals.
+Public Function TestCheckList() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim transcript As String
+
+    Set host = NewCanvas()
+    gChangeCount = 0
+    Set app = ReDimUI.Mount(host, "wid23")
+    app.CheckList("feat").AtRect 24, 24, 170, 100
+    app.CheckList("feat").ItemsFrom(Array("Alpha", "Bravo", "Charlie")) _
+        .CheckedFrom(Array("Bravo")) _
+        .WritesTo("features").OnChange "TestReDimWidgets.RecordChange"
+    app.Render
+
+    transcript = "parts=" & CStr(ShapeExists(host, "rdm_wid23_feat") And _
+        ShapeExists(host, "rdm_wid23_feat__b2") And _
+        ShapeExists(host, "rdm_wid23_feat__b3") And _
+        ShapeExists(host, "rdm_wid23_feat__t1") And _
+        ShapeExists(host, "rdm_wid23_feat__mb") And _
+        ShapeExists(host, "rdm_wid23_feat__mt"))
+    transcript = transcript & "|headerText=" & _
+        host.Shapes("rdm_wid23_feat__mt").TextFrame2.TextRange.Text
+    transcript = transcript & "|seeded=" & _
+        CStr(app.CheckList("feat").IsItemChecked(2) And _
+            host.Shapes("rdm_wid23_feat__b2").Fill.ForeColor.RGB = _
+            app.Theme.PrimaryColor)
+    transcript = transcript & "|mixedDash=" & _
+        CStr(host.Shapes("rdm_wid23_feat__mb").TextFrame2.TextRange.Text _
+            = "-")
+
+    ' The caption is a full-row hit target: it toggles like the box.
+    ReDimUI.DispatchShape "rdm_wid23_feat__t1"
+    transcript = transcript & "|captionToggled=" & app.State("features")
+    transcript = transcript & "|changeRan=" & gChangeCount
+
+    ' Select-all from mixed checks everything; from all, unchecks all.
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid23_feat__mb"
+    transcript = transcript & "|allChecked=" & _
+        CStr(app.CheckList("feat").CheckedCount = 3 And _
+            app.State("features") = "Alpha, Bravo, Charlie")
+    transcript = transcript & "|masterCheckGlyph=" & _
+        CStr(host.Shapes("rdm_wid23_feat__mb").TextFrame2.TextRange.Text _
+            = ChrW(10003))
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid23_feat__mt"
+    transcript = transcript & "|noneChecked=" & _
+        CStr(app.CheckList("feat").CheckedCount = 0 And _
+            LenB(CStr(app.State("features"))) = 0)
+    transcript = transcript & "|changeAfterMaster=" & gChangeCount
+
+    ' The main shape is row one's box.
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid23_feat"
+    transcript = transcript & "|mainShapeRow1=" & _
+        CStr(app.State("features") = "Alpha" And gChangeCount = 4)
+
+    ' Programmatic checks render but stay silent.
+    app.CheckList("feat").SetItemChecked 3, True
+    transcript = transcript & "|progSilent=" & _
+        CStr(app.CheckList("feat").CheckedCount = 2 And _
+            gChangeCount = 4 And app.State("features") = "Alpha")
+
+    ' Checks follow their items through inserts and removals.
+    app.CheckList("feat").AddItem "Zeta", 1
+    transcript = transcript & "|insertShift=" & _
+        CStr(app.CheckList("feat").IsItemChecked(2) And _
+            app.CheckList("feat").IsItemChecked(4) And _
+            Not app.CheckList("feat").IsItemChecked(1))
+    app.CheckList("feat").RemoveItem 2
+    transcript = transcript & "|removeShift=" & _
+        CStr(app.CheckList("feat").CheckedCount = 1 And _
+            app.CheckList("feat").IsItemChecked(3))
+
+    ' Opting out of the header sweeps its parts.
+    app.CheckList("feat").WithSelectAll False
+    app.Render
+    transcript = transcript & "|headerOff=" & _
+        CStr(Not ShapeExists(host, "rdm_wid23_feat__mb"))
+    TestCheckList = transcript
+End Function
+
 Public Function TestModalConfirm() As String
     Dim app As ReDimUI
     Dim host As Worksheet

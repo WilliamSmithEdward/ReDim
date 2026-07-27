@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.12.0 - 2026-07-26
+
+- `CheckList`: a drawn checkbox list. One box-and-caption row per item,
+  any number checked, and a select-all header row on by default
+  (`WithSelectAll False` to opt out) following the standard tri-state
+  conventions: the header box reads empty, checked, or dashed for a
+  mixed state, clicking it checks everything unless everything is
+  already checked, and the caption shows the live count. Box and
+  caption both toggle their row, so the whole row is a hit target.
+  `ItemsFrom` and the item APIs feed the rows; `CheckedFrom` seeds the
+  checked set by text; `SetItemChecked`, `IsItemChecked`, and
+  `CheckedCount` are the programmatic surface, silent by the usual
+  contract. Checks follow their items through inserts and removals.
+  `WritesTo` carries the checked items joined with ", "; `OnChange`
+  fires once per toggle, bulk select-all included. The gallery gains
+  an options list beside the crew roster.
+
 ## 0.11.1 - 2026-07-26
 
 - TransferList rows multi-select. Ctrl+click cannot work on a drawn
