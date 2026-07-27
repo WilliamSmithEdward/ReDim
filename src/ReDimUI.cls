@@ -74,6 +74,7 @@ Private Const KIND_RADIO As Long = 15
 Private Const KIND_STEPPER As Long = 16
 Private Const KIND_SLIDEBAR As Long = 17
 Private Const KIND_COMBO As Long = 18
+Private Const KIND_TRANSFER As Long = 19
 
 Private Const VARIANT_PRIMARY As Long = 0
 Private Const VARIANT_SECONDARY As Long = 1
@@ -85,7 +86,7 @@ Private Const REL_NONE As Long = 0
 Private Const REL_BELOW As Long = 1
 Private Const REL_RIGHT_OF As Long = 2
 Private Const PERSIST_PREFIX As String = "rdm_s_"
-Private Const REDIM_VERSION As String = "0.10.2"
+Private Const REDIM_VERSION As String = "0.11.0"
 
 Private mRole As Long
 
@@ -182,6 +183,15 @@ Private mSlideRemaining As Double
 Private mToastExiting As Boolean
 Private mExitRemaining As Double
 Private mItems As Collection
+' Transfer list: the right-hand (chosen) side and its selections. mItems
+' carries the left-hand (available) side, so the item APIs work unchanged.
+Private mChosenItems As Collection
+Private mSelLeft As Long
+Private mSelRight As Long
+Private mCaptionLeft As String
+Private mCaptionRight As String
+Private mAppliedLeftRows As Long
+Private mAppliedRightRows As Long
 Private mSliderMin As Long
 Private mSliderMax As Long
 Private mSliderStep As Long
@@ -882,6 +892,14 @@ End Function
 ' the caption to toggle.
 Public Function TickBox(ByVal componentId As String) As ReDimUI
     Set TickBox = GetOrCreateComponent(componentId, KIND_TICKBOX)
+End Function
+
+' Drawn dual listbox (transfer list): two panels with move buttons between
+' them. Items feeds the available side, ChosenFrom the chosen side; click a
+' row to select it, then move one (>, <) or all (>>, <<). WritesTo carries
+' the chosen items joined with ", "; OnChange fires once per user transfer.
+Public Function TransferList(ByVal componentId As String) As ReDimUI
+    Set TransferList = GetOrCreateComponent(componentId, KIND_TRANSFER)
 End Function
 
 ' Drawn single-select option rows. Items supplies the rows, Value the
@@ -2095,6 +2113,8 @@ Friend Sub ConfigureComponent( _
             mSliderMin = 0: mSliderMax = 100: mSliderStep = 1
         Case KIND_TOAST
             mWidth = 240: mHeight = 40
+        Case KIND_TRANSFER
+            mWidth = 360: mHeight = 140
         Case Else
             mWidth = 120: mHeight = 24
     End Select
@@ -2416,6 +2436,61 @@ Public Function ItemsFrom(ByVal source As Variant) As ReDimUI
     Touch
     Set ItemsFrom = Me
 End Function
+
+' Fills the transfer list's chosen (right-hand) side from a 1D array, a
+' Collection, or a Range, mirroring ItemsFrom for the available side.
+Public Function ChosenFrom(ByVal source As Variant) As ReDimUI
+    Dim entry As Variant
+    Dim cell As Range
+    Dim position As Long
+
+    RequireRole ROLE_COMPONENT, "ChosenFrom"
+    Set mChosenItems = New Collection
+    If TypeName(source) = "Range" Then
+        For Each cell In source.Cells
+            If LenB(CStr(cell.Value)) > 0 Then mChosenItems.Add CStr(cell.Value)
+        Next cell
+    ElseIf TypeName(source) = "Collection" Then
+        For Each entry In source
+            mChosenItems.Add CStr(entry)
+        Next entry
+    ElseIf IsArray(source) Then
+        For position = LBound(source) To UBound(source)
+            mChosenItems.Add CStr(source(position))
+        Next position
+    Else
+        RaiseError ERROR_INVALID_ARGUMENT, "ChosenFrom", _
+            "ChosenFrom accepts an array, a Collection, or a Range."
+    End If
+    mSelRight = 0
+    Touch
+    Set ChosenFrom = Me
+End Function
+
+' Header captions for the transfer list panels; each header also shows the
+' live item count.
+Public Function Captions( _
+    ByVal leftText As String, _
+    ByVal rightText As String _
+) As ReDimUI
+    RequireRole ROLE_COMPONENT, "Captions"
+    mCaptionLeft = leftText
+    mCaptionRight = rightText
+    Touch
+    Set Captions = Me
+End Function
+
+Public Property Get ChosenCount() As Long
+    RequireRole ROLE_COMPONENT, "ChosenCount"
+    If Not mChosenItems Is Nothing Then ChosenCount = mChosenItems.Count
+End Property
+
+Public Property Get ChosenTextAt(ByVal position As Long) As String
+    RequireRole ROLE_COMPONENT, "ChosenTextAt"
+    If mChosenItems Is Nothing Then Exit Property
+    If position < 1 Or position > mChosenItems.Count Then Exit Property
+    ChosenTextAt = CStr(mChosenItems.Item(position))
+End Property
 
 ' Appends, or inserts at a 1-based position. The selected item stays
 ' selected: an insert at or before it shifts the index along with it.
@@ -2776,6 +2851,75 @@ Friend Function IsBoundTo(ByVal stateKey As String) As Boolean
         Or (mBindVisibleKey = stateKey) Or (mBindEnabledKey = stateKey)
 End Function
 
+' =====================================================================
+' Transfer list moves
+' =====================================================================
+
+Private Sub EnsureTransferCollections()
+    If mItems Is Nothing Then Set mItems = New Collection
+    If mChosenItems Is Nothing Then Set mChosenItems = New Collection
+End Sub
+
+Private Sub TransferOne(ByVal hostApp As ReDimUI, ByVal toRight As Boolean)
+    Dim moved As String
+
+    If toRight Then
+        If mSelLeft < 1 Or mSelLeft > mItems.Count Then Exit Sub
+        moved = CStr(mItems.Item(mSelLeft))
+        mItems.Remove mSelLeft
+        mChosenItems.Add moved
+        mSelLeft = 0
+    Else
+        If mSelRight < 1 Or mSelRight > mChosenItems.Count Then Exit Sub
+        moved = CStr(mChosenItems.Item(mSelRight))
+        mChosenItems.Remove mSelRight
+        mItems.Add moved
+        mSelRight = 0
+    End If
+    Touch
+    CommitTransferChange hostApp
+End Sub
+
+Private Sub TransferAll(ByVal hostApp As ReDimUI, ByVal toRight As Boolean)
+    Dim position As Long
+
+    If toRight Then
+        If mItems.Count = 0 Then Exit Sub
+        For position = 1 To mItems.Count
+            mChosenItems.Add CStr(mItems.Item(position))
+        Next position
+        Set mItems = New Collection
+    Else
+        If mChosenItems.Count = 0 Then Exit Sub
+        For position = 1 To mChosenItems.Count
+            mItems.Add CStr(mChosenItems.Item(position))
+        Next position
+        Set mChosenItems = New Collection
+    End If
+    mSelLeft = 0
+    mSelRight = 0
+    Touch
+    CommitTransferChange hostApp
+End Sub
+
+' A user transfer writes the chosen list (joined with a comma and space)
+' to state and fires OnChange once. Selection clicks fire nothing.
+Private Sub CommitTransferChange(ByVal hostApp As ReDimUI)
+    Dim joined As String
+    Dim position As Long
+
+    For position = 1 To mChosenItems.Count
+        If position > 1 Then joined = joined & ", "
+        joined = joined & CStr(mChosenItems.Item(position))
+    Next position
+    If LenB(mWritesToKey) > 0 Then hostApp.SetState mWritesToKey, joined
+    If LenB(mClickProc) > 0 Then
+        On Error Resume Next
+        Application.Run mClickProc
+        On Error GoTo 0
+    End If
+End Sub
+
 Friend Function CanClick() As Boolean
     If Not mVisible Or Not mEnabled Or mBusy Then Exit Function
     If GetTickCount64() - mLastClickMs < CLICK_DEBOUNCE_MS Then Exit Function
@@ -2836,6 +2980,41 @@ Friend Sub RunClickBehavior()
             mChecked = Not mChecked
             If LenB(mWritesToKey) > 0 Then hostApp.SetState mWritesToKey, mChecked
             Touch
+        Case KIND_TRANSFER
+            Dim transferPart As String
+            Dim transferRow As Long
+            transferPart = ReDimUI.SenderPart
+            EnsureTransferCollections
+            If Left$(transferPart, 2) = "al" Then
+                If IsNumeric(Mid$(transferPart, 3)) Then
+                    transferRow = CLng(Mid$(transferPart, 3))
+                    If mSelLeft = transferRow Then
+                        mSelLeft = 0
+                    Else
+                        mSelLeft = transferRow
+                    End If
+                    Touch
+                End If
+            ElseIf Left$(transferPart, 2) = "cl" Then
+                If IsNumeric(Mid$(transferPart, 3)) Then
+                    transferRow = CLng(Mid$(transferPart, 3))
+                    If mSelRight = transferRow Then
+                        mSelRight = 0
+                    Else
+                        mSelRight = transferRow
+                    End If
+                    Touch
+                End If
+            ElseIf transferPart = "mvr" Then
+                TransferOne hostApp, True
+            ElseIf transferPart = "mvl" Then
+                TransferOne hostApp, False
+            ElseIf transferPart = "mvar" Then
+                TransferAll hostApp, True
+            ElseIf transferPart = "mval" Then
+                TransferAll hostApp, False
+            End If
+            Exit Sub
         Case KIND_RADIO
             Dim rowIndex As Long
             If LenB(ReDimUI.SenderPart) = 0 Then
@@ -3128,6 +3307,11 @@ Private Function CreateShapeForKind(ByVal hostSheet As Worksheet) As Shape
             Set target = hostSheet.Shapes.AddShape( _
                 msoShapeRoundedRectangle, mLeft, mTop, mWidth, mHeight)
             target.Adjustments(1) = 0.15
+        Case KIND_TRANSFER
+            ' The main shape is the left panel; extras own its geometry.
+            Set target = hostSheet.Shapes.AddShape( _
+                msoShapeRoundedRectangle, mLeft, mTop, 100, 100)
+            target.Adjustments(1) = 0.08
         Case Else
             Set target = hostSheet.Shapes.AddShape( _
                 msoShapeRectangle, mLeft, mTop, mWidth, mHeight)
@@ -3159,7 +3343,8 @@ End Function
 
 Private Function IsCompositeDrawnKind() As Boolean
     IsCompositeDrawnKind = (mKind = KIND_TICKBOX Or mKind = KIND_RADIO _
-        Or mKind = KIND_STEPPER Or mKind = KIND_SLIDEBAR)
+        Or mKind = KIND_STEPPER Or mKind = KIND_SLIDEBAR _
+        Or mKind = KIND_TRANSFER)
 End Function
 
 ' Geometry diffs against the shape's actual position rather than a cache, so
@@ -3476,6 +3661,8 @@ Private Sub ApplyKindExtras( _
             ApplyStepper target, hostSheet, themeValue
         Case KIND_SLIDEBAR
             ApplySlideBar target, hostSheet, themeValue
+        Case KIND_TRANSFER
+            ApplyTransferParts target, hostSheet, themeValue
         Case KIND_TOAST
             If mSlideRemaining > 0 Then target.Top = mTop + mSlideRemaining
     End Select
@@ -3771,6 +3958,202 @@ Private Sub ApplyProgressFill( _
     End If
     fillPart.Fill.Visible = msoTrue
     fillPart.Fill.ForeColor.RGB = ResolveFill(themeValue)
+End Sub
+
+' Dual listbox: the main shape is the left panel; the right panel, two
+' counted headers, four move buttons, and the row shapes are parts. Rows
+' render up to the panel capacity; the header count keeps overflow honest.
+Private Sub ApplyTransferParts( _
+    ByVal target As Shape, _
+    ByVal hostSheet As Worksheet, _
+    ByVal themeValue As ReDimUI _
+)
+    Const HEADER_H As Double = 18
+    Const BTN_W As Double = 26
+    Const BTN_H As Double = 22
+    Const GAP As Double = 6
+    Dim panelW As Double
+    Dim panelH As Double
+    Dim panelTop As Double
+    Dim rightX As Double
+    Dim btnX As Double
+    Dim btnTop As Double
+    Dim rightPanel As Shape
+    Dim header As Shape
+
+    EnsureTransferCollections
+    If mSelLeft > mItems.Count Then mSelLeft = 0
+    If mSelRight > mChosenItems.Count Then mSelRight = 0
+    panelW = (mWidth - BTN_W - 4 * GAP) / 2
+    If panelW < 40 Then panelW = 40
+    panelTop = mTop + HEADER_H
+    panelH = mHeight - HEADER_H
+    If panelH < 30 Then panelH = 30
+    rightX = mLeft + panelW + BTN_W + 4 * GAP
+    btnX = mLeft + panelW + 2 * GAP
+
+    target.Left = mLeft
+    target.Top = panelTop
+    target.Width = panelW
+    target.Height = panelH
+    target.Fill.Visible = msoTrue
+    target.Fill.ForeColor.RGB = ResolveSurfaceFill(themeValue)
+    target.Line.Visible = msoTrue
+    target.Line.ForeColor.RGB = themeValue.BorderColor
+    target.Line.Weight = 1
+    target.Visible = BoolToMso(mVisible)
+
+    Set rightPanel = EnsurePartShape(hostSheet, "rp", msoShapeRoundedRectangle)
+    On Error Resume Next
+    rightPanel.Adjustments(1) = 0.08
+    On Error GoTo 0
+    rightPanel.Left = rightX
+    rightPanel.Top = panelTop
+    rightPanel.Width = panelW
+    rightPanel.Height = panelH
+    rightPanel.Fill.Visible = msoTrue
+    rightPanel.Fill.ForeColor.RGB = ResolveSurfaceFill(themeValue)
+    rightPanel.Line.Visible = msoTrue
+    rightPanel.Line.ForeColor.RGB = themeValue.BorderColor
+    rightPanel.Line.Weight = 1
+    rightPanel.Visible = BoolToMso(mVisible)
+    rightPanel.OnAction = mAppliedOnAction
+
+    Set header = EnsurePartShape(hostSheet, "hl", msoShapeRectangle)
+    header.Left = mLeft
+    header.Top = mTop - 1
+    header.Width = panelW
+    header.Height = HEADER_H
+    StyleCaptionPart header, _
+        IIf(LenB(mCaptionLeft) > 0, mCaptionLeft, "Available") & _
+        " (" & mItems.Count & ")", themeValue
+    header.Visible = BoolToMso(mVisible)
+
+    Set header = EnsurePartShape(hostSheet, "hr", msoShapeRectangle)
+    header.Left = rightX
+    header.Top = mTop - 1
+    header.Width = panelW
+    header.Height = HEADER_H
+    StyleCaptionPart header, _
+        IIf(LenB(mCaptionRight) > 0, mCaptionRight, "Selected") & _
+        " (" & mChosenItems.Count & ")", themeValue
+    header.Visible = BoolToMso(mVisible)
+
+    btnTop = panelTop + (panelH - (4 * BTN_H + 3 * GAP)) / 2
+    If btnTop < panelTop Then btnTop = panelTop
+    ApplyTransferButton hostSheet, themeValue, "mvr", ">", _
+        btnX, btnTop, BTN_W, BTN_H
+    ApplyTransferButton hostSheet, themeValue, "mvar", ">>", _
+        btnX, btnTop + (BTN_H + GAP), BTN_W, BTN_H
+    ApplyTransferButton hostSheet, themeValue, "mvl", "<", _
+        btnX, btnTop + 2 * (BTN_H + GAP), BTN_W, BTN_H
+    ApplyTransferButton hostSheet, themeValue, "mval", "<<", _
+        btnX, btnTop + 3 * (BTN_H + GAP), BTN_W, BTN_H
+
+    SyncTransferRows hostSheet, themeValue, mItems, "al", _
+        mLeft, panelTop, panelW, panelH, mSelLeft, mAppliedLeftRows
+    SyncTransferRows hostSheet, themeValue, mChosenItems, "cl", _
+        rightX, panelTop, panelW, panelH, mSelRight, mAppliedRightRows
+End Sub
+
+Private Sub ApplyTransferButton( _
+    ByVal hostSheet As Worksheet, _
+    ByVal themeValue As ReDimUI, _
+    ByVal partName As String, _
+    ByVal glyph As String, _
+    ByVal buttonLeft As Double, _
+    ByVal buttonTop As Double, _
+    ByVal buttonWidth As Double, _
+    ByVal buttonHeight As Double _
+)
+    Dim moveButton As Shape
+
+    Set moveButton = EnsurePartShape( _
+        hostSheet, partName, msoShapeRoundedRectangle)
+    On Error Resume Next
+    moveButton.Adjustments(1) = 0.25
+    On Error GoTo 0
+    moveButton.Left = buttonLeft
+    moveButton.Top = buttonTop
+    moveButton.Width = buttonWidth
+    moveButton.Height = buttonHeight
+    moveButton.Fill.Visible = msoTrue
+    moveButton.Fill.ForeColor.RGB = themeValue.MutedColor
+    StyleGlyphText moveButton, glyph, ResolveDrawnInk(themeValue), _
+        themeValue.BaseFontSize, themeValue
+    moveButton.Visible = BoolToMso(mVisible)
+    moveButton.OnAction = mAppliedOnAction
+End Sub
+
+Private Sub SyncTransferRows( _
+    ByVal hostSheet As Worksheet, _
+    ByVal themeValue As ReDimUI, _
+    ByVal itemsRef As Collection, _
+    ByVal partPrefix As String, _
+    ByVal panelX As Double, _
+    ByVal panelTop As Double, _
+    ByVal panelW As Double, _
+    ByVal panelH As Double, _
+    ByVal selectedRow As Long, _
+    ByRef appliedRows As Long _
+)
+    Const ROW_H As Double = 20
+    Dim rowShape As Shape
+    Dim position As Long
+    Dim wanted As Long
+    Dim resolvedSize As Double
+
+    wanted = itemsRef.Count
+    If wanted > Int((panelH - 6) / ROW_H) Then
+        wanted = Int((panelH - 6) / ROW_H)
+    End If
+    If Not mVisible Then wanted = 0
+    resolvedSize = mFontSize
+    If resolvedSize <= 0 Then resolvedSize = themeValue.BaseFontSize
+    For position = 1 To wanted
+        Set rowShape = EnsurePartShape( _
+            hostSheet, partPrefix & position, msoShapeRectangle)
+        rowShape.Left = panelX + 3
+        rowShape.Top = panelTop + 3 + (position - 1) * ROW_H
+        rowShape.Width = panelW - 6
+        rowShape.Height = ROW_H
+        rowShape.Fill.Visible = msoTrue
+        If position = selectedRow Then
+            rowShape.Fill.ForeColor.RGB = themeValue.PrimaryColor
+        Else
+            rowShape.Fill.ForeColor.RGB = ResolveSurfaceFill(themeValue)
+        End If
+        With rowShape.TextFrame2
+            .MarginLeft = 6
+            .MarginRight = 4
+            .MarginTop = 1
+            .MarginBottom = 1
+            .VerticalAnchor = msoAnchorMiddle
+            .WordWrap = msoFalse
+            .TextRange.Text = CStr(itemsRef.Item(position))
+            .TextRange.ParagraphFormat.Alignment = msoAlignLeft
+            With .TextRange.Font
+                .Name = themeValue.FontName
+                .Size = resolvedSize
+                .Bold = msoFalse
+                If position = selectedRow Then
+                    .Fill.ForeColor.RGB = themeValue.OnPrimaryColor
+                Else
+                    .Fill.ForeColor.RGB = themeValue.OnSurfaceColor
+                End If
+            End With
+        End With
+        rowShape.Visible = msoTrue
+        rowShape.OnAction = mAppliedOnAction
+        rowShape.ZOrder msoBringToFront
+    Next position
+    For position = wanted + 1 To appliedRows
+        On Error Resume Next
+        hostSheet.Shapes( _
+            ShapeName & PART_SEPARATOR & partPrefix & position).Delete
+        On Error GoTo 0
+    Next position
+    appliedRows = wanted
 End Sub
 
 Private Sub ApplySelectParts( _

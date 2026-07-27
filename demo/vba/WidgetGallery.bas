@@ -63,17 +63,27 @@ Public Sub BuildWidgetGallery()
     app.Label("inputHint").AtRect(24, 332, 480, 16) _
         .Text("Click a field and type: the combo filters live, Enter commits, Esc reverts.")
 
-    app.Label("lblProgress").AtRect(24, 356, 200, 16) _
-        .Text("Slider, stepper, and meter share one state key").Bold
-    app.SlideBar("volumeslide").AtRect(24, 378, 240, 18) _
-        .SliderRange(0, 100, 5).Value(35).WritesTo("volume").BindValue "volume"
-    app.ProgressBar("meter").AtRect(24, 404, 240, 12).BindValue "volume"
-    app.Label("meterLbl").AtRect(276, 398, 220, 18) _
-        .BindText "volume", "Slide, step, or watch: {0}"
-    app.Spinner("spin").AtRect 490, 394, 26, 26
+    app.Label("lblTransfer").AtRect(24, 356, 300, 16) _
+        .Text("Transfer list (dual listbox)").Bold
+    app.TransferList("crew").AtRect 24, 378, 380, 132
+    app.TransferList("crew").ItemsFrom( _
+        Array("Ada", "Grace", "Edsger", "Alan")) _
+        .ChosenFrom(Array("Barbara")) _
+        .Captions("Available", "On mission") _
+        .WritesTo "crew"
+    app.TransferList("crew").OnChange "WidgetGallery.HandleCrewChange"
 
-    app.Card("inspector").AtRect(24, 436, 560, 110).Text("State inspector")
-    app.Label("inspectorBody").AtRect(36, 464, 536, 74).BindText "inspector"
+    app.Label("lblProgress").AtRect(24, 526, 200, 16) _
+        .Text("Slider, stepper, and meter share one state key").Bold
+    app.SlideBar("volumeslide").AtRect(24, 548, 240, 18) _
+        .SliderRange(0, 100, 5).Value(35).WritesTo("volume").BindValue "volume"
+    app.ProgressBar("meter").AtRect(24, 574, 240, 12).BindValue "volume"
+    app.Label("meterLbl").AtRect(276, 568, 220, 18) _
+        .BindText "volume", "Slide, step, or watch: {0}"
+    app.Spinner("spin").AtRect 490, 564, 26, 26
+
+    app.Card("inspector").AtRect(24, 606, 560, 110).Text("State inspector")
+    app.Label("inspectorBody").AtRect(36, 634, 536, 74).BindText "inspector"
 
     app.SetState "notifications", False
     app.SetState "region", "North"
@@ -82,6 +92,7 @@ Public Sub BuildWidgetGallery()
     app.SetState "volume", 35
     app.SetState "userName", vbNullString
     app.SetState "fruit", vbNullString
+    app.SetState "crew", "Barbara"
     app.SetState "lastAction", "none yet"
     app.SetState "oplog", "no run yet"
     RefreshInspector
@@ -117,6 +128,10 @@ End Sub
 
 Public Sub HandleRegionChange()
     GalleryApp().SetState "lastAction", "region picked"
+End Sub
+
+Public Sub HandleCrewChange()
+    GalleryApp().SetState "lastAction", "crew transferred"
 End Sub
 
 Public Sub HandlePing()

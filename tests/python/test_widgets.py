@@ -304,6 +304,33 @@ def test_float_field(run_widgets):
     assert facts["cellClickBlurred"] == "True"
 
 
+def test_transfer_list(run_widgets):
+    facts = parse_transcript(run_widgets("TestTransferList"))
+    assert facts["panels"] == "True"
+    assert facts["buttons"] == "True"
+    assert facts["leftRows"] == "True"
+    assert facts["rightRows"] == "True"
+    assert facts["headerCounts"] == "True", (
+        "panel headers must show live item counts"
+    )
+    assert facts["rowSelected"] == "True"
+    assert facts["selectNoChange"] == "True", (
+        "selecting a row must not fire OnChange; only transfers do"
+    )
+    assert facts["movedState"] == "Charlie, Delta, Bravo", (
+        "a moved item appends to the chosen list and writes joined state"
+    )
+    assert facts["movedCounts"] == "True"
+    assert facts["changeRan"] == "1"
+    assert facts["allRight"] == "True", (
+        "move-all must empty the available panel and sweep its row shapes"
+    )
+    assert facts["allLeft"] == "True"
+    assert facts["changeTotal"] == "3"
+    assert facts["noSelNoOp"] == "True"
+    assert facts["oneBack"] == "True"
+
+
 def test_modal_confirm(run_widgets):
     facts = parse_transcript(run_widgets("TestModalConfirm"))
     assert facts["overlayShown"] == "True"

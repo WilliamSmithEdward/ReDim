@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.11.0 - 2026-07-26
+
+- `TransferList`: a drawn dual listbox (transfer list). Two panels with
+  counted headers, selectable rows, and four move buttons between them -
+  move one right or left, move all right or left, matching the classic
+  control. `Items`/`ItemsFrom` and the item APIs feed the available side;
+  `ChosenFrom` seeds the chosen side; `Captions` names the headers;
+  `ChosenCount`/`ChosenTextAt` read the result. `WritesTo` carries the
+  chosen items joined with a comma and space, and `OnChange` fires once
+  per user transfer (row selection fires nothing). Rows render up to the
+  panel's capacity and the header counts keep overflow honest. The
+  gallery gains a crew roster between the fields and the slider block.
+
 ## 0.10.2 - 2026-07-26
 
 - Fix the root cause of new toasts landing in occupied positions:

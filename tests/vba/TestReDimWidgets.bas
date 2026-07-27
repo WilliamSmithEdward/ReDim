@@ -990,6 +990,94 @@ Public Function TestFloatField() As String
     TestFloatField = transcript
 End Function
 
+' Dual listbox: rows select, the four buttons move one or all items, the
+' chosen list writes to state joined with a comma, headers count live,
+' stale row shapes are swept as panels shrink.
+Public Function TestTransferList() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim transcript As String
+
+    Set host = NewCanvas()
+    gChangeCount = 0
+    Set app = ReDimUI.Mount(host, "wid22")
+    app.TransferList("teams").AtRect 24, 24, 360, 140
+    app.TransferList("teams").ItemsFrom(Array("Alpha", "Bravo", "Echo")) _
+        .ChosenFrom(Array("Charlie", "Delta")) _
+        .Captions("Bench", "Roster") _
+        .WritesTo("roster").OnChange "TestReDimWidgets.RecordChange"
+    app.Render
+
+    transcript = "panels=" & CStr(ShapeExists(host, "rdm_wid22_teams") And _
+        ShapeExists(host, "rdm_wid22_teams__rp"))
+    transcript = transcript & "|buttons=" & _
+        CStr(ShapeExists(host, "rdm_wid22_teams__mvr") And _
+             ShapeExists(host, "rdm_wid22_teams__mvar") And _
+             ShapeExists(host, "rdm_wid22_teams__mvl") And _
+             ShapeExists(host, "rdm_wid22_teams__mval"))
+    transcript = transcript & "|leftRows=" & _
+        CStr(ShapeExists(host, "rdm_wid22_teams__al3") And _
+             Not ShapeExists(host, "rdm_wid22_teams__al4"))
+    transcript = transcript & "|rightRows=" & _
+        CStr(ShapeExists(host, "rdm_wid22_teams__cl2") And _
+             Not ShapeExists(host, "rdm_wid22_teams__cl3"))
+    transcript = transcript & "|headerCounts=" & _
+        CStr(host.Shapes("rdm_wid22_teams__hl").TextFrame2.TextRange.Text _
+            = "Bench (3)" And _
+            host.Shapes("rdm_wid22_teams__hr").TextFrame2.TextRange.Text _
+            = "Roster (2)")
+
+    ' Selecting a row shows the accent and fires nothing.
+    ReDimUI.DispatchShape "rdm_wid22_teams__al2"
+    transcript = transcript & "|rowSelected=" & _
+        CStr(host.Shapes("rdm_wid22_teams__al2").Fill.ForeColor.RGB = _
+            app.Theme.PrimaryColor)
+    transcript = transcript & "|selectNoChange=" & CStr(gChangeCount = 0)
+
+    ' Move it right: appended to the roster, state written, change fired.
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid22_teams__mvr"
+    transcript = transcript & "|movedState=" & app.State("roster")
+    transcript = transcript & "|movedCounts=" & _
+        CStr(app.TransferList("teams").ItemCount = 2 And _
+             app.TransferList("teams").ChosenCount = 3)
+    transcript = transcript & "|changeRan=" & gChangeCount
+
+    ' Move all right, then all back; empty panels sweep their rows.
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid22_teams__mvar"
+    transcript = transcript & "|allRight=" & _
+        CStr(app.TransferList("teams").ItemCount = 0 And _
+             app.TransferList("teams").ChosenCount = 5 And _
+             Not ShapeExists(host, "rdm_wid22_teams__al1"))
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid22_teams__mval"
+    transcript = transcript & "|allLeft=" & _
+        CStr(app.TransferList("teams").ItemCount = 5 And _
+             app.TransferList("teams").ChosenCount = 0 And _
+             LenB(CStr(app.State("roster"))) = 0)
+    transcript = transcript & "|changeTotal=" & gChangeCount
+
+    ' Move-one with nothing selected is a no-op.
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid22_teams__mvr"
+    transcript = transcript & "|noSelNoOp=" & _
+        CStr(app.TransferList("teams").ChosenCount = 0 And gChangeCount = 3)
+
+    ' Pull one back left from the right panel.
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid22_teams__mvar"
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid22_teams__cl1"
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid22_teams__mvl"
+    transcript = transcript & "|oneBack=" & _
+        CStr(app.TransferList("teams").ItemCount = 1 And _
+             app.TransferList("teams").ItemTextAt(1) = "Charlie" And _
+             app.TransferList("teams").ChosenTextAt(1) = "Delta")
+    TestTransferList = transcript
+End Function
+
 Public Function TestModalConfirm() As String
     Dim app As ReDimUI
     Dim host As Worksheet

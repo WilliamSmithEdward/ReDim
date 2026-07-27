@@ -31,7 +31,8 @@ user keeps working in the workbook.
 
 - **Components over shapes.** Button, Label, Card, ProgressBar, Spinner, Toggle, TickBox,
   RadioGroup, Stepper, SlideBar (press-drag), SelectBox, ComboBox (editable, filtering live
-  as you type), TextInput, Toast, and a shapes-based modal overlay with Confirm - every
+  as you type), TransferList (dual listbox with move buttons), TextInput, Toast, and a
+  shapes-based modal overlay with Confirm - every
   control drawn from shapes and fully themed, with light and dark presets, no native form
   controls anywhere, no cells required (text fields float free of the grid via a keyboard
   focus layer, or anchor to a cell if you want one), and no dependencies beyond a stock

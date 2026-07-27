@@ -126,6 +126,13 @@ dependencies:
   `PointsToScreenPixels`; frozen-pane splits skew that calibration, so keep app surfaces
   unsplit. Use `Stepper` for precision.
 - `SelectBox`: a themed face, caret, and option list in place of the native dropdown.
+- `TransferList`: a dual listbox - two panels with counted headers, selectable rows, and
+  four move buttons (`>`, `>>`, `<`, `<<`). `Items`/`ItemsFrom` and the item APIs feed the
+  available side, `ChosenFrom` seeds the chosen side, `Captions` names the headers, and
+  `ChosenCount`/`ChosenTextAt` read the result. `WritesTo` carries the chosen items joined
+  with a comma and space; `OnChange` fires once per user transfer, and selecting a row
+  fires nothing. Rows render up to the panel's height; the header counts stay honest when
+  a list overflows what fits.
 - `ComboBox`: an editable combo with a caret and a filtered drop list, sharing the item
   APIs. Place it with `AtRect` (or `Below`/`RightOf`) and it is a float field: click to
   focus, type, and the list re-filters on every keystroke. Anchoring to a cell with `At`
