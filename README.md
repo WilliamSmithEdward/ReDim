@@ -65,7 +65,8 @@ user keeps working in the workbook.
 
 ## Installation
 
-1. Import `ROneCOne.cls` (from the ROneCOne release) into your macro-enabled workbook.
+1. Import `ROneCOne.cls` (from the ROneCOne release, 1.8.0 or later) into your macro-enabled
+   workbook.
 2. Import `src/ReDimUI.cls`.
 3. Import `src/ReDimHost.bas`.
 

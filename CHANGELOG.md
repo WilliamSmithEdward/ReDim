@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.18.4 - 2026-07-28
+
+- ReDex reads PokeAPI through ROneCOne 1.8.0's partial reads. The
+  textual section stripper 0.18.3 shipped is gone, replaced by
+  `Json.DeserializeOnly` with an allowlist of the seven paths the
+  browse window actually draws. The unwanted move lists and per-game
+  sprite variants are now stepped over inside the reader instead of
+  cut out of the text beforehand, which is the same saving without a
+  denylist that encoded one API's response shape. Measured for scale:
+  responses run 271 KB to 665 KB and the dex draws under 2.5 KB of
+  them.
+- The detail cache holds parsed documents rather than payload strings,
+  so a revisit costs neither a request nor a parse. Because an
+  allowlist omits a path the response did not carry, the sprite reader
+  checks for its members instead of assuming them.
+- Requires ROneCOne 1.8.0 or later.
+
 ## 0.18.3 - 2026-07-27
 
 - Theme swaps repaint everything. SetTheme now repaints a canvas that

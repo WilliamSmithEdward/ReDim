@@ -258,14 +258,26 @@ Public Function SmokePokeDex() As String
     transcript = transcript & "|nightIsDark=" & _
         CStr(ReDimUI.App("dexbrowse").Theme.PrimaryColor <> RGB(214, 55, 46))
 
-    Dim slim As String
-    slim = SlimDetailPayload( _
-        "{""id"":25,""moves"":[{""m"":{""n"":""a[b]"",""u"":""x\\""y""}}]" & _
-        ",""name"":""pikachu"",""other"":{""z"":[1,2]}}")
-    transcript = transcript & "|slimmed=" & _
-        CStr(slim = "{""id"":25,""name"":""pikachu""}")
-    transcript = transcript & "|slimParses=" & CStr(CStr( _
-        ROneCOne.Json.Deserialize(slim).Item("name")) = "pikachu")
+    Dim probe As ROneCOne
+    Dim spritesNode As ROneCOne
+    Dim raw As String
+
+    ' Quotes are written as apostrophes and swapped in, so the fixture
+    ' reads cleanly and carries no doubled-quote runs.
+    raw = Replace("{'id':25,'moves':[{'m':1}],'name':'pikachu'," & _
+        "'sprites':{'front_default':'u.png','versions':{'z':1}}}", _
+        "'", Chr$(34))
+    Set probe = ROneCOne.Json.DeserializeOnly(raw, _
+        Array("$.id", "$.name", "$.sprites.front_default"))
+    Set spritesNode = probe.Item("sprites")
+    transcript = transcript & "|partialName=" & _
+        CStr(CStr(probe.Item("name")) = "pikachu")
+    transcript = transcript & "|partialSprite=" & _
+        CStr(CStr(spritesNode.Item("front_default")) = "u.png")
+    transcript = transcript & "|partialSkipped=" & _
+        CStr(Not probe.ContainsKey("moves"))
+    transcript = transcript & "|partialPruned=" & _
+        CStr(Not spritesNode.ContainsKey("versions"))
     RdxReleaseKeys
     RdxStopPump
     ReDimUI.AutoPump True
@@ -384,10 +396,16 @@ def test_pokedex_smoke(demo_paths):
             "night mode must retint the stat bar tracks"
         )
         assert facts["nightIsDark"] == "True"
-        assert facts["slimmed"] == "True", (
-            "the payload slimmer must drop unused sections cleanly"
+        assert facts["partialName"] == "True"
+        assert facts["partialSprite"] == "True", (
+            "a nested allowlist path must stay navigable as a subtree"
         )
-        assert facts["slimParses"] == "True"
+        assert facts["partialSkipped"] == "True", (
+            "an unrequested top-level member must never be materialized"
+        )
+        assert facts["partialPruned"] == "True", (
+            "a kept parent must carry only the requested child"
+        )
 
 
 def test_snake_smoke(demo_paths):
