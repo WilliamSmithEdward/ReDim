@@ -10,6 +10,15 @@ one-file invariant cannot carry: the host loop (ROneCOne ADR 0007 anticipated ex
 retained component model with diffed rendering, a state store with bindings, and an async engine
 that keeps Excel responsive while work runs.
 
+<p align="center">
+  <a href="https://www.youtube.com/watch?v=2WAgLK5W5Fo">
+    <img src="https://img.youtube.com/vi/2WAgLK5W5Fo/hqdefault.jpg"
+         alt="ReDim: A UI Framework for Excel VBA - video" width="480">
+  </a>
+  <br>
+  <em><a href="https://www.youtube.com/watch?v=2WAgLK5W5Fo">Watch: ReDim in action</a></em>
+</p>
+
 ```vba
 Dim app As ReDimUI
 
