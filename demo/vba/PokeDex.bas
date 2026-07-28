@@ -7,14 +7,6 @@ Option Explicit
 ' three windows navigate under a NavBar, and every drawn control in the
 ' family appears somewhere it genuinely belongs. Entry: BuildPokeDex.
 
-Private Declare PtrSafe Function URLDownloadToFileA Lib "urlmon" ( _
-    ByVal pCaller As LongPtr, _
-    ByVal szURL As String, _
-    ByVal szFileName As String, _
-    ByVal dwReserved As Long, _
-    ByVal lpfnCB As LongPtr _
-) As Long
-
 Private Const API_BASE As String = "https://pokeapi.co/api/v2/pokemon/"
 Private Const DEX_MAX As Long = 151
 
@@ -27,11 +19,18 @@ Private gDetailTask As ROneCOne
 ' Parsed documents cache by request key plus canonical id and name, so
 ' revisits apply with no HTTP and no parse at all, and the nav cursor
 ' advances on the keypress itself so held keys step through the dex.
-Private gDetailCache As Collection
+Private gDetailCache As ROneCOne
 Private gWantPath As String
 Private gFlightPath As String
 Private gShownPath As String
 Private gNavId As Long
+' Sprites ride the pump like every other fetch. The image is kept in
+' temp and reused, so a species seen once paints from disk with no
+' request at all, and a fast switch never blocks on a download.
+Private gSpriteTask As ROneCOne
+Private gSpriteWantId As Long
+Private gSpriteWantUrl As String
+Private gSpriteFlightId As Long
 ' The stat tween model: bars ease from now toward target every frame.
 Private gStatNow(1 To 6) As Double
 Private gStatTarget(1 To 6) As Double
@@ -423,22 +422,26 @@ Private Function TryCachedDetail( _
 ) As Boolean
     Dim cached As ROneCOne
 
-    If gDetailCache Is Nothing Then Set gDetailCache = New Collection
-    On Error Resume Next
-    Set cached = gDetailCache.Item("k" & key)
-    Err.Clear
-    On Error GoTo 0
-    If cached Is Nothing Then Exit Function
+    EnsureDetailCache
+    If Not gDetailCache.ContainsKey(key) Then Exit Function
+    Set cached = gDetailCache.Item(key)
     Set doc = cached
     TryCachedDetail = True
 End Function
 
 Private Sub CacheDetail(ByVal key As String, ByVal doc As ROneCOne)
-    Dim existing As ROneCOne
-
     If LenB(key) = 0 Then Exit Sub
-    If TryCachedDetail(key, existing) Then Exit Sub
-    gDetailCache.Add doc, "k" & key
+    EnsureDetailCache
+    If gDetailCache.ContainsKey(key) Then Exit Sub
+    gDetailCache.Add key, doc
+End Sub
+
+' A typed dictionary rather than a bare Collection: real string keys,
+' membership asked directly instead of trapped from a failed lookup.
+Private Sub EnsureDetailCache()
+    If gDetailCache Is Nothing Then
+        Set gDetailCache = ROneCOne.DictionaryOf(vbString, vbObject)
+    End If
 End Sub
 
 Private Sub ApplyTypeBadge( _
@@ -481,15 +484,58 @@ Private Sub ApplySprite( _
     If Not sprites.ContainsKey("front_default") Then Exit Sub
     spriteUrl = sprites.Item("front_default")
     If IsNull(spriteUrl) Or LenB(CStr(spriteUrl)) = 0 Then Exit Sub
-    localPath = Environ$("TEMP") & "\redex_" & dexId & ".png"
-    If LenB(Dir$(localPath)) = 0 Then
-        If URLDownloadToFileA(0, CStr(spriteUrl), localPath, 0, 0) <> 0 Then
-            app.Toast "Sprite download failed.", 4000
-            Exit Sub
-        End If
+    localPath = SpritePath(dexId)
+    If ROneCOne.File.Exists(localPath) Then
+        app.SetState "spriteFile", localPath
+        Exit Sub
     End If
-    app.SetState "spriteFile", localPath
+    ' Not on disk yet, so fetch it through the pump instead of blocking
+    ' the frame. The previous sprite stays up until the new one lands,
+    ' which reads better than flashing a placeholder.
+    gSpriteWantId = dexId
+    gSpriteWantUrl = CStr(spriteUrl)
+    StartSpriteFetch app
 End Sub
+
+Private Sub StartSpriteFetch(ByVal app As ReDimUI)
+    If gSpriteWantId = 0 Then Exit Sub
+    If app.IsOpRunning("sprite") Then Exit Sub
+    gSpriteFlightId = gSpriteWantId
+    Set gSpriteTask = ROneCOne.HttpClient.DownloadFileAsync( _
+        gSpriteWantUrl, SpritePath(gSpriteFlightId))
+    With app.Async("sprite")
+        .RunsTask gSpriteTask
+        .ShowsSpinner "spn"
+        .OnDone "PokeDex.SpriteReady"
+        .OnFail "PokeDex.SpriteFailed"
+    End With
+    app.Async("sprite").Start
+End Sub
+
+Public Sub SpriteReady()
+    Dim app As ReDimUI
+
+    Set app = ReDimUI.App("dexbrowse")
+    ' Paint it only if the dex still shows the species it belongs to; a
+    ' fast switch can land a sprite nobody is looking at any more.
+    If gSpriteFlightId = CLng(app.StateOrDefault("dexId", 0)) Then
+        app.SetState "spriteFile", SpritePath(gSpriteFlightId)
+    End If
+    If gSpriteWantId <> gSpriteFlightId Then StartSpriteFetch app
+End Sub
+
+Public Sub SpriteFailed()
+    Dim app As ReDimUI
+
+    Set app = ReDimUI.App("dexbrowse")
+    app.Toast "Sprite download failed: " & app.AsyncError("sprite"), 4000
+    If gSpriteWantId <> gSpriteFlightId Then StartSpriteFetch app
+End Sub
+
+Private Function SpritePath(ByVal dexId As Long) As String
+    SpritePath = ROneCOne.Path.Combine( _
+        ROneCOne.Path.GetTempPath(), "redex_" & dexId & ".png")
+End Function
 
 ' =====================================================================
 ' Stat tween: bars ease toward their targets on a 16 ms paced job

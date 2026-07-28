@@ -161,10 +161,9 @@ Private Function EnsureDemoImage(ByVal host As Worksheet) As String
     Dim canvas As Chart
     Dim targetPath As String
 
-    targetPath = Environ$("TEMP") & "\rdm_gallery_logo.png"
-    On Error Resume Next
-    Kill targetPath
-    On Error GoTo 0
+    targetPath = ROneCOne.Path.Combine( _
+        ROneCOne.Path.GetTempPath(), "rdm_gallery_logo.png")
+    If ROneCOne.File.Exists(targetPath) Then ROneCOne.File.Delete targetPath
     Set chartHost = host.ChartObjects.Add(0, 0, 160, 74)
     Set canvas = chartHost.Chart
     canvas.ChartArea.Format.Fill.ForeColor.RGB = RGB(24, 56, 42)

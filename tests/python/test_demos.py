@@ -278,6 +278,23 @@ Public Function SmokePokeDex() As String
         CStr(Not probe.ContainsKey("moves"))
     transcript = transcript & "|partialPruned=" & _
         CStr(Not spritesNode.ContainsKey("versions"))
+
+    ' The library surfaces the dex leans on in place of hand-rolled
+    ' equivalents: a typed cache, temp paths, and file probing.
+    Dim cache As ROneCOne
+    Dim tempFile As String
+    Set cache = ROneCOne.DictionaryOf(vbString, vbObject)
+    cache.Add "bulbasaur", probe
+    transcript = transcript & "|cacheHit=" & _
+        CStr(cache.ContainsKey("bulbasaur") And Not cache.ContainsKey("mew"))
+    tempFile = ROneCOne.Path.Combine( _
+        ROneCOne.Path.GetTempPath(), "redex_probe_absent.png")
+    transcript = transcript & "|tempRooted=" & _
+        CStr(InStr(tempFile, ROneCOne.Path.GetTempPath()) = 1)
+    transcript = transcript & "|absentFile=" & _
+        CStr(Not ROneCOne.File.Exists(tempFile))
+    transcript = transcript & "|spriteIdle=" & _
+        CStr(Not ReDimUI.App("dexbrowse").IsOpRunning("sprite"))
     RdxReleaseKeys
     RdxStopPump
     ReDimUI.AutoPump True
@@ -405,6 +422,14 @@ def test_pokedex_smoke(demo_paths):
         )
         assert facts["partialPruned"] == "True", (
             "a kept parent must carry only the requested child"
+        )
+        assert facts["cacheHit"] == "True", (
+            "the typed dictionary must answer membership directly"
+        )
+        assert facts["tempRooted"] == "True"
+        assert facts["absentFile"] == "True"
+        assert facts["spriteIdle"] == "True", (
+            "no sprite download may be in flight before any species loads"
         )
 
 

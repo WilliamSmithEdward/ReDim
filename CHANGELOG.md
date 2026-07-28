@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.19.0 - 2026-07-28
+
+- Sprite downloads stopped blocking the pump. ReDex called
+  `URLDownloadToFileA` synchronously inside the op that applied a
+  species, so the first view of any sprite stalled a frame while the
+  image came down. It now runs as its own async op on
+  `HttpClient.DownloadFileAsync`, chasing the newest selection the same
+  way the detail fetch does, and painting only if the dex still shows
+  the species the image belongs to. The last `Declare` statement is
+  gone from the demos.
+- A species already seen paints from disk with no request at all, and
+  the previous sprite stays up while a new one downloads, which reads
+  better than flashing a placeholder. The placeholder rule itself is
+  unchanged: a picture embedded in the workbook still outlives its
+  source file.
+- The demos stop hand-rolling what the runtime already provides. The
+  ReDex detail cache is a `DictionaryOf(vbString, vbObject)` asked for
+  membership directly, rather than a bare `Collection` probed by
+  trapping a failed lookup. Temp paths come from `Path.Combine` and
+  `Path.GetTempPath`, existence from `File.Exists`, and removal from
+  `File.Delete`, in both ReDex and the Widget Gallery.
+
 ## 0.18.4 - 2026-07-28
 
 - ReDex reads PokeAPI through ROneCOne 1.8.0's partial reads. The
