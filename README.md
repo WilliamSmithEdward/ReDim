@@ -75,9 +75,11 @@ as ROneCOne.
 
 ## Demos
 
-Built workbooks live in `demo/` after running `python tools/build_workbooks.py`. Open one
-with macros enabled and it builds itself (each ships an `Auto_Open`); the entry macro
-rebuilds on demand.
+Built workbooks are attached to each
+[release](https://github.com/WilliamSmithEdward/ReDim/releases). They are build artifacts
+rather than sources, so they are not tracked here; `python tools/build_workbooks.py`
+regenerates them into `demo/` from the VBA in `demo/vba/`. Open one with macros enabled
+and it builds itself (each ships an `Auto_Open`); the entry macro rebuilds on demand.
 
 | Workbook | Shows | Entry macro |
 |---|---|---|
@@ -106,7 +108,11 @@ python -m pytest tests/python  # live Excel suite via pyvbaharness
 
 The live suite covers mount and adoption, dispatch and guards, bindings, batching, theming, the
 async op lifecycle, jobs, cancellation, every widget, a real armed-timer end-to-end run, a VBA
-compile gate for every shipped workbook, and smoke runs of all three demos.
+compile gate for every shipped workbook, and smoke runs of all five demos.
+
+It drives a real Excel instance, so it cannot run on hosted CI. Continuous integration runs
+the static gate only, over the same sources plus the ROneCOne runtime; the live suite is a
+local step before release.
 
 ## License
 

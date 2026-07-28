@@ -7,3 +7,6 @@ __pycache__/
 build/
 tests/output/
 .claude/
+# Built workbooks are release assets, not sources: they are zip archives,
+# so every rebuild would add a fresh incompressible copy to history.
+demo/*.xlsm

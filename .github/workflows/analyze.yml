@@ -1,0 +1,41 @@
+name: analyze
+
+# The live suite drives a real Excel instance and cannot run on a hosted
+# runner, so CI covers the static gate: pyvbaanalysis over every VBA
+# source, with zero findings required. The live suite stays a local step.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  static-analysis:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out ReDim
+        uses: actions/checkout@v4
+
+      # The analyzer resolves cross-module references against the runtime,
+      # which lives in its own repository beside this one.
+      - name: Check out ROneCOne
+        uses: actions/checkout@v4
+        with:
+          repository: WilliamSmithEdward/ROneCOne
+          path: .ronecone
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # Only the analyzer: requirements-dev.txt also pulls the live-Excel
+      # harness, which has no meaning on a Linux runner.
+      - name: Install the analyzer
+        run: pip install pyvbaanalysis==1.2.0
+
+      - name: Run the static gate
+        env:
+          REDIM_RONECONE_PATH: ${{ github.workspace }}/.ronecone/src/ROneCOne.cls
+        run: python tools/check.py
