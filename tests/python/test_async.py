@@ -77,6 +77,16 @@ def test_adaptive_budget(run_async):
     assert int(facts["stepsAnimating"]) >= 1
 
 
+def test_spinner_frame_pinned(run_async):
+    facts = parse_transcript(run_async("TestSpinnerFramePinned"))
+    assert facts["spun"] == "True"
+    assert facts["leftPinned"] == "True"
+    assert facts["topPinned"] == "True"
+    assert facts["repinned"] == "True", (
+        "a deviated spinner frame must snap back within one animation frame"
+    )
+
+
 def test_render_arms_drag_watch(run_async):
     facts = parse_transcript(run_async("TestRenderArmsDragWatch"))
     assert facts["armedAfterRender"] == "True", (

@@ -298,6 +298,50 @@ Public Function TestAdaptiveBudget() As String
     TestAdaptiveBudget = transcript
 End Function
 
+' The spinner rotates every animation frame, and its frame must hold at
+' the model position through sustained spinning: a walking spinner was
+' reported in interactive use, so the animation tick re-pins the frame.
+' The nudge at the end proves the pin repairs a deviation, whatever
+' causes one, within a single frame.
+Public Function TestSpinnerFramePinned() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim spinnerShape As Shape
+    Dim rotBefore As Double
+    Dim round As Long
+    Dim transcript As String
+
+    Set host = NewCanvas()
+    ReDimUI.AutoPump False
+    Set app = ReDimUI.Mount(host, "async10")
+    app.Spinner("spn").AtRect 137.37, 42.61, 26, 26
+    app.Spinner("spn").Visible True
+    app.Render
+
+    Set spinnerShape = host.Shapes("rdm_async10_spn")
+    rotBefore = spinnerShape.Rotation
+    For round = 1 To 40
+        Sleep 20
+        ReDimUI.PumpOnce
+    Next round
+    transcript = "spun=" & CStr(spinnerShape.Rotation <> rotBefore)
+    transcript = transcript & "|leftPinned=" & _
+        CStr(Abs(spinnerShape.Left - 137.37) <= 0.02)
+    transcript = transcript & "|topPinned=" & _
+        CStr(Abs(spinnerShape.Top - 42.61) <= 0.02)
+
+    spinnerShape.Left = 300
+    spinnerShape.Top = 200
+    Sleep 20
+    ReDimUI.PumpOnce
+    transcript = transcript & "|repinned=" & _
+        CStr(Abs(spinnerShape.Left - 137.37) <= 0.02 And _
+            Abs(spinnerShape.Top - 42.61) <= 0.02)
+    app.Spinner("spn").Visible False
+    ReDimUI.AutoPump True
+    TestSpinnerFramePinned = transcript
+End Function
+
 ' Rendering a slider must arm the pump for its press watch: demand alone
 ' only keeps an already-armed pump alive, so a fresh workbook whose only
 ' interactive content is a slider would otherwise never watch for drags.

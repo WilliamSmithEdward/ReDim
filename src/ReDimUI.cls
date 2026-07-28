@@ -95,7 +95,7 @@ Private Const VARIANT_NEUTRAL As Long = 4
 Private Const REL_NONE As Long = 0
 Private Const REL_BELOW As Long = 1
 Private Const REL_RIGHT_OF As Long = 2
-Private Const REDIM_VERSION As String = "0.19.0"
+Private Const REDIM_VERSION As String = "0.19.1"
 
 Private mRole As Long
 
@@ -6057,7 +6057,17 @@ Friend Sub TickAnimation(ByVal hostSheet As Worksheet, ByVal elapsedMs As Long)
     On Error Resume Next
     Select Case mKind
         Case KIND_SPINNER
-            hostSheet.Shapes(ShapeName).IncrementRotation elapsedMs * 0.6
+            ' Re-pin the frame after every rotation write. Probing never
+            ' caught rotation moving the frame at the object-model level,
+            ' but a spinner was observed walking down-right during long
+            ' multi-feed runs in interactive use; if the frame ever
+            ' deviates, this snaps it back the same frame, and the
+            ' corrective write forces a repaint at the true rect.
+            With hostSheet.Shapes(ShapeName)
+                .IncrementRotation elapsedMs * 0.6
+                If Abs(.Left - mLeft) > 0.01 Then .Left = mLeft
+                If Abs(.Top - mTop) > 0.01 Then .Top = mTop
+            End With
         Case KIND_TOAST
             mSlideRemaining = mSlideRemaining * (0.55 ^ (elapsedMs / 50#))
             If mSlideRemaining < 0.75 Then mSlideRemaining = 0

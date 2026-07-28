@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.19.1 - 2026-07-28
+
+- The spinner re-pins its frame after every rotation tick. A spinner
+  was observed walking down and right during long multi-feed runs in
+  Mission Control. Three live probes could not reproduce any frame
+  movement at the object-model level: thousands of raw
+  IncrementRotation calls, rotation under repaints, 90 and 125 percent
+  zoom, interleaved shape writes with ScreenUpdating cycles, UIO
+  protection, frame writes on a rotated shape, and the real demo
+  under pumped load all held the frame exactly. The animation tick
+  now snaps Left and Top back to the model whenever they deviate, so
+  any walk, whatever drives it in an interactive session, corrects
+  within a single frame, and the corrective write forces a repaint at
+  the true rect. A new scenario proves a deviated frame is repaired
+  in one frame.
+
 ## 0.19.0 - 2026-07-28
 
 - Sprite downloads stopped blocking the pump. ReDex called
