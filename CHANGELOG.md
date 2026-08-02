@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.19.2 - 2026-08-02
+
+- The item-source readers no longer trip over an object. `ItemsFrom`,
+  `ChosenFrom`, and `CheckedFrom` reached a bare `IsArray(source)` when
+  the source was neither a Range nor a Collection, and `IsArray` on a
+  ROneCOne dereferences its default member, which raises on the zero
+  arguments the dereference supplies. Under the pump's active error
+  handling that raise was swallowed, leaving `Err` dirty for the next
+  reader, and a ROneCOne sequence fell through every branch and yielded
+  no items at all. The three readers now share one `ReadItemSource`
+  helper whose array test runs through a `IsObject` guard, so `IsArray`
+  appears exactly once in the runtime and never receives an object.
+- Item-source readers accept a ROneCOne sequence. A `SelectBox`,
+  `ComboBox`, `RadioGroup`, `TransferList`, or `CheckList` can now be
+  fed straight from a `ListOf`, a `Queryable` result, or a
+  `Json.Deserialize` array, alongside the array, Collection, and Range
+  sources already supported.
+- Requires ROneCOne 1.8.1 or later, a drop-in patch over 1.8.0 that
+  fixes two Object-and-Variant dereference defects. Neither reached
+  ReDim as written, but the same defect class did, in the readers
+  above.
+
 ## 0.19.1 - 2026-07-28
 
 - The spinner re-pins its frame after every rotation tick. A spinner

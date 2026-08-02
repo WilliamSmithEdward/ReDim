@@ -95,7 +95,7 @@ Private Const VARIANT_NEUTRAL As Long = 4
 Private Const REL_NONE As Long = 0
 Private Const REL_BELOW As Long = 1
 Private Const REL_RIGHT_OF As Long = 2
-Private Const REDIM_VERSION As String = "0.19.1"
+Private Const REDIM_VERSION As String = "0.19.2"
 
 Private mRole As Long
 
@@ -2479,31 +2479,12 @@ Public Function Items(ParamArray listItems() As Variant) As ReDimUI
     Set Items = Me
 End Function
 
-' Replaces the item list from a 1D array, a Collection, or a Range (one
-' item per non-empty cell), so pickers can be fed straight from data.
+' Replaces the item list from a 1D array, a Collection, a Range (one
+' item per non-empty cell), or a ROneCOne sequence, so pickers can be
+' fed straight from data.
 Public Function ItemsFrom(ByVal source As Variant) As ReDimUI
-    Dim entry As Variant
-    Dim cell As Range
-    Dim position As Long
-
     RequireRole ROLE_COMPONENT, "ItemsFrom"
-    Set mItems = New Collection
-    If TypeName(source) = "Range" Then
-        For Each cell In source.Cells
-            If LenB(CStr(cell.Value)) > 0 Then mItems.Add CStr(cell.Value)
-        Next cell
-    ElseIf TypeName(source) = "Collection" Then
-        For Each entry In source
-            mItems.Add CStr(entry)
-        Next entry
-    ElseIf IsArray(source) Then
-        For position = LBound(source) To UBound(source)
-            mItems.Add CStr(source(position))
-        Next position
-    Else
-        RaiseError ERROR_INVALID_ARGUMENT, "ItemsFrom", _
-            "ItemsFrom accepts an array, a Collection, or a Range."
-    End If
+    Set mItems = ReadItemSource(source, "ItemsFrom")
     ClampItemSelection
     If Not mCheckedSet Is Nothing Then Set mCheckedSet = New Collection
     Touch
@@ -2511,30 +2492,11 @@ Public Function ItemsFrom(ByVal source As Variant) As ReDimUI
 End Function
 
 ' Fills the transfer list's chosen (right-hand) side from a 1D array, a
-' Collection, or a Range, mirroring ItemsFrom for the available side.
+' Collection, a Range, or a ROneCOne sequence, mirroring ItemsFrom for
+' the available side.
 Public Function ChosenFrom(ByVal source As Variant) As ReDimUI
-    Dim entry As Variant
-    Dim cell As Range
-    Dim position As Long
-
     RequireRole ROLE_COMPONENT, "ChosenFrom"
-    Set mChosenItems = New Collection
-    If TypeName(source) = "Range" Then
-        For Each cell In source.Cells
-            If LenB(CStr(cell.Value)) > 0 Then mChosenItems.Add CStr(cell.Value)
-        Next cell
-    ElseIf TypeName(source) = "Collection" Then
-        For Each entry In source
-            mChosenItems.Add CStr(entry)
-        Next entry
-    ElseIf IsArray(source) Then
-        For position = LBound(source) To UBound(source)
-            mChosenItems.Add CStr(source(position))
-        Next position
-    Else
-        RaiseError ERROR_INVALID_ARGUMENT, "ChosenFrom", _
-            "ChosenFrom accepts an array, a Collection, or a Range."
-    End If
+    Set mChosenItems = ReadItemSource(source, "ChosenFrom")
     Set mSelRight = New Collection
     Touch
     Set ChosenFrom = Me
@@ -2544,28 +2506,11 @@ End Function
 ' no item are ignored. Programmatic, so no state write and no OnChange.
 Public Function CheckedFrom(ByVal source As Variant) As ReDimUI
     Dim entry As Variant
-    Dim cell As Range
     Dim position As Long
     Dim wanted As Collection
 
     RequireRole ROLE_COMPONENT, "CheckedFrom"
-    Set wanted = New Collection
-    If TypeName(source) = "Range" Then
-        For Each cell In source.Cells
-            If LenB(CStr(cell.Value)) > 0 Then wanted.Add CStr(cell.Value)
-        Next cell
-    ElseIf TypeName(source) = "Collection" Then
-        For Each entry In source
-            wanted.Add CStr(entry)
-        Next entry
-    ElseIf IsArray(source) Then
-        For position = LBound(source) To UBound(source)
-            wanted.Add CStr(source(position))
-        Next position
-    Else
-        RaiseError ERROR_INVALID_ARGUMENT, "CheckedFrom", _
-            "CheckedFrom accepts an array, a Collection, or a Range."
-    End If
+    Set wanted = ReadItemSource(source, "CheckedFrom")
     Set mCheckedSet = New Collection
     If Not mItems Is Nothing Then
         For position = 1 To mItems.Count
@@ -2582,6 +2527,54 @@ Public Function CheckedFrom(ByVal source As Variant) As ReDimUI
     End If
     Touch
     Set CheckedFrom = Me
+End Function
+
+' Reads an item source into a fresh Collection of strings. Accepts a 1D
+' array, a Collection, a Range (one item per non-empty cell), or a
+' ROneCOne sequence. Centralized so every picker reader shares one shape
+' and the array test lives in exactly one guarded place.
+Private Function ReadItemSource( _
+    ByVal source As Variant, _
+    ByVal caller As String _
+) As Collection
+    Dim result As Collection
+    Dim entry As Variant
+    Dim cell As Range
+    Dim position As Long
+
+    Set result = New Collection
+    If TypeName(source) = "Range" Then
+        For Each cell In source.Cells
+            If LenB(CStr(cell.Value)) > 0 Then result.Add CStr(cell.Value)
+        Next cell
+    ElseIf TypeName(source) = "Collection" Then
+        For Each entry In source
+            result.Add CStr(entry)
+        Next entry
+    ElseIf TypeName(source) = "ROneCOne" Then
+        ' A ROneCOne sequence enumerates like any other For Each source.
+        For Each entry In source
+            result.Add CStr(entry)
+        Next entry
+    ElseIf IsArrayValue(source) Then
+        For position = LBound(source) To UBound(source)
+            result.Add CStr(source(position))
+        Next position
+    Else
+        RaiseError ERROR_INVALID_ARGUMENT, caller, caller & _
+            " accepts an array, a Collection, a Range, or a ROneCOne sequence."
+    End If
+    Set ReadItemSource = result
+End Function
+
+' The one guarded home for the array test. An object is never an array,
+' and asking IsArray about a ROneCOne dereferences its default member,
+' which raises on the zero arguments the dereference supplies; the raise
+' is then swallowed by any active On Error, leaving Err dirty for the
+' next reader. The IsObject short-circuit keeps the object out of IsArray.
+Private Function IsArrayValue(ByVal value As Variant) As Boolean
+    If IsObject(value) Then Exit Function
+    IsArrayValue = IsArray(value)
 End Function
 
 ' Renders or hides the select-all header row (on by default).

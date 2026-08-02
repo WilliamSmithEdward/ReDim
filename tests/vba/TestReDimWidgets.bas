@@ -734,6 +734,7 @@ Public Function TestItemApi() As String
     Dim host As Worksheet
     Dim picker As ReDimUI
     Dim radio As ReDimUI
+    Dim seq As ROneCOne
     Dim transcript As String
 
     Set host = NewCanvas()
@@ -777,6 +778,17 @@ Public Function TestItemApi() As String
     picker.ItemsFrom host.Range("H1:H4")
     transcript = transcript & "|fromRangeSkipsBlank=" & picker.ItemCount
     transcript = transcript & "|rangeSecond=" & picker.ItemTextAt(2)
+
+    ' Replace from a ROneCOne sequence: a ListOf feeds a picker like any
+    ' other source, and passing an object never trips the array test.
+    Set seq = ROneCOne.Json.Deserialize("[""Mercury"",""Venus"",""Earth""]")
+    On Error Resume Next
+    Err.Clear
+    picker.ItemsFrom seq
+    transcript = transcript & "|seqErrClean=" & CStr(Err.Number = 0)
+    On Error GoTo 0
+    transcript = transcript & "|fromSequence=" & picker.ItemCount
+    transcript = transcript & "|sequenceSecond=" & picker.ItemTextAt(2)
 
     ' Cleared list: opening shows no options.
     picker.ClearItems

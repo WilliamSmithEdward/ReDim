@@ -236,6 +236,13 @@ def test_item_api(run_widgets):
     assert facts["fromArray"] == "4"
     assert facts["fromRangeSkipsBlank"] == "3"
     assert facts["rangeSecond"] == "Green"
+    assert facts["seqErrClean"] == "True", (
+        "a ROneCOne item source must not trip the guarded array test or dirty Err"
+    )
+    assert facts["fromSequence"] == "3", (
+        "a ROneCOne sequence must feed a picker, not fall through to no items"
+    )
+    assert facts["sequenceSecond"] == "Venus"
     assert facts["clearedNoOptions"] == "True"
     assert facts["radioShrunk"] == "2"
     assert facts["radioStaleGone"] == "True", (
