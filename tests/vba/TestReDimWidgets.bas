@@ -265,6 +265,11 @@ Private Function ShapeExists(ByVal host As Worksheet, ByVal shapeName As String)
     ShapeExists = Not probe Is Nothing
 End Function
 
+' The text color a drawn shape shows.
+Private Function InkOf(ByVal host As Worksheet, ByVal shapeName As String) As Long
+    InkOf = host.Shapes(shapeName).TextFrame2.TextRange.Font.Fill.ForeColor.RGB
+End Function
+
 Public Function TestToastSlots() As String
     Dim app As ReDimUI
     Dim host As Worksheet
@@ -1117,13 +1122,15 @@ Public Function TestTransferList() As String
     ReDimUI.DispatchShape "rdm_wid22_teams__al2"
     transcript = transcript & "|rowSelected=" & _
         CStr(host.Shapes("rdm_wid22_teams__al2").Fill.ForeColor.RGB = _
-            app.Theme.PrimaryColor)
+            app.Theme.PrimaryColor And _
+            InkOf(host, "rdm_wid22_teams__al2") = app.Theme.OnPrimaryColor)
     transcript = transcript & "|selectNoChange=" & CStr(gChangeCount = 0)
     Sleep 200
     ReDimUI.DispatchShape "rdm_wid22_teams__al2"
     transcript = transcript & "|toggledOff=" & _
         CStr(host.Shapes("rdm_wid22_teams__al2").Fill.ForeColor.RGB <> _
-            app.Theme.PrimaryColor)
+            app.Theme.PrimaryColor And _
+            InkOf(host, "rdm_wid22_teams__al2") = app.Theme.OnSurfaceColor)
 
     ' Multi-select: toggle two rows, both carry the accent, one move
     ' transfers both in list order.
@@ -1230,11 +1237,24 @@ Public Function TestCheckList() As String
     transcript = transcript & "|masterCheckGlyph=" & _
         CStr(host.Shapes("rdm_wid23_feat__mb").TextFrame2.TextRange.Text _
             = ChrW(10003))
+    ' A row that changes only its check rewrites only its box state; the
+    ' box must still read fully checked or fully cleared.
+    transcript = transcript & "|rowsChecked=" & _
+        CStr(host.Shapes("rdm_wid23_feat__b3").Fill.ForeColor.RGB = _
+            app.Theme.PrimaryColor And _
+            host.Shapes("rdm_wid23_feat__b3").TextFrame2.TextRange.Text = _
+            ChrW(10003) And _
+            InkOf(host, "rdm_wid23_feat__b3") = app.Theme.OnPrimaryColor)
     Sleep 200
     ReDimUI.DispatchShape "rdm_wid23_feat__mt"
     transcript = transcript & "|noneChecked=" & _
         CStr(app.CheckList("feat").CheckedCount = 0 And _
             LenB(CStr(app.State("features"))) = 0)
+    transcript = transcript & "|rowsCleared=" & _
+        CStr(host.Shapes("rdm_wid23_feat__b3").Fill.ForeColor.RGB = _
+            app.Theme.SurfaceColor And _
+            LenB(host.Shapes("rdm_wid23_feat__b3").TextFrame2.TextRange.Text) _
+            = 0 And host.Shapes("rdm_wid23_feat__b3").Line.Visible = msoTrue)
     transcript = transcript & "|changeAfterMaster=" & gChangeCount
 
     ' The main shape is row one's box.
@@ -1259,6 +1279,13 @@ Public Function TestCheckList() As String
     transcript = transcript & "|removeShift=" & _
         CStr(app.CheckList("feat").CheckedCount = 1 And _
             app.CheckList("feat").IsItemChecked(3))
+
+    ' New items at the same count keep the layout: only captions rewrite.
+    app.CheckList("feat").ItemsFrom Array("Xray", "Yankee", "Zulu")
+    app.Render
+    transcript = transcript & "|captionSwap=" & _
+        host.Shapes("rdm_wid23_feat__t1").TextFrame2.TextRange.Text & "," & _
+        host.Shapes("rdm_wid23_feat__t3").TextFrame2.TextRange.Text
 
     ' Opting out of the header sweeps its parts.
     app.CheckList("feat").WithSelectAll False
@@ -1623,7 +1650,8 @@ Public Function TestLongLists() As String
     RdxKeyChar "{DOWN}"
     transcript = transcript & "|downStartsInWindow=" & _
         CStr(host.Shapes("rdm_wid27_pick__opt1").Fill.ForeColor.RGB = _
-            app.Theme.PrimaryColor)
+            app.Theme.PrimaryColor And _
+            InkOf(host, "rdm_wid27_pick__opt1") = app.Theme.OnPrimaryColor)
     Sleep 200
     ReDimUI.DispatchShape "rdm_wid27_pick__optu"
     transcript = transcript & "|pagedBack=" & _
@@ -1651,7 +1679,10 @@ Public Function TestLongLists() As String
     RdxKeyChar "{DOWN}"
     transcript = transcript & "|downFromPick=" & _
         CStr(host.Shapes("rdm_wid27_pick__opt2").Fill.ForeColor.RGB = _
-            app.Theme.PrimaryColor)
+            app.Theme.PrimaryColor And _
+            host.Shapes("rdm_wid27_pick__opt1").Fill.ForeColor.RGB = _
+            app.Theme.MutedColor And _
+            InkOf(host, "rdm_wid27_pick__opt1") = app.Theme.OnSurfaceColor)
     RdxKeyChar "x"
     transcript = transcript & "|typingFilters=" & _
         CStr(Not ShapeExists(host, "rdm_wid27_pick__opt1"))

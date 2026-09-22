@@ -15,7 +15,7 @@ only the members of its role and raises a clear error otherwise.
 | `ReDimUI.PumpOnce` | One deterministic pump tick (tests, debugging). |
 | `ReDimUI.PinPumpCursor pinOn` | Opt-in steady arrow cursor while the pump is armed. Off by default so interactive shapes keep their hover hand; turn on if busy-cursor flicker is visible on your hardware. |
 | `ReDimUI.AutoPump pumpOn` | Turn the wall-clock timer off for deterministic runs. |
-| `ReDimUI.Shutdown` | Kill the pump and forget every app. Shapes stay. |
+| `ReDimUI.Shutdown` | Kill the pump and forget every app, with its window registration and the back stack. Shapes stay. |
 | `ReDimUI.ThemeLight`, `ThemeDark` | Theme presets; customize with `WithPrimary`, `WithFont`. |
 
 App ids use letters and digits only. Component ids may add single underscores.

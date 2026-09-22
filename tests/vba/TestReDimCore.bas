@@ -558,6 +558,23 @@ Public Function TestNavigation() As String
     transcript = transcript & "|liveTabsRemain=" & _
         CStr(ShapeExistsCore(sheetA, "rdm_nava_nvb_nava") And _
              ShapeExistsCore(sheetA, "rdm_nava_nvb_navb"))
+
+    ' Shutdown forgets the windows with their apps: a rebuild in the same
+    ' session gets a bar with no tabs for unmounted windows, no active
+    ' window, and an empty back stack.
+    ReDimUI.Shutdown
+    transcript = transcript & "|shutdownClearsActive=" & _
+        CStr(LenB(ReDimUI.ActiveWindowId) = 0)
+    On Error Resume Next
+    Err.Clear
+    Set appA = ReDimUI.Mount(sheetA, "nava")
+    appA.AsWindow.NavBar
+    transcript = transcript & "|rebuildAfterShutdown=" & CStr(Err.Number = 0)
+    Err.Clear
+    transcript = transcript & "|backStackCleared=" & _
+        CStr(Not ReDimUI.NavigateBack() And Err.Number = 0)
+    On Error GoTo 0
+    ReDimUI.Shutdown
     TestNavigation = transcript
 End Function
 

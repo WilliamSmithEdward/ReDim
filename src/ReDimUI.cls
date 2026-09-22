@@ -138,6 +138,9 @@ Private mNavStack As Collection
 Private mActiveWindowId As String
 Private mFocusAppId As String
 Private mFocusComponentId As String
+' Set while focus moves from one field to another, so the outgoing
+' field's blur leaves the OnKey bindings in place for the incoming one.
+Private mFocusHandoff As Boolean
 ' Test seam: the next real tick treats the field-watch press edge as
 ' fired, so in-tick blur paths are testable without physical input.
 Private mForcePressEdge As Boolean
@@ -152,6 +155,11 @@ Private mAppId As String
 Private mSheet As Worksheet
 Private mComponents As Collection
 Private mComponentOrder As Collection
+' The components a pump frame can have work for (spinners, toasts,
+' sliders, text fields), so frames skip the rest; rebuilt lazily after
+' components come or go.
+Private mTickables As Collection
+Private mTickablesStale As Boolean
 Private mStateValues As Collection
 Private mStateHandlers As Collection
 Private mDirtyIds As Collection
@@ -248,6 +256,21 @@ Private mAppliedListSig As String
 Private mAppliedTransferSig As String
 Private mAppliedCheckSig As String
 Private mAppliedProgressSig As String
+' Composite part signatures: the kind's extra parts (tick box, knob,
+' radio rows, stepper, slider, drop-list caret), drop-list rows and
+' pagers, check-list rows, transfer headers, rows, and scrollers. A part
+' is rewritten only when its signature changes; Render forgets them all.
+Private mAppliedExtrasSig As String
+Private mAppliedRowStates() As String
+Private mAppliedPagerUpSig As String
+Private mAppliedPagerDownSig As String
+Private mAppliedCheckHeaderSig As String
+Private mAppliedHeaderLeftSig As String
+Private mAppliedHeaderRightSig As String
+Private mAppliedLeftRowStates() As String
+Private mAppliedRightRowStates() As String
+Private mAppliedScrollLeftSig As String
+Private mAppliedScrollRightSig As String
 Private mAppliedCellFill As Long
 ' The caret index: characters before the caret, 0 through Len(mText).
 Private mCaretPos As Long
@@ -259,6 +282,12 @@ Private mCaretPos As Long
 ' Transfer panels scroll through per-side offsets.
 Private mListRows As Long
 Private mListMatches As Collection
+Private mListMatchesFilter As String
+' Items as a String array (1-based), rebuilt by one For Each after any
+' change: a VBA Collection read by index walks the list, so loops that
+' indexed mItems went quadratic on long lists.
+Private mItemTexts() As String
+Private mItemTextsCurrent As Boolean
 Private mFilterPristine As Boolean
 Private mListOffset As Long
 Private mListHighlight As Long
@@ -534,7 +563,9 @@ Friend Sub SetKeyboardFocus(ByVal hostApp As ReDimUI, ByVal componentValue As Re
             Set previousComponent = _
                 previousApp.PeekComponent(mFocusComponentId)
             If Not previousComponent Is Nothing Then
+                mFocusHandoff = True
                 previousComponent.BlurField previousApp, True
+                mFocusHandoff = False
             End If
         End If
     End If
@@ -551,7 +582,7 @@ Friend Sub ClearKeyboardFocus()
     End If
     mFocusAppId = vbNullString
     mFocusComponentId = vbNullString
-    RdxReleaseKeys
+    If Not mFocusHandoff Then RdxReleaseKeys
 End Sub
 
 ' Test seam: consumed by the first TickApp that polls after it is set.
@@ -762,6 +793,10 @@ Public Sub Shutdown()
     Next appValue
     On Error GoTo 0
     Set mApps = New Collection
+    ' Windows go with their apps; a rebuild would otherwise tab to them.
+    Set mWindows = Nothing
+    Set mNavStack = Nothing
+    mActiveWindowId = vbNullString
     Set mSenderApp = Nothing
     Set mSenderComponent = Nothing
 End Sub
@@ -1361,7 +1396,8 @@ Friend Function GetOrCreateComponent( _
     Set componentValue = New ReDimUI
     componentValue.ConfigureComponent mAppId, targetComponentId, kindCode
     mComponents.Add componentValue, targetComponentId
-    mComponentOrder.Add targetComponentId
+    mComponentOrder.Add targetComponentId, targetComponentId
+    mTickablesStale = True
     Set GetOrCreateComponent = componentValue
 End Function
 
@@ -1510,11 +1546,19 @@ End Sub
 
 Public Sub Render()
     Dim orderedId As Variant
+    Dim componentValue As ReDimUI
 
     RequireRole ROLE_APP, "Render"
     For Each orderedId In mComponentOrder
         NotifyDirty CStr(orderedId)
     Next orderedId
+    ' An explicit render rewrites the single-shape composites' parts (tick
+    ' box, knob, radio rows, stepper, slider, drop-list caret), so a part
+    ' moved or deleted by hand comes back. List composites keep the row
+    ' state they diff against, as their whole-list signatures did before.
+    For Each componentValue In mComponents
+        componentValue.ForgetExtrasSignature
+    Next componentValue
     mRendered = True
     FlushDirty
     PruneOrphanShapes
@@ -1833,8 +1877,6 @@ End Sub
 
 ' Removes every component shape and unregisters the app.
 Public Sub Unmount(Optional ByVal deleteShapes As Boolean = True)
-    Dim componentValue As ReDimUI
-
     RequireRole ROLE_APP, "Unmount"
     ClearHotKeys
     If ReDimUI.FocusedComponentId <> vbNullString Then
@@ -1843,14 +1885,15 @@ Public Sub Unmount(Optional ByVal deleteShapes As Boolean = True)
         End If
     End If
     If mSurfaceProtected Then ProtectSurface False
+    ' One pass over the sheet finds every shape carrying this app's
+    ' prefix, parts and leftovers alike, and one call deletes them.
     If deleteShapes Then
-        For Each componentValue In mComponents
-            componentValue.DeleteOwnShapes mSheet
-        Next componentValue
+        DeleteShapesNamed mSheet, SHAPE_PREFIX & mAppId & "_", vbNullString
     End If
     Set mComponents = New Collection
     Set mComponentOrder = New Collection
     Set mDirtyIds = New Collection
+    Set mTickables = Nothing
     ReDimUI.ForgetApp mAppId
 End Sub
 
@@ -1920,7 +1963,7 @@ Private Sub TickJobsSection(ByVal nowMs As LongLong, ByVal runWork As Boolean)
     Dim animating As Boolean
 
     On Error GoTo Fault
-    For Each componentValue In mComponents
+    For Each componentValue In Tickables()
         If componentValue.NeedsAnimation Then
             animating = True
             Exit For
@@ -1958,7 +2001,7 @@ Private Sub TickComponentsSection( _
     mFieldPrevButtonDown = anyButtonDown
     If ReDimUI.ConsumeForcedPressEdge() Then pressEdge = True
     Set expiredIds = New Collection
-    For Each componentValue In mComponents
+    For Each componentValue In Tickables()
         componentValue.TickAnimation mSheet, elapsedMs
         componentValue.TickSlideDrag Me, leftButtonDown
         componentValue.TickFieldWatch Me, anyButtonDown, pressEdge, runWork
@@ -2035,7 +2078,7 @@ Friend Function HasAppWork() As Boolean
             Exit Function
         End If
     Next jobValue
-    For Each componentValue In mComponents
+    For Each componentValue In Tickables()
         If componentValue.NeedsAnimation Then
             HasAppWork = True
             Exit Function
@@ -2210,6 +2253,13 @@ End Property
 
 Friend Property Get ComponentKind() As Long
     ComponentKind = mKind
+End Property
+
+Friend Property Get IsTickable() As Boolean
+    Select Case mKind
+        Case KIND_SPINNER, KIND_TOAST, KIND_SLIDEBAR, KIND_INPUT, KIND_COMBO
+            IsTickable = True
+    End Select
 End Property
 
 Public Property Get OwnerApp() As ReDimUI
@@ -2515,6 +2565,7 @@ Public Function Items(ParamArray listItems() As Variant) As ReDimUI
     For idx = LBound(listItems) To UBound(listItems)
         mItems.Add CStr(listItems(idx))
     Next idx
+    ItemsChanged
     ClampItemSelection
     Touch
     Set Items = Me
@@ -2526,6 +2577,7 @@ End Function
 Public Function ItemsFrom(ByVal itemSource As Variant) As ReDimUI
     RequireRole ROLE_COMPONENT, "ItemsFrom"
     Set mItems = ReadItemSource(itemSource, "ItemsFrom")
+    ItemsChanged
     ClampItemSelection
     If Not mCheckedSet Is Nothing Then Set mCheckedSet = New Collection
     Touch
@@ -2548,22 +2600,27 @@ End Function
 Public Function CheckedFrom(ByVal itemSource As Variant) As ReDimUI
     Dim entry As Variant
     Dim idx As Long
-    Dim wanted As Collection
+    Dim wantedSet As Collection
+    Dim ignored As Variant
 
     RequireRole ROLE_COMPONENT, "CheckedFrom"
-    Set wanted = ReadItemSource(itemSource, "CheckedFrom")
+    ' Wanted texts go into a keyed set (Collection keys compare without
+    ' case, like the match this replaced), so each item costs one lookup
+    ' instead of a scan of the wanted list.
+    Set wantedSet = New Collection
+    For Each entry In ReadItemSource(itemSource, "CheckedFrom")
+        On Error Resume Next
+        wantedSet.Add True, CStr(entry)
+        Err.Clear
+        On Error GoTo 0
+    Next entry
     Set mCheckedSet = New Collection
     If Not mItems Is Nothing Then
+        EnsureItemTexts
         For idx = 1 To mItems.Count
-            For Each entry In wanted
-                If StrComp(CStr(mItems.Item(idx)), CStr(entry), _
-                    vbTextCompare) = 0 Then
-                    If Not TransferSelectionHas(mCheckedSet, idx) Then
-                        mCheckedSet.Add idx
-                    End If
-                    Exit For
-                End If
-            Next entry
+            If TryGetItem(wantedSet, mItemTexts(idx), ignored) Then
+                mCheckedSet.Add idx
+            End If
         Next idx
     End If
     Touch
@@ -2580,14 +2637,30 @@ Private Function ReadItemSource( _
 ) As Collection
     Dim gathered As Collection
     Dim entry As Variant
-    Dim cell As Range
+    Dim area As Range
+    Dim cellValues As Variant
+    Dim rowIdx As Long
+    Dim colIdx As Long
     Dim idx As Long
 
     Set gathered = New Collection
     If TypeName(itemSource) = "Range" Then
-        For Each cell In itemSource.Cells
-            If LenB(CStr(cell.Value)) > 0 Then gathered.Add CStr(cell.Value)
-        Next cell
+        ' One Value read per area instead of one per cell, in the row-major
+        ' order For Each over the cells gives.
+        For Each area In itemSource.Areas
+            If area.CountLarge = 1 Then
+                If LenB(CStr(area.Value)) > 0 Then gathered.Add CStr(area.Value)
+            Else
+                cellValues = area.Value
+                For rowIdx = 1 To UBound(cellValues, 1)
+                    For colIdx = 1 To UBound(cellValues, 2)
+                        If LenB(CStr(cellValues(rowIdx, colIdx))) > 0 Then
+                            gathered.Add CStr(cellValues(rowIdx, colIdx))
+                        End If
+                    Next colIdx
+                Next rowIdx
+            End If
+        Next area
     ElseIf TypeName(itemSource) = "Collection" Then
         For Each entry In itemSource
             gathered.Add CStr(entry)
@@ -2703,6 +2776,7 @@ Public Function AddItem( _
     Else
         mItems.Add itemText
     End If
+    ItemsChanged
     Touch
     Set AddItem = Me
 End Function
@@ -2750,8 +2824,9 @@ Public Function RemoveItem(ByVal indexOrText As Variant) As ReDimUI
     If IsNumeric(indexOrText) Then
         idx = CLng(indexOrText)
     Else
+        EnsureItemTexts
         For probe = 1 To mItems.Count
-            If CStr(mItems.Item(probe)) = CStr(indexOrText) Then
+            If mItemTexts(probe) = CStr(indexOrText) Then
                 idx = probe
                 Exit For
             End If
@@ -2762,6 +2837,7 @@ Public Function RemoveItem(ByVal indexOrText As Variant) As ReDimUI
         Exit Function
     End If
     mItems.Remove idx
+    ItemsChanged
     If CLng(mValue) = idx Then
         mValue = 0
     ElseIf CLng(mValue) > idx Then
@@ -2775,6 +2851,7 @@ End Function
 Public Function ClearItems() As ReDimUI
     RequireRole ROLE_COMPONENT, "ClearItems"
     Set mItems = New Collection
+    ItemsChanged
     mValue = 0
     If Not mCheckedSet Is Nothing Then Set mCheckedSet = New Collection
     Touch
@@ -3096,18 +3173,27 @@ Public Sub Remove()
 End Sub
 
 Friend Sub ForgetComponent(ByVal targetComponentId As String)
-    Dim idx As Long
-
     RequireRole ROLE_APP, "ForgetComponent"
     On Error Resume Next
     mComponents.Remove targetComponentId
+    mComponentOrder.Remove targetComponentId
+    Err.Clear
     On Error GoTo 0
-    For idx = mComponentOrder.Count To 1 Step -1
-        If mComponentOrder.Item(idx) = targetComponentId Then
-            mComponentOrder.Remove idx
-        End If
-    Next idx
+    mTickablesStale = True
 End Sub
+
+Private Function Tickables() As Collection
+    Dim componentValue As ReDimUI
+
+    If mTickables Is Nothing Or mTickablesStale Then
+        Set mTickables = New Collection
+        For Each componentValue In mComponents
+            If componentValue.IsTickable Then mTickables.Add componentValue
+        Next componentValue
+        mTickablesStale = False
+    End If
+    Set Tickables = mTickables
+End Function
 
 Friend Function IsBoundTo(ByVal stateKey As String) As Boolean
     IsBoundTo = (mBindTextKey = stateKey) Or (mBindValueKey = stateKey) _
@@ -3120,7 +3206,10 @@ End Function
 ' =====================================================================
 
 Private Sub EnsureTransferCollections()
-    If mItems Is Nothing Then Set mItems = New Collection
+    If mItems Is Nothing Then
+        Set mItems = New Collection
+        ItemsChanged
+    End If
     If mChosenItems Is Nothing Then Set mChosenItems = New Collection
     If mSelLeft Is Nothing Then Set mSelLeft = New Collection
     If mSelRight Is Nothing Then Set mSelRight = New Collection
@@ -3166,26 +3255,56 @@ End Sub
 ' Collection values joined into a repaint signature; values only, so no
 ' late-bound member access is involved.
 Private Function JoinedSig(ByVal store As Collection) As String
+    If store.Count > 0 Then JoinedSig = "|" & JoinedText(store, "|")
+End Function
+
+' A collection's values joined in order: one For Each into an array and
+' one Join, where indexed reads and repeated concatenation both went
+' quadratic on long lists.
+Private Function JoinedText( _
+    ByVal store As Collection, _
+    ByVal joinWith As String _
+) As String
+    Dim parts() As String
+    Dim entry As Variant
     Dim idx As Long
 
-    For idx = 1 To store.Count
-        JoinedSig = JoinedSig & "|" & CStr(store.Item(idx))
-    Next idx
+    If store.Count = 0 Then Exit Function
+    ReDim parts(1 To store.Count)
+    For Each entry In store
+        idx = idx + 1
+        parts(idx) = CStr(entry)
+    Next entry
+    JoinedText = Join(parts, joinWith)
 End Function
 
 ' Checked item texts in list order, joined for the WritesTo state value.
 Private Function CheckedJoined() As String
+    Dim parts() As String
+    Dim selectedFlags() As Boolean
+    Dim entry As Variant
     Dim idx As Long
+    Dim takenCount As Long
 
-    If mItems Is Nothing Then Exit Function
+    If mItems Is Nothing Or mCheckedSet Is Nothing Then Exit Function
+    If mItems.Count = 0 Or mCheckedSet.Count = 0 Then Exit Function
+    ReDim selectedFlags(1 To mItems.Count)
+    For Each entry In mCheckedSet
+        If CLng(entry) >= 1 And CLng(entry) <= mItems.Count Then
+            selectedFlags(CLng(entry)) = True
+        End If
+    Next entry
+    EnsureItemTexts
+    ReDim parts(1 To mItems.Count)
     For idx = 1 To mItems.Count
-        If TransferSelectionHas(mCheckedSet, idx) Then
-            If LenB(CheckedJoined) > 0 Then
-                CheckedJoined = CheckedJoined & ", "
-            End If
-            CheckedJoined = CheckedJoined & CStr(mItems.Item(idx))
+        If selectedFlags(idx) Then
+            takenCount = takenCount + 1
+            parts(takenCount) = mItemTexts(idx)
         End If
     Next idx
+    If takenCount = 0 Then Exit Function
+    ReDim Preserve parts(1 To takenCount)
+    CheckedJoined = Join(parts, ", ")
 End Function
 
 Private Function TransferSelectionHas( _
@@ -3237,8 +3356,11 @@ Private Sub TransferSelected(ByVal hostApp As ReDimUI, ByVal rightward As Boolea
     Dim sourceItems As Collection
     Dim targetItems As Collection
     Dim selectionSet As Collection
-    Dim ordered As Collection
+    Dim kept As Collection
+    Dim selectedFlags() As Boolean
+    Dim entry As Variant
     Dim idx As Long
+    Dim anySelected As Boolean
 
     If rightward Then
         Set sourceItems = mItems
@@ -3249,46 +3371,56 @@ Private Sub TransferSelected(ByVal hostApp As ReDimUI, ByVal rightward As Boolea
         Set targetItems = mItems
         Set selectionSet = mSelRight
     End If
-    Set ordered = New Collection
-    For idx = 1 To sourceItems.Count
-        If TransferSelectionHas(selectionSet, idx) Then
-            ordered.Add CStr(sourceItems.Item(idx))
+    If sourceItems.Count = 0 Or selectionSet.Count = 0 Then Exit Sub
+    ReDim selectedFlags(1 To sourceItems.Count)
+    For Each entry In selectionSet
+        If CLng(entry) >= 1 And CLng(entry) <= sourceItems.Count Then
+            selectedFlags(CLng(entry)) = True
+            anySelected = True
         End If
-    Next idx
-    If ordered.Count = 0 Then Exit Sub
-    For idx = sourceItems.Count To 1 Step -1
-        If TransferSelectionHas(selectionSet, idx) Then
-            sourceItems.Remove idx
+    Next entry
+    If Not anySelected Then Exit Sub
+    ' One pass moves the selected rows to the target in their list order
+    ' and rebuilds the source without them; removing by index would walk
+    ' the list once per row.
+    Set kept = New Collection
+    For Each entry In sourceItems
+        idx = idx + 1
+        If selectedFlags(idx) Then
+            targetItems.Add CStr(entry)
+        Else
+            kept.Add CStr(entry)
         End If
-    Next idx
-    For idx = 1 To ordered.Count
-        targetItems.Add CStr(ordered.Item(idx))
-    Next idx
+    Next entry
     If rightward Then
+        Set mItems = kept
         Set mSelLeft = New Collection
     Else
+        Set mChosenItems = kept
         Set mSelRight = New Collection
     End If
+    ItemsChanged
     Touch
     CommitTransferChange hostApp
 End Sub
 
 Private Sub TransferAll(ByVal hostApp As ReDimUI, ByVal rightward As Boolean)
-    Dim idx As Long
+    Dim entry As Variant
 
     If rightward Then
         If mItems.Count = 0 Then Exit Sub
-        For idx = 1 To mItems.Count
-            mChosenItems.Add CStr(mItems.Item(idx))
-        Next idx
+        For Each entry In mItems
+            mChosenItems.Add CStr(entry)
+        Next entry
         Set mItems = New Collection
     Else
         If mChosenItems.Count = 0 Then Exit Sub
-        For idx = 1 To mChosenItems.Count
-            mItems.Add CStr(mChosenItems.Item(idx))
-        Next idx
+        For Each entry In mChosenItems
+            mItems.Add CStr(entry)
+        Next entry
         Set mChosenItems = New Collection
     End If
+    ItemsChanged
     Set mSelLeft = New Collection
     Set mSelRight = New Collection
     Touch
@@ -3298,14 +3430,9 @@ End Sub
 ' A user transfer writes the chosen list (joined with a comma and space)
 ' to state and fires OnChange once. Selection clicks fire nothing.
 Private Sub CommitTransferChange(ByVal hostApp As ReDimUI)
-    Dim joined As String
-    Dim idx As Long
-
-    For idx = 1 To mChosenItems.Count
-        If idx > 1 Then joined = joined & ", "
-        joined = joined & CStr(mChosenItems.Item(idx))
-    Next idx
-    If LenB(mWritesToKey) > 0 Then hostApp.SetState mWritesToKey, joined
+    If LenB(mWritesToKey) > 0 Then
+        hostApp.SetState mWritesToKey, JoinedText(mChosenItems, ", ")
+    End If
     If LenB(mClickProc) > 0 Then
         On Error Resume Next
         Application.Run mClickProc
@@ -3542,8 +3669,34 @@ End Sub
 Private Function ItemAt(ByVal itemNumber As Long) As String
     If mItems Is Nothing Then Exit Function
     If itemNumber < 1 Or itemNumber > mItems.Count Then Exit Function
-    ItemAt = CStr(mItems.Item(itemNumber))
+    EnsureItemTexts
+    ItemAt = mItemTexts(itemNumber)
 End Function
+
+' Called after every change to mItems: the text snapshot and the cached
+' list matches are rebuilt on next use.
+Private Sub ItemsChanged()
+    mItemTextsCurrent = False
+    Set mListMatches = Nothing
+End Sub
+
+Private Sub EnsureItemTexts()
+    Dim entry As Variant
+    Dim idx As Long
+
+    If mItemTextsCurrent Then Exit Sub
+    Erase mItemTexts
+    If Not mItems Is Nothing Then
+        If mItems.Count > 0 Then
+            ReDim mItemTexts(1 To mItems.Count)
+            For Each entry In mItems
+                idx = idx + 1
+                mItemTexts(idx) = CStr(entry)
+            Next entry
+        End If
+    End If
+    mItemTextsCurrent = True
+End Sub
 
 ' The OnClickAsync path: a per-button op that disables the button, runs the
 ' procedure through the pump, and restores the button on completion.
@@ -3722,6 +3875,7 @@ Private Function EnsureShape(ByVal hostSheet As Worksheet) As Shape
         Set mainShape = CreateShapeForKind(hostSheet)
         mainShape.Name = ShapeName
         mAppliedValid = False
+        ForgetPartSignatures
     End If
     Set EnsureShape = mainShape
 End Function
@@ -3808,10 +3962,13 @@ Private Function CreateShapeForKind(ByVal hostSheet As Worksheet) As Shape
     Set CreateShapeForKind = mainShape
 End Function
 
+' The named part, created when missing; wasCreated says which, so a row
+' updater that writes only what changed knows to style a fresh shape.
 Private Function EnsurePartShape( _
     ByVal hostSheet As Worksheet, _
     ByVal partName As String, _
-    ByVal shapeType As MsoAutoShapeType _
+    ByVal shapeType As MsoAutoShapeType, _
+    Optional ByRef wasCreated As Boolean _
 ) As Shape
     Dim partShape As Shape
     Dim partShapeName As String
@@ -3820,7 +3977,8 @@ Private Function EnsurePartShape( _
     On Error Resume Next
     Set partShape = hostSheet.Shapes(partShapeName)
     On Error GoTo 0
-    If partShape Is Nothing Then
+    wasCreated = (partShape Is Nothing)
+    If wasCreated Then
         Set partShape = hostSheet.Shapes.AddShape(shapeType, mLeft, mTop, 8, 8)
         partShape.Name = partShapeName
         partShape.Placement = xlFreeFloating
@@ -4407,6 +4565,52 @@ Private Function ResolveDrawnInk(ByVal themeValue As ReDimUI) As Long
     End If
 End Function
 
+' The state every composite part depends on: theme, geometry, visibility,
+' enablement, and font. Kinds append their own state to it.
+Private Function PartsState(ByVal themeValue As ReDimUI) As String
+    PartsState = CStr(ObjPtr(themeValue)) & ":" & CStr(mLeft) & ":" & _
+        CStr(mTop) & ":" & CStr(mWidth) & ":" & CStr(mHeight) & ":" & _
+        CStr(mVisible) & ":" & CStr(mEnabled) & ":" & CStr(mFontSize) & _
+        ":" & CStr(mFontBold) & ":" & mAppliedOnAction
+End Function
+
+' True when the kind's extra parts were last written for exactly this
+' state, so every part write can be skipped; otherwise records the state
+' and returns False. Render forgets it, so an explicit render rewrites.
+Private Function ExtrasCurrent(ByVal partsKey As String) As Boolean
+    If mAppliedValid And partsKey = mAppliedExtrasSig Then
+        ExtrasCurrent = True
+    Else
+        mAppliedExtrasSig = partsKey
+    End If
+End Function
+
+Friend Sub ForgetExtrasSignature()
+    mAppliedExtrasSig = vbNullString
+End Sub
+
+' Every part key dropped, so the next apply rewrites every part: for a
+' main shape recreated from scratch and for teardown.
+Friend Sub ForgetPartSignatures()
+    mAppliedExtrasSig = vbNullString
+    mAppliedListSig = vbNullString
+    mAppliedProgressSig = vbNullString
+    mAppliedTransferSig = vbNullString
+    mAppliedCheckSig = vbNullString
+    mAppliedCheckHeaderSig = vbNullString
+    ' Parts that may or may not exist read as unknown, which forces one
+    ' redraw when needed and one delete when not.
+    mAppliedPagerUpSig = "?"
+    mAppliedPagerDownSig = "?"
+    mAppliedHeaderLeftSig = vbNullString
+    mAppliedHeaderRightSig = vbNullString
+    mAppliedScrollLeftSig = "?"
+    mAppliedScrollRightSig = "?"
+    Erase mAppliedRowStates
+    Erase mAppliedLeftRowStates
+    Erase mAppliedRightRowStates
+End Sub
+
 ' Box at the left edge, check glyph inside it when checked, caption filling
 ' the remainder. Both pieces click-toggle through the dispatcher.
 Private Sub ApplyTickBox( _
@@ -4417,6 +4621,8 @@ Private Sub ApplyTickBox( _
     Dim captionShape As Shape
     Dim boxSize As Double
 
+    If ExtrasCurrent(PartsState(themeValue) & ":" & CStr(mChecked) & _
+        ":" & mText) Then Exit Sub
     boxSize = mHeight - 2
     If boxSize > 16 Then boxSize = 16
     If boxSize < 10 Then boxSize = 10
@@ -4474,6 +4680,8 @@ Private Sub ApplyRadioGroup( _
     If mItems Is Nothing Then Exit Sub
     rowTotal = mItems.Count
     If rowTotal = 0 Then Exit Sub
+    If ExtrasCurrent(PartsState(themeValue) & ":" & CStr(mValue) & _
+        JoinedSig(mItems)) Then Exit Sub
     rowPitch = mHeight / rowTotal
     circleSize = rowPitch - 6
     If circleSize > 14 Then circleSize = 14
@@ -4539,6 +4747,10 @@ End Sub
 
 ' One box-and-caption row per item, any number checked, plus an optional
 ' select-all header whose box reads empty, checked, or dashed for mixed.
+' The layout key covers what every row shares; when it changes, every
+' row is rewritten. Otherwise a row whose check changed rewrites its box
+' state and one whose caption changed rewrites its text, so a toggle
+' costs one box and the header instead of the list.
 Private Sub ApplyCheckListParts( _
     ByVal mainShape As Shape, _
     ByVal hostSheet As Worksheet, _
@@ -4552,23 +4764,35 @@ Private Sub ApplyCheckListParts( _
     Dim box As Shape
     Dim captionShape As Shape
     Dim boxSize As Double
-    Dim isOn As Boolean
     Dim checkedTotal As Long
+    Dim layoutKey As String
+    Dim rowKey As String
+    Dim priorKey As String
+    Dim headerKey As String
+    Dim headerText As String
+    Dim boxCreated As Boolean
+    Dim captionCreated As Boolean
+    Dim fullPass As Boolean
+    Dim checkedFlags() As Boolean
+    Dim entry As Variant
 
     EnsureCheckedSet
     If mItems Is Nothing Then Exit Sub
     rowTotal = mItems.Count
     If rowTotal = 0 Then Exit Sub
     PruneTransferSelection mCheckedSet, rowTotal
-    ' Skip the shape work when nothing visible changed.
-    Dim checkSig As String
-    checkSig = CStr(ObjPtr(themeValue)) & ":" & CStr(mLeft) & ":" & _
-        CStr(mTop) & ":" & CStr(mWidth) & ":" & CStr(mHeight) & ":" & _
-        CStr(mVisible) & ":" & CStr(mEnabled) & ":" & _
-        CStr(mSelectAllRow) & ":" & CStr(mFontSize) & ":" & _
-        JoinedSig(mItems) & "#" & JoinedSig(mCheckedSet)
-    If mAppliedValid And checkSig = mAppliedCheckSig Then Exit Sub
-    mAppliedCheckSig = checkSig
+    layoutKey = PartsState(themeValue) & ":" & CStr(mSelectAllRow) & _
+        ":" & CStr(rowTotal)
+    fullPass = Not (mAppliedValid And layoutKey = mAppliedCheckSig)
+    If fullPass Then
+        mAppliedCheckSig = layoutKey
+        mAppliedCheckHeaderSig = vbNullString
+        ReDim mAppliedRowStates(1 To rowTotal)
+    End If
+    ReDim checkedFlags(1 To rowTotal)
+    For Each entry In mCheckedSet
+        checkedFlags(CLng(entry)) = True
+    Next entry
     checkedTotal = mCheckedSet.Count
     headerRows = 0
     If mSelectAllRow Then headerRows = 1
@@ -4578,22 +4802,35 @@ Private Sub ApplyCheckListParts( _
     If boxSize < 10 Then boxSize = 10
 
     If mSelectAllRow Then
-        Set box = EnsurePartShape(hostSheet, "mb", msoShapeRoundedRectangle)
-        On Error Resume Next
-        box.Adjustments(1) = 0.2
-        On Error GoTo 0
-        StyleCheckBoxFace box, boxSize, mTop, rowPitch, themeValue, _
-            (checkedTotal = rowTotal), (checkedTotal > 0)
-        Set captionShape = EnsurePartShape(hostSheet, "mt", msoShapeRectangle)
-        captionShape.Left = mLeft + boxSize + 8
-        captionShape.Top = mTop
-        captionShape.Width = mWidth - boxSize - 8
-        captionShape.Height = rowPitch
-        StyleCaptionPart captionShape, _
-            "Select all (" & checkedTotal & "/" & rowTotal & ")", themeValue
-        captionShape.Visible = BoolToMso(mVisible)
-        captionShape.OnAction = mAppliedOnAction
-    Else
+        headerKey = CStr(checkedTotal) & "/" & CStr(rowTotal)
+        priorKey = mAppliedCheckHeaderSig
+        If headerKey <> priorKey Then
+            mAppliedCheckHeaderSig = headerKey
+            Set box = EnsurePartShape( _
+                hostSheet, "mb", msoShapeRoundedRectangle, boxCreated)
+            Set captionShape = EnsurePartShape( _
+                hostSheet, "mt", msoShapeRectangle, captionCreated)
+            headerText = "Select all (" & checkedTotal & "/" & rowTotal & ")"
+            If LenB(priorKey) > 0 And Not (boxCreated Or captionCreated) Then
+                StyleCheckBoxState box, boxSize, themeValue, _
+                    (checkedTotal = rowTotal), (checkedTotal > 0)
+                captionShape.TextFrame2.TextRange.Text = headerText
+            Else
+                On Error Resume Next
+                box.Adjustments(1) = 0.2
+                On Error GoTo 0
+                StyleCheckBoxFace box, boxSize, mTop, rowPitch, themeValue, _
+                    (checkedTotal = rowTotal), (checkedTotal > 0)
+                captionShape.Left = mLeft + boxSize + 8
+                captionShape.Top = mTop
+                captionShape.Width = mWidth - boxSize - 8
+                captionShape.Height = rowPitch
+                StyleCaptionPart captionShape, headerText, themeValue
+                captionShape.Visible = BoolToMso(mVisible)
+                captionShape.OnAction = mAppliedOnAction
+            End If
+        End If
+    ElseIf fullPass Then
         On Error Resume Next
         hostSheet.Shapes(ShapeName & PART_SEPARATOR & "mb").Delete
         hostSheet.Shapes(ShapeName & PART_SEPARATOR & "mt").Delete
@@ -4601,36 +4838,94 @@ Private Sub ApplyCheckListParts( _
     End If
 
     For idx = 1 To rowTotal
-        rowTop = mTop + (idx - 1 + headerRows) * rowPitch
-        isOn = TransferSelectionHas(mCheckedSet, idx)
-        If idx = 1 Then
-            Set box = mainShape
-        Else
-            Set box = EnsurePartShape( _
-                hostSheet, "b" & idx, msoShapeRoundedRectangle)
-            On Error Resume Next
-            box.Adjustments(1) = 0.2
-            On Error GoTo 0
+        rowKey = IIf(checkedFlags(idx), "1", "0") & ItemAt(idx)
+        priorKey = mAppliedRowStates(idx)
+        If rowKey <> priorKey Then
+            mAppliedRowStates(idx) = rowKey
+            rowTop = mTop + (idx - 1 + headerRows) * rowPitch
+            boxCreated = False
+            If idx = 1 Then
+                Set box = mainShape
+            Else
+                Set box = EnsurePartShape( _
+                    hostSheet, "b" & idx, msoShapeRoundedRectangle, boxCreated)
+            End If
+            Set captionShape = EnsurePartShape( _
+                hostSheet, "t" & idx, msoShapeRectangle, captionCreated)
+            If LenB(priorKey) > 0 And Not (boxCreated Or captionCreated) Then
+                ' Drawn under this layout: rewrite only the box state or the
+                ' caption text, whichever moved.
+                If Left$(priorKey, 1) <> Left$(rowKey, 1) Then
+                    StyleCheckBoxState box, boxSize, themeValue, _
+                        checkedFlags(idx), checkedFlags(idx)
+                End If
+                If Mid$(priorKey, 2) <> Mid$(rowKey, 2) Then
+                    captionShape.TextFrame2.TextRange.Text = ItemAt(idx)
+                End If
+            Else
+                If idx > 1 Then
+                    On Error Resume Next
+                    box.Adjustments(1) = 0.2
+                    On Error GoTo 0
+                End If
+                StyleCheckBoxFace box, boxSize, rowTop, rowPitch, themeValue, _
+                    checkedFlags(idx), checkedFlags(idx)
+                captionShape.Left = mLeft + boxSize + 8
+                captionShape.Top = rowTop
+                captionShape.Width = mWidth - boxSize - 8
+                captionShape.Height = rowPitch
+                StyleCaptionPart captionShape, ItemAt(idx), themeValue
+                captionShape.Visible = BoolToMso(mVisible)
+                captionShape.OnAction = mAppliedOnAction
+            End If
         End If
-        StyleCheckBoxFace box, boxSize, rowTop, rowPitch, themeValue, _
-            isOn, isOn
-        Set captionShape = EnsurePartShape( _
-            hostSheet, "t" & idx, msoShapeRectangle)
-        captionShape.Left = mLeft + boxSize + 8
-        captionShape.Top = rowTop
-        captionShape.Width = mWidth - boxSize - 8
-        captionShape.Height = rowPitch
-        StyleCaptionPart captionShape, ItemAt(idx), themeValue
-        captionShape.Visible = BoolToMso(mVisible)
-        captionShape.OnAction = mAppliedOnAction
     Next idx
-    For idx = rowTotal + 1 To mAppliedOptionCount
-        On Error Resume Next
-        hostSheet.Shapes(ShapeName & PART_SEPARATOR & "b" & idx).Delete
-        hostSheet.Shapes(ShapeName & PART_SEPARATOR & "t" & idx).Delete
-        On Error GoTo 0
-    Next idx
-    mAppliedOptionCount = rowTotal
+    If fullPass Then
+        For idx = rowTotal + 1 To mAppliedOptionCount
+            On Error Resume Next
+            hostSheet.Shapes(ShapeName & PART_SEPARATOR & "b" & idx).Delete
+            hostSheet.Shapes(ShapeName & PART_SEPARATOR & "t" & idx).Delete
+            On Error GoTo 0
+        Next idx
+        mAppliedOptionCount = rowTotal
+    End If
+End Sub
+
+' The parts of a checkbox face that follow its state: fill, border, and
+' glyph text, size, and ink. Geometry and glyph layout stay as
+' StyleCheckBoxFace left them, since shape text keeps its formatting
+' across a change to or from empty text.
+Private Sub StyleCheckBoxState( _
+    ByVal box As Shape, _
+    ByVal boxSize As Double, _
+    ByVal themeValue As ReDimUI, _
+    ByVal fullState As Boolean, _
+    ByVal partialState As Boolean _
+)
+    If partialState And mEnabled Then
+        box.Fill.ForeColor.RGB = ResolveFill(themeValue)
+        box.Line.Visible = msoFalse
+    Else
+        box.Fill.ForeColor.RGB = themeValue.SurfaceColor
+        box.Line.Visible = msoTrue
+        box.Line.ForeColor.RGB = themeValue.BorderColor
+        box.Line.Weight = 1.25
+    End If
+    With box.TextFrame2.TextRange
+        If fullState Then
+            .Text = ChrW(10003)
+            .Font.Size = boxSize * 0.62
+        ElseIf partialState Then
+            .Text = "-"
+            .Font.Size = boxSize * 0.8
+        Else
+            .Text = vbNullString
+        End If
+        If partialState Then
+            .Font.Fill.ForeColor.RGB = _
+                IIf(mEnabled, themeValue.OnPrimaryColor, themeValue.OnMutedColor)
+        End If
+    End With
 End Sub
 
 ' A checkbox face in one of three reads: full (accent fill and a check),
@@ -4685,6 +4980,7 @@ Private Sub ApplyStepper( _
     Dim plusButton As Shape
     Dim buttonSize As Double
 
+    If ExtrasCurrent(PartsState(themeValue) & ":" & CStr(mValue)) Then Exit Sub
     buttonSize = mHeight
     mainShape.Left = mLeft + buttonSize + 4
     mainShape.Top = mTop
@@ -4734,6 +5030,7 @@ Private Sub ApplyToggleKnob( _
     Dim knob As Shape
     Dim knobSize As Double
 
+    If ExtrasCurrent(PartsState(themeValue) & ":" & CStr(mChecked)) Then Exit Sub
     Set knob = EnsurePartShape(hostSheet, "knob", msoShapeOval)
     knobSize = mHeight - 4
     If knobSize < 4 Then knobSize = 4
@@ -4778,6 +5075,9 @@ End Sub
 ' Dual listbox: the main shape is the left panel; the right panel, two
 ' counted headers, four move buttons, and the row shapes are parts. Rows
 ' render up to the panel capacity; the header count keeps overflow honest.
+' The frame (both panels and the move buttons) is rewritten only when the
+' layout changes; headers, rows, and paging arrows each keep the state
+' they were last drawn with, so a row click rewrites that row alone.
 Private Sub ApplyTransferParts( _
     ByVal mainShape As Shape, _
     ByVal hostSheet As Worksheet, _
@@ -4794,7 +5094,7 @@ Private Sub ApplyTransferParts( _
     Dim btnX As Double
     Dim btnTop As Double
     Dim rightPanel As Shape
-    Dim headerShape As Shape
+    Dim layoutKey As String
 
     EnsureTransferCollections
     PruneTransferSelection mSelLeft, mItems.Count
@@ -4807,19 +5107,6 @@ Private Sub ApplyTransferParts( _
         mRightOffset = mChosenItems.Count - TransferRowCapacity()
     End If
     If mRightOffset < 0 Then mRightOffset = 0
-    ' A repaint that changes nothing visible skips all the shape work:
-    ' both panels, headers, rows, and buttons carry dozens of COM
-    ' writes, and most touches change only one side or nothing.
-    Dim transferSig As String
-    transferSig = CStr(ObjPtr(themeValue)) & ":" & CStr(mLeft) & ":" & _
-        CStr(mTop) & ":" & CStr(mWidth) & ":" & CStr(mHeight) & ":" & _
-        CStr(mVisible) & ":" & mCaptionLeft & "/" & mCaptionRight & ":" & _
-        CStr(mLeftOffset) & ":" & CStr(mRightOffset) & ":" & _
-        CStr(mFontSize) & ":" & _
-        JoinedSig(mItems) & "#" & JoinedSig(mChosenItems) & "#" & _
-        JoinedSig(mSelLeft) & "#" & JoinedSig(mSelRight)
-    If mAppliedValid And transferSig = mAppliedTransferSig Then Exit Sub
-    mAppliedTransferSig = transferSig
     panelW = (mWidth - BTN_W - 4 * PANEL_GAP) / 2
     If panelW < 40 Then panelW = 40
     panelTop = mTop + HEADER_H
@@ -4828,78 +5115,97 @@ Private Sub ApplyTransferParts( _
     rightX = mLeft + panelW + BTN_W + 4 * PANEL_GAP
     btnX = mLeft + panelW + 2 * PANEL_GAP
 
-    mainShape.Left = mLeft
-    mainShape.Top = panelTop
-    mainShape.Width = panelW
-    mainShape.Height = panelH
-    mainShape.Fill.Visible = msoTrue
-    mainShape.Fill.ForeColor.RGB = ResolveSurfaceFill(themeValue)
-    mainShape.Line.Visible = msoTrue
-    mainShape.Line.ForeColor.RGB = themeValue.BorderColor
-    mainShape.Line.Weight = 1
-    mainShape.Visible = BoolToMso(mVisible)
+    layoutKey = PartsState(themeValue)
+    If Not (mAppliedValid And layoutKey = mAppliedTransferSig) Then
+        mAppliedTransferSig = layoutKey
+        mainShape.Left = mLeft
+        mainShape.Top = panelTop
+        mainShape.Width = panelW
+        mainShape.Height = panelH
+        mainShape.Fill.Visible = msoTrue
+        mainShape.Fill.ForeColor.RGB = ResolveSurfaceFill(themeValue)
+        mainShape.Line.Visible = msoTrue
+        mainShape.Line.ForeColor.RGB = themeValue.BorderColor
+        mainShape.Line.Weight = 1
+        mainShape.Visible = BoolToMso(mVisible)
 
-    Set rightPanel = EnsurePartShape(hostSheet, "rp", msoShapeRoundedRectangle)
-    On Error Resume Next
-    rightPanel.Adjustments(1) = 0.08
-    On Error GoTo 0
-    rightPanel.Left = rightX
-    rightPanel.Top = panelTop
-    rightPanel.Width = panelW
-    rightPanel.Height = panelH
-    rightPanel.Fill.Visible = msoTrue
-    rightPanel.Fill.ForeColor.RGB = ResolveSurfaceFill(themeValue)
-    rightPanel.Line.Visible = msoTrue
-    rightPanel.Line.ForeColor.RGB = themeValue.BorderColor
-    rightPanel.Line.Weight = 1
-    rightPanel.Visible = BoolToMso(mVisible)
-    rightPanel.OnAction = mAppliedOnAction
+        Set rightPanel = EnsurePartShape(hostSheet, "rp", msoShapeRoundedRectangle)
+        On Error Resume Next
+        rightPanel.Adjustments(1) = 0.08
+        On Error GoTo 0
+        rightPanel.Left = rightX
+        rightPanel.Top = panelTop
+        rightPanel.Width = panelW
+        rightPanel.Height = panelH
+        rightPanel.Fill.Visible = msoTrue
+        rightPanel.Fill.ForeColor.RGB = ResolveSurfaceFill(themeValue)
+        rightPanel.Line.Visible = msoTrue
+        rightPanel.Line.ForeColor.RGB = themeValue.BorderColor
+        rightPanel.Line.Weight = 1
+        rightPanel.Visible = BoolToMso(mVisible)
+        rightPanel.OnAction = mAppliedOnAction
 
-    Set headerShape = EnsurePartShape(hostSheet, "hl", msoShapeRectangle)
-    headerShape.Left = mLeft
-    headerShape.Top = mTop - 1
-    headerShape.Width = panelW
-    headerShape.Height = HEADER_H
-    StyleCaptionPart headerShape, _
+        btnTop = panelTop + (panelH - (4 * BTN_H + 3 * PANEL_GAP)) / 2
+        If btnTop < panelTop Then btnTop = panelTop
+        ApplyTransferButton hostSheet, themeValue, "mvr", ">", _
+            btnX, btnTop, BTN_W, BTN_H
+        ApplyTransferButton hostSheet, themeValue, "mvar", ">>", _
+            btnX, btnTop + (BTN_H + PANEL_GAP), BTN_W, BTN_H
+        ApplyTransferButton hostSheet, themeValue, "mvl", "<", _
+            btnX, btnTop + 2 * (BTN_H + PANEL_GAP), BTN_W, BTN_H
+        ApplyTransferButton hostSheet, themeValue, "mval", "<<", _
+            btnX, btnTop + 3 * (BTN_H + PANEL_GAP), BTN_W, BTN_H
+    End If
+
+    ApplyTransferHeader hostSheet, themeValue, "hl", mLeft, panelW, HEADER_H, _
         IIf(LenB(mCaptionLeft) > 0, mCaptionLeft, "Available") & _
-        " (" & mItems.Count & ")", themeValue
-    headerShape.Visible = BoolToMso(mVisible)
-
-    Set headerShape = EnsurePartShape(hostSheet, "hr", msoShapeRectangle)
-    headerShape.Left = rightX
-    headerShape.Top = mTop - 1
-    headerShape.Width = panelW
-    headerShape.Height = HEADER_H
-    StyleCaptionPart headerShape, _
+        " (" & mItems.Count & ")", mAppliedHeaderLeftSig
+    ApplyTransferHeader hostSheet, themeValue, "hr", rightX, panelW, HEADER_H, _
         IIf(LenB(mCaptionRight) > 0, mCaptionRight, "Selected") & _
-        " (" & mChosenItems.Count & ")", themeValue
-    headerShape.Visible = BoolToMso(mVisible)
-
-    btnTop = panelTop + (panelH - (4 * BTN_H + 3 * PANEL_GAP)) / 2
-    If btnTop < panelTop Then btnTop = panelTop
-    ApplyTransferButton hostSheet, themeValue, "mvr", ">", _
-        btnX, btnTop, BTN_W, BTN_H
-    ApplyTransferButton hostSheet, themeValue, "mvar", ">>", _
-        btnX, btnTop + (BTN_H + PANEL_GAP), BTN_W, BTN_H
-    ApplyTransferButton hostSheet, themeValue, "mvl", "<", _
-        btnX, btnTop + 2 * (BTN_H + PANEL_GAP), BTN_W, BTN_H
-    ApplyTransferButton hostSheet, themeValue, "mval", "<<", _
-        btnX, btnTop + 3 * (BTN_H + PANEL_GAP), BTN_W, BTN_H
-
+        " (" & mChosenItems.Count & ")", mAppliedHeaderRightSig
     SyncTransferRows hostSheet, themeValue, mItems, "al", _
         mLeft, panelTop, panelW, panelH, mSelLeft, mLeftOffset, _
-        mAppliedLeftRows
+        mAppliedLeftRows, mAppliedLeftRowStates
     SyncTransferRows hostSheet, themeValue, mChosenItems, "cl", _
         rightX, panelTop, panelW, panelH, mSelRight, mRightOffset, _
-        mAppliedRightRows
+        mAppliedRightRows, mAppliedRightRowStates
     ApplyTransferScroller hostSheet, themeValue, "alu", "ald", _
-        mLeft, panelTop, panelW, panelH, mItems.Count
+        mLeft, panelTop, panelW, panelH, mItems.Count, mAppliedScrollLeftSig
     ApplyTransferScroller hostSheet, themeValue, "clu", "cld", _
-        rightX, panelTop, panelW, panelH, mChosenItems.Count
+        rightX, panelTop, panelW, panelH, mChosenItems.Count, _
+        mAppliedScrollRightSig
+End Sub
+
+' A panel's counted header, rewritten only when its text or the layout
+' changes.
+Private Sub ApplyTransferHeader( _
+    ByVal hostSheet As Worksheet, _
+    ByVal themeValue As ReDimUI, _
+    ByVal partName As String, _
+    ByVal headerLeft As Double, _
+    ByVal headerWidth As Double, _
+    ByVal headerHeight As Double, _
+    ByVal headerText As String, _
+    ByRef appliedKey As String _
+)
+    Dim headerShape As Shape
+    Dim headerKey As String
+
+    headerKey = PartsState(themeValue) & ":" & headerText
+    If headerKey = appliedKey Then Exit Sub
+    appliedKey = headerKey
+    Set headerShape = EnsurePartShape(hostSheet, partName, msoShapeRectangle)
+    headerShape.Left = headerLeft
+    headerShape.Top = mTop - 1
+    headerShape.Width = headerWidth
+    headerShape.Height = headerHeight
+    StyleCaptionPart headerShape, headerText, themeValue
+    headerShape.Visible = BoolToMso(mVisible)
 End Sub
 
 ' Small paging arrows on a panel's right edge, shown only when the list
-' outgrows the panel.
+' outgrows the panel. appliedKey follows SyncListPager's convention:
+' empty when absent, "?" when unknown after Render.
 Private Sub ApplyTransferScroller( _
     ByVal hostSheet As Worksheet, _
     ByVal themeValue As ReDimUI, _
@@ -4909,11 +5215,19 @@ Private Sub ApplyTransferScroller( _
     ByVal panelTop As Double, _
     ByVal panelW As Double, _
     ByVal panelH As Double, _
-    ByVal itemTotal As Long _
+    ByVal itemTotal As Long, _
+    ByRef appliedKey As String _
 )
     Dim scrollButton As Shape
+    Dim scrollKey As String
+    Dim firstDraw As Boolean
 
     If itemTotal > TransferRowCapacity() And mVisible Then
+        scrollKey = PartsState(themeValue) & ":" & CStr(panelX) & ":" & _
+            CStr(panelTop) & ":" & CStr(panelW) & ":" & CStr(panelH)
+        If scrollKey = appliedKey Then Exit Sub
+        firstDraw = (LenB(appliedKey) = 0 Or appliedKey = "?")
+        appliedKey = scrollKey
         Set scrollButton = EnsurePartShape( _
             hostSheet, upPart, msoShapeRoundedRectangle)
         scrollButton.Left = panelX + panelW - 17
@@ -4926,7 +5240,7 @@ Private Sub ApplyTransferScroller( _
             ResolveDrawnInk(themeValue), 7, themeValue
         scrollButton.Visible = msoTrue
         scrollButton.OnAction = mAppliedOnAction
-        scrollButton.ZOrder msoBringToFront
+        If firstDraw Then scrollButton.ZOrder msoBringToFront
         Set scrollButton = EnsurePartShape( _
             hostSheet, downPart, msoShapeRoundedRectangle)
         scrollButton.Left = panelX + panelW - 17
@@ -4939,8 +5253,9 @@ Private Sub ApplyTransferScroller( _
             ResolveDrawnInk(themeValue), 7, themeValue
         scrollButton.Visible = msoTrue
         scrollButton.OnAction = mAppliedOnAction
-        scrollButton.ZOrder msoBringToFront
-    Else
+        If firstDraw Then scrollButton.ZOrder msoBringToFront
+    ElseIf LenB(appliedKey) > 0 Then
+        appliedKey = vbNullString
         On Error Resume Next
         hostSheet.Shapes(ShapeName & PART_SEPARATOR & upPart).Delete
         hostSheet.Shapes(ShapeName & PART_SEPARATOR & downPart).Delete
@@ -4977,6 +5292,10 @@ Private Sub ApplyTransferButton( _
     moveButton.OnAction = mAppliedOnAction
 End Sub
 
+' One panel's window of rows. Each row keeps the state it was last drawn
+' with, so selecting a row or paging rewrites only rows that changed; a
+' row whose frame held rewrites only its fill, text, and ink, and a row
+' is brought to the front only when first drawn.
 Private Sub SyncTransferRows( _
     ByVal hostSheet As Worksheet, _
     ByVal themeValue As ReDimUI, _
@@ -4988,7 +5307,8 @@ Private Sub SyncTransferRows( _
     ByVal panelH As Double, _
     ByVal selectionSet As Collection, _
     ByVal scrollOffset As Long, _
-    ByRef appliedRows As Long _
+    ByRef appliedRows As Long, _
+    ByRef rowStates() As String _
 )
     Const ROW_H As Double = 20
     Dim rowShape As Shape
@@ -4997,7 +5317,13 @@ Private Sub SyncTransferRows( _
     Dim itemIndex As Long
     Dim rowWidth As Double
     Dim resolvedSize As Double
-    Dim rowSelected As Boolean
+    Dim rowKey As String
+    Dim priorKey As String
+    Dim rowText As String
+    Dim rowFill As Long
+    Dim rowInk As Long
+    Dim partCreated As Boolean
+    Dim layoutKey As String
 
     wanted = itemsRef.Count - scrollOffset
     If wanted > Int((panelH - 6) / ROW_H) Then
@@ -5012,46 +5338,65 @@ Private Sub SyncTransferRows( _
     End If
     resolvedSize = mFontSize
     If resolvedSize <= 0 Then resolvedSize = themeValue.BaseFontSize
+    layoutKey = PartsState(themeValue) & ":" & CStr(panelX) & ":" & _
+        CStr(panelTop) & ":" & CStr(rowWidth)
+    EnsureRowStates rowStates, wanted
     For idx = 1 To wanted
         itemIndex = scrollOffset + idx
-        rowSelected = TransferSelectionHas(selectionSet, itemIndex)
-        Set rowShape = EnsurePartShape( _
-            hostSheet, partPrefix & idx, msoShapeRectangle)
-        rowShape.Left = panelX + 3
-        rowShape.Top = panelTop + 3 + (idx - 1) * ROW_H
-        rowShape.Width = rowWidth
-        rowShape.Height = ROW_H
-        rowShape.Fill.Visible = msoTrue
-        If rowSelected Then
-            rowShape.Fill.ForeColor.RGB = themeValue.PrimaryColor
+        If TransferSelectionHas(selectionSet, itemIndex) Then
+            rowFill = themeValue.PrimaryColor
+            rowInk = themeValue.OnPrimaryColor
         Else
-            rowShape.Fill.ForeColor.RGB = ResolveSurfaceFill(themeValue)
+            rowFill = ResolveSurfaceFill(themeValue)
+            rowInk = themeValue.OnSurfaceColor
         End If
-        With rowShape.TextFrame2
-            .MarginLeft = 6
-            .MarginRight = 4
-            .MarginTop = 1
-            .MarginBottom = 1
-            .VerticalAnchor = msoAnchorMiddle
-            .WordWrap = msoFalse
-            .TextRange.Text = CStr(itemsRef.Item(itemIndex))
-            .TextRange.ParagraphFormat.Alignment = msoAlignLeft
-            With .TextRange.Font
-                .Name = themeValue.FontName
-                .Size = resolvedSize
-                .Bold = msoFalse
-                If rowSelected Then
-                    .Fill.ForeColor.RGB = themeValue.OnPrimaryColor
-                Else
-                    .Fill.ForeColor.RGB = themeValue.OnSurfaceColor
-                End If
-            End With
-        End With
-        rowShape.Visible = msoTrue
-        rowShape.OnAction = mAppliedOnAction
-        rowShape.ZOrder msoBringToFront
+        rowText = CStr(itemsRef.Item(itemIndex))
+        rowKey = layoutKey & Chr$(1) & CStr(rowFill) & ":" & _
+            CStr(rowInk) & ":" & rowText
+        priorKey = rowStates(idx)
+        If rowKey <> priorKey Then
+            rowStates(idx) = rowKey
+            Set rowShape = EnsurePartShape( _
+                hostSheet, partPrefix & idx, msoShapeRectangle, partCreated)
+            If KeyFrame(priorKey) = layoutKey And Not partCreated Then
+                ' Same frame: only the fill, the text, and the ink move.
+                rowShape.Fill.ForeColor.RGB = rowFill
+                With rowShape.TextFrame2.TextRange
+                    .Text = rowText
+                    .Font.Fill.ForeColor.RGB = rowInk
+                End With
+            Else
+                rowShape.Left = panelX + 3
+                rowShape.Top = panelTop + 3 + (idx - 1) * ROW_H
+                rowShape.Width = rowWidth
+                rowShape.Height = ROW_H
+                rowShape.Fill.Visible = msoTrue
+                rowShape.Fill.ForeColor.RGB = rowFill
+                With rowShape.TextFrame2
+                    .MarginLeft = 6
+                    .MarginRight = 4
+                    .MarginTop = 1
+                    .MarginBottom = 1
+                    .VerticalAnchor = msoAnchorMiddle
+                    .WordWrap = msoFalse
+                    .TextRange.Text = rowText
+                    .TextRange.ParagraphFormat.Alignment = msoAlignLeft
+                    With .TextRange.Font
+                        .Name = themeValue.FontName
+                        .Size = resolvedSize
+                        .Bold = msoFalse
+                        .Fill.ForeColor.RGB = rowInk
+                    End With
+                End With
+                rowShape.Visible = msoTrue
+                rowShape.OnAction = mAppliedOnAction
+                If LenB(priorKey) = 0 Then rowShape.ZOrder msoBringToFront
+            End If
+        End If
     Next idx
+    EnsureRowStates rowStates, appliedRows
     For idx = wanted + 1 To appliedRows
+        rowStates(idx) = vbNullString
         On Error Resume Next
         hostSheet.Shapes( _
             ShapeName & PART_SEPARATOR & partPrefix & idx).Delete
@@ -5064,19 +5409,30 @@ Private Sub ApplySelectParts( _
     ByVal hostSheet As Worksheet, _
     ByVal themeValue As ReDimUI _
 )
+    ApplyListCaret hostSheet, themeValue, 14
+    SyncDropList hostSheet, themeValue
+End Sub
+
+' The drop-down caret at the face's right edge, shared by the SelectBox
+' and the ComboBox.
+Private Sub ApplyListCaret( _
+    ByVal hostSheet As Worksheet, _
+    ByVal themeValue As ReDimUI, _
+    ByVal rightInset As Double _
+)
     Dim caret As Shape
 
+    If ExtrasCurrent(PartsState(themeValue)) Then Exit Sub
     Set caret = EnsurePartShape(hostSheet, "caret", msoShapeIsoscelesTriangle)
     caret.Width = 8
     caret.Height = 5
-    caret.Left = mLeft + mWidth - 14
+    caret.Left = mLeft + mWidth - rightInset
     caret.Top = mTop + (mHeight - 5) / 2
     caret.Rotation = 180
     caret.Fill.Visible = msoTrue
     caret.Fill.ForeColor.RGB = themeValue.OnMutedColor
     caret.Visible = BoolToMso(mVisible)
     caret.OnAction = mAppliedOnAction
-    SyncDropList hostSheet, themeValue
 End Sub
 
 ' Slim centered track, accent fill up to the value, and a round thumb.
@@ -5092,6 +5448,8 @@ Private Sub ApplySlideBar( _
     Dim thumbSize As Double
 
     fraction = SlideFraction()
+    If ExtrasCurrent(PartsState(themeValue) & ":" & CStr(fraction) & _
+        ":" & CStr(mSlideTracking)) Then Exit Sub
     trackTop = mTop + (mHeight - 6) / 2
     mainShape.Left = mLeft
     mainShape.Top = trackTop
@@ -5449,18 +5807,7 @@ Private Sub ApplyComboParts( _
     ByVal hostSheet As Worksheet, _
     ByVal themeValue As ReDimUI _
 )
-    Dim caret As Shape
-
-    Set caret = EnsurePartShape(hostSheet, "caret", msoShapeIsoscelesTriangle)
-    caret.Width = 8
-    caret.Height = 5
-    caret.Left = mLeft + mWidth - 12
-    caret.Top = mTop + (mHeight - 5) / 2
-    caret.Rotation = 180
-    caret.Fill.Visible = msoTrue
-    caret.Fill.ForeColor.RGB = themeValue.OnMutedColor
-    caret.Visible = BoolToMso(mVisible)
-    caret.OnAction = mAppliedOnAction
+    ApplyListCaret hostSheet, themeValue, 12
     SyncDropList hostSheet, themeValue
 End Sub
 
@@ -5468,7 +5815,10 @@ End Sub
 ' rows from mListOffset, with a clickable pager row at each edge that has
 ' items beyond it. Rows map back to item indexes through mListMatches.
 ' The combo's keyboard highlight paints in the accent, the current item
-' in the muted fill.
+' in the muted fill. Each window row keeps the state it was last drawn
+' with, so an arrow key that moves the highlight rewrites two rows, not
+' the window; a row whose frame held rewrites only its fill, text, and
+' ink, and a row is brought to the front only when first drawn.
 Private Sub SyncDropList( _
     ByVal hostSheet As Worksheet, _
     ByVal themeValue As ReDimUI _
@@ -5484,19 +5834,32 @@ Private Sub SyncDropList( _
     Dim rowShift As Long
     Dim matchIndex As Long
     Dim rowPitch As Double
+    Dim rowTop As Double
+    Dim rowFill As Long
+    Dim rowInk As Long
+    Dim rowKey As String
+    Dim rowFrame As String
+    Dim priorKey As String
+    Dim partCreated As Boolean
+    Dim listSig As String
 
-    Set mListMatches = BuildListMatches(hostSheet)
-    matchTotal = mListMatches.Count
-    If mListOffset > matchTotal - mListRows Then
-        mListOffset = matchTotal - mListRows
-    End If
-    If mListOffset < 0 Then mListOffset = 0
-    If mListHighlight > matchTotal Then mListHighlight = 0
-    If mSelectOpen And mVisible Then
-        wanted = matchTotal - mListOffset
-        If wanted > mListRows Then wanted = mListRows
-        aboveCount = mListOffset
-        belowCount = matchTotal - mListOffset - wanted
+    ' A closed list draws nothing, so it skips the match walk: an item
+    ' change on a closed long list would otherwise rebuild every match.
+    ' Every path that opens the list sets its window and highlight.
+    If mSelectOpen Then
+        Set mListMatches = BuildListMatches(hostSheet)
+        matchTotal = mListMatches.Count
+        If mListOffset > matchTotal - mListRows Then
+            mListOffset = matchTotal - mListRows
+        End If
+        If mListOffset < 0 Then mListOffset = 0
+        If mListHighlight > matchTotal Then mListHighlight = 0
+        If mVisible Then
+            wanted = matchTotal - mListOffset
+            If wanted > mListRows Then wanted = mListRows
+            aboveCount = mListOffset
+            belowCount = matchTotal - mListOffset - wanted
+        End If
     End If
     If aboveCount > 0 Then rowShift = 1
     rowPitch = DropRowPitch()
@@ -5505,7 +5868,6 @@ Private Sub SyncDropList( _
     ' Keystrokes and repaints that leave the visible list identical (same
     ' window, rows, highlight, selection, geometry, and theme) skip the
     ' shape work entirely.
-    Dim listSig As String
     listSig = CStr(ObjPtr(themeValue)) & ":" & CStr(wanted) & ":" & _
         CStr(mValue) & ":" & CStr(mListOffset) & ":" & _
         CStr(mListHighlight) & ":" & CStr(aboveCount) & ":" & _
@@ -5517,53 +5879,80 @@ Private Sub SyncDropList( _
     Next idx
     If mAppliedValid And listSig = mAppliedListSig Then Exit Sub
     mAppliedListSig = listSig
+    If Not mAppliedValid Then
+        ' The 0.17.0 inert indicator row is superseded by the pagers.
+        On Error Resume Next
+        hostSheet.Shapes(ShapeName & PART_SEPARATOR & "optm").Delete
+        On Error GoTo 0
+    End If
     SyncListPager hostSheet, themeValue, "optu", ChrW(9650), _
-        aboveCount, mTop + mHeight, resolvedSize
+        aboveCount, mTop + mHeight, resolvedSize, mAppliedPagerUpSig
+    EnsureRowStates mAppliedRowStates, wanted
     For idx = 1 To wanted
         matchIndex = mListOffset + idx
         itemIndex = CLng(mListMatches.Item(matchIndex))
-        Set optionShape = EnsurePartShape( _
-            hostSheet, "opt" & idx, msoShapeRectangle)
-        optionShape.Left = mLeft
-        optionShape.Top = mTop + mHeight + (rowShift + idx - 1) * rowPitch
-        optionShape.Width = mWidth
-        optionShape.Height = rowPitch
-        optionShape.Fill.Visible = msoTrue
+        rowTop = mTop + mHeight + (rowShift + idx - 1) * rowPitch
         If matchIndex = mListHighlight Then
-            optionShape.Fill.ForeColor.RGB = themeValue.PrimaryColor
+            rowFill = themeValue.PrimaryColor
+            rowInk = themeValue.OnPrimaryColor
         ElseIf itemIndex = CLng(mValue) Then
-            optionShape.Fill.ForeColor.RGB = themeValue.MutedColor
+            rowFill = themeValue.MutedColor
+            rowInk = themeValue.OnSurfaceColor
         Else
-            optionShape.Fill.ForeColor.RGB = themeValue.SurfaceColor
+            rowFill = themeValue.SurfaceColor
+            rowInk = themeValue.OnSurfaceColor
         End If
-        optionShape.Line.Visible = msoTrue
-        optionShape.Line.ForeColor.RGB = themeValue.BorderColor
-        optionShape.Line.Weight = 1
-        With optionShape.TextFrame2
-            .MarginLeft = 6
-            .MarginRight = 6
-            .MarginTop = 2
-            .MarginBottom = 2
-            .VerticalAnchor = msoAnchorMiddle
-            .WordWrap = msoFalse
-            .TextRange.Text = ItemAt(itemIndex)
-            .TextRange.ParagraphFormat.Alignment = msoAlignLeft
-            With .TextRange.Font
-                .Name = themeValue.FontName
-                .Size = resolvedSize
-                .Bold = msoFalse
-                If matchIndex = mListHighlight Then
-                    .Fill.ForeColor.RGB = themeValue.OnPrimaryColor
-                Else
-                    .Fill.ForeColor.RGB = themeValue.OnSurfaceColor
-                End If
-            End With
-        End With
-        optionShape.Visible = msoTrue
-        optionShape.OnAction = mAppliedOnAction
-        optionShape.ZOrder msoBringToFront
+        rowFrame = PartsState(themeValue) & ":" & CStr(rowTop) & ":" & _
+            CStr(rowPitch) & ":" & CStr(resolvedSize)
+        rowKey = rowFrame & Chr$(1) & CStr(rowFill) & ":" & _
+            CStr(rowInk) & ":" & ItemAt(itemIndex)
+        priorKey = mAppliedRowStates(idx)
+        If rowKey <> priorKey Then
+            mAppliedRowStates(idx) = rowKey
+            Set optionShape = EnsurePartShape( _
+                hostSheet, "opt" & idx, msoShapeRectangle, partCreated)
+            If KeyFrame(priorKey) = rowFrame And Not partCreated Then
+                ' Same frame: only the fill, the text, and the ink move.
+                optionShape.Fill.ForeColor.RGB = rowFill
+                With optionShape.TextFrame2.TextRange
+                    .Text = ItemAt(itemIndex)
+                    .Font.Fill.ForeColor.RGB = rowInk
+                End With
+            Else
+                optionShape.Left = mLeft
+                optionShape.Top = rowTop
+                optionShape.Width = mWidth
+                optionShape.Height = rowPitch
+                optionShape.Fill.Visible = msoTrue
+                optionShape.Fill.ForeColor.RGB = rowFill
+                optionShape.Line.Visible = msoTrue
+                optionShape.Line.ForeColor.RGB = themeValue.BorderColor
+                optionShape.Line.Weight = 1
+                With optionShape.TextFrame2
+                    .MarginLeft = 6
+                    .MarginRight = 6
+                    .MarginTop = 2
+                    .MarginBottom = 2
+                    .VerticalAnchor = msoAnchorMiddle
+                    .WordWrap = msoFalse
+                    .TextRange.Text = ItemAt(itemIndex)
+                    .TextRange.ParagraphFormat.Alignment = msoAlignLeft
+                    With .TextRange.Font
+                        .Name = themeValue.FontName
+                        .Size = resolvedSize
+                        .Bold = msoFalse
+                        .Fill.ForeColor.RGB = rowInk
+                    End With
+                End With
+                optionShape.Visible = msoTrue
+                optionShape.OnAction = mAppliedOnAction
+                If LenB(priorKey) = 0 Then optionShape.ZOrder msoBringToFront
+            End If
+        End If
     Next idx
+    EnsureRowStates mAppliedRowStates, mAppliedOptionCount
     For idx = wanted + 1 To mAppliedOptionCount
+        mAppliedRowStates(idx) = vbNullString
         On Error Resume Next
         hostSheet.Shapes(ShapeName & PART_SEPARATOR & "opt" & idx).Delete
         On Error GoTo 0
@@ -5571,11 +5960,34 @@ Private Sub SyncDropList( _
     mAppliedOptionCount = wanted
     SyncListPager hostSheet, themeValue, "optd", ChrW(9660), _
         belowCount, mTop + mHeight + (rowShift + wanted) * rowPitch, _
-        resolvedSize
-    ' The 0.17.0 inert indicator row is superseded by the pagers.
+        resolvedSize, mAppliedPagerDownSig
+End Sub
+
+' The frame half of a stored row key (frame & Chr$(1) & content): when a
+' row's new frame matches, only its content needs writing.
+Private Function KeyFrame(ByVal storedKey As String) As String
+    Dim splitAt As Long
+
+    splitAt = InStr(1, storedKey, Chr$(1))
+    If splitAt > 0 Then KeyFrame = Left$(storedKey, splitAt - 1)
+End Function
+
+' Grows a row-state array to hold at least rowsNeeded rows, keeping what
+' it holds; an erased or never-sized array starts empty.
+Private Sub EnsureRowStates(ByRef rowStates() As String, ByVal rowsNeeded As Long)
+    Dim rowsHeld As Long
+
+    If rowsNeeded < 1 Then Exit Sub
     On Error Resume Next
-    hostSheet.Shapes(ShapeName & PART_SEPARATOR & "optm").Delete
+    rowsHeld = UBound(rowStates)
+    Err.Clear
     On Error GoTo 0
+    If rowsHeld >= rowsNeeded Then Exit Sub
+    If rowsHeld = 0 Then
+        ReDim rowStates(1 To rowsNeeded)
+    Else
+        ReDim Preserve rowStates(1 To rowsNeeded)
+    End If
 End Sub
 
 ' A SelectBox row is exactly the face height; a combo row runs two
@@ -5622,6 +6034,14 @@ Private Function BuildListMatches(ByVal hostSheet As Worksheet) As Collection
             If ExactItemMatch(filterText) > 0 Then filterText = vbNullString
         End If
     End If
+    ' Matches are cached per filter text; any item change drops them.
+    If Not mListMatches Is Nothing Then
+        If filterText = mListMatchesFilter Then
+            Set BuildListMatches = mListMatches
+            Exit Function
+        End If
+    End If
+    mListMatchesFilter = filterText
     Set BuildListMatches = FilterItems(filterText)
 End Function
 
@@ -5687,7 +6107,9 @@ End Function
 
 ' A clickable paging row at a list edge: the arrow plus the count of
 ' items beyond that edge. Clicking pages the window; absent when nothing
-' lies beyond.
+' lies beyond. appliedKey holds the state it was last drawn with: empty
+' when absent, "?" when unknown after Render, which forces one redraw or
+' one delete.
 Private Sub SyncListPager( _
     ByVal hostSheet As Worksheet, _
     ByVal themeValue As ReDimUI, _
@@ -5695,11 +6117,19 @@ Private Sub SyncListPager( _
     ByVal arrowGlyph As String, _
     ByVal beyondCount As Long, _
     ByVal rowTop As Double, _
-    ByVal resolvedSize As Double _
+    ByVal resolvedSize As Double, _
+    ByRef appliedKey As String _
 )
     Dim pagerShape As Shape
+    Dim pagerKey As String
+    Dim firstDraw As Boolean
 
     If beyondCount > 0 Then
+        pagerKey = PartsState(themeValue) & ":" & CStr(rowTop) & ":" & _
+            CStr(beyondCount) & ":" & CStr(resolvedSize)
+        If pagerKey = appliedKey Then Exit Sub
+        firstDraw = (LenB(appliedKey) = 0 Or appliedKey = "?")
+        appliedKey = pagerKey
         Set pagerShape = EnsurePartShape( _
             hostSheet, partName, msoShapeRectangle)
         pagerShape.Left = mLeft
@@ -5716,8 +6146,9 @@ Private Sub SyncListPager( _
             resolvedSize - 1, themeValue
         pagerShape.Visible = msoTrue
         pagerShape.OnAction = mAppliedOnAction
-        pagerShape.ZOrder msoBringToFront
-    Else
+        If firstDraw Then pagerShape.ZOrder msoBringToFront
+    ElseIf LenB(appliedKey) > 0 Then
+        appliedKey = vbNullString
         On Error Resume Next
         hostSheet.Shapes(ShapeName & PART_SEPARATOR & partName).Delete
         On Error GoTo 0
@@ -6063,23 +6494,29 @@ Private Function FilterItems(ByVal filterText As String) As Collection
 
     Set FilterItems = New Collection
     If mItems Is Nothing Then Exit Function
-    For idx = 1 To mItems.Count
-        If LenB(filterText) = 0 Then
+    If mItems.Count = 0 Then Exit Function
+    EnsureItemTexts
+    If LenB(filterText) = 0 Then
+        For idx = 1 To mItems.Count
             FilterItems.Add idx
-        ElseIf InStr(1, CStr(mItems.Item(idx)), filterText, _
-            vbTextCompare) > 0 Then
-            FilterItems.Add idx
-        End If
-    Next idx
+        Next idx
+    Else
+        For idx = 1 To mItems.Count
+            If InStr(1, mItemTexts(idx), filterText, vbTextCompare) > 0 Then
+                FilterItems.Add idx
+            End If
+        Next idx
+    End If
 End Function
 
 Private Function ExactItemMatch(ByVal candidate As String) As Long
     Dim idx As Long
 
     If mItems Is Nothing Then Exit Function
+    If mItems.Count = 0 Then Exit Function
+    EnsureItemTexts
     For idx = 1 To mItems.Count
-        If StrComp(CStr(mItems.Item(idx)), candidate, _
-            vbTextCompare) = 0 Then
+        If StrComp(mItemTexts(idx), candidate, vbTextCompare) = 0 Then
             ExactItemMatch = idx
             Exit Function
         End If
@@ -6164,30 +6601,68 @@ Friend Sub UnlockInputCell(ByVal hostSheet As Worksheet)
 End Sub
 
 Friend Sub DeleteOwnShapes(ByVal hostSheet As Worksheet)
-    Dim idx As Long
-    Dim optionCount As Long
-
-    optionCount = mAppliedOptionCount
-    If Not mItems Is Nothing Then
-        If mItems.Count > optionCount Then optionCount = mItems.Count
+    ' Kinds drawn as a single shape delete it by name. Composite kinds
+    ' delete the main shape and every part by prefix in one pass, where
+    ' guessing each part name cost a failed lookup per guess.
+    If HasParts() Then
+        DeleteShapesNamed hostSheet, ShapeName & PART_SEPARATOR, ShapeName
+    Else
+        On Error Resume Next
+        hostSheet.Shapes(ShapeName).Delete
+        On Error GoTo 0
     End If
+    mAppliedOptionCount = 0
+    ForgetPartSignatures
+End Sub
+
+Private Function HasParts() As Boolean
+    Select Case mKind
+        Case KIND_BUTTON, KIND_LABEL, KIND_CARD, KIND_SPINNER, _
+            KIND_TOAST, KIND_OVERLAY, KIND_IMAGE
+            HasParts = False
+        Case KIND_INPUT
+            HasParts = False
+        Case Else
+            HasParts = True
+    End Select
+End Function
+
+' Deletes every shape on the sheet whose name starts with namePrefix, or
+' equals exactName when one is given, through one ShapeRange call; a
+' shape that refuses falls back to a delete of its own.
+Private Sub DeleteShapesNamed( _
+    ByVal hostSheet As Worksheet, _
+    ByVal namePrefix As String, _
+    ByVal exactName As String _
+)
+    Dim candidateShape As Shape
+    Dim doomedNames() As String
+    Dim doomedCount As Long
+    Dim idx As Long
+    Dim shapeLabel As String
+
+    If hostSheet.Shapes.Count = 0 Then Exit Sub
+    ReDim doomedNames(1 To hostSheet.Shapes.Count)
+    For Each candidateShape In hostSheet.Shapes
+        shapeLabel = candidateShape.Name
+        If Left$(shapeLabel, Len(namePrefix)) = namePrefix _
+            Or (LenB(exactName) > 0 And shapeLabel = exactName) Then
+            doomedCount = doomedCount + 1
+            doomedNames(doomedCount) = shapeLabel
+        End If
+    Next candidateShape
+    If doomedCount = 0 Then Exit Sub
+    ReDim Preserve doomedNames(1 To doomedCount)
     On Error Resume Next
-    hostSheet.Shapes(ShapeName).Delete
-    hostSheet.Shapes(ShapeName & PART_SEPARATOR & "knob").Delete
-    hostSheet.Shapes(ShapeName & PART_SEPARATOR & "fill").Delete
-    hostSheet.Shapes(ShapeName & PART_SEPARATOR & "lbl").Delete
-    hostSheet.Shapes(ShapeName & PART_SEPARATOR & "caret").Delete
-    hostSheet.Shapes(ShapeName & PART_SEPARATOR & "minus").Delete
-    hostSheet.Shapes(ShapeName & PART_SEPARATOR & "plus").Delete
-    hostSheet.Shapes(ShapeName & PART_SEPARATOR & "thumb").Delete
-    hostSheet.Shapes(ShapeName & PART_SEPARATOR & "optu").Delete
-    hostSheet.Shapes(ShapeName & PART_SEPARATOR & "optd").Delete
-    For idx = 1 To optionCount
-        hostSheet.Shapes(ShapeName & PART_SEPARATOR & "opt" & idx).Delete
-        hostSheet.Shapes(ShapeName & PART_SEPARATOR & "c" & idx).Delete
-        hostSheet.Shapes(ShapeName & PART_SEPARATOR & "d" & idx).Delete
-        hostSheet.Shapes(ShapeName & PART_SEPARATOR & "t" & idx).Delete
-    Next idx
+    Err.Clear
+    hostSheet.Shapes.Range(doomedNames).Delete
+    If Err.Number <> 0 Then
+        Err.Clear
+        For idx = 1 To doomedCount
+            hostSheet.Shapes(doomedNames(idx)).Delete
+        Next idx
+    End If
+    Err.Clear
     On Error GoTo 0
 End Sub
 

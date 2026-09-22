@@ -141,6 +141,15 @@ def test_navigation(run_core):
     assert facts["goneRefused"] == "True"
     assert facts["staleTabPruned"] == "True"
     assert facts["liveTabsRemain"] == "True"
+    assert facts["shutdownClearsActive"] == "True", (
+        "Shutdown must forget the active window with the apps"
+    )
+    assert facts["rebuildAfterShutdown"] == "True", (
+        "a NavBar built after Shutdown must not tab to unmounted windows"
+    )
+    assert facts["backStackCleared"] == "True", (
+        "Shutdown must empty the back stack"
+    )
 
 
 def test_protect_surface(run_core):

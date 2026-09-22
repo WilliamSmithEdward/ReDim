@@ -68,6 +68,10 @@ Private gTickCount As LongLong
 Private gTimerResolutionRaised As Boolean
 Private gPinCursor As Boolean
 Private gCursorPinned As Boolean
+' True while the typing keys are bound. Binding is eighty OnKey calls,
+' so a focus move between fields keeps them instead of paying a release
+' and a rebind.
+Private gKeysBound As Boolean
 
 ' Keyboard capture target. Application.OnKey can only call a standard
 ' module procedure, so focused text entry routes every character through
@@ -88,6 +92,7 @@ Public Sub RdxBindKeys()
     Dim code As Long
     Dim lower As String
 
+    If gKeysBound Then Exit Sub
     On Error Resume Next
     For code = Asc("A") To Asc("Z")
         lower = LCase$(Chr$(code))
@@ -116,6 +121,7 @@ Public Sub RdxBindKeys()
     Application.OnKey "{TAB}", "'RdxKeyChar ""{TAB}""'"
     Application.OnKey "{ESC}", "'RdxKeyChar ""{ESC}""'"
     On Error GoTo 0
+    gKeysBound = True
 End Sub
 
 ' Panic release: restores every key ReDim may have bound, whether or not
@@ -150,6 +156,7 @@ Public Sub RdxReleaseKeys()
     Application.OnKey "{TAB}"
     Application.OnKey "{ESC}"
     On Error GoTo 0
+    gKeysBound = False
 End Sub
 
 ' Shape.OnAction target for every ReDim component. Application.Caller carries

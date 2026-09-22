@@ -98,6 +98,52 @@
 - Smaller fixes on the same paths: an open drop list repaints its rows
   when the theme changes, and removing a combo or select deletes its
   pager rows instead of leaving them for the next render to sweep.
+- Lists redraw only the rows that changed. Each row keeps the state it
+  was last drawn with, and a row whose place and font held rewrites only
+  its fill, text, and ink. Against 0.19.2, as the fastest of three warm
+  runs on one machine: toggling one row of a 150-row `CheckList` fell
+  from 348 ms to 0.7 ms and its select-all from 352 ms to 39 ms. A
+  `TransferList` row click among 1,000 items fell from 22 ms to 0.3 ms
+  and a page from 28 ms to 1.9 ms. An arrow key in an open 2,000-item
+  combo fell from 10 ms to 2.9 ms. Opening a 2,000-item `SelectBox` took
+  8.3 seconds when it drew every row and takes 14 ms windowed, and a
+  pick from it fell from 547 ms to 3 ms.
+- Tick boxes, radio groups, steppers, toggles, sliders, and drop-list
+  carets skip their part writes when nothing they draw has changed.
+  `Render` still rewrites them, so a part moved or deleted by hand comes
+  back.
+- Item text is read from a snapshot kept beside the items. A VBA
+  `Collection` read by index walks from its start, so filtering,
+  matching, and drawing a long list paid a walk per read. A closed list
+  also no longer rebuilds its matches on every change: adding or
+  removing an item at the front of a closed 2,000-item select fell from
+  about 0.22 ms to 0.04 ms. `ItemsFrom` reads a range one area at a
+  time instead of one cell at a time, and loading 2,000 items fell from
+  3.4 ms to 0.5 ms.
+- The frame pump visits only the controls that tick: spinners, toasts,
+  sliders, and the text fields and combos whose caret blinks. An idle
+  frame over 100 controls fell from 0.26 ms to 0.008 ms. Focus moving
+  from one text field to another keeps the eighty typing keys bound
+  instead of releasing and binding them again.
+- `Unmount` deletes an app's shapes in one pass over the sheet and one
+  batch delete. It used to try every name a part could have, eight per
+  control and four more per item, and each absent part cost a failed
+  lookup. Unmounting 100 controls fell from 86 ms to 4 ms.
+- Rebuilding a surface over its existing shapes takes about half as
+  long for the gallery (100 ms to 45 ms) and ReDex (91 ms to 49 ms). A
+  session's first build runs up to 16 ms slower than in 0.19.2 (the
+  gallery 315 ms to 331 ms). That cost is paid once per session: the
+  same build repeated from empty sheets costs what it did in 0.19.2 or
+  less, ReDex 198 ms to 177 ms.
+- `ReDimUI.Shutdown` forgets window registrations and the back stack
+  along with the apps. A multi-window surface rebuilt after a
+  `Shutdown` in the same session failed in its `NavBar` with "No
+  mounted app is named", because the bar still tabbed to the unmounted
+  windows. The new bench's warm builds found it in Navigator and ReDex.
+- `tools/bench.py` times framework scenarios and each demo's first
+  build, warm build, and rebuild in a live Excel, and compares against
+  a saved run with `--save NAME` and `--compare NAME`. The numbers
+  above come from it.
 
 ## 0.19.2 - 2026-08-02
 

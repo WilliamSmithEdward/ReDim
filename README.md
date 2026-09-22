@@ -120,6 +120,7 @@ python tools/check.py          # pyvbaanalysis static gate, zero findings requir
 python tools/stamp_release.py  # after a version bump: header in every release source
 python tools/build_workbooks.py
 python -m pytest tests/python  # live Excel suite via pyvbaharness
+python tools/bench.py --save before   # timings in live Excel; later runs add --compare before
 ```
 
 The live suite covers mount and adoption, dispatch and guards, bindings, batching, theming, the

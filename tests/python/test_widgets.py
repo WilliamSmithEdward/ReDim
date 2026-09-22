@@ -400,8 +400,15 @@ def test_check_list(run_widgets):
         "select-all from a mixed state must check everything"
     )
     assert facts["masterCheckGlyph"] == "True"
+    assert facts["rowsChecked"] == "True", (
+        "a row whose check changed must read fully checked: accent fill,"
+        " check glyph, and glyph ink"
+    )
     assert facts["noneChecked"] == "True", (
         "select-all from the all state must uncheck everything"
+    )
+    assert facts["rowsCleared"] == "True", (
+        "an unchecked row must read empty: surface fill, no glyph, border"
     )
     assert facts["changeAfterMaster"] == "3", (
         "a bulk toggle fires OnChange once"
@@ -415,6 +422,9 @@ def test_check_list(run_widgets):
     )
     assert facts["removeShift"] == "True", (
         "checks must follow their items through removals"
+    )
+    assert facts["captionSwap"] == "Xray,Zulu", (
+        "new items at the same count must rewrite the captions"
     )
     assert facts["headerOff"] == "True"
 
