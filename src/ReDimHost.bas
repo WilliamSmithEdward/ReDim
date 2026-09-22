@@ -68,9 +68,9 @@ Private gTickCount As LongLong
 Private gTimerResolutionRaised As Boolean
 Private gPinCursor As Boolean
 Private gCursorPinned As Boolean
-' True while the typing keys are bound. Binding is eighty OnKey calls,
-' so a focus move between fields keeps them instead of paying a release
-' and a rebind.
+' True while the captured keys are bound. Binding is some ninety OnKey
+' calls, so focus moving between controls keeps them instead of paying
+' a release and a rebind.
 Private gKeysBound As Boolean
 
 ' Keyboard capture target. Application.OnKey can only call a standard
@@ -86,40 +86,60 @@ Public Sub RdxKeyChar(ByVal keyText As String)
     End If
 End Sub
 
-' Arms character capture for a focused field. Letters bind twice so shift
-' yields capitals; the rest is the practical typing set for search fields.
-Public Sub RdxBindKeys()
+' The keys a focused control captures: OnKey codes paired with the key
+' text RdxKeyChar dispatches. Letters bind twice so Shift yields
+' capitals; then the digits and typing punctuation, and the editing and
+' navigation keys. Binding and release walk this one list, so they can
+' never disagree about what is bound.
+Private Function CapturedKeys() As Collection
+    Dim keyTable As Collection
     Dim code As Long
-    Dim lower As String
+
+    Set keyTable = New Collection
+    For code = Asc("a") To Asc("z")
+        keyTable.Add Array(Chr$(code), Chr$(code))
+        keyTable.Add Array("+" & Chr$(code), UCase$(Chr$(code)))
+    Next code
+    For code = Asc("0") To Asc("9")
+        keyTable.Add Array(Chr$(code), Chr$(code))
+    Next code
+    keyTable.Add Array(" ", " ")
+    keyTable.Add Array("-", "-")
+    keyTable.Add Array(".", ".")
+    keyTable.Add Array(",", ",")
+    keyTable.Add Array("{BS}", "{BS}")
+    keyTable.Add Array("{DEL}", "{DEL}")
+    keyTable.Add Array("{LEFT}", "{LEFT}")
+    keyTable.Add Array("{RIGHT}", "{RIGHT}")
+    keyTable.Add Array("{UP}", "{UP}")
+    keyTable.Add Array("{DOWN}", "{DOWN}")
+    keyTable.Add Array("{HOME}", "{HOME}")
+    keyTable.Add Array("{END}", "{END}")
+    keyTable.Add Array("{PGUP}", "{PGUP}")
+    keyTable.Add Array("{PGDN}", "{PGDN}")
+    keyTable.Add Array("{ENTER}", "{ENTER}")
+    keyTable.Add Array("~", "{ENTER}")
+    keyTable.Add Array("^{ENTER}", "{CTRLENTER}")
+    keyTable.Add Array("^~", "{CTRLENTER}")
+    keyTable.Add Array("{TAB}", "{TAB}")
+    keyTable.Add Array("+{TAB}", "{BACKTAB}")
+    keyTable.Add Array("{ESC}", "{ESC}")
+    keyTable.Add Array("%{DOWN}", "{ALTDOWN}")
+    keyTable.Add Array("%{UP}", "{ALTUP}")
+    keyTable.Add Array("{F4}", "{F4}")
+    Set CapturedKeys = keyTable
+End Function
+
+' Arms capture for a focused control.
+Public Sub RdxBindKeys()
+    Dim binding As Variant
 
     If gKeysBound Then Exit Sub
     On Error Resume Next
-    For code = Asc("A") To Asc("Z")
-        lower = LCase$(Chr$(code))
-        Application.OnKey lower, "'RdxKeyChar """ & lower & """'"
-        Application.OnKey "+" & lower, "'RdxKeyChar """ & Chr$(code) & """'"
-    Next code
-    For code = Asc("0") To Asc("9")
-        Application.OnKey Chr$(code), "'RdxKeyChar """ & Chr$(code) & """'"
-    Next code
-    Application.OnKey " ", "'RdxKeyChar "" ""'"
-    Application.OnKey "-", "'RdxKeyChar ""-""'"
-    Application.OnKey ".", "'RdxKeyChar "".""'"
-    Application.OnKey ",", "'RdxKeyChar "",""'"
-    Application.OnKey "{BS}", "'RdxKeyChar ""{BS}""'"
-    Application.OnKey "{DEL}", "'RdxKeyChar ""{DEL}""'"
-    Application.OnKey "{LEFT}", "'RdxKeyChar ""{LEFT}""'"
-    Application.OnKey "{RIGHT}", "'RdxKeyChar ""{RIGHT}""'"
-    Application.OnKey "{UP}", "'RdxKeyChar ""{UP}""'"
-    Application.OnKey "{DOWN}", "'RdxKeyChar ""{DOWN}""'"
-    Application.OnKey "{HOME}", "'RdxKeyChar ""{HOME}""'"
-    Application.OnKey "{END}", "'RdxKeyChar ""{END}""'"
-    Application.OnKey "{ENTER}", "'RdxKeyChar ""{ENTER}""'"
-    Application.OnKey "~", "'RdxKeyChar ""{ENTER}""'"
-    Application.OnKey "^{ENTER}", "'RdxKeyChar ""{CTRLENTER}""'"
-    Application.OnKey "^~", "'RdxKeyChar ""{CTRLENTER}""'"
-    Application.OnKey "{TAB}", "'RdxKeyChar ""{TAB}""'"
-    Application.OnKey "{ESC}", "'RdxKeyChar ""{ESC}""'"
+    For Each binding In CapturedKeys()
+        Application.OnKey binding(0), _
+            "'RdxKeyChar """ & Replace(binding(1), """", """""") & """'"
+    Next binding
     On Error GoTo 0
     gKeysBound = True
 End Sub
@@ -127,36 +147,26 @@ End Sub
 ' Panic release: restores every key ReDim may have bound, whether or not
 ' any focus state survives. Safe to call at any time.
 Public Sub RdxReleaseKeys()
-    Dim code As Long
+    Dim binding As Variant
 
     On Error Resume Next
-    For code = Asc("A") To Asc("Z")
-        Application.OnKey LCase$(Chr$(code))
-        Application.OnKey "+" & LCase$(Chr$(code))
-    Next code
-    For code = Asc("0") To Asc("9")
-        Application.OnKey Chr$(code)
-    Next code
-    Application.OnKey " "
-    Application.OnKey "-"
-    Application.OnKey "."
-    Application.OnKey ","
-    Application.OnKey "{BS}"
-    Application.OnKey "{DEL}"
-    Application.OnKey "{LEFT}"
-    Application.OnKey "{RIGHT}"
-    Application.OnKey "{UP}"
-    Application.OnKey "{DOWN}"
-    Application.OnKey "{HOME}"
-    Application.OnKey "{END}"
-    Application.OnKey "{ENTER}"
-    Application.OnKey "~"
-    Application.OnKey "^{ENTER}"
-    Application.OnKey "^~"
-    Application.OnKey "{TAB}"
-    Application.OnKey "{ESC}"
+    For Each binding In CapturedKeys()
+        Application.OnKey binding(0)
+    Next binding
     On Error GoTo 0
     gKeysBound = False
+End Sub
+
+' Alt+letter target for access keys, bound only while an app sheet with
+' access keys is in front. Never raises.
+Public Sub RdxAccessKey(ByVal keyLetter As String)
+    On Error Resume Next
+    Err.Clear
+    ReDimUI.DispatchAccessKey keyLetter
+    If Err.Number <> 0 Then
+        Err.Clear
+        ReDimUI.NoteTickFault
+    End If
 End Sub
 
 ' Shape.OnAction target for every ReDim component. Application.Caller carries

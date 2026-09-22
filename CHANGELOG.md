@@ -195,6 +195,42 @@
   of fixed white, as Windows draws it: unchanged on the light theme,
   dark on the dark theme's green, and black on the high-contrast
   yellow, where white would vanish.
+- Every control takes keyboard focus. Tab and Shift+Tab walk an app's
+  controls in creation order, positive `TabIndex` values first, and
+  `TabIndex(-1)` leaves a control to `Focus` alone; `ui.FocusFirst` and
+  `component.Focus` place focus from code. A click still focuses only
+  text fields, so the grid keeps its keys after a button click. A
+  focused control wears an accent ring, focus that lands off screen
+  scrolls into view without moving the selection, and Esc, a click
+  elsewhere, or a moved selection ends it.
+- Keys for each control: Space and Enter click a button, and Space
+  toggles a toggle or tick box. Arrows move a radio group's selection
+  and step a stepper or slider, with Page Up, Page Down, Home, and End
+  for bigger moves. A check list and a transfer list show a row cursor
+  that Space toggles, and Enter moves a transfer panel's selection
+  across.
+- A focused `SelectBox` works like a native drop-down. Arrows change
+  the selection while it is closed; Space, Alt+Down, or F4 opens it on
+  the current item; Enter or Space takes the highlight and Esc closes;
+  typed letters jump to the next item that starts with them.
+- `Confirm` takes keyboard focus: OK holds it, Tab stays among the
+  dialog's buttons, Enter confirms, Esc cancels, and closing the dialog
+  returns focus to where it was.
+- `ui.DefaultButton "save"` names the button Enter clicks, from a text
+  field after its commit and from any control that does not use Enter
+  itself.
+- `AccessKey "s"` underlines the letter in a button's or tick box's
+  text and clicks the control on Alt+S while its sheet is in front. The
+  chords are bound only while such a sheet is active.
+- Behavior changes for float fields. Tab and Shift+Tab commit and move
+  focus to the next control; they used to commit and leave. A combo's
+  Esc closes an open list first and then reverts; it used to clear the
+  value. A click on another control commits the field before that
+  control's handler runs; it used to depend on the pump catching the
+  press. `Clearable` adds a clear button to a float `TextInput` or
+  `ComboBox`, for the clearing Esc no longer does.
+- The captured keys add Page Up, Page Down, Shift+Tab, Alt+Down, Alt+Up,
+  and F4, bound and released from one list the two share.
 
 ## 0.19.2 - 2026-08-02
 

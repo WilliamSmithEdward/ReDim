@@ -63,7 +63,8 @@ controls in the framework. Also:
 | `PrepareCanvas` | Paint the sheet background and hide gridlines. |
 | `Toast messageText, ttlMs` | Transient card on a rail beside the content, clamped into the visible viewport, with a close button. Without `ttlMs` it stays long enough to read: three seconds plus 60 ms a character, from four seconds to twelve. `Primary`, `Success`, `Warning`, or `Danger` on the returned toast gives it an info, success, warning, or error tone, an icon and a matching edge; `.Action "Undo", "Module.Proc"` adds a button that dismisses the toast and runs the handler, and keeps the toast four seconds longer. Toasts slide up on entrance, and when one leaves the survivors slide up to fill its slot; modal chrome never shifts the rail. |
 | `ToastTray rangeAddress` | Pins the tray's top-left to a range, exactly and unclamped. |
-| `Confirm titleText, messageText, okProc, cancelProc, okText, cancelText` | Shapes-based modal. |
+| `Confirm titleText, messageText, okProc, cancelProc, okText, cancelText` | Shapes-based modal. It takes keyboard focus: Enter confirms, Esc cancels, and Tab stays among its buttons. |
+| `FocusFirst` / `DefaultButton componentId` | Keyboard focus to the first control in Tab order; the button Enter clicks from controls that do not use Enter themselves. |
 | `CloseModal` | Hide the modal set. |
 | `Async(opId)` / `CancelAsync opId` / `AsyncError(opId)` | Async ops (see [async.md](async.md)). |
 | `Job(jobId)` / `CancelJob jobId` | Chunked or paced background work. |
@@ -113,7 +114,11 @@ All fluent, all return the component:
   `BindVisible(key, invert)`, `BindEnabled(key, invert)`, `WritesTo(key)`. The invert flag
   serves the disable-while-busy pattern: `BindEnabled "anyRunning", True`.
 - Behavior: `OnClick "Module.Proc"`, `OnClickAsync "Module.Proc"`, `OnChange "Module.Proc"`.
-- Reads: `CurrentValue`, `CurrentText`, `IsChecked`, `IsEnabled`, `IsBusy`, `InputValue`
+- Keyboard: `TabIndex(n)` orders Tab, `Focus` gives the control keyboard focus,
+  `AccessKey(letter)` binds Alt+letter for a button or tick box, and `Clearable` gives a
+  float TextInput or ComboBox a clear button (see
+  [Keyboard focus for every control](#keyboard-focus-for-every-control)).
+- Reads: `CurrentValue`, `CurrentText`, `IsChecked`, `IsEnabled`, `IsVisible`, `IsBusy`, `InputValue`
   (TextInput and ComboBox; reads the float buffer or the backing cell, and assigning it
   writes without firing change events).
 - `Remove` deletes the component and its shapes.
@@ -215,40 +220,46 @@ means typing works on `ProtectSurface` sheets, where cell edit is locked out.
 
 Focus mechanics, all automatic:
 
-- One field holds focus at a time; focusing another commits the first.
-- Enter and Tab commit: the buffer becomes the value, `WritesTo` state is written and
-  `OnChange` fires if the text changed. A combo commit that exactly matches an item takes
-  that item. A `MultiLine` TextInput follows textarea conventions instead: Enter inserts
-  a newline and keeps focus, while Tab, Ctrl+Enter, and clicking away commit; the value
-  carries its newlines into state. Size the rectangle for the lines you expect - roughly
-  15 points per line plus 6 points of margin; a line that cannot fully fit is not drawn
-  at all, which reads as a missing line.
+- One control holds keyboard focus at a time; focus moving on commits a field it leaves.
+- Enter commits: the buffer becomes the value, `WritesTo` state is written and `OnChange`
+  fires if the text changed, and then Enter clicks the app's `DefaultButton` if it has
+  one. Tab and Shift+Tab commit the same way and move focus to the next or previous
+  control in Tab order (see [Keyboard focus for every control](#keyboard-focus-for-every-control));
+  with no other control to move to, they commit and leave. A combo commit that exactly
+  matches an item takes that item. A `MultiLine` TextInput follows textarea conventions
+  instead: Enter inserts a newline and keeps focus, while Tab, Ctrl+Enter, and clicking
+  away commit; the value carries its newlines into state. Size the rectangle for the
+  lines you expect - roughly 15 points per line plus 6 points of margin; a line that
+  cannot fully fit is not drawn at all, which reads as a missing line.
 - Overflow follows the caret. Shape text cannot scroll, so a focused field renders the
   tail window of its buffer - the last lines that fit (multi-line) or the rightmost
   characters that fit (single-line and combo) - with a leading ellipsis marking trimmed
   content. The buffer keeps the complete text and commits intact; unfocused fields show
   their beginning.
-- Esc reverts a TextInput to the text it had when focus arrived and fires nothing. On a
-  combo, Esc clears instead: the first press empties the value and reopens the full list
-  with focus kept; a second press on the empty combo leaves and commits the clear.
+- Esc reverts the field to the text it had when focus arrived, fires nothing, and leaves.
+  A combo with its list open closes the list on the first Esc, keeping focus and text,
+  and reverts on the second. `Clearable` gives either field a clear button for emptying
+  it.
 - Clicking anywhere off the field commits, through two frame-driven signals. A cell click
   moves the selection, and the focused field's frames poll the selection - the press
   itself can be invisible (the grid's selection mouse loop holds timer messages until the
   button is back up), but the selection it leaves behind is durable state the next frame
   sees. Sheet navigation commits the same way, and none of it depends on application
-  events. (Arrow keys no longer move the selection while a field is focused - they edit.) Everything that changes no selection - either mouse button on
-  shapes, chrome, or other windows - is caught by the same press-edge watch that drives
-  slider drags. The one blind spot: re-clicking the already-selected cell during a starved
+  events. (Arrow keys no longer move the selection while a field is focused - they
+  edit.) Everything that changes no selection - either mouse button on shapes, chrome,
+  or other windows - is caught by the same press-edge watch that drives slider drags,
+  and a click on another ReDim control commits before that control's handler runs. The one blind spot: re-clicking the already-selected cell during a starved
   moment changes nothing observable; the next keystroke, click, or frame resolves it. On a
   default `ProtectSurface` sheet the canvas is unselectable, so grid clicks move no
   selection at all - there, commit by Enter, Tab, or clicking any control, which is the
   natural flow on an app surface anyway.
 - `InputValue` reads and writes the buffer in float mode, the cell in cell mode.
 
-Capture uses `Application.OnKey`, bound only while a field is focused and released on blur,
-so sheet typing is untouched the rest of the time. The bound set is the practical editing
-set: letters (with Shift capitals), digits, space, minus, period, comma, Backspace, Del,
-the arrow keys, Home, End, Tab, Enter (and Ctrl+Enter), Esc. Editing is full caret
+Capture uses `Application.OnKey`, bound only while a control holds focus and released when
+it leaves, so sheet typing is untouched the rest of the time. The bound set is the
+practical editing and navigation set: letters (with Shift capitals), digits, space, minus,
+period, comma, Backspace, Del, the arrow keys, Home, End, Page Up, Page Down, Tab and
+Shift+Tab, Enter (and Ctrl+Enter), Esc, Alt+Down, Alt+Up, and F4. Editing is full caret
 editing: arrows move the insertion point, characters insert at it, Backspace and Del
 delete around it, Home and End jump the line edges, and Up and Down move across hard
 lines with the column clamped (a long wrapped line counts as one line). While a field is
@@ -261,6 +272,48 @@ should re-arm them after field focus sessions if they mix the two. `ReDimUI.HasK
 and `ReDimUI.FocusedComponentId` report the current holder; `RdxReleaseKeys` is the panic
 release that unbinds everything regardless of state.
 
+## Keyboard focus for every control
+
+Every interactive control takes keyboard focus: buttons, toggles, tick boxes, radio groups,
+steppers, sliders, selects, check lists, transfer lists, images with a click handler, and
+float fields. Focus comes from the keyboard or from code: Tab and Shift+Tab walk the app's
+controls, `component.Focus` and `ui.FocusFirst` place it, and a modal takes it. A click
+focuses only a text field, since someone who clicks a button in Excel expects the grid to
+keep the keys.
+
+- Tab order: controls with a positive `TabIndex` come first, in ascending order, then the
+  rest in creation order. `TabIndex(-1)` leaves a control out of Tab while `Focus` still
+  reaches it. Tab wraps within the app. Focus that lands outside the visible window
+  scrolls the control into view by rows and columns, leaving the selection where it is.
+- A focused control wears an accent ring three points outside its bounds; a text field
+  shows focus on its own border. A check list or transfer list also shows a dotted cursor
+  on the row its arrow keys have reached.
+- Focus ends on Esc, on a click on another control, on a press anywhere off the control,
+  or when the grid selection moves: the watch that ends a text field's focus, for every
+  kind. A control that turns hidden or disabled gives focus up.
+- Enter on a control with no use for it clicks the app's default button,
+  `ui.DefaultButton "save"`. A focused button takes Enter itself.
+- Modals trap focus. `Confirm` puts focus on OK, Tab stays among the dialog's buttons,
+  Enter confirms, Esc cancels (or confirms when there is no Cancel), and closing the
+  dialog returns focus to the control that had it.
+- Access keys: `AccessKey "s"` on a button or tick box underlines the first matching
+  character of its text and clicks the control on Alt+S while its sheet is in front. The
+  chords are bound with `Application.OnKey` only while such a sheet is active, and while
+  bound they take that Alt+letter from Excel, so pick letters your users do not need for
+  the ribbon. An ampersand in the text stays literal.
+
+| Control | Keys |
+|---|---|
+| Button, Image | Space or Enter clicks. |
+| Toggle, TickBox | Space toggles. |
+| RadioGroup | Arrows move the selection, wrapping at the ends; Home and End jump. Each move fires `OnChange`. |
+| Stepper | Up and Right step up, Down and Left step down, Page Up and Page Down step ten times, Home and End jump to the range ends. |
+| SlideBar | Arrows move a step, Page Up and Page Down a tenth of the range in whole steps, Home and End go to the ends. |
+| SelectBox | Closed: arrows, Home, End, Page Up, and Page Down change the selection, and Space, Alt+Down, or F4 opens the list. Open: they move the highlight; Enter, Space, or Alt+Up takes it, Tab takes it and moves on, and Esc or F4 closes. Letters jump to the next item that starts with them, open or closed: letters typed within a second build a prefix, and one letter typed again steps through its items. |
+| CheckList | Up and Down move the row cursor, the select-all header included; Home and End jump; Space toggles the cursor's row. |
+| TransferList | Up and Down move the row cursor, Left and Right switch panels, Space toggles the cursor's row in the selection, and Enter moves the panel's selection across, or the cursor's row when nothing is selected. |
+| TextInput, ComboBox | The editing keys above; a combo also opens with Alt+Down or F4, closes with Alt+Up, and pages its list with Page Up and Page Down. |
+
 ## Accessibility
 
 - Alternative text: ReDim writes a description on each control's shape from its kind, text,
@@ -268,6 +321,8 @@ release that unbinds everything regardless of state.
   "Progress, 40 percent" (in 5 percent steps), with ", unavailable" when disabled. Labels,
   cards, and toasts carry none, since their text is what a reader announces. `AltText`
   replaces the description.
+- Keyboard: every control works without a mouse, and focus shows as a ring or a field
+  border (see [Keyboard focus for every control](#keyboard-focus-for-every-control)).
 - State without color: a drop list's current item and a transfer panel's selected rows
   show a check, not only a fill.
 - Contrast: `ThemeHighContrast` passes WCAG AA for every pairing the controls draw, and

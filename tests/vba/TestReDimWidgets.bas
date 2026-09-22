@@ -276,6 +276,16 @@ Private Function InkOf(ByVal host As Worksheet, ByVal shapeName As String) As Lo
     InkOf = host.Shapes(shapeName).TextFrame2.TextRange.Font.Fill.ForeColor.RGB
 End Function
 
+' Empties a focused float field through the keys, one Backspace per
+' character, as a user would.
+Private Sub BackspaceAll(ByVal fieldValue As ReDimUI)
+    Dim keyNo As Long
+
+    For keyNo = 1 To Len(fieldValue.InputValue)
+        RdxKeyChar "{BS}"
+    Next keyNo
+End Sub
+
 ' A list row's item, after the check gutter and its tab.
 Private Function RowItem(ByVal host As Worksheet, ByVal shapeName As String) As String
     Dim rowText As String
@@ -1058,20 +1068,20 @@ Public Function TestFloatField() As String
              Not ShapeExists(host, "rdm_wid21_color__opt2"))
     RdxKeyChar "{TAB}"
 
-    ' Esc on a combo clears first (value emptied, full list reopened,
-    ' focus kept), then a second Esc leaves and commits the clear.
+    ' Esc on a combo closes an open list first, keeping focus and text;
+    ' a second Esc reverts to the text focus found and leaves.
     Sleep 200
     ReDimUI.DispatchShape "rdm_wid21_color"
+    RdxKeyChar "z"
     RdxKeyChar "{ESC}"
-    transcript = transcript & "|escCleared=" & _
-        CStr(app.ComboBox("color").InputValue = vbNullString And _
-            ReDimUI.HasKeyboardFocus And _
-            ShapeExists(host, "rdm_wid21_color__opt4"))
+    transcript = transcript & "|escClosesList=" & _
+        CStr(ReDimUI.HasKeyboardFocus And _
+            app.ComboBox("color").InputValue = "Greez" And _
+            Not ShapeExists(host, "rdm_wid21_color__optn"))
     RdxKeyChar "{ESC}"
-    transcript = transcript & "|escEscCommits=" & _
+    transcript = transcript & "|escEscReverts=" & _
         CStr(Not ReDimUI.HasKeyboardFocus And _
-            LenB(CStr(app.State("hue"))) = 0 And _
-            Not ShapeExists(host, "rdm_wid21_color__opt1"))
+            app.ComboBox("color").InputValue = "Gree")
 
     ' Outside-press blur through the watch seam commits the field.
     Sleep 200
@@ -1080,14 +1090,14 @@ Public Function TestFloatField() As String
     app.TextInput("name").BlurField app, True
     transcript = transcript & "|outsideCommit=" & app.State("who")
 
-    ' Tab is the form-field leave key: commit exactly like Enter.
+    ' Tab commits exactly like Enter and moves focus to the next field.
     Sleep 200
     ReDimUI.DispatchShape "rdm_wid21_name"
     RdxKeyChar "x"
     RdxKeyChar "{TAB}"
     transcript = transcript & "|tabCommit=" & app.State("who")
-    transcript = transcript & "|tabBlurred=" & _
-        CStr(Not ReDimUI.HasKeyboardFocus)
+    transcript = transcript & "|tabMovesOn=" & _
+        CStr(ReDimUI.FocusedComponentId = "color")
 
     ' A cell click leaves a moved selection behind, and the next frame's
     ' selection poll commits on it - the press itself can be invisible
@@ -1658,7 +1668,7 @@ Public Function TestLongLists() As String
     ' nine again, click the first visible row.
     Sleep 200
     ReDimUI.DispatchShape "rdm_wid27_pick"
-    RdxKeyChar "{ESC}"
+    BackspaceAll app.ComboBox("pick")
     For keyNo = 1 To 9
         RdxKeyChar "{DOWN}"
     Next keyNo
@@ -1671,7 +1681,7 @@ Public Function TestLongLists() As String
     ' paging starts the highlight inside the visible window.
     Sleep 200
     ReDimUI.DispatchShape "rdm_wid27_pick"
-    RdxKeyChar "{ESC}"
+    BackspaceAll app.ComboBox("pick")
     Sleep 200
     ReDimUI.DispatchShape "rdm_wid27_pick__optd"
     transcript = transcript & "|comboPagedRow1=" & _
@@ -1690,7 +1700,7 @@ Public Function TestLongLists() As String
     transcript = transcript & "|pagedBack=" & _
         CStr(RowItem(host, "rdm_wid27_pick__opt1") _
             = "Item01" And Not ShapeExists(host, "rdm_wid27_pick__optu"))
-    RdxKeyChar "{ESC}"
+    RdxKeyChar "{ENTER}"
 
     ' A pick reopens pristine: the whole list, scrolled so the pick is
     ' the first row, and Down walks on from the pick. The first edit
@@ -1719,8 +1729,8 @@ Public Function TestLongLists() As String
     RdxKeyChar "x"
     transcript = transcript & "|typingFilters=" & _
         CStr(Not ShapeExists(host, "rdm_wid27_pick__opt1"))
-    RdxKeyChar "{ESC}"
-    RdxKeyChar "{ESC}"
+    BackspaceAll app.ComboBox("pick")
+    RdxKeyChar "{ENTER}"
 
     ' A pick commits like the field's other commit paths: OnChange fires
     ' once when the pick changes the value, from the keyboard or the
@@ -1760,8 +1770,8 @@ Public Function TestLongLists() As String
     app.ComboBox("pick").OnChange vbNullString
     Sleep 200
     ReDimUI.DispatchShape "rdm_wid27_pick"
-    RdxKeyChar "{ESC}"
-    RdxKeyChar "{ESC}"
+    BackspaceAll app.ComboBox("pick")
+    RdxKeyChar "{ENTER}"
 
     ' ListRows resizes the combo window.
     app.ComboBox("pick").ListRows 5
@@ -1770,6 +1780,7 @@ Public Function TestLongLists() As String
     transcript = transcript & "|comboListRows=" & _
         CStr(ShapeExists(host, "rdm_wid27_pick__opt5") And _
             Not ShapeExists(host, "rdm_wid27_pick__opt6"))
+    RdxKeyChar "{ESC}"
     RdxKeyChar "{ESC}"
 
     ' SelectBox windowing: opening scrolls the selection into view (the
@@ -1908,6 +1919,7 @@ Public Function TestModalConfirm() As String
     Dim transcript As String
 
     Set host = NewCanvas()
+    ReDimUI.AutoPump False
     gConfirmRan = 0
     gCancelRan = 0
     Set app = ReDimUI.Mount(host, "wid6")
@@ -1943,6 +1955,7 @@ Public Function TestModalConfirm() As String
     transcript = transcript & "|confirmStillOne=" & CStr(gConfirmRan = 1)
     transcript = transcript & "|overlayHiddenAgain=" & _
         CStr(host.Shapes("rdm_wid6_mdl_ov").Visible = msoFalse)
+    ReDimUI.AutoPump True
     TestModalConfirm = transcript
 End Function
 
@@ -2254,4 +2267,291 @@ Public Function TestToastConventions() As String
     ReDimUI.ReduceMotion
     ReDimUI.AutoPump True
     TestToastConventions = transcript
+End Function
+
+' Keyboard focus: Tab order (TabIndex first, then creation order, -1
+' skipped), the focus ring, Space and Enter per kind, Esc to leave, clicks
+' that focus only text fields, the default button, access keys, the
+' click-away and selection watches, and scrolling focus into view.
+Public Function TestKeyboardFocus() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim transcript As String
+    Dim visibleArea As Range
+
+    gChangeCount = 0
+    ReDimUI.AutoPump False
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "wid34")
+    app.Button("first").AtRect(24, 24, 90, 26).Text("First").TabIndex 1
+    app.TextInput("name").AtRect(24, 60, 150, 22).WritesTo "who"
+    app.Button("save").AtRect(24, 96, 90, 26).Text("Save") _
+        .OnClick "TestReDimWidgets.RecordChange"
+    app.Toggle("dark").AtRect(24, 132, 44, 22).WritesTo "darkMode"
+    app.TickBox("agree").AtRect(24, 166, 160, 20).Text("Agree").AccessKey "a"
+    app.Button("later").AtRect(140, 24, 90, 26).Text("Later").TabIndex (-1)
+    app.Render
+
+    app.FocusFirst
+    transcript = "firstFocused=" & CStr(ReDimUI.FocusedComponentId = "first")
+    transcript = transcript & "|ringDrawn=" & _
+        CStr(ShapeExists(host, "rdm_wid34_first__fr"))
+    RdxKeyChar "{TAB}"
+    transcript = transcript & "|tabToField=" & _
+        CStr(ReDimUI.FocusedComponentId = "name" And _
+            Not ShapeExists(host, "rdm_wid34_first__fr"))
+    RdxKeyChar "B"
+    RdxKeyChar "o"
+    RdxKeyChar "{TAB}"
+    transcript = transcript & "|tabCommits=" & app.State("who")
+    transcript = transcript & "|onButton=" & CStr(ReDimUI.FocusedComponentId = "save")
+    RdxKeyChar " "
+    transcript = transcript & "|spaceClicks=" & CStr(gChangeCount = 1)
+    RdxKeyChar "{TAB}"
+    RdxKeyChar " "
+    transcript = transcript & "|spaceToggles=" & CStr(app.State("darkMode") = True)
+    RdxKeyChar "{TAB}"
+    RdxKeyChar " "
+    transcript = transcript & "|spaceChecks=" & CStr(app.TickBox("agree").IsChecked)
+    RdxKeyChar "{TAB}"
+    transcript = transcript & "|tabWraps=" & CStr(ReDimUI.FocusedComponentId = "first")
+    RdxKeyChar "{BACKTAB}"
+    transcript = transcript & "|backTab=" & CStr(ReDimUI.FocusedComponentId = "agree")
+
+    ' TabIndex -1 leaves a control to Focus alone.
+    app.Button("later").Focus
+    transcript = transcript & "|focusApi=" & CStr(ReDimUI.FocusedComponentId = "later")
+    RdxKeyChar "{ESC}"
+    transcript = transcript & "|escLeaves=" & _
+        CStr(Not ReDimUI.HasKeyboardFocus And _
+            Not ShapeExists(host, "rdm_wid34_later__fr"))
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid34_save"
+    transcript = transcript & "|clickNoFocus=" & _
+        CStr(Not ReDimUI.HasKeyboardFocus And gChangeCount = 2)
+
+    ' Enter in a text field commits and clicks the default button.
+    app.DefaultButton "save"
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid34_name"
+    RdxKeyChar "x"
+    RdxKeyChar "{ENTER}"
+    transcript = transcript & "|enterDefault=" & _
+        CStr(app.State("who") = "Box" And gChangeCount = 3)
+
+    ' Alt plus the access key clicks its control; the key is underlined.
+    transcript = transcript & "|keyUnderlined=" & _
+        CStr(host.Shapes("rdm_wid34_agree__lbl").TextFrame2.TextRange _
+            .Characters(1, 1).Font.UnderlineStyle = msoUnderlineSingleLine)
+    ReDimUI.DispatchAccessKey "a"
+    transcript = transcript & "|accessKeyClicks=" & _
+        CStr(Not app.TickBox("agree").IsChecked)
+
+    ' A moved selection and a click elsewhere both end focus.
+    app.Button("save").Focus
+    host.Range("E9").Select
+    ReDimUI.PumpOnce
+    transcript = transcript & "|selectionEndsFocus=" & CStr(Not ReDimUI.HasKeyboardFocus)
+    app.Button("save").Focus
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid34_dark"
+    transcript = transcript & "|clickEndsFocus=" & CStr(Not ReDimUI.HasKeyboardFocus)
+
+    ' Focus below the visible window scrolls it into view.
+    app.Button("far").AtRect(24, 2400, 90, 26).Text "Far"
+    app.Render
+    ActiveWindow.ScrollRow = 1
+    app.Button("far").Focus
+    Set visibleArea = ActiveWindow.VisibleRange
+    transcript = transcript & "|scrolledIntoView=" & _
+        CStr(Not Intersect(visibleArea, _
+            host.Shapes("rdm_wid34_far").TopLeftCell) Is Nothing)
+    RdxKeyChar "{ESC}"
+    ActiveWindow.ScrollRow = 1
+    app.Unmount False
+    RdxReleaseKeys
+    ReDimUI.AutoPump True
+    TestKeyboardFocus = transcript
+End Function
+
+' Keys per kind: radio arrows move the selection and wrap, stepper and
+' slider keys step and jump, check-list and transfer-list cursors, and the
+' select's closed arrows, type-ahead, open list, and Esc.
+Public Function TestControlKeys() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim transcript As String
+
+    gChangeCount = 0
+    ReDimUI.AutoPump False
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "wid35")
+    app.RadioGroup("size").AtRect(24, 24, 120, 60) _
+        .Items("Small", "Medium", "Large").Value(1).WritesTo "sizeState"
+    app.RadioGroup("size").OnChange "TestReDimWidgets.RecordChange"
+    app.Stepper("qty").AtRect(24, 100, 120, 24).SliderRange(0, 20, 1).Value 5
+    app.SlideBar("vol").AtRect(24, 140, 160, 18).SliderRange(0, 100, 5).Value 50
+    app.CheckList("feat").AtRect(220, 24, 170, 80).Items "Alpha", "Bravo", "Charlie"
+    app.TransferList("pool").AtRect(220, 140, 360, 140).Items "One", "Two", "Three"
+    app.SelectBox("zone").AtRect(24, 200, 150, 22) _
+        .Items("North", "South", "East", "West", "Northwest").Value 1
+    app.Render
+
+    app.RadioGroup("size").Focus
+    RdxKeyChar "{DOWN}"
+    transcript = "radioDown=" & app.State("sizeState")
+    RdxKeyChar "{UP}"
+    RdxKeyChar "{UP}"
+    transcript = transcript & "|radioWraps=" & app.State("sizeState")
+    transcript = transcript & "|radioFires=" & gChangeCount
+
+    RdxKeyChar "{TAB}"
+    RdxKeyChar "{UP}"
+    transcript = transcript & "|stepUp=" & CStr(app.Stepper("qty").CurrentValue)
+    RdxKeyChar "{PGUP}"
+    transcript = transcript & "|stepPage=" & CStr(app.Stepper("qty").CurrentValue)
+    RdxKeyChar "{END}"
+    transcript = transcript & "|stepEnd=" & CStr(app.Stepper("qty").CurrentValue)
+    RdxKeyChar "{HOME}"
+    transcript = transcript & "|stepHome=" & CStr(app.Stepper("qty").CurrentValue)
+
+    RdxKeyChar "{TAB}"
+    RdxKeyChar "{RIGHT}"
+    RdxKeyChar "{PGDN}"
+    transcript = transcript & "|slider=" & CStr(app.SlideBar("vol").CurrentValue)
+    RdxKeyChar "{END}"
+    transcript = transcript & "|sliderEnd=" & CStr(app.SlideBar("vol").CurrentValue)
+
+    RdxKeyChar "{TAB}"
+    transcript = transcript & "|cursorDrawn=" & _
+        CStr(ShapeExists(host, "rdm_wid35_feat__kr"))
+    RdxKeyChar " "
+    RdxKeyChar "{DOWN}"
+    RdxKeyChar " "
+    transcript = transcript & "|checkKeys=" & _
+        CStr(app.CheckList("feat").CheckedCount = 2 And _
+            app.CheckList("feat").IsItemChecked(1) And _
+            app.CheckList("feat").IsItemChecked(2))
+    RdxKeyChar "{HOME}"
+    RdxKeyChar " "
+    transcript = transcript & "|headerKey=" & _
+        CStr(app.CheckList("feat").CheckedCount = 3)
+
+    RdxKeyChar "{TAB}"
+    RdxKeyChar "{DOWN}"
+    RdxKeyChar "{ENTER}"
+    transcript = transcript & "|enterMoves=" & _
+        CStr(app.TransferList("pool").ChosenCount = 1 And _
+            app.TransferList("pool").ChosenTextAt(1) = "Two")
+    RdxKeyChar "{RIGHT}"
+    RdxKeyChar " "
+    RdxKeyChar "{ENTER}"
+    transcript = transcript & "|movesBack=" & _
+        CStr(app.TransferList("pool").ChosenCount = 0)
+
+    RdxKeyChar "{TAB}"
+    RdxKeyChar "{DOWN}"
+    transcript = transcript & "|selectArrow=" & CStr(app.SelectBox("zone").CurrentValue)
+    RdxKeyChar "n"
+    transcript = transcript & "|typeAhead=" & CStr(app.SelectBox("zone").CurrentValue)
+    RdxKeyChar " "
+    transcript = transcript & "|spaceOpens=" & _
+        CStr(host.Shapes("rdm_wid35_zone__opt5").Fill.ForeColor.RGB = _
+            app.Theme.PrimaryColor)
+    RdxKeyChar "{HOME}"
+    RdxKeyChar "{DOWN}"
+    RdxKeyChar "{ENTER}"
+    transcript = transcript & "|openPick=" & _
+        CStr(app.SelectBox("zone").CurrentValue = 2 And _
+            Not ShapeExists(host, "rdm_wid35_zone__opt1"))
+    RdxKeyChar "{F4}"
+    RdxKeyChar "{ESC}"
+    transcript = transcript & "|escCloses=" & _
+        CStr(Not ShapeExists(host, "rdm_wid35_zone__opt1") And _
+            ReDimUI.HasKeyboardFocus)
+    RdxKeyChar "{ESC}"
+    transcript = transcript & "|escLeaves=" & CStr(Not ReDimUI.HasKeyboardFocus)
+    RdxReleaseKeys
+    ReDimUI.AutoPump True
+    TestControlKeys = transcript
+End Function
+
+' The modal takes focus on OK, Tab stays inside it, Enter confirms and
+' returns focus to where it was, and Esc cancels.
+Public Function TestModalKeys() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim transcript As String
+
+    gConfirmRan = 0
+    gCancelRan = 0
+    ReDimUI.AutoPump False
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "wid36")
+    app.Button("del").AtRect(24, 24, 90, 26).Text "Delete"
+    app.TextInput("note").AtRect 24, 60, 150, 22
+    app.Render
+    app.Button("del").Focus
+    app.Confirm "Delete rows", "Remove 42 rows?", _
+        "TestReDimWidgets.RecordConfirm", "TestReDimWidgets.RecordCancelChoice"
+    transcript = "modalTakesFocus=" & CStr(ReDimUI.FocusedComponentId = "mdl_ok")
+    RdxKeyChar "{TAB}"
+    transcript = transcript & "|tabToCancel=" & _
+        CStr(ReDimUI.FocusedComponentId = "mdl_cancel")
+    RdxKeyChar "{TAB}"
+    transcript = transcript & "|trapped=" & CStr(ReDimUI.FocusedComponentId = "mdl_ok")
+    RdxKeyChar "{ENTER}"
+    transcript = transcript & "|enterConfirms=" & CStr(gConfirmRan = 1)
+    transcript = transcript & "|focusReturns=" & CStr(ReDimUI.FocusedComponentId = "del")
+    app.Confirm "Again", "Sure?", _
+        "TestReDimWidgets.RecordConfirm", "TestReDimWidgets.RecordCancelChoice"
+    RdxKeyChar "{ESC}"
+    transcript = transcript & "|escCancels=" & _
+        CStr(gCancelRan = 1 And gConfirmRan = 1)
+    RdxKeyChar "{ESC}"
+    RdxReleaseKeys
+    ReDimUI.AutoPump True
+    TestModalKeys = transcript
+End Function
+
+' Clearable: the button shows only while the field holds text, empties it
+' and keeps focus, and a combo's list opens unfiltered.
+Public Function TestClearable() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim transcript As String
+
+    ReDimUI.AutoPump False
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "wid37")
+    app.TextInput("q").AtRect(24, 24, 160, 22).Clearable.WritesTo "query"
+    app.ComboBox("c").AtRect(24, 60, 160, 22).Items("Red", "Green").Clearable
+    app.Render
+    transcript = "hiddenWhenEmpty=" & CStr(Not ShapeExists(host, "rdm_wid37_q__cx"))
+    ReDimUI.DispatchShape "rdm_wid37_q"
+    RdxKeyChar "a"
+    RdxKeyChar "b"
+    transcript = transcript & "|shownWithText=" & _
+        CStr(ShapeExists(host, "rdm_wid37_q__cx"))
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid37_q__cx"
+    transcript = transcript & "|clearEmpties=" & _
+        CStr(app.TextInput("q").InputValue = vbNullString And _
+            ReDimUI.FocusedComponentId = "q" And _
+            Not ShapeExists(host, "rdm_wid37_q__cx"))
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid37_c"
+    RdxKeyChar "r"
+    RdxKeyChar "e"
+    transcript = transcript & "|comboX=" & CStr(ShapeExists(host, "rdm_wid37_c__cx"))
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid37_c__cx"
+    transcript = transcript & "|comboCleared=" & _
+        CStr(app.ComboBox("c").InputValue = vbNullString And _
+            ShapeExists(host, "rdm_wid37_c__opt2"))
+    RdxKeyChar "{ESC}"
+    RdxKeyChar "{ESC}"
+    RdxReleaseKeys
+    ReDimUI.AutoPump True
+    TestClearable = transcript
 End Function

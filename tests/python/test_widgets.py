@@ -333,16 +333,18 @@ def test_float_field(run_widgets):
     assert facts["editFilters"] == "True", (
         "the first edit after reopening must filter the list again"
     )
-    assert facts["escCleared"] == "True", (
-        "Esc on a combo must clear the value, reopen the full list, and"
-        " keep focus"
+    assert facts["escClosesList"] == "True", (
+        "Esc on a combo must close its open list, keeping focus and text"
     )
-    assert facts["escEscCommits"] == "True", (
-        "a second Esc on the empty combo must blur and commit the clear"
+    assert facts["escEscReverts"] == "True", (
+        "a second Esc must revert the combo to the text focus found and"
+        " leave"
     )
     assert facts["outsideCommit"] == "Heyo"
     assert facts["tabCommit"] == "Heyox", "Tab must commit exactly like Enter"
-    assert facts["tabBlurred"] == "True"
+    assert facts["tabMovesOn"] == "True", (
+        "Tab must move focus to the next field in Tab order"
+    )
     assert facts["cellClickCommit"] == "Heyoxz", (
         "a selection change must commit the focused field - the cell-click"
         " press can be invisible to the pump's poll"
@@ -720,3 +722,87 @@ def test_toast_conventions(run_widgets):
     )
     assert facts["actionRan"] == "True"
     assert facts["actionDismisses"] == "True"
+
+
+def test_keyboard_focus(run_widgets):
+    facts = parse_transcript(run_widgets("TestKeyboardFocus"))
+    assert facts["firstFocused"] == "True", "TabIndex 1 must come first"
+    assert facts["ringDrawn"] == "True", "a focused button must wear a ring"
+    assert facts["tabToField"] == "True", (
+        "Tab must move on in creation order and take the ring along"
+    )
+    assert facts["tabCommits"] == "Bo"
+    assert facts["onButton"] == "True"
+    assert facts["spaceClicks"] == "True", "Space must click a focused button"
+    assert facts["spaceToggles"] == "True"
+    assert facts["spaceChecks"] == "True"
+    assert facts["tabWraps"] == "True", "Tab must wrap, skipping TabIndex -1"
+    assert facts["backTab"] == "True"
+    assert facts["focusApi"] == "True"
+    assert facts["escLeaves"] == "True"
+    assert facts["clickNoFocus"] == "True", (
+        "a mouse click must not give a button keyboard focus"
+    )
+    assert facts["enterDefault"] == "True", (
+        "Enter in a field must commit and click the default button"
+    )
+    assert facts["keyUnderlined"] == "True"
+    assert facts["accessKeyClicks"] == "True"
+    assert facts["selectionEndsFocus"] == "True"
+    assert facts["clickEndsFocus"] == "True"
+    assert facts["scrolledIntoView"] == "True", (
+        "focus below the window must scroll the control into view"
+    )
+
+
+def test_control_keys(run_widgets):
+    facts = parse_transcript(run_widgets("TestControlKeys"))
+    assert facts["radioDown"] == "Medium"
+    assert facts["radioWraps"] == "Large", "Up from the first row must wrap"
+    assert facts["radioFires"] == "3"
+    assert facts["stepUp"] == "6"
+    assert facts["stepPage"] == "16"
+    assert facts["stepEnd"] == "20"
+    assert facts["stepHome"] == "0"
+    assert facts["slider"] == "45", "Right steps 5, Page Down a tenth (10)"
+    assert facts["sliderEnd"] == "100"
+    assert facts["cursorDrawn"] == "True"
+    assert facts["checkKeys"] == "True"
+    assert facts["headerKey"] == "True", "Space on the header checks all"
+    assert facts["enterMoves"] == "True", (
+        "Enter must move the cursor's row when nothing is selected"
+    )
+    assert facts["movesBack"] == "True"
+    assert facts["selectArrow"] == "2", "Down on a closed select selects next"
+    assert facts["typeAhead"] == "5", "n from South must land on Northwest"
+    assert facts["spaceOpens"] == "True", (
+        "Space must open the list with the current item highlighted"
+    )
+    assert facts["openPick"] == "True"
+    assert facts["escCloses"] == "True"
+    assert facts["escLeaves"] == "True"
+
+
+def test_modal_keys(run_widgets):
+    facts = parse_transcript(run_widgets("TestModalKeys"))
+    assert facts["modalTakesFocus"] == "True"
+    assert facts["tabToCancel"] == "True"
+    assert facts["trapped"] == "True", "Tab must stay among the modal's buttons"
+    assert facts["enterConfirms"] == "True"
+    assert facts["focusReturns"] == "True", (
+        "closing the modal must return focus to the control that had it"
+    )
+    assert facts["escCancels"] == "True"
+
+
+def test_clearable(run_widgets):
+    facts = parse_transcript(run_widgets("TestClearable"))
+    assert facts["hiddenWhenEmpty"] == "True"
+    assert facts["shownWithText"] == "True"
+    assert facts["clearEmpties"] == "True", (
+        "the clear button must empty the field and keep focus"
+    )
+    assert facts["comboX"] == "True"
+    assert facts["comboCleared"] == "True", (
+        "clearing a combo must open its whole list"
+    )

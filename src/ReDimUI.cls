@@ -162,6 +162,8 @@ Private mFocusHandoff As Boolean
 Private mForcePressEdge As Boolean
 ' Test seam: a fixed pointer position, in sheet points, that stands in
 ' for the cursor until cleared.
+' The Alt+letter chords bound for the active sheet's access keys.
+Private mBoundAccessKeys As String
 Private mPointerOverridden As Boolean
 Private mPointerX As Double
 Private mPointerY As Double
@@ -196,6 +198,10 @@ Private mAsyncOps As Collection
 Private mJobs As Collection
 Private mErrorHandlerProc As String
 Private mToastCounter As Long
+' The button Enter clicks when focus is on a control that does not use
+' Enter itself, and the control that held focus when a modal opened.
+Private mDefaultButtonId As String
+Private mFocusBeforeModal As String
 Private mFieldPrevButtonDown As Boolean
 Private mToastTrayAnchor As String
 Private mToastRailLeft As Double
@@ -350,6 +356,28 @@ Private mFieldSelAtFocus As String
 ' The grid selection an open list's watch compares against; empty until
 ' the watch's first frame records it.
 Private mListSelAtOpen As String
+' Tab order: 0 follows creation order, positive values come first in
+' ascending order, and -1 leaves the control out of Tab (Focus still
+' reaches it).
+Private mTabIndex As Long
+' The row a focused check list or transfer list's arrow keys have
+' reached (1-based; 0 is a check list's select-all header), and for a
+' transfer list the panel it is in (0 available, 1 chosen).
+Private mKeyRow As Long
+Private mKeyPanel As Long
+Private mKeyCursorSet As Boolean
+' Type-ahead in a focused select: the prefix typed so far and when its
+' last letter landed; a second's pause starts a new prefix.
+Private mTypeAhead As String
+Private mTypeAheadMs As LongLong
+Private mAppliedRingSig As String
+Private mAppliedKeyCursorSig As String
+' AccessKey's letter or digit (lower case) and the one last underlined.
+Private mAccessKey As String
+Private mAppliedAccessKey As String
+' Clearable: a float field shows a clear button while it holds text.
+Private mClearable As Boolean
+Private mAppliedClearSig As String
 Private mCaretOn As Boolean
 Private mCaretAccumMs As Long
 Private mRelMode As Long
@@ -457,6 +485,15 @@ Private Sub mExcelApp_WorkbookBeforeClose(ByVal Wb As Workbook, Cancel As Boolea
     If Wb Is ThisWorkbook Then Shutdown
 End Sub
 
+' Access-key chords follow the sheet in front.
+Private Sub mExcelApp_SheetActivate(ByVal Sh As Object)
+    RefreshAccessKeys
+End Sub
+
+Private Sub mExcelApp_WorkbookActivate(ByVal Wb As Workbook)
+    RefreshAccessKeys
+End Sub
+
 Private Function FindApp(ByVal targetAppId As String) As ReDimUI
     On Error Resume Next
     Set FindApp = mApps.Item(targetAppId)
@@ -533,6 +570,19 @@ Friend Sub DispatchShape(ByVal clickedName As String)
     ' A click anywhere else closes an open list, even a click the target
     ' then ignores.
     appValue.CloseListsExcept targetComponentId
+    ' It also ends keyboard focus held elsewhere, so a field commits
+    ' before the clicked control's handler runs. A float field clicked
+    ' to focus takes focus over itself, and a click on a modal's chrome
+    ' leaves the dialog's focus alone.
+    If LenB(mFocusComponentId) > 0 Then
+        If mFocusAppId <> targetAppId _
+            Or mFocusComponentId <> targetComponentId Then
+            If Not componentValue.IsFloatField _
+                And Left$(targetComponentId, 4) <> "mdl_" Then
+                EndKeyboardFocus
+            End If
+        End If
+    End If
     If Not componentValue.CanClick Then Exit Sub
     componentValue.MarkClicked
     Set mSenderApp = appValue
@@ -608,7 +658,7 @@ Friend Sub SetKeyboardFocus(ByVal hostApp As ReDimUI, ByVal componentValue As Re
                 previousApp.PeekComponent(mFocusComponentId)
             If Not previousComponent Is Nothing Then
                 mFocusHandoff = True
-                previousComponent.BlurField previousApp, True
+                previousComponent.LeaveFocus previousApp, True
                 mFocusHandoff = False
             End If
         End If
@@ -636,6 +686,86 @@ Friend Property Get CaretBlinkMs() As Long
     End If
     CaretBlinkMs = mCaretBlinkMs
 End Property
+
+' Binds Alt plus each access key the active sheet's apps declare and
+' releases the rest, so the chords belong to ReDim only while an app
+' sheet is in front.
+Friend Sub RefreshAccessKeys()
+    Dim appValue As ReDimUI
+    Dim wantedKeys As String
+    Dim declaredKeys As String
+    Dim idx As Long
+    Dim keyLetter As String
+
+    If Not IsFactory(Me) Then
+        ReDimUI.RefreshAccessKeys
+        Exit Sub
+    End If
+    EnsureFactory
+    On Error Resume Next
+    For Each appValue In mApps
+        If appValue.Sheet Is ActiveSheet Then
+            declaredKeys = appValue.AccessKeyLetters
+            For idx = 1 To Len(declaredKeys)
+                keyLetter = Mid$(declaredKeys, idx, 1)
+                If InStr(wantedKeys, keyLetter) = 0 Then
+                    wantedKeys = wantedKeys & keyLetter
+                End If
+            Next idx
+        End If
+    Next appValue
+    For idx = 1 To Len(mBoundAccessKeys)
+        keyLetter = Mid$(mBoundAccessKeys, idx, 1)
+        If InStr(wantedKeys, keyLetter) = 0 Then Application.OnKey "%" & keyLetter
+    Next idx
+    For idx = 1 To Len(wantedKeys)
+        keyLetter = Mid$(wantedKeys, idx, 1)
+        If InStr(mBoundAccessKeys, keyLetter) = 0 Then
+            Application.OnKey "%" & keyLetter, "'RdxAccessKey """ & keyLetter & """'"
+        End If
+    Next idx
+    On Error GoTo 0
+    mBoundAccessKeys = wantedKeys
+End Sub
+
+' Alt plus a letter: the first app on the active sheet with a control
+' declaring it clicks that control.
+Friend Sub DispatchAccessKey(ByVal keyLetter As String)
+    Dim appValue As ReDimUI
+
+    If Not IsFactory(Me) Then
+        ReDimUI.DispatchAccessKey keyLetter
+        Exit Sub
+    End If
+    EnsureFactory
+    For Each appValue In mApps
+        If appValue.Sheet Is ActiveSheet Then
+            If appValue.ActivateAccessKey(LCase$(keyLetter)) Then Exit Sub
+        End If
+    Next appValue
+End Sub
+
+' Ends keyboard focus the way a click elsewhere does: a field commits,
+' any other control drops its ring.
+Friend Sub EndKeyboardFocus()
+    Dim focusApp As ReDimUI
+    Dim focusedValue As ReDimUI
+
+    If Not IsFactory(Me) Then
+        ReDimUI.EndKeyboardFocus
+        Exit Sub
+    End If
+    If LenB(mFocusComponentId) = 0 Then Exit Sub
+    Set focusApp = FindApp(mFocusAppId)
+    If Not focusApp Is Nothing Then
+        Set focusedValue = focusApp.PeekComponent(mFocusComponentId)
+    End If
+    If focusedValue Is Nothing Then
+        ClearKeyboardFocus
+    Else
+        focusedValue.LeaveFocus focusApp, True
+    End If
+End Sub
 
 Friend Sub ClearKeyboardFocus()
     If Not IsFactory(Me) Then
@@ -935,6 +1065,7 @@ Public Sub Shutdown()
     Set mNavStack = Nothing
     mActiveWindowId = vbNullString
     mPointerOverridden = False
+    RefreshAccessKeys
     Set mSenderApp = Nothing
     Set mSenderComponent = Nothing
 End Sub
@@ -1499,16 +1630,40 @@ Public Sub Confirm( _
     EndUpdate
     If Not mRendered Then Render
     RaiseModalZOrder
+    ' The dialog takes the keys: OK holds focus, Tab stays among its
+    ' buttons, Enter confirms, and Esc cancels.
+    mFocusBeforeModal = vbNullString
+    If ReDimUI.IsComponentFocused(mAppId, ReDimUI.FocusedComponentId) Then
+        mFocusBeforeModal = ReDimUI.FocusedComponentId
+    End If
+    Component("mdl_ok").TakeFocus Me, False
 End Sub
 
 Public Sub CloseModal()
+    Dim heldByDialog As Boolean
+    Dim returnTo As ReDimUI
+
     RequireRole ROLE_APP, "CloseModal"
+    heldByDialog = Left$(ReDimUI.FocusedComponentId, 4) = "mdl_" _
+        And ReDimUI.IsComponentFocused(mAppId, ReDimUI.FocusedComponentId)
     BeginUpdate
     HideIfExists "mdl_ov"
     HideIfExists "mdl_card"
     HideIfExists "mdl_ok"
     HideIfExists "mdl_cancel"
     EndUpdate
+    ' Focus goes back to the control that held it before the dialog.
+    If heldByDialog Then
+        If ReDimUI.IsComponentFocused(mAppId, ReDimUI.FocusedComponentId) Then
+            ReDimUI.ClearKeyboardFocus
+        End If
+        If LenB(mFocusBeforeModal) > 0 Then
+            If TryGetComponent(mFocusBeforeModal, returnTo) Then
+                If returnTo.IsFocusable Then returnTo.TakeFocus Me, False
+            End If
+        End If
+    End If
+    mFocusBeforeModal = vbNullString
 End Sub
 
 Private Sub HideIfExists(ByVal targetComponentId As String)
@@ -1805,6 +1960,7 @@ Public Sub Render()
     ' spinner, a toast) arms the pump right here; demand alone only keeps
     ' an already-armed pump alive.
     If HasAppWork() Then ReDimUI.RequestPump
+    ReDimUI.RefreshAccessKeys
 End Sub
 
 ' Shapes with this app's prefix but no registered component are leftovers
@@ -2134,6 +2290,7 @@ Public Sub Unmount(Optional ByVal deleteShapes As Boolean = True)
     Set mDirtyIds = New Collection
     Set mTickables = Nothing
     ReDimUI.ForgetApp mAppId
+    ReDimUI.RefreshAccessKeys
 End Sub
 
 Friend Sub ForgetApp(ByVal targetAppId As String)
@@ -2243,7 +2400,6 @@ Private Sub TickComponentsSection( _
     For Each componentValue In Tickables()
         componentValue.TickAnimation mSheet, elapsedMs
         componentValue.TickSlideDrag Me, leftButtonDown
-        componentValue.TickFieldWatch Me, anyButtonDown, pressEdge, runWork
         componentValue.TickListWatch pressEdge, runWork
         If runWork Then
             If componentValue.IsExpiredToast(nowMs) Then
@@ -2254,6 +2410,13 @@ Private Sub TickComponentsSection( _
             expiredIds.Add componentValue.ComponentId
         End If
     Next componentValue
+    ' The control holding keyboard focus, tickable or not, watches for a
+    ' press elsewhere or a moved selection.
+    If ReDimUI.IsComponentFocused(mAppId, ReDimUI.FocusedComponentId) Then
+        If TryGetComponent(ReDimUI.FocusedComponentId, componentValue) Then
+            componentValue.TickFocusWatch Me, pressEdge, runWork
+        End If
+    End If
     For Each expiredId In expiredIds
         If TryGetComponent(CStr(expiredId), componentValue) Then
             componentValue.Remove
@@ -2318,6 +2481,11 @@ Friend Function HasAppWork() As Boolean
             Exit Function
         End If
     Next jobValue
+    ' Keyboard focus keeps the frames coming for its click-away watch.
+    If ReDimUI.IsComponentFocused(mAppId, ReDimUI.FocusedComponentId) Then
+        HasAppWork = True
+        Exit Function
+    End If
     For Each componentValue In Tickables()
         If componentValue.NeedsAnimation Then
             HasAppWork = True
@@ -2712,6 +2880,60 @@ Public Function Action(ByVal actionLabel As String, ByVal handlerProc As String)
     Touch
     Set Action = Me
 End Function
+
+' Tab order: positive values come first, ascending; the rest follow in
+' creation order; -1 takes the control out of Tab while Focus still
+' reaches it.
+Public Function TabIndex(ByVal tabSlot As Long) As ReDimUI
+    RequireRole ROLE_COMPONENT, "TabIndex"
+    mTabIndex = tabSlot
+    Set TabIndex = Me
+End Function
+
+' Gives the control keyboard focus and scrolls it into view: the way in
+' from code, since a click focuses only text fields.
+Public Function Focus() As ReDimUI
+    RequireRole ROLE_COMPONENT, "Focus"
+    If IsFocusable() Then
+        TakeFocus OwnerApp, False
+        ScrollIntoSight
+    End If
+    Set Focus = Me
+End Function
+
+' Alt plus this letter or digit clicks the control while its sheet is
+' active, and the first matching character of its text is underlined.
+' For buttons and tick boxes; an ampersand in their text stays literal.
+Public Function AccessKey(ByVal keyLetter As String) As ReDimUI
+    RequireRole ROLE_COMPONENT, "AccessKey"
+    If Len(keyLetter) > 1 Or Not LCase$(keyLetter & "a") Like "[a-z0-9]*" Then
+        RaiseError ERROR_INVALID_ARGUMENT, "AccessKey", _
+            "AccessKey takes one letter or digit."
+    End If
+    mAccessKey = LCase$(keyLetter)
+    Touch
+    ReDimUI.RefreshAccessKeys
+    Set AccessKey = Me
+End Function
+
+Friend Property Get AccessKeyLetter() As String
+    AccessKeyLetter = mAccessKey
+End Property
+
+' A float TextInput or ComboBox shows a clear button inside its right
+' end while it holds text. A click on it empties the field and leaves
+' it focused; the emptied value commits when focus leaves.
+Public Function Clearable(Optional ByVal clearOn As Boolean = True) As ReDimUI
+    RequireRole ROLE_COMPONENT, "Clearable"
+    mClearable = clearOn
+    Touch
+    Set Clearable = Me
+End Function
+
+Public Property Get IsVisible() As Boolean
+    RequireRole ROLE_COMPONENT, "IsVisible"
+    IsVisible = mVisible
+End Property
 
 Public Function AltText(ByVal altDescription As String) As ReDimUI
     RequireRole ROLE_COMPONENT, "AltText"
@@ -3458,6 +3680,9 @@ Public Sub Remove()
 
     RequireRole ROLE_COMPONENT, "Remove"
     Set hostApp = OwnerApp
+    If ReDimUI.IsComponentFocused(hostApp.AppId, mComponentId) Then
+        ReDimUI.ClearKeyboardFocus
+    End If
     DeleteOwnShapes hostApp.Sheet
     hostApp.ForgetComponent mComponentId
 End Sub
@@ -3525,6 +3750,176 @@ Friend Function PointClaimedByChrome( _
         End If
     Next componentValue
 End Function
+
+' The controls Tab visits: positive TabIndex values first, ascending,
+' then the rest in creation order. While a modal is up only its buttons
+' take part, which keeps focus inside the dialog.
+Private Function TabOrder() As Collection
+    Dim leading As Collection
+    Dim trailing As Collection
+    Dim orderedId As Variant
+    Dim componentValue As ReDimUI
+    Dim placed As ReDimUI
+    Dim idx As Long
+    Dim trapped As Boolean
+    Dim inserted As Boolean
+
+    Set leading = New Collection
+    Set trailing = New Collection
+    trapped = ModalUp()
+    For Each orderedId In mComponentOrder
+        If TryGetComponent(CStr(orderedId), componentValue) Then
+            If componentValue.IsTabStop Then
+                If Not trapped Or Left$(componentValue.ComponentId, 4) = "mdl_" Then
+                    If componentValue.TabPosition > 0 Then
+                        inserted = False
+                        For idx = 1 To leading.Count
+                            Set placed = leading.Item(idx)
+                            If placed.TabPosition > componentValue.TabPosition Then
+                                leading.Add componentValue, Before:=idx
+                                inserted = True
+                                Exit For
+                            End If
+                        Next idx
+                        If Not inserted Then leading.Add componentValue
+                    Else
+                        trailing.Add componentValue
+                    End If
+                End If
+            End If
+        End If
+    Next orderedId
+    For idx = 1 To trailing.Count
+        leading.Add trailing.Item(idx)
+    Next idx
+    Set TabOrder = leading
+End Function
+
+' Moves keyboard focus to the next or previous control in Tab order,
+' wrapping, and scrolls it into view. False when no other control can
+' take focus, so the caller can simply leave.
+Friend Function MoveFocusFrom(ByVal currentId As String, ByVal goingForward As Boolean) As Boolean
+    Dim stops As Collection
+    Dim idx As Long
+    Dim here As Long
+    Dim nextStop As ReDimUI
+
+    RequireRole ROLE_APP, "MoveFocusFrom"
+    Set stops = TabOrder()
+    If stops.Count = 0 Then Exit Function
+    For idx = 1 To stops.Count
+        Set nextStop = stops.Item(idx)
+        If nextStop.ComponentId = currentId Then
+            here = idx
+        End If
+    Next idx
+    If here = 0 Then
+        idx = IIf(goingForward, 1, stops.Count)
+    ElseIf goingForward Then
+        idx = here Mod stops.Count + 1
+    Else
+        idx = (here + stops.Count - 2) Mod stops.Count + 1
+    End If
+    If idx = here Then Exit Function
+    Set nextStop = stops.Item(idx)
+    nextStop.TakeFocus Me, False
+    nextStop.ScrollIntoSight
+    MoveFocusFrom = True
+End Function
+
+' Gives keyboard focus to the first control in Tab order.
+Public Function FocusFirst() As ReDimUI
+    RequireRole ROLE_APP, "FocusFirst"
+    MoveFocusFrom vbNullString, True
+    Set FocusFirst = Me
+End Function
+
+' The button Enter clicks when focus is on a text field or on a control
+' that does not use Enter itself. A modal's OK takes over while it is up.
+Public Function DefaultButton(ByVal targetComponentId As String) As ReDimUI
+    RequireRole ROLE_APP, "DefaultButton"
+    mDefaultButtonId = targetComponentId
+    Set DefaultButton = Me
+End Function
+
+Friend Sub ClickDefaultButton()
+    Dim defaultId As String
+    Dim defaultTarget As ReDimUI
+
+    RequireRole ROLE_APP, "ClickDefaultButton"
+    If ModalUp() Then
+        defaultId = "mdl_ok"
+    Else
+        defaultId = mDefaultButtonId
+    End If
+    If LenB(defaultId) = 0 Then Exit Sub
+    If Not TryGetComponent(defaultId, defaultTarget) Then Exit Sub
+    If Not defaultTarget.IsFocusable Then Exit Sub
+    ReDimUI.DispatchShape defaultTarget.ShapeName
+End Sub
+
+' The access-key letters this app's controls declare.
+Friend Function AccessKeyLetters() As String
+    Dim componentValue As ReDimUI
+    Dim keyLetter As String
+
+    For Each componentValue In mComponents
+        keyLetter = componentValue.AccessKeyLetter
+        If LenB(keyLetter) > 0 Then
+            If InStr(AccessKeyLetters, keyLetter) = 0 Then
+                AccessKeyLetters = AccessKeyLetters & keyLetter
+            End If
+        End If
+    Next componentValue
+End Function
+
+' Clicks the first control in creation order that declares the key and
+' can take a click; while a modal is up, only its buttons count.
+Friend Function ActivateAccessKey(ByVal keyLetter As String) As Boolean
+    Dim orderedId As Variant
+    Dim componentValue As ReDimUI
+    Dim trapped As Boolean
+
+    RequireRole ROLE_APP, "ActivateAccessKey"
+    trapped = ModalUp()
+    For Each orderedId In mComponentOrder
+        If TryGetComponent(CStr(orderedId), componentValue) Then
+            If componentValue.AccessKeyLetter = keyLetter Then
+                If componentValue.IsFocusable Then
+                    If Not trapped Or Left$(componentValue.ComponentId, 4) = "mdl_" Then
+                        ReDimUI.DispatchShape componentValue.ShapeName
+                        ActivateAccessKey = True
+                        Exit Function
+                    End If
+                End If
+            End If
+        End If
+    Next orderedId
+End Function
+
+' True while Confirm's overlay is showing.
+Friend Function ModalUp() As Boolean
+    Dim overlay As ReDimUI
+
+    If TryGetComponent("mdl_ov", overlay) Then
+        ModalUp = overlay.IsVisible
+    End If
+End Function
+
+' Esc on a modal: Cancel when it shows one, else OK.
+Friend Sub CancelModal()
+    Dim modalButton As ReDimUI
+
+    If TryGetComponent("mdl_cancel", modalButton) Then
+        If modalButton.IsFocusable Then
+            ReDimUI.DispatchShape modalButton.ShapeName
+            Exit Sub
+        End If
+    End If
+    If TryGetComponent("mdl_ok", modalButton) Then
+        ReDimUI.DispatchShape modalButton.ShapeName
+    End If
+End Sub
 
 ' One open list per app: a list opening, or a click on any other
 ' control, closes the rest.
@@ -3766,7 +4161,9 @@ Friend Sub RunClickBehavior()
             If LenB(mWritesToKey) > 0 Then hostApp.SetState mWritesToKey, mChecked
             Touch
         Case KIND_INPUT
-            If IsFloatField() Then
+            If ReDimUI.SenderPart = "cx" Then
+                ClearFieldText hostApp
+            ElseIf IsFloatField() Then
                 FocusField hostApp
             Else
                 ' The frame covers the anchor cell and takes the click, so
@@ -3776,7 +4173,10 @@ Friend Sub RunClickBehavior()
             End If
             Exit Sub
         Case KIND_COMBO
-            If ReDimUI.SenderPart = "optn" Then
+            If ReDimUI.SenderPart = "cx" Then
+                ClearFieldText hostApp
+                Exit Sub
+            ElseIf ReDimUI.SenderPart = "optn" Then
                 ' The empty row is a message, not an option.
                 Exit Sub
             ElseIf ReDimUI.SenderPart = "optu" Or ReDimUI.SenderPart = "optd" Then
@@ -3818,17 +4218,7 @@ Friend Sub RunClickBehavior()
                 If pickedItem = 0 Then Exit Sub
                 ' Re-picking the selection only closes the list: nothing
                 ' changed, so nothing is written and no handler runs.
-                If pickedItem = CLng(mValue) Then
-                    mSelectOpen = False
-                    Touch
-                    Exit Sub
-                End If
-                mValue = pickedItem
-                mSelectOpen = False
-                If LenB(mWritesToKey) > 0 Then
-                    hostApp.SetState mWritesToKey, ItemAt(pickedItem)
-                End If
-                Touch
+                If Not PickSelectItem(hostApp, pickedItem) Then Exit Sub
             Else
                 ToggleDropList hostApp.Sheet
                 Exit Sub
@@ -3844,30 +4234,16 @@ Friend Sub RunClickBehavior()
             Dim checkPart As String
             Dim checkRow As Long
             checkPart = ReDimUI.SenderPart
-            EnsureCheckedSet
             If checkPart = "mb" Or checkPart = "mt" Then
-                If ItemCount = 0 Then Exit Sub
-                If mCheckedSet.Count = ItemCount Then
-                    Set mCheckedSet = New Collection
-                Else
-                    Set mCheckedSet = New Collection
-                    For checkRow = 1 To ItemCount
-                        mCheckedSet.Add checkRow
-                    Next checkRow
-                End If
+                checkRow = 0
+            ElseIf LenB(checkPart) = 0 Then
+                checkRow = 1
+            ElseIf IsNumeric(Mid$(checkPart, 2)) Then
+                checkRow = CLng(Mid$(checkPart, 2))
             Else
-                If LenB(checkPart) = 0 Then
-                    checkRow = 1
-                ElseIf IsNumeric(Mid$(checkPart, 2)) Then
-                    checkRow = CLng(Mid$(checkPart, 2))
-                End If
-                If checkRow < 1 Or checkRow > ItemCount Then Exit Sub
-                TransferSelectionToggle mCheckedSet, checkRow
+                Exit Sub
             End If
-            If LenB(mWritesToKey) > 0 Then
-                hostApp.SetState mWritesToKey, CheckedJoined()
-            End If
-            Touch
+            If Not ToggleCheckRow(hostApp, checkRow) Then Exit Sub
         Case KIND_TRANSFER
             Dim transferPart As String
             Dim transferRow As Long
@@ -3895,12 +4271,14 @@ Friend Sub RunClickBehavior()
                     ' Window rows map through the scroll offset.
                     transferRow = mLeftOffset + CLng(Mid$(transferPart, 3))
                     TransferSelectionToggle mSelLeft, transferRow
+                    PlaceKeyCursor 0, transferRow
                     Touch
                 End If
             ElseIf Left$(transferPart, 2) = "cl" Then
                 If IsNumeric(Mid$(transferPart, 3)) Then
                     transferRow = mRightOffset + CLng(Mid$(transferPart, 3))
                     TransferSelectionToggle mSelRight, transferRow
+                    PlaceKeyCursor 1, transferRow
                     Touch
                 End If
             ElseIf transferPart = "mvr" Then
@@ -3920,13 +4298,7 @@ Friend Sub RunClickBehavior()
             ElseIf IsNumeric(Mid$(ReDimUI.SenderPart, 2)) Then
                 rowNumber = CLng(Mid$(ReDimUI.SenderPart, 2))
             End If
-            If rowNumber < 1 Then Exit Sub
-            If rowNumber = CLng(mValue) Then Exit Sub
-            mValue = rowNumber
-            If LenB(mWritesToKey) > 0 Then
-                hostApp.SetState mWritesToKey, ItemAt(rowNumber)
-            End If
-            Touch
+            If Not SelectRadioRow(hostApp, rowNumber) Then Exit Sub
         Case KIND_STEPPER
             Dim stepped As Double
             If ReDimUI.SenderPart = "minus" Then
@@ -3936,12 +4308,7 @@ Friend Sub RunClickBehavior()
             Else
                 Exit Sub
             End If
-            If stepped < mSliderMin Then stepped = mSliderMin
-            If stepped > mSliderMax Then stepped = mSliderMax
-            If stepped = mValue Then Exit Sub
-            mValue = stepped
-            If LenB(mWritesToKey) > 0 Then hostApp.SetState mWritesToKey, mValue
-            Touch
+            If Not SetStepperValue(hostApp, stepped) Then Exit Sub
         Case KIND_SLIDEBAR
             ' Drags are handled by the pump's press watch; the release
             ' click arrives here and is swallowed by the suppress window.
@@ -4064,6 +4431,8 @@ Friend Sub Apply( _
     ApplyText mainShape, themeValue
     ApplyBehavior mainShape, hostSheet
     ApplyKindExtras mainShape, hostSheet, themeValue
+    If IsFloatField() Then ApplyClearButton mainShape, hostSheet, themeValue
+    ApplyFocusRing hostSheet, themeValue
     ApplyAltText mainShape
     mAppliedValid = True
 End Sub
@@ -4137,6 +4506,9 @@ Private Function AccessibleDescription() As String
     End Select
     If Not mEnabled And LenB(described) > 0 Then
         described = described & ", unavailable"
+    End If
+    If LenB(mAccessKey) > 0 And LenB(described) > 0 Then
+        described = described & ", Alt+" & UCase$(mAccessKey)
     End If
     AccessibleDescription = described
 End Function
@@ -4687,7 +5059,7 @@ Private Function WindowFieldText( _
     Dim viewText As String
     Dim idx As Long
 
-    charsPerLine = Int((mWidth - 12) / (resolvedSize * 0.58))
+    charsPerLine = Int((mWidth - 12 - ClearReserve()) / (resolvedSize * 0.58))
     If charsPerLine < 4 Then charsPerLine = 4
     caretRender = mCaretPos + 1
     If Not mMultiLine Then
@@ -4832,6 +5204,652 @@ Private Sub ApplyText(ByVal mainShape As Shape, ByVal themeValue As ReDimUI)
         mAppliedTextColor = resolvedColor
         mAppliedFontSize = resolvedSize
         mAppliedFontBold = mFontBold
+    End If
+    If mKind = KIND_BUTTON Then
+        If LenB(mAccessKey) > 0 Or LenB(mAppliedAccessKey) > 0 Then
+            If textChanged Or mustRestyle Or mAppliedAccessKey <> mAccessKey Then
+                MarkAccessKey mainShape, shownText
+            End If
+        End If
+    End If
+End Sub
+
+' Underlines the access key's first appearance in the shown text.
+Private Sub MarkAccessKey(ByVal keyedShape As Shape, ByVal shownText As String)
+    Dim keyAt As Long
+
+    mAppliedAccessKey = mAccessKey
+    On Error Resume Next
+    With keyedShape.TextFrame2.TextRange
+        .Font.UnderlineStyle = msoNoUnderline
+        If LenB(mAccessKey) > 0 Then
+            keyAt = InStr(1, shownText, mAccessKey, vbTextCompare)
+            If keyAt > 0 Then
+                .Characters(keyAt, 1).Font.UnderlineStyle = msoUnderlineSingleLine
+            End If
+        End If
+    End With
+    On Error GoTo 0
+End Sub
+
+' Keys for a focused control that is not a text field. Tab and Shift+Tab
+' move focus; Esc closes an open list, cancels a modal, or leaves; the
+' rest is per kind, with Enter clicking a button or the app's default
+' button.
+Private Sub HandleControlKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
+    Select Case keyText
+        Case "{TAB}", "{BACKTAB}"
+            If mKind = KIND_SELECT And mSelectOpen Then
+                ' Tab takes the highlighted item, as a native list does.
+                If mListHighlight >= 1 Then
+                    If PickSelectItem(hostApp, mListHighlight) Then
+                        RunClickHandlers hostApp
+                    End If
+                Else
+                    CloseDropList
+                End If
+            End If
+            If Not hostApp.MoveFocusFrom(mComponentId, keyText = "{TAB}") Then
+                LeaveFocus hostApp, True
+            End If
+            Exit Sub
+        Case "{ESC}"
+            If mSelectOpen Then
+                CloseDropList
+            ElseIf hostApp.ModalUp Then
+                hostApp.CancelModal
+            Else
+                LeaveFocus hostApp, True
+            End If
+            Exit Sub
+    End Select
+    Select Case mKind
+        Case KIND_BUTTON, KIND_IMAGE
+            If keyText = " " Or keyText = "{ENTER}" Then ActivateByKey
+        Case KIND_TOGGLE, KIND_TICKBOX
+            If keyText = " " Then
+                ActivateByKey
+            ElseIf keyText = "{ENTER}" Then
+                hostApp.ClickDefaultButton
+            End If
+        Case KIND_RADIO
+            HandleRadioKey hostApp, keyText
+        Case KIND_STEPPER
+            HandleStepperKey hostApp, keyText
+        Case KIND_SLIDEBAR
+            HandleSliderKey hostApp, keyText
+        Case KIND_SELECT
+            HandleSelectKey hostApp, keyText
+        Case KIND_CHECKLIST
+            HandleCheckListKey hostApp, keyText
+        Case KIND_TRANSFER
+            HandleTransferKey hostApp, keyText
+    End Select
+End Sub
+
+' A key standing in for a click takes the mouse's own path: debounce,
+' handlers, and the sender context included.
+Private Sub ActivateByKey()
+    ReDimUI.DispatchShape ShapeName
+End Sub
+
+' Arrows move the selection itself, wrapping at the ends; each move
+' writes the state and fires OnChange as a click would.
+Private Sub HandleRadioKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
+    Dim itemTotal As Long
+    Dim aimRow As Long
+
+    itemTotal = ItemCount
+    If itemTotal = 0 Then Exit Sub
+    Select Case keyText
+        Case "{UP}", "{LEFT}"
+            aimRow = CLng(mValue) - 1
+            If aimRow < 1 Then aimRow = itemTotal
+        Case "{DOWN}", "{RIGHT}"
+            aimRow = CLng(mValue) + 1
+            If aimRow > itemTotal Then aimRow = 1
+        Case "{HOME}"
+            aimRow = 1
+        Case "{END}"
+            aimRow = itemTotal
+        Case " "
+            If CLng(mValue) = 0 Then aimRow = 1
+        Case "{ENTER}"
+            hostApp.ClickDefaultButton
+    End Select
+    If aimRow = 0 Then Exit Sub
+    If SelectRadioRow(hostApp, aimRow) Then RunClickHandlers hostApp
+End Sub
+
+Private Function SelectRadioRow(ByVal hostApp As ReDimUI, ByVal rowNumber As Long) As Boolean
+    If rowNumber < 1 Or rowNumber > ItemCount Then Exit Function
+    If rowNumber = CLng(mValue) Then Exit Function
+    mValue = rowNumber
+    If LenB(mWritesToKey) > 0 Then
+        hostApp.SetState mWritesToKey, ItemAt(rowNumber)
+    End If
+    Touch
+    SelectRadioRow = True
+End Function
+
+' Arrows step, Page Up and Page Down step ten times, Home and End jump
+' to the range ends; each change fires OnChange.
+Private Sub HandleStepperKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
+    Dim aimValue As Double
+
+    Select Case keyText
+        Case "{UP}", "{RIGHT}"
+            aimValue = mValue + mSliderStep
+        Case "{DOWN}", "{LEFT}"
+            aimValue = mValue - mSliderStep
+        Case "{PGUP}"
+            aimValue = mValue + 10 * mSliderStep
+        Case "{PGDN}"
+            aimValue = mValue - 10 * mSliderStep
+        Case "{HOME}"
+            aimValue = mSliderMin
+        Case "{END}"
+            aimValue = mSliderMax
+        Case "{ENTER}"
+            hostApp.ClickDefaultButton
+            Exit Sub
+        Case Else
+            Exit Sub
+    End Select
+    If SetStepperValue(hostApp, aimValue) Then RunClickHandlers hostApp
+End Sub
+
+' Clamps to the range and, when the value moves, writes it and its
+' state. True when it moved; the caller runs the handlers.
+Private Function SetStepperValue(ByVal hostApp As ReDimUI, ByVal aimValue As Double) As Boolean
+    If aimValue < mSliderMin Then aimValue = mSliderMin
+    If aimValue > mSliderMax Then aimValue = mSliderMax
+    If aimValue = mValue Then Exit Function
+    mValue = aimValue
+    If LenB(mWritesToKey) > 0 Then hostApp.SetState mWritesToKey, mValue
+    Touch
+    SetStepperValue = True
+End Function
+
+' Arrows move a step, Page Up and Page Down a tenth of the range (in
+' whole steps), Home and End the ends; each change fires OnChange.
+Private Sub HandleSliderKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
+    Dim aimValue As Double
+    Dim smallStep As Double
+    Dim pageStep As Double
+
+    If mSliderMax <= mSliderMin Then Exit Sub
+    smallStep = mSliderStep
+    If smallStep <= 0 Then smallStep = (mSliderMax - mSliderMin) / 100
+    pageStep = CLng((mSliderMax - mSliderMin) / 10 / smallStep) * smallStep
+    If pageStep < smallStep Then pageStep = smallStep
+    Select Case keyText
+        Case "{RIGHT}", "{UP}"
+            aimValue = mValue + smallStep
+        Case "{LEFT}", "{DOWN}"
+            aimValue = mValue - smallStep
+        Case "{PGUP}"
+            aimValue = mValue + pageStep
+        Case "{PGDN}"
+            aimValue = mValue - pageStep
+        Case "{HOME}"
+            aimValue = mSliderMin
+        Case "{END}"
+            aimValue = mSliderMax
+        Case "{ENTER}"
+            hostApp.ClickDefaultButton
+            Exit Sub
+        Case Else
+            Exit Sub
+    End Select
+    If aimValue < mSliderMin Then aimValue = mSliderMin
+    If aimValue > mSliderMax Then aimValue = mSliderMax
+    If aimValue = mValue Then Exit Sub
+    SlideToFraction hostApp, (aimValue - mSliderMin) / (mSliderMax - mSliderMin), True
+End Sub
+
+' A focused select. Closed, arrows and Home, End, Page Up, and Page
+' Down change the selection directly, as a native drop-down does, and
+' Space, Alt+Down, and F4 open the list. Open, they move the highlight,
+' Enter, Space, or Alt+Up take it, and F4 closes. Typed letters jump to
+' the next item starting with them, open or closed.
+Private Sub HandleSelectKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
+    Dim itemTotal As Long
+    Dim aimRow As Long
+    Dim anchorItem As Long
+
+    itemTotal = ItemCount
+    If itemTotal = 0 Then
+        If keyText = "{ENTER}" Then hostApp.ClickDefaultButton
+        Exit Sub
+    End If
+    If mSelectOpen Then
+        anchorItem = mListHighlight
+        If anchorItem < 1 Then anchorItem = CLng(mValue)
+        Select Case keyText
+            Case "{UP}"
+                aimRow = anchorItem - 1
+            Case "{DOWN}"
+                aimRow = anchorItem + 1
+            Case "{PGUP}"
+                aimRow = anchorItem - mListRows
+            Case "{PGDN}"
+                aimRow = anchorItem + mListRows
+            Case "{HOME}"
+                aimRow = 1
+            Case "{END}"
+                aimRow = itemTotal
+            Case "{ENTER}", " ", "{ALTUP}"
+                If mListHighlight >= 1 Then
+                    If PickSelectItem(hostApp, mListHighlight) Then
+                        RunClickHandlers hostApp
+                    End If
+                Else
+                    CloseDropList
+                End If
+                Exit Sub
+            Case "{F4}", "{ALTDOWN}"
+                CloseDropList
+                Exit Sub
+            Case Else
+                aimRow = TypeAheadItem(keyText, anchorItem)
+                If aimRow = 0 Then Exit Sub
+        End Select
+        If aimRow < 1 Then aimRow = 1
+        If aimRow > itemTotal Then aimRow = itemTotal
+        HighlightListItem aimRow
+        Exit Sub
+    End If
+    anchorItem = CLng(mValue)
+    Select Case keyText
+        Case "{UP}", "{LEFT}"
+            aimRow = anchorItem - 1
+        Case "{DOWN}", "{RIGHT}"
+            aimRow = anchorItem + 1
+        Case "{PGUP}"
+            aimRow = anchorItem - mListRows
+        Case "{PGDN}"
+            aimRow = anchorItem + mListRows
+        Case "{HOME}"
+            aimRow = 1
+        Case "{END}"
+            aimRow = itemTotal
+        Case " ", "{ALTDOWN}", "{F4}"
+            OpenDropList hostApp.Sheet
+            HighlightListItem IIf(anchorItem >= 1, anchorItem, 1)
+            Exit Sub
+        Case "{ENTER}"
+            hostApp.ClickDefaultButton
+            Exit Sub
+        Case Else
+            aimRow = TypeAheadItem(keyText, anchorItem)
+            If aimRow = 0 Then Exit Sub
+    End Select
+    If aimRow < 1 Then aimRow = 1
+    If aimRow > itemTotal Then aimRow = itemTotal
+    If PickSelectItem(hostApp, aimRow) Then RunClickHandlers hostApp
+End Sub
+
+' Moves an open select's highlight, scrolling the window to keep it in
+' view.
+Private Sub HighlightListItem(ByVal itemIndex As Long)
+    mListHighlight = itemIndex
+    If mListHighlight > mListOffset + mListRows Then
+        mListOffset = mListHighlight - mListRows
+    ElseIf mListHighlight <= mListOffset Then
+        mListOffset = mListHighlight - 1
+    End If
+    Touch
+End Sub
+
+' Takes an item into the select and closes its list. True when the
+' value changed, which is when the caller runs the handlers; taking the
+' current item again only closes the list.
+Private Function PickSelectItem(ByVal hostApp As ReDimUI, ByVal itemIndex As Long) As Boolean
+    mSelectOpen = False
+    mListHighlight = 0
+    If itemIndex = CLng(mValue) Then
+        Touch
+        Exit Function
+    End If
+    mValue = itemIndex
+    If LenB(mWritesToKey) > 0 Then
+        hostApp.SetState mWritesToKey, ItemAt(itemIndex)
+    End If
+    Touch
+    PickSelectItem = True
+End Function
+
+' Type-ahead: letters typed within a second of each other build a
+' prefix, and the answer is the next item that starts with it, counted
+' from the current one; one letter typed again steps through the items
+' that start with it. 0 when nothing matches.
+Private Function TypeAheadItem(ByVal keyText As String, ByVal fromItem As Long) As Long
+    Dim nowMs As LongLong
+    Dim typedPrefix As String
+    Dim itemTotal As Long
+    Dim startAt As Long
+    Dim stepCount As Long
+    Dim candidate As Long
+
+    If Len(keyText) <> 1 Then Exit Function
+    nowMs = GetTickCount64()
+    If nowMs - mTypeAheadMs > 1000 Then mTypeAhead = vbNullString
+    mTypeAheadMs = nowMs
+    mTypeAhead = mTypeAhead & LCase$(keyText)
+    typedPrefix = mTypeAhead
+    If Len(typedPrefix) > 1 And typedPrefix = String$(Len(typedPrefix), Left$(typedPrefix, 1)) Then
+        typedPrefix = Left$(typedPrefix, 1)
+    End If
+    itemTotal = ItemCount
+    ' One letter looks past the current item; a longer prefix refines
+    ' from it, so typing on narrows instead of skipping ahead.
+    If Len(typedPrefix) = 1 Then
+        startAt = fromItem + 1
+    Else
+        startAt = fromItem
+    End If
+    If startAt < 1 Then startAt = 1
+    For stepCount = 0 To itemTotal - 1
+        candidate = (startAt - 1 + stepCount) Mod itemTotal + 1
+        If LCase$(Left$(ItemAt(candidate), Len(typedPrefix))) = typedPrefix Then
+            TypeAheadItem = candidate
+            Exit Function
+        End If
+    Next stepCount
+End Function
+
+' Up and Down move a cursor through the rows, the select-all header
+' included; Space toggles the cursor's row as a click would.
+Private Sub HandleCheckListKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
+    Dim firstRow As Long
+    Dim aimRow As Long
+
+    If ItemCount = 0 Then Exit Sub
+    firstRow = IIf(mSelectAllRow, 0, 1)
+    Select Case keyText
+        Case "{UP}"
+            aimRow = mKeyRow - 1
+        Case "{DOWN}"
+            aimRow = mKeyRow + 1
+        Case "{HOME}", "{PGUP}"
+            aimRow = firstRow
+        Case "{END}", "{PGDN}"
+            aimRow = ItemCount
+        Case " "
+            If ToggleCheckRow(hostApp, mKeyRow) Then RunClickHandlers hostApp
+            Exit Sub
+        Case "{ENTER}"
+            hostApp.ClickDefaultButton
+            Exit Sub
+        Case Else
+            Exit Sub
+    End Select
+    If aimRow < firstRow Then aimRow = firstRow
+    If aimRow > ItemCount Then aimRow = ItemCount
+    PlaceKeyCursor 0, aimRow
+    Touch
+End Sub
+
+' Toggles one row, or with row 0 the select-all header: from mixed or
+' none it checks everything, from all it clears. Writes the state and
+' moves the keyboard cursor there. True when anything toggled; the
+' caller runs the handlers.
+Private Function ToggleCheckRow(ByVal hostApp As ReDimUI, ByVal checkRow As Long) As Boolean
+    Dim rowNumber As Long
+
+    EnsureCheckedSet
+    If ItemCount = 0 Then Exit Function
+    If checkRow = 0 Then
+        If Not mSelectAllRow Then Exit Function
+        If mCheckedSet.Count = ItemCount Then
+            Set mCheckedSet = New Collection
+        Else
+            Set mCheckedSet = New Collection
+            For rowNumber = 1 To ItemCount
+                mCheckedSet.Add rowNumber
+            Next rowNumber
+        End If
+    Else
+        If checkRow < 1 Or checkRow > ItemCount Then Exit Function
+        TransferSelectionToggle mCheckedSet, checkRow
+    End If
+    PlaceKeyCursor 0, checkRow
+    If LenB(mWritesToKey) > 0 Then
+        hostApp.SetState mWritesToKey, CheckedJoined()
+    End If
+    Touch
+    ToggleCheckRow = True
+End Function
+
+Private Sub PlaceKeyCursor(ByVal panelIndex As Long, ByVal rowNumber As Long)
+    mKeyPanel = panelIndex
+    mKeyRow = rowNumber
+    mKeyCursorSet = True
+End Sub
+
+' Up and Down move a cursor through the focused panel's rows, Left and
+' Right switch panels, Space toggles the cursor's row in the selection,
+' and Enter moves the panel's selection across, or the cursor's row
+' when nothing is selected.
+Private Sub HandleTransferKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
+    Dim rowTotal As Long
+    Dim aimRow As Long
+    Dim rowsShown As Long
+
+    EnsureTransferCollections
+    rowsShown = TransferRowCapacity()
+    aimRow = mKeyRow
+    Select Case keyText
+        Case "{UP}"
+            aimRow = mKeyRow - 1
+        Case "{DOWN}"
+            aimRow = mKeyRow + 1
+        Case "{HOME}"
+            aimRow = 1
+        Case "{END}"
+            aimRow = TransferPanelCount(mKeyPanel)
+        Case "{PGUP}"
+            aimRow = mKeyRow - rowsShown
+        Case "{PGDN}"
+            aimRow = mKeyRow + rowsShown
+        Case "{LEFT}"
+            mKeyPanel = 0
+        Case "{RIGHT}"
+            mKeyPanel = 1
+        Case " "
+            If mKeyRow >= 1 And mKeyRow <= TransferPanelCount(mKeyPanel) Then
+                If mKeyPanel = 0 Then
+                    TransferSelectionToggle mSelLeft, mKeyRow
+                Else
+                    TransferSelectionToggle mSelRight, mKeyRow
+                End If
+                Touch
+            End If
+            Exit Sub
+        Case "{ENTER}"
+            If mKeyRow >= 1 And mKeyRow <= TransferPanelCount(mKeyPanel) Then
+                If mKeyPanel = 0 Then
+                    If mSelLeft.Count = 0 Then mSelLeft.Add mKeyRow
+                Else
+                    If mSelRight.Count = 0 Then mSelRight.Add mKeyRow
+                End If
+                TransferSelected hostApp, (mKeyPanel = 0)
+            End If
+        Case Else
+            Exit Sub
+    End Select
+    rowTotal = TransferPanelCount(mKeyPanel)
+    If aimRow > rowTotal Then aimRow = rowTotal
+    If aimRow < 1 Then aimRow = IIf(rowTotal > 0, 1, 0)
+    PlaceKeyCursor mKeyPanel, aimRow
+    ' The panel window follows the cursor.
+    If mKeyPanel = 0 Then
+        If aimRow > mLeftOffset + rowsShown Then mLeftOffset = aimRow - rowsShown
+        If aimRow >= 1 And aimRow <= mLeftOffset Then mLeftOffset = aimRow - 1
+    Else
+        If aimRow > mRightOffset + rowsShown Then mRightOffset = aimRow - rowsShown
+        If aimRow >= 1 And aimRow <= mRightOffset Then mRightOffset = aimRow - 1
+    End If
+    Touch
+End Sub
+
+Private Function TransferPanelCount(ByVal panelIndex As Long) As Long
+    EnsureTransferCollections
+    If panelIndex = 0 Then
+        TransferPanelCount = mItems.Count
+    Else
+        TransferPanelCount = mChosenItems.Count
+    End If
+End Function
+
+' Clearable's button: a small muted circle with an x inside the face's
+' right end (left of a combo's caret) while the field holds text.
+Private Sub ApplyClearButton( _
+    ByVal mainShape As Shape, _
+    ByVal hostSheet As Worksheet, _
+    ByVal themeValue As ReDimUI _
+)
+    Dim clearShape As Shape
+    Dim clearKey As String
+
+    If ClearReserve() > 0 Then
+        clearKey = PartsState(themeValue)
+        If clearKey = mAppliedClearSig Then Exit Sub
+        mAppliedClearSig = clearKey
+        Set clearShape = EnsurePartShape(hostSheet, "cx", msoShapeOval)
+        clearShape.Width = ClearButtonSize()
+        clearShape.Height = ClearButtonSize()
+        clearShape.Left = mLeft + mWidth - ClearReserve() - _
+            IIf(mKind = KIND_COMBO, 16, 0) + 2
+        clearShape.Top = mTop + (mHeight - ClearButtonSize()) / 2
+        clearShape.Fill.Visible = msoTrue
+        clearShape.Fill.ForeColor.RGB = themeValue.MutedColor
+        clearShape.Line.Visible = msoFalse
+        StyleGlyphText clearShape, ChrW(&H2715), themeValue.OnSurfaceColor, _
+            ClearButtonSize() * 0.5, themeValue
+        clearShape.Visible = msoTrue
+        clearShape.OnAction = mAppliedOnAction
+        mainShape.TextFrame2.MarginRight = 6 + ClearReserve() + _
+            IIf(mKind = KIND_COMBO, 16, 0)
+    ElseIf LenB(mAppliedClearSig) > 0 Then
+        mAppliedClearSig = vbNullString
+        On Error Resume Next
+        hostSheet.Shapes(ShapeName & PART_SEPARATOR & "cx").Delete
+        On Error GoTo 0
+        mainShape.TextFrame2.MarginRight = 6
+    End If
+End Sub
+
+' Points the clear button takes from the text, 0 while it is not shown.
+Private Function ClearReserve() As Double
+    If mClearable And mVisible And mEnabled And LenB(mText) > 0 Then
+        ClearReserve = ClearButtonSize() + 4
+    End If
+End Function
+
+Private Function ClearButtonSize() As Double
+    ClearButtonSize = mHeight - 4
+    If ClearButtonSize > 16 Then ClearButtonSize = 16
+End Function
+
+' The clear button: empties the field and leaves it focused for typing;
+' a combo's list opens unfiltered, as after deleting the text by hand.
+Private Sub ClearFieldText(ByVal hostApp As ReDimUI)
+    If Not ReDimUI.IsComponentFocused(hostApp.AppId, mComponentId) Then
+        FocusField hostApp, False
+    End If
+    mText = vbNullString
+    mCaretPos = 0
+    If mKind = KIND_COMBO Then
+        mValue = 0
+        If Not mSelectOpen Then NoteListOpened
+        mSelectOpen = True
+        mFilterPristine = False
+        mListOffset = 0
+        mListHighlight = 0
+    End If
+    Touch
+End Sub
+
+' A focused control that is not a text field wears a ring: an accent
+' outline three points outside its bounds. Float fields show focus on
+' their own border. A focused control that turns hidden or disabled
+' gives focus up here.
+Private Sub ApplyFocusRing(ByVal hostSheet As Worksheet, ByVal themeValue As ReDimUI)
+    Dim ringOn As Boolean
+    Dim ringShape As Shape
+    Dim ringKey As String
+
+    ringOn = ReDimUI.IsComponentFocused(mOwnerAppId, mComponentId)
+    If ringOn And Not IsFocusable() Then
+        ReDimUI.ClearKeyboardFocus
+        ringOn = False
+    End If
+    If IsFloatField() Then Exit Sub
+    If ringOn Then
+        ringKey = PartsState(themeValue)
+        If ringKey = mAppliedRingSig Then Exit Sub
+        mAppliedRingSig = ringKey
+        Set ringShape = EnsurePartShape(hostSheet, "fr", msoShapeRoundedRectangle)
+        On Error Resume Next
+        ringShape.Adjustments(1) = 0.12
+        On Error GoTo 0
+        ringShape.Left = mLeft - 3
+        ringShape.Top = mTop - 3
+        ringShape.Width = mWidth + 6
+        ringShape.Height = mHeight + 6
+        ringShape.Fill.Visible = msoFalse
+        ringShape.Line.Visible = msoTrue
+        ringShape.Line.ForeColor.RGB = themeValue.PrimaryColor
+        ringShape.Line.Weight = 2
+        ringShape.Visible = msoTrue
+        ringShape.OnAction = mAppliedOnAction
+    ElseIf LenB(mAppliedRingSig) > 0 Then
+        mAppliedRingSig = vbNullString
+        On Error Resume Next
+        hostSheet.Shapes(ShapeName & PART_SEPARATOR & "fr").Delete
+        On Error GoTo 0
+    End If
+End Sub
+
+' The row a focused list's arrow keys have reached: a dotted outline in
+' surface ink over the row, readable on the selection fill as well.
+Private Sub SyncKeyCursor( _
+    ByVal hostSheet As Worksheet, _
+    ByVal themeValue As ReDimUI, _
+    ByVal showIt As Boolean, _
+    ByVal cursorLeft As Double, _
+    ByVal cursorTop As Double, _
+    ByVal cursorWidth As Double, _
+    ByVal cursorHeight As Double _
+)
+    Dim cursorShape As Shape
+    Dim cursorKey As String
+
+    If showIt Then
+        cursorKey = PartsState(themeValue) & ":" & CStr(cursorLeft) & ":" & _
+            CStr(cursorTop) & ":" & CStr(cursorWidth) & ":" & CStr(cursorHeight)
+        If cursorKey = mAppliedKeyCursorSig Then Exit Sub
+        mAppliedKeyCursorSig = cursorKey
+        Set cursorShape = EnsurePartShape(hostSheet, "kr", msoShapeRectangle)
+        cursorShape.Left = cursorLeft
+        cursorShape.Top = cursorTop
+        cursorShape.Width = cursorWidth
+        cursorShape.Height = cursorHeight
+        cursorShape.Fill.Visible = msoFalse
+        cursorShape.Line.Visible = msoTrue
+        cursorShape.Line.ForeColor.RGB = themeValue.OnSurfaceColor
+        cursorShape.Line.Weight = 1.25
+        cursorShape.Line.DashStyle = msoLineRoundDot
+        cursorShape.Visible = msoTrue
+        cursorShape.OnAction = mAppliedOnAction
+        cursorShape.ZOrder msoBringToFront
+    ElseIf LenB(mAppliedKeyCursorSig) > 0 Then
+        mAppliedKeyCursorSig = vbNullString
+        On Error Resume Next
+        hostSheet.Shapes(ShapeName & PART_SEPARATOR & "kr").Delete
+        On Error GoTo 0
     End If
 End Sub
 
@@ -5127,6 +6145,12 @@ Friend Sub ForgetPartSignatures()
     mAppliedHeaderRightSig = vbNullString
     mAppliedScrollLeftSig = "?"
     mAppliedScrollRightSig = "?"
+    ' Focus and clear parts start absent: probing for them on every new
+    ' control's first draw cost a failed lookup each, for parts only a
+    ' focused or typed-in control ever has.
+    mAppliedRingSig = vbNullString
+    mAppliedKeyCursorSig = vbNullString
+    mAppliedClearSig = vbNullString
     Erase mAppliedRowStates
     Erase mAppliedLeftRowStates
     Erase mAppliedRightRowStates
@@ -5143,7 +6167,7 @@ Private Sub ApplyTickBox( _
     Dim boxSize As Double
 
     If ExtrasCurrent(PartsState(themeValue) & ":" & CStr(mChecked) & _
-        ":" & mText) Then Exit Sub
+        ":" & mText & ":" & mAccessKey) Then Exit Sub
     boxSize = mHeight - 2
     If boxSize > 16 Then boxSize = 16
     If boxSize < 10 Then boxSize = 10
@@ -5176,6 +6200,9 @@ Private Sub ApplyTickBox( _
     captionShape.Width = mWidth - boxSize - 6
     captionShape.Height = mHeight + 2
     StyleCaptionPart captionShape, mText, themeValue
+    If LenB(mAccessKey) > 0 Or LenB(mAppliedAccessKey) > 0 Then
+        MarkAccessKey captionShape, mText
+    End If
     captionShape.Visible = BoolToMso(mVisible)
     captionShape.OnAction = mAppliedOnAction
     mAppliedChecked = mChecked
@@ -5298,9 +6325,11 @@ Private Sub ApplyCheckListParts( _
     Dim entry As Variant
 
     EnsureCheckedSet
-    If mItems Is Nothing Then Exit Sub
-    rowTotal = mItems.Count
-    If rowTotal = 0 Then Exit Sub
+    If Not mItems Is Nothing Then rowTotal = mItems.Count
+    If rowTotal = 0 Then
+        SyncKeyCursor hostSheet, themeValue, False, 0, 0, 0, 0
+        Exit Sub
+    End If
     PruneTransferSelection mCheckedSet, rowTotal
     layoutKey = PartsState(themeValue) & ":" & CStr(mSelectAllRow) & _
         ":" & CStr(rowTotal)
@@ -5410,6 +6439,12 @@ Private Sub ApplyCheckListParts( _
         Next idx
         mAppliedOptionCount = rowTotal
     End If
+    If mKeyRow > rowTotal Then mKeyRow = rowTotal
+    If mKeyRow < 1 - headerRows Then mKeyRow = 1
+    SyncKeyCursor hostSheet, themeValue, _
+        ReDimUI.IsComponentFocused(mOwnerAppId, mComponentId) And mVisible, _
+        mLeft - 2, mTop + (mKeyRow - 1 + headerRows) * rowPitch, _
+        mWidth + 4, rowPitch
 End Sub
 
 ' The parts of a checkbox face that follow its state: fill, border, and
@@ -5702,6 +6737,24 @@ Private Sub ApplyTransferParts( _
     ApplyTransferScroller hostSheet, themeValue, "clu", "cld", _
         rightX, panelTop, panelW, panelH, mChosenItems.Count, _
         mAppliedScrollRightSig
+
+    ' The keyboard cursor, while the list holds focus.
+    Dim cursorItems As Long
+    Dim cursorRow As Long
+    Dim cursorWidth As Double
+    cursorItems = TransferPanelCount(mKeyPanel)
+    If mKeyRow > cursorItems Then mKeyRow = cursorItems
+    cursorRow = mKeyRow - IIf(mKeyPanel = 0, mLeftOffset, mRightOffset)
+    cursorWidth = panelW - 6
+    If cursorItems > TransferRowCapacity() Then
+        cursorWidth = cursorWidth - PAGER_TARGET - 2
+    End If
+    SyncKeyCursor hostSheet, themeValue, _
+        ReDimUI.IsComponentFocused(mOwnerAppId, mComponentId) And mVisible _
+            And mKeyRow >= 1 And cursorRow >= 1 _
+            And cursorRow <= TransferRowCapacity(), _
+        IIf(mKeyPanel = 0, mLeft, rightX) + 3, _
+        panelTop + 3 + (cursorRow - 1) * 20, cursorWidth, 20
 End Sub
 
 ' A panel's counted header, rewritten only when its text or the layout
@@ -6869,7 +7922,107 @@ Private Function FieldText(ByVal hostSheet As Worksheet) As String
     On Error GoTo 0
 End Function
 
-Friend Sub FocusField(ByVal hostApp As ReDimUI)
+' Kinds that take keyboard focus: every interactive control, a text
+' field only when it floats (a cell-backed one lives in the grid), and
+' an image only when it has a click handler.
+Friend Function IsFocusable() As Boolean
+    If Not mVisible Or Not mEnabled Or mBusy Then Exit Function
+    Select Case mKind
+        Case KIND_BUTTON, KIND_TOGGLE, KIND_TICKBOX, KIND_RADIO, _
+            KIND_STEPPER, KIND_SLIDEBAR, KIND_SELECT, KIND_CHECKLIST, _
+            KIND_TRANSFER
+            IsFocusable = True
+        Case KIND_INPUT, KIND_COMBO
+            IsFocusable = IsFloatField()
+        Case KIND_IMAGE
+            IsFocusable = (LenB(mClickProc) > 0)
+    End Select
+End Function
+
+Friend Function IsTabStop() As Boolean
+    IsTabStop = IsFocusable() And mTabIndex >= 0
+End Function
+
+Friend Property Get TabPosition() As Long
+    TabPosition = mTabIndex
+End Property
+
+' Takes keyboard focus. A float field focuses as an editor, opening a
+' combo's list only when openList says so (a click does, Tab does
+' not); any other control takes the keys and shows a focus ring.
+Friend Sub TakeFocus(ByVal hostApp As ReDimUI, ByVal openList As Boolean)
+    If ReDimUI.IsComponentFocused(hostApp.AppId, mComponentId) Then Exit Sub
+    If IsFloatField() Then
+        FocusField hostApp, openList
+        Exit Sub
+    End If
+    mFieldSelAtFocus = CurrentSelectionKey()
+    mTypeAhead = vbNullString
+    If Not mKeyCursorSet Then
+        mKeyRow = 1
+        mKeyPanel = 0
+        mKeyCursorSet = True
+    End If
+    ReDimUI.SetKeyboardFocus hostApp, Me
+    Touch
+End Sub
+
+' Gives keyboard focus up: a float field blurs, committing or
+' reverting; any other control drops its ring and closes an open list.
+Friend Sub LeaveFocus(ByVal hostApp As ReDimUI, ByVal keepEdits As Boolean)
+    If IsFloatField() Then
+        BlurField hostApp, keepEdits
+        Exit Sub
+    End If
+    If Not ReDimUI.IsComponentFocused(hostApp.AppId, mComponentId) Then Exit Sub
+    ReDimUI.ClearKeyboardFocus
+    mSelectOpen = False
+    mListHighlight = 0
+    Touch
+End Sub
+
+' Keyboard focus that lands outside the visible window scrolls it into
+' view, by rows and columns so the selection stays where it is.
+Friend Sub ScrollIntoSight()
+    Dim hostApp As ReDimUI
+    Dim viewLeft As Double
+    Dim viewTop As Double
+    Dim viewWidth As Double
+    Dim viewHeight As Double
+    Dim mainShape As Shape
+    Dim scrollTo As Long
+
+    Set hostApp = OwnerApp
+    On Error GoTo Done
+    If Not hostApp.Sheet Is ActiveSheet Then Exit Sub
+    hostApp.ResolveViewport viewLeft, viewTop, viewWidth, viewHeight
+    Set mainShape = hostApp.Sheet.Shapes(ShapeName)
+    ' Above or left of the window: align to the top or left edge. Below
+    ' or right: scroll just far enough to show the far edge.
+    If mTop < viewTop Then
+        ActiveWindow.ScrollRow = mainShape.TopLeftCell.Row
+    ElseIf mTop + mHeight > viewTop + viewHeight * 0.95 Then
+        scrollTo = ActiveWindow.ScrollRow
+        Do While hostApp.Sheet.Rows(scrollTo).Top + viewHeight * 0.95 _
+            < mTop + mHeight And scrollTo < mainShape.TopLeftCell.Row
+            scrollTo = scrollTo + 1
+        Loop
+        ActiveWindow.ScrollRow = scrollTo
+    End If
+    If mLeft < viewLeft Then
+        ActiveWindow.ScrollColumn = mainShape.TopLeftCell.Column
+    ElseIf mLeft + mWidth > viewLeft + viewWidth * 0.95 Then
+        scrollTo = ActiveWindow.ScrollColumn
+        Do While hostApp.Sheet.Columns(scrollTo).Left + viewWidth * 0.95 _
+            < mLeft + mWidth And scrollTo < mainShape.TopLeftCell.Column
+            scrollTo = scrollTo + 1
+        Loop
+        ActiveWindow.ScrollColumn = scrollTo
+    End If
+Done:
+End Sub
+
+Friend Sub FocusField(ByVal hostApp As ReDimUI, Optional ByVal openList As Boolean = True)
     If Not IsFloatField() Then Exit Sub
     mFieldTextAtFocus = mText
     mFieldSelAtFocus = CurrentSelectionKey()
@@ -6877,7 +8030,7 @@ Friend Sub FocusField(ByVal hostApp As ReDimUI)
     mCaretOn = True
     mCaretAccumMs = 0
     ReDimUI.SetKeyboardFocus hostApp, Me
-    If mKind = KIND_COMBO Then OpenDropList hostApp.Sheet
+    If mKind = KIND_COMBO And openList Then OpenDropList hostApp.Sheet
     Touch
 End Sub
 
@@ -6929,7 +8082,10 @@ End Sub
 Friend Sub HandleKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
     Dim textBeforeKey As String
 
-    If Not IsFloatField() Then Exit Sub
+    If Not IsFloatField() Then
+        HandleControlKey hostApp, keyText
+        Exit Sub
+    End If
     If mCaretPos > Len(mText) Then mCaretPos = Len(mText)
     textBeforeKey = mText
     Select Case keyText
@@ -6949,32 +8105,41 @@ Friend Sub HandleKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
                 End If
                 Exit Sub
             Else
+                ' Enter commits, then clicks the app's default button.
                 BlurField hostApp, True
+                hostApp.ClickDefaultButton
                 Exit Sub
             End If
-        Case "{TAB}", "{CTRLENTER}"
-            ' Tab commits like Enter: the form-field convention for
-            ' leaving a field with its value kept.
+        Case "{TAB}", "{BACKTAB}"
+            ' Tab commits and moves focus on; with no other control to
+            ' move to, it commits and leaves.
+            If Not hostApp.MoveFocusFrom(mComponentId, keyText = "{TAB}") Then
+                BlurField hostApp, True
+            End If
+            Exit Sub
+        Case "{CTRLENTER}"
             BlurField hostApp, True
             Exit Sub
         Case "{ESC}"
-            ' A combo clears first, then leaves: the first Esc empties
-            ' the value and reopens the unfiltered list with focus kept;
-            ' a second Esc on the empty combo blurs and commits the
-            ' clear, so state never disagrees with the face. A TextInput
-            ' keeps the revert-on-Esc convention.
-            If mKind = KIND_COMBO Then
-                If LenB(mText) > 0 Then
-                    mText = vbNullString
-                    mValue = 0
-                    mCaretPos = 0
-                Else
-                    BlurField hostApp, True
-                    Exit Sub
-                End If
+            ' Esc closes an open list first, keeping focus and text;
+            ' with the list closed it reverts the field to the text it
+            ' had when focus arrived and leaves, firing nothing.
+            If mKind = KIND_COMBO And mSelectOpen Then
+                CloseDropList
             Else
                 BlurField hostApp, False
-                Exit Sub
+            End If
+            Exit Sub
+        Case "{ALTUP}"
+            If mKind = KIND_COMBO And mSelectOpen Then CloseDropList
+            Exit Sub
+        Case "{ALTDOWN}", "{F4}"
+            If mKind = KIND_COMBO And Not mSelectOpen Then
+                OpenDropList hostApp.Sheet
+            End If
+        Case "{PGUP}", "{PGDN}"
+            If mKind = KIND_COMBO Then
+                ComboListNav hostApp, IIf(keyText = "{PGDN}", mListRows, -mListRows)
             End If
         Case "{BS}"
             If mCaretPos > 0 Then
@@ -7006,6 +8171,8 @@ Friend Sub HandleKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
         Case "{END}"
             MoveCaretLineEdge True
         Case Else
+            ' Named keys a field has no use for are dropped, not typed.
+            If Len(keyText) > 1 And Left$(keyText, 1) = "{" Then Exit Sub
             InsertAtCaret keyText
     End Select
     mCaretOn = True
@@ -7128,7 +8295,8 @@ Private Sub MoveCaretLineEdge(ByVal toEnd As Boolean)
     mCaretPos = newPos
 End Sub
 
-' Outside-press blur, watched by the same pump frames as slider drags.
+' Outside-press blur for whichever control holds keyboard focus,
+' watched by the same pump frames as slider drags.
 ' Two independent signals, because neither alone covers everything:
 ' - The selection moved since focus: a cell was clicked or arrowed to.
 '   The press itself can be invisible to polling (the grid's selection
@@ -7136,28 +8304,28 @@ End Sub
 '   selection it leaves behind is durable state the next frame sees.
 '   Event-free, so it works even when a host disables application
 '   events, and it runs in proven tick context.
-' - A press edge lands off the field: shapes, chrome, other windows -
+' - A press edge lands off the control: shapes, chrome, other windows -
 '   clicks that never touch the selection.
-Friend Sub TickFieldWatch( _
+Friend Sub TickFocusWatch( _
     ByVal hostApp As ReDimUI, _
-    ByVal buttonDown As Boolean, _
     ByVal pressEdge As Boolean, _
     ByVal pollSelection As Boolean _
 )
-    If Not IsFloatField() Then Exit Sub
     If Not ReDimUI.IsComponentFocused(hostApp.AppId, mComponentId) Then Exit Sub
+    ' A modal's buttons keep focus until the dialog closes.
+    If Left$(mComponentId, 4) = "mdl_" Then Exit Sub
     ' The selection compare costs three COM reads, so it rides the work
     ' cadence; a 50 ms commit latency is imperceptible. The press edge
     ' stays at frame rate.
     If pollSelection Then
         If CurrentSelectionKey() <> mFieldSelAtFocus Then
-            BlurField hostApp, True
+            LeaveFocus hostApp, True
             Exit Sub
         End If
     End If
     If Not pressEdge Then Exit Sub
     If CursorOverField() Then Exit Sub
-    BlurField hostApp, True
+    LeaveFocus hostApp, True
 End Sub
 
 ' An open list that no field watch covers (a SelectBox, or a cell-backed
@@ -7343,10 +8511,7 @@ End Sub
 
 Private Function HasParts() As Boolean
     Select Case mKind
-        Case KIND_BUTTON, KIND_LABEL, KIND_CARD, KIND_SPINNER, _
-            KIND_OVERLAY, KIND_IMAGE
-            HasParts = False
-        Case KIND_INPUT
+        Case KIND_LABEL, KIND_CARD, KIND_SPINNER, KIND_OVERLAY
             HasParts = False
         Case Else
             HasParts = True
