@@ -1,4 +1,29 @@
 Attribute VB_Name = "Navigator"
+' ReDim 0.20.0 (2026-09-22)
+' https://github.com/WilliamSmithEdward/ReDim
+'
+' MIT License
+'
+' Copyright (c) 2026 William Smith
+'
+' Permission is hereby granted, free of charge, to any person obtaining a copy
+' of this software and associated documentation files (the "Software"), to deal
+' in the Software without restriction, including without limitation the rights
+' to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+' copies of the Software, and to permit persons to whom the Software is
+' furnished to do so, subject to the following conditions:
+'
+' The above copyright notice and this permission notice shall be included in all
+' copies or substantial portions of the Software.
+'
+' THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+' IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+' FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+' AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+' LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+' OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+' SOFTWARE.
+
 Option Explicit
 
 ' Navigator: sheets as forms. Three windows (Home, Settings, About), each a
@@ -34,79 +59,79 @@ Private Function EnsureSheet(ByVal sheetName As String) As Worksheet
 End Function
 
 Private Sub BuildHome()
-    Dim app As ReDimUI
+    Dim ui As ReDimUI
 
-    Set app = ReDimUI.Mount(EnsureSheet("NavHome"), "navhome")
-    app.ProtectSurface False
-    app.PrepareCanvas
-    app.AsWindow.WindowTitle "Home"
-    app.OnShow "Navigator.HandleHomeShown"
-    app.NavBar
+    Set ui = ReDimUI.Mount(EnsureSheet("NavHome"), "navhome")
+    ui.ProtectSurface False
+    ui.PrepareCanvas
+    ui.AsWindow.WindowTitle "Home"
+    ui.OnShow "Navigator.HandleHomeShown"
+    ui.NavBar
 
-    app.Label("title").AtRect(24, 48, 320, 30).Text("Navigator").FontSize(20).Bold
-    app.Label("subtitle").Below("title", 2).Sized(420, 18) _
+    ui.Label("title").AtRect(24, 48, 320, 30).Text("Navigator").FontSize(20).Bold
+    ui.Label("subtitle").Below("title", 2).Sized(420, 18) _
         .Text("Sheets as forms: tabs navigate, back walks the stack.")
-    app.Label("visits").Below("subtitle", 16).Sized(300, 18) _
+    ui.Label("visits").Below("subtitle", 16).Sized(300, 18) _
         .BindText "homeShown", "Home shown {0} times this session."
-    app.SetState "homeShown", 0
-    app.Render
-    app.ProtectSurface
+    ui.SetState "homeShown", 0
+    ui.Render
+    ui.ProtectSurface
 End Sub
 
 Private Sub BuildSettings()
-    Dim app As ReDimUI
+    Dim ui As ReDimUI
 
-    Set app = ReDimUI.Mount(EnsureSheet("NavSettings"), "navsettings")
-    app.ProtectSurface False
-    app.PrepareCanvas
-    app.AsWindow.WindowTitle "Settings"
-    app.NavBar
+    Set ui = ReDimUI.Mount(EnsureSheet("NavSettings"), "navsettings")
+    ui.ProtectSurface False
+    ui.PrepareCanvas
+    ui.AsWindow.WindowTitle "Settings"
+    ui.NavBar
 
-    app.Label("title").AtRect(24, 48, 320, 30).Text("Settings").FontSize(20).Bold
-    app.Toggle("alerts").Below("title", 16).Sized(44, 22).WritesTo "alertsOn"
-    app.Label("alertslbl").RightOf("alerts", 10).Sized(200, 18) _
+    ui.Label("title").AtRect(24, 48, 320, 30).Text("Settings").FontSize(20).Bold
+    ui.Toggle("alerts").Below("title", 16).Sized(44, 22).WritesTo "alertsOn"
+    ui.Label("alertslbl").RightOf("alerts", 10).Sized(200, 18) _
         .Text("Alert notifications")
-    app.Toggle("autosave").Below("alerts", 14).Sized(44, 22).WritesTo "autoSave"
-    app.Label("autosavelbl").RightOf("autosave", 10).Sized(200, 18) _
+    ui.Toggle("autosave").Below("alerts", 14).Sized(44, 22).WritesTo "autoSave"
+    ui.Label("autosavelbl").RightOf("autosave", 10).Sized(200, 18) _
         .Text("Autosave results")
-    app.Label("hint").Below("autosave", 20).Sized(360, 18) _
+    ui.Label("hint").Below("autosave", 20).Sized(360, 18) _
         .Text("These choices live in app state for this session.")
-    app.Button("back").Below("hint", 14).Sized(110, 30).Text("< Back") _
+    ui.Button("back").Below("hint", 14).Sized(110, 30).Text("< Back") _
         .Secondary.OnClick "Navigator.HandleBack"
-    app.SetStateDefault "alertsOn", True
-    app.SetStateDefault "autoSave", False
-    app.Toggle("alerts").Checked CBool(app.State("alertsOn"))
-    app.Toggle("autosave").Checked CBool(app.State("autoSave"))
-    app.Render
-    app.ProtectSurface
+    ui.SetStateDefault "alertsOn", True
+    ui.SetStateDefault "autoSave", False
+    ui.Toggle("alerts").Checked CBool(ui.State("alertsOn"))
+    ui.Toggle("autosave").Checked CBool(ui.State("autoSave"))
+    ui.Render
+    ui.ProtectSurface
 End Sub
 
 Private Sub BuildAbout()
-    Dim app As ReDimUI
+    Dim ui As ReDimUI
 
-    Set app = ReDimUI.Mount(EnsureSheet("NavAbout"), "navabout")
-    app.ProtectSurface False
-    app.PrepareCanvas
-    app.AsWindow.WindowTitle "About"
-    app.NavBar
+    Set ui = ReDimUI.Mount(EnsureSheet("NavAbout"), "navabout")
+    ui.ProtectSurface False
+    ui.PrepareCanvas
+    ui.AsWindow.WindowTitle "About"
+    ui.NavBar
 
-    app.Label("title").AtRect(24, 48, 320, 30).Text("About").FontSize(20).Bold
-    app.Card("card").Below("title", 14).Sized(380, 110) _
+    ui.Label("title").AtRect(24, 48, 320, 30).Text("About").FontSize(20).Bold
+    ui.Card("card").Below("title", 14).Sized(380, 110) _
         .Text("ReDim " & ReDimUI.Version & vbLf & vbLf & _
             "A stateful UI framework for Excel worksheets, built on ROneCOne." & _
             vbLf & "github.com/WilliamSmithEdward/ReDim")
-    app.Button("back").Below("card", 14).Sized(110, 30).Text("< Back") _
+    ui.Button("back").Below("card", 14).Sized(110, 30).Text("< Back") _
         .Secondary.OnClick "Navigator.HandleBack"
-    app.Render
-    app.ProtectSurface
+    ui.Render
+    ui.ProtectSurface
 End Sub
 
 Public Sub HandleHomeShown()
-    Dim app As ReDimUI
+    Dim ui As ReDimUI
 
     gHomeShownCount = gHomeShownCount + 1
-    Set app = ReDimUI.App("navhome")
-    app.SetState "homeShown", gHomeShownCount
+    Set ui = ReDimUI.App("navhome")
+    ui.SetState "homeShown", gHomeShownCount
 End Sub
 
 Public Sub HandleBack()

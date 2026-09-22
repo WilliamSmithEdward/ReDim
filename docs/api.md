@@ -13,8 +13,8 @@ only the members of its role and raises a clear error otherwise.
 | `ReDimUI.HasApp(appId)` | Existence probe. |
 | `ReDimUI.Sender`, `SenderApp`, `SenderId` | Click context, valid inside handlers. |
 | `ReDimUI.PumpOnce` | One deterministic pump tick (tests, debugging). |
-| `ReDimUI.PinPumpCursor enabled` | Opt-in steady arrow cursor while the pump is armed. Off by default so interactive shapes keep their hover hand; turn on if busy-cursor flicker is visible on your hardware. |
-| `ReDimUI.AutoPump enabled` | Turn the wall-clock timer off for deterministic runs. |
+| `ReDimUI.PinPumpCursor pinOn` | Opt-in steady arrow cursor while the pump is armed. Off by default so interactive shapes keep their hover hand; turn on if busy-cursor flicker is visible on your hardware. |
+| `ReDimUI.AutoPump pumpOn` | Turn the wall-clock timer off for deterministic runs. |
 | `ReDimUI.Shutdown` | Kill the pump and forget every app. Shapes stay. |
 | `ReDimUI.ThemeLight`, `ThemeDark` | Theme presets; customize with `WithPrimary`, `WithFont`. |
 
@@ -27,14 +27,14 @@ window at a time among the registered set.
 
 | Member | Purpose |
 |---|---|
-| `app.AsWindow` | Registers the app's sheet as a window. |
+| `ui.AsWindow` | Registers the app's sheet as a window. |
 | `ReDimUI.Navigate appId` | Shows the target window's sheet, activates it, then very-hides every other registered window. Sheets that are not windows are never touched. |
 | `ReDimUI.NavigateBack` | Pops the back stack; returns False when empty. |
 | `ReDimUI.ActiveWindowId` | The currently shown window's app id. |
-| `app.OnShow "Module.Proc"` / `app.OnHide "Module.Proc"` | Lifecycle hooks fired after navigation shows or hides the window. |
+| `ui.OnShow "Module.Proc"` / `ui.OnHide "Module.Proc"` | Lifecycle hooks fired after navigation shows or hides the window. |
 | `component.NavigatesTo "appId"` | One-declaration nav link: navigates after any OnClick handler. |
-| `app.WindowTitle "Home"` | Display name used by navigation chrome; the app id is the fallback. |
-| `app.NavBar left, top, tabWidth, tabHeight` | One tab per registered window across the top of this sheet, active tab highlighted. Bars refresh on every Navigate, picking up late registrations and pruning removed windows. |
+| `ui.WindowTitle "Home"` | Display name used by navigation chrome; the app id is the fallback. |
+| `ui.NavBar left, top, tabWidth, tabHeight` | One tab per registered window across the top of this sheet, active tab highlighted. Bars refresh on every Navigate, picking up late registrations and pruning removed windows. |
 
 The target is shown before others hide, because Excel requires one visible sheet at all times.
 Very-hidden windows cannot be unhidden from the tab bar, and their pumps keep running: a
@@ -59,15 +59,15 @@ controls in the framework. Also:
 | `Render` | Mark everything dirty and paint. Call once after building the UI. |
 | `SetTheme theme` | Restyle every component, and repaint the canvas background if `PrepareCanvas` painted one. |
 | `PrepareCanvas` | Paint the sheet background and hide gridlines. |
-| `Toast message, ttlMs` | Transient card on a rail beside the content, clamped into the visible viewport. Toasts slide up on entrance, and when one leaves the survivors slide up to fill its slot; modal chrome never shifts the rail. |
-| `ToastTray anchor` | Pins the tray's top-left to a range, exactly and unclamped. |
-| `Confirm title, message, okProc, cancelProc, okText, cancelText` | Shapes-based modal. |
+| `Toast messageText, ttlMs` | Transient card on a rail beside the content, clamped into the visible viewport. Toasts slide up on entrance, and when one leaves the survivors slide up to fill its slot; modal chrome never shifts the rail. |
+| `ToastTray rangeAddress` | Pins the tray's top-left to a range, exactly and unclamped. |
+| `Confirm titleText, messageText, okProc, cancelProc, okText, cancelText` | Shapes-based modal. |
 | `CloseModal` | Hide the modal set. |
 | `Async(opId)` / `CancelAsync opId` / `AsyncError(opId)` | Async ops (see [async.md](async.md)). |
 | `Job(jobId)` / `CancelJob jobId` | Chunked or paced background work. |
 | `OnError "Module.Proc"` | One-argument sink for swallowed handler failures. |
 | `TickFaultCount` / `ResetTickFaults` (on `ReDimUI`) | The pump and key dispatch trap errors silently by design; every trapped fault increments this factory counter. Read it in tests or diagnostics to prove a run was clean, reset it to scope a measurement. |
-| `ProtectSurface enabled, allowCellSelection` | Opt-in app-sheet protection (UserInterfaceOnly): users cannot enter cell edit mode or drag shapes there, framework writes keep working, cell-anchored TextInput cells stay editable, and float fields type normally since they never enter cell edit. By default locked canvas cells are also unselectable - no selection rectangle on the app surface, no protected-cell warnings for stray keys - while unlocked TextInput cells stay selectable; pass `allowCellSelection:=True` to keep the whole grid selectable. OnKey capture (fields, HotKey) is unaffected. Protection state does not persist across reopen, so builds should call `ProtectSurface False` first and `ProtectSurface` after Render, as every demo does. Unmount unprotects. |
+| `ProtectSurface protectOn, allowCellSelection` | Opt-in app-sheet protection (UserInterfaceOnly): users cannot enter cell edit mode or drag shapes there, framework writes keep working, cell-anchored TextInput cells stay editable, and float fields type normally since they never enter cell edit. By default locked canvas cells are also unselectable - no selection rectangle on the app surface, no protected-cell warnings for stray keys - while unlocked TextInput cells stay selectable; pass `allowCellSelection:=True` to keep the whole grid selectable. OnKey capture (fields, HotKey) is unaffected. Protection state does not persist across reopen, so builds should call `ProtectSurface False` first and `ProtectSurface` after Render, as every demo does. Unmount unprotects. |
 | `Unmount deleteShapes` | Remove components (and shapes) and forget the app. |
 
 ## Component builders
@@ -83,13 +83,20 @@ All fluent, all return the component:
 - Visibility: `Visible(flag)`, `Enabled(flag)`.
 - Values: `Value(number)` (progress, slider, picker index), `Checked(flag)`,
   `SliderRange(min, max, step)`.
-- Item lists (`SelectBox`, `RadioGroup`): `Items("A", "B", ...)` replaces;
-  `ItemsFrom(source)` replaces from a 1D array, a Collection, a Range (one item per
-  non-empty cell), or a ROneCOne sequence; `AddItem(text, atPosition)` appends or inserts; `RemoveItem(indexOrText)`;
-  `ClearItems`; read back with `ItemCount` and `ItemTextAt(position)`. The selected item
-  survives inserts and unrelated removals; removing it clears the selection to the
-  placeholder. Programmatic mutations re-render but do not write `WritesTo` state or fire
-  `OnChange`; those belong to user interaction and explicit `SetState`.
+- Item lists (`SelectBox`, `ComboBox`, `RadioGroup`, `TransferList`, `CheckList`):
+  `Items("A", "B", ...)` replaces; `ItemsFrom(source)` replaces from a 1D array, a
+  Collection, a Range (one item per non-empty cell), or a ROneCOne sequence;
+  `AddItem(text, atPosition)` appends or inserts; `RemoveItem(indexOrText)`; `ClearItems`;
+  read back with `ItemCount` and `ItemTextAt(position)`. The selected item survives inserts
+  and unrelated removals; removing it clears the selection to the placeholder.
+  Programmatic mutations re-render but do not write `WritesTo` state or fire `OnChange`;
+  those belong to user interaction and explicit `SetState`.
+- Placeholder (`SelectBox`): `Text` is the placeholder the face shows while nothing is
+  selected, and `Value(0)` clears the selection back to it. Like the item mutations, the
+  clear writes no `WritesTo` state and fires no `OnChange`.
+- Drop lists (`SelectBox`, `ComboBox`): `ListRows(n)` sets how many item rows the open
+  list shows at once, eight by default. A longer list windows behind clickable pager rows
+  at its edges, each showing an arrow and the count of items beyond it.
 - Bindings: `BindText(key, template)` where `{0}` is the value, `BindValue(key)`,
   `BindVisible(key, invert)`, `BindEnabled(key, invert)`, `WritesTo(key)`. The invert flag
   serves the disable-while-busy pattern: `BindEnabled "anyRunning", True`.
@@ -128,6 +135,12 @@ dependencies:
   or a modal overlay never reaches a track painted underneath. Use `Stepper` for
   precision.
 - `SelectBox`: a themed face, caret, and option list in place of the native dropdown.
+  `Text` is the placeholder shown while nothing is selected. The list windows to
+  `ListRows` rows (eight by default): opening scrolls the selection into view, and
+  clickable pager rows at the list edges (arrow plus the count beyond that edge) page the
+  window, appearing only when something lies beyond them. Picking a new item writes the
+  `WritesTo` state and fires `OnChange`; re-picking the selected item only closes the
+  list, the same rule `RadioGroup` follows for its selected row.
 - `TransferList`: a dual listbox - two panels with counted headers, selectable rows, and
   four move buttons (`>`, `>>`, `<`, `<<`). `Items`/`ItemsFrom` and the item APIs feed the
   available side, `ChosenFrom` seeds the chosen side, `Captions` names the headers, and
@@ -144,13 +157,22 @@ dependencies:
   APIs. Place it with `AtRect` (or `Below`/`RightOf`) and it is a float field: click to
   focus, type, and the list re-filters on every keystroke. Anchoring to a cell with `At`
   keeps the 0.8.0 cell-backed mode, where Excel's edit-mode VBA pause limits filtering to
-  commit moments. In both modes picking an option writes the value, the `WritesTo` state,
-  and fires `OnChange`. The drop list windows to eight rows: Up and Down walk a highlight
-  that scrolls the window, Enter takes the highlighted match, typing re-filters, and
-  clickable pager rows at the list edges (arrow plus the count beyond that edge) page the
-  window for the mouse, appearing only when something lies beyond them.
+  commit moments; its face covers the cell, so a click on it selects the cell for typing
+  as well as opening the list. In both modes a pick, by click or by Enter on the
+  highlighted row, writes the value and closes the list; when it changes the value it
+  also writes the `WritesTo` state and fires `OnChange`, exactly once. Re-picking the
+  value already there only closes the list. For a float combo, the value a pick replaces
+  is the text the field held when focus arrived, so text typed only to filter the list
+  never counts. The drop list windows to `ListRows` rows (eight by default): Up and Down
+  walk a highlight that scrolls the window, Enter takes the highlighted match, typing
+  re-filters, and clickable pager rows at the list edges (arrow plus the count beyond that
+  edge) page the window for the mouse, appearing only when something lies beyond them.
+  When the text names an item, as it does after a pick, the list reopens unfiltered and
+  scrolled to that item, and Down walks on from it; the first edit filters again.
 - `TextInput`: a text field. Float by default (`AtRect`), cell-backed with `At` when you
-  want the value to live in the grid.
+  want the value to live in the grid. A cell-backed field's frame covers its cell, so a
+  click on the frame selects the cell: typing replaces the value and F2 edits it in place,
+  and the click itself fires no `OnChange`.
 - `CheckList`: a checkbox list - one box-and-caption row per item, any number checked,
   with a select-all header on by default (`WithSelectAll False` opts out). The header box
   is tri-state (empty, check, dash for mixed), clicking it checks everything unless all
@@ -239,9 +261,9 @@ VBA accepts a fluent chain as a statement only when the final call uses bare arg
 single parenthesized argument:
 
 ```vba
-app.Spinner("busy").AtRect 400, 18, 26, 26        ' right
-app.Spinner("busy").AtRect(400, 18, 26, 26)       ' compile error: Syntax error
-app.Label("x").At("B2").Text("hello")             ' fine: one argument
+ui.Spinner("busy").AtRect 400, 18, 26, 26        ' right
+ui.Spinner("busy").AtRect(400, 18, 26, 26)       ' compile error: Syntax error
+ui.Label("x").At("B2").Text("hello")             ' fine: one argument
 ```
 
 Mid-chain calls are expression position and may keep their parentheses. The repository's compile
@@ -251,3 +273,14 @@ gate (`tests/python/test_compile.py`) catches violations that static analysis ca
 
 VBA identifiers are case-insensitive. A local `Dim ownerApp` shadows a property named
 `OwnerApp`, so `Set ownerApp = OwnerApp` self-assigns Nothing. Never name a local after a member.
+
+## Identifier casing
+
+The same case-insensitivity leaves each project with one spelling per name, and a
+declaration in any module can set it for all of them. A parameter named `value` anywhere
+in the project turns every `.Value` into `.value`, and the next module export carries
+that into version control as noise. ReDim declares no name in a casing that differs from
+the Excel, Office, VBA, or stdole type libraries or from its own members, and
+`tests/python/test_casing.py` holds the runtime and the demos to that, ending with a VBE
+export round trip. Host code stays quiet the same way: the samples name their app
+variable `ui`, because a variable named `app` collides with `ReDimUI.App`.

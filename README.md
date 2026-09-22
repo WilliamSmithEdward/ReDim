@@ -20,20 +20,20 @@ that keeps Excel responsive while work runs.
 </p>
 
 ```vba
-Dim app As ReDimUI
+Dim ui As ReDimUI
 
-Set app = ReDimUI.Mount(Sheet1, "Dashboard")
+Set ui = ReDimUI.Mount(Sheet1, "Dashboard")
 
-app.Button("run").At("B2:C3").Text("Run Report").Primary.OnClickAsync "Demo.BuildReport"
-app.ProgressBar("prg").At("B5:F5").BindValue "progress"
-app.Label("status").At("B7:F7").BindText "statusMsg", "Status: {0}"
+ui.Button("run").At("B2:C3").Text("Run Report").Primary.OnClickAsync "Demo.BuildReport"
+ui.ProgressBar("prg").At("B5:F5").BindValue "progress"
+ui.Label("status").At("B7:F7").BindText "statusMsg", "Status: {0}"
 
-app.Render
+ui.Render
 ```
 
 Clicking Run disables the button, swaps its caption to busy text, runs `Demo.BuildReport` through
 the pump, and restores the button when the work completes or fails. While a chunked job runs,
-`app.SetState "progress", 40` moves the bar and `"statusMsg"` updates the label, all while the
+`ui.SetState "progress", 40` moves the bar and `"statusMsg"` updates the label, all while the
 user keeps working in the workbook.
 
 ## What it does
@@ -76,11 +76,17 @@ user keeps working in the workbook.
 
 1. Import `ROneCOne.cls` (from the ROneCOne release, 1.8.1 or later) into your macro-enabled
    workbook.
-2. Import `src/ReDimUI.cls`.
-3. Import `src/ReDimHost.bas`.
+2. Import `ReDimUI.cls` from the
+   [latest release](https://github.com/WilliamSmithEdward/ReDim/releases).
+3. Import `ReDimHost.bas` from the same release.
 
 Three imports, no references, no registration. Windows x64 Microsoft 365 Excel, the same target
 as ROneCOne.
+
+Take the two ReDim files from the release rather than downloading them from `src/`. The
+repository stores them with LF line endings, and the VBE imports an LF-only class file as a
+standard module with its header pasted in as code. The release copies carry the CRLF endings
+the VBE expects.
 
 ## Demos
 
@@ -111,13 +117,16 @@ VBA sources are plain files; workbooks are built artifacts.
 ```bash
 pip install -r requirements-dev.txt
 python tools/check.py          # pyvbaanalysis static gate, zero findings required
+python tools/stamp_release.py  # after a version bump: header in every release source
 python tools/build_workbooks.py
 python -m pytest tests/python  # live Excel suite via pyvbaharness
 ```
 
 The live suite covers mount and adoption, dispatch and guards, bindings, batching, theming, the
 async op lifecycle, jobs, cancellation, every widget, a real armed-timer end-to-end run, a VBA
-compile gate for every shipped workbook, and smoke runs of all five demos.
+compile gate for every shipped workbook, smoke runs of all five demos, and an identifier-casing
+guard that exports the runtime, the demos, and sample host code through the VBE and requires
+every name back as written.
 
 It drives a real Excel instance, so it cannot run on hosted CI. Continuous integration runs
 the static gate only, over the same sources plus the ROneCOne runtime; the live suite is a
@@ -125,4 +134,6 @@ local step before release.
 
 ## License
 
-MIT
+MIT. Every source a release ships, the two runtime files and each demo module, opens with
+the license text and the ReDim version and date it belongs to, so a copied module still says
+what it is and under what terms.

@@ -137,6 +137,15 @@ Public Function TestSelectBox() As String
         CStr(Not ShapeExists(host, "rdm_wid7_pick__opt1"))
     transcript = transcript & "|changeRan=" & gChangeCount
 
+    ' Re-picking the current item closes the list and changes nothing.
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid7_pick"
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid7_pick__opt3"
+    transcript = transcript & "|repickQuiet=" & _
+        CStr(gChangeCount = 1 And _
+            Not ShapeExists(host, "rdm_wid7_pick__opt1"))
+
     ' Reopen and close by clicking the face again.
     Sleep 200
     ReDimUI.DispatchShape "rdm_wid7_pick"
@@ -161,6 +170,15 @@ Public Function TestTextInput() As String
 
     transcript = "frameExists=" & _
         CStr(Not host.Shapes("rdm_wid4_name") Is Nothing)
+
+    ' The frame covers the anchor cell and takes the click; the click
+    ' selects the cell so typing lands in the grid, and fires nothing.
+    host.Range("A1").Select
+    ReDimUI.DispatchShape "rdm_wid4_name"
+    transcript = transcript & "|clickSelectsCell=" & _
+        CStr(Selection.Address = "$C$3")
+    transcript = transcript & "|clickNoChange=" & CStr(gChangeCount = 0)
+
     app.TextInput("name").InputValue = "Ada"
     transcript = transcript & "|apiWriteState=" & app.State("userName")
     transcript = transcript & "|apiNoChangeProc=" & CStr(gChangeCount = 0)
@@ -831,6 +849,17 @@ Public Function TestComboBox() As String
         CStr(ShapeExists(host, "rdm_wid20_color") And _
              ShapeExists(host, "rdm_wid20_color__caret"))
 
+    ' The face covers the anchor cell: a click selects the cell for
+    ' typing as well as opening the list, and a second click closes it.
+    host.Range("A1").Select
+    ReDimUI.DispatchShape "rdm_wid20_color"
+    transcript = transcript & "|faceSelectsCell=" & _
+        CStr(Selection.Address = "$E$3" And _
+            ShapeExists(host, "rdm_wid20_color__opt1"))
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid20_color"
+    Sleep 200
+
     ' Caret with empty text opens everything.
     ReDimUI.DispatchShape "rdm_wid20_color__caret"
     transcript = transcript & "|openAll=" & _
@@ -847,6 +876,19 @@ Public Function TestComboBox() As String
     transcript = transcript & "|closedAfterPick=" & _
         CStr(Not ShapeExists(host, "rdm_wid20_color__opt1"))
     transcript = transcript & "|pickedIndex=" & combo.CurrentValue
+
+    ' The cell now names the pick, so reopening shows every item rather
+    ' than trapping the list on the one match. Re-picking the item the
+    ' cell already holds closes the list and changes nothing.
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid20_color__caret"
+    transcript = transcript & "|reopenAll=" & _
+        CStr(ShapeExists(host, "rdm_wid20_color__opt4"))
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid20_color__opt2"
+    transcript = transcript & "|repickQuiet=" & _
+        CStr(gChangeCount = 1 And _
+            Not ShapeExists(host, "rdm_wid20_color__opt1"))
 
     ' Programmatic text plus caret: the list opens filtered.
     combo.InputValue = "Bl"
@@ -971,6 +1013,18 @@ Public Function TestFloatField() As String
         CStr(Not ReDimUI.HasKeyboardFocus)
     transcript = transcript & "|pickClosed=" & _
         CStr(Not ShapeExists(host, "rdm_wid21_color__opt1"))
+
+    ' Refocusing after a pick shows the whole list, not just the pick,
+    ' and the first edit filters again.
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid21_color"
+    transcript = transcript & "|reopenShowsAll=" & _
+        CStr(ShapeExists(host, "rdm_wid21_color__opt4"))
+    RdxKeyChar "{BS}"
+    transcript = transcript & "|editFilters=" & _
+        CStr(ShapeExists(host, "rdm_wid21_color__opt1") And _
+             Not ShapeExists(host, "rdm_wid21_color__opt2"))
+    RdxKeyChar "{TAB}"
 
     ' Esc on a combo clears first (value emptied, full list reopened,
     ' focus kept), then a second Esc leaves and commits the clear.
@@ -1486,10 +1540,11 @@ Private Function NormalizedFace(ByVal fieldShape As Shape) As String
     NormalizedFace = faceRaw
 End Function
 
-' Long lists: the combo drop list windows to eight rows with an inert
-' overflow indicator, Up/Down walk a highlight that scrolls the window,
-' Enter takes the highlighted match, and clicked rows map through the
-' scroll offset. Transfer panels page through scroll buttons with
+' Long lists: combo and SelectBox drop lists window to eight rows (or
+' ListRows) behind clickable pager rows, Up/Down walk a highlight that
+' scrolls the combo window, Enter takes the highlighted match, clicked
+' rows map through the scroll offset, and a pick reopens onto the whole
+' list scrolled to it. Transfer panels page through scroll buttons with
 ' offset-mapped row selection.
 Public Function TestLongLists() As String
     Dim app As ReDimUI
@@ -1507,6 +1562,9 @@ Public Function TestLongLists() As String
     Next position
     app.ComboBox("pick").AtRect 24, 24, 150, 22
     app.ComboBox("pick").ItemsFrom(items).WritesTo "pickState"
+    app.SelectBox("zone").AtRect 220, 24, 130, 24
+    app.SelectBox("zone").ItemsFrom(items).WritesTo "zoneState"
+    app.SelectBox("zone").Value 10
     app.TransferList("pool").AtRect 24, 240, 380, 128
     app.TransferList("pool").ItemsFrom(items).WritesTo "poolState"
     app.Render
@@ -1573,6 +1631,122 @@ Public Function TestLongLists() As String
             = "Item01" And Not ShapeExists(host, "rdm_wid27_pick__optu"))
     RdxKeyChar "{ESC}"
 
+    ' A pick reopens pristine: the whole list, scrolled so the pick is
+    ' the first row, and Down walks on from the pick. The first edit
+    ' filters again.
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid27_pick"
+    For keyNo = 1 To 3
+        RdxKeyChar "{DOWN}"
+    Next keyNo
+    RdxKeyChar "{ENTER}"
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid27_pick"
+    transcript = transcript & "|reopenRow1=" & _
+        host.Shapes("rdm_wid27_pick__opt1").TextFrame2.TextRange.Text
+    transcript = transcript & "|reopenWindowed=" & _
+        CStr(ShapeExists(host, "rdm_wid27_pick__opt8") And _
+            ShapeExists(host, "rdm_wid27_pick__optu") And _
+            ShapeExists(host, "rdm_wid27_pick__optd"))
+    RdxKeyChar "{DOWN}"
+    transcript = transcript & "|downFromPick=" & _
+        CStr(host.Shapes("rdm_wid27_pick__opt2").Fill.ForeColor.RGB = _
+            app.Theme.PrimaryColor)
+    RdxKeyChar "x"
+    transcript = transcript & "|typingFilters=" & _
+        CStr(Not ShapeExists(host, "rdm_wid27_pick__opt1"))
+    RdxKeyChar "{ESC}"
+    RdxKeyChar "{ESC}"
+
+    ' A pick commits like the field's other commit paths: OnChange fires
+    ' once when the pick changes the value, from the keyboard or the
+    ' mouse, never again through the blur, and not at all for a re-pick
+    ' of the value already there.
+    app.ComboBox("pick").OnChange "TestReDimWidgets.RecordChange"
+    gChangeCount = 0
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid27_pick"
+    RdxKeyChar "{DOWN}"
+    RdxKeyChar "{ENTER}"
+    transcript = transcript & "|keyPickFires=" & gChangeCount
+    transcript = transcript & "|keyPickState=" & app.State("pickState")
+    ReDimUI.ForcePressEdge
+    RdxPumpOnce
+    transcript = transcript & "|keyPickNoRefire=" & gChangeCount
+    gChangeCount = 0
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid27_pick"
+    RdxKeyChar "{DOWN}"
+    RdxKeyChar "{UP}"
+    RdxKeyChar "{ENTER}"
+    transcript = transcript & "|keyRepickQuiet=" & gChangeCount
+    gChangeCount = 0
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid27_pick"
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid27_pick__opt1"
+    transcript = transcript & "|mouseRepickQuiet=" & gChangeCount
+    gChangeCount = 0
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid27_pick"
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid27_pick__opt3"
+    transcript = transcript & "|mousePickFires=" & gChangeCount
+    transcript = transcript & "|mousePickState=" & app.State("pickState")
+    app.ComboBox("pick").OnChange vbNullString
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid27_pick"
+    RdxKeyChar "{ESC}"
+    RdxKeyChar "{ESC}"
+
+    ' ListRows resizes the combo window.
+    app.ComboBox("pick").ListRows 5
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid27_pick"
+    transcript = transcript & "|comboListRows=" & _
+        CStr(ShapeExists(host, "rdm_wid27_pick__opt5") And _
+            Not ShapeExists(host, "rdm_wid27_pick__opt6"))
+    RdxKeyChar "{ESC}"
+
+    ' SelectBox windowing: opening scrolls the selection into view (the
+    ' window clamps at the end of the list), the top pager pages back,
+    ' clicked rows map through the offset, and ListRows sizes the window.
+    ReDimUI.DispatchShape "rdm_wid27_zone"
+    transcript = transcript & "|selectWindow=" & _
+        CStr(ShapeExists(host, "rdm_wid27_zone__opt8") And _
+            Not ShapeExists(host, "rdm_wid27_zone__opt9") And _
+            ShapeExists(host, "rdm_wid27_zone__optu") And _
+            Not ShapeExists(host, "rdm_wid27_zone__optd"))
+    transcript = transcript & "|selectShowsPick=" & _
+        host.Shapes("rdm_wid27_zone__opt6").TextFrame2.TextRange.Text
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid27_zone__optu"
+    transcript = transcript & "|selectPagedBack=" & _
+        CStr(host.Shapes("rdm_wid27_zone__opt1").TextFrame2.TextRange.Text _
+            = "Item01" And ShapeExists(host, "rdm_wid27_zone__optd"))
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid27_zone__opt2"
+    transcript = transcript & "|selectRowMaps=" & app.State("zoneState")
+    app.SelectBox("zone").ListRows 4
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid27_zone"
+    transcript = transcript & "|selectListRows=" & _
+        CStr(ShapeExists(host, "rdm_wid27_zone__opt4") And _
+            Not ShapeExists(host, "rdm_wid27_zone__opt5") And _
+            host.Shapes("rdm_wid27_zone__opt1").TextFrame2.TextRange.Text _
+                = "Item02")
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid27_zone"
+    On Error Resume Next
+    Err.Clear
+    app.TransferList("pool").ListRows 3
+    transcript = transcript & "|listRowsKindGuard=" & CStr(Err.Number <> 0)
+    Err.Clear
+    app.SelectBox("zone").ListRows 0
+    transcript = transcript & "|listRowsMinimum=" & CStr(Err.Number <> 0)
+    Err.Clear
+    On Error GoTo 0
+
     ' Transfer panel: five rows fit, arrows page, selection maps
     ' through the offset.
     transcript = transcript & "|poolRows=" & _
@@ -1613,6 +1787,8 @@ Public Function TestChromeClaim() As String
     Next position
     app.ComboBox("pick").AtRect 24, 24, 150, 22
     app.ComboBox("pick").ItemsFrom items
+    app.SelectBox("zone").AtRect 300, 24, 130, 24
+    app.SelectBox("zone").ItemsFrom items
     app.SlideBar("vol").AtRect 24, 200, 200, 18
     app.SlideBar("vol").SliderRange 0, 100, 5
     app.Render
@@ -1633,6 +1809,16 @@ Public Function TestChromeClaim() As String
     RdxKeyChar "{ESC}"
     transcript = transcript & "|closedAgain=" & _
         CStr(Not app.PointClaimedByChrome(30, 150, "vol"))
+
+    ' An open SelectBox claims its windowed depth - eight rows and the
+    ' bottom pager, ending near y 266 - not all twelve items.
+    ReDimUI.DispatchShape "rdm_wid28_zone"
+    transcript = transcript & "|selectClaimsWindow=" & _
+        CStr(app.PointClaimedByChrome(310, 250, "vol"))
+    transcript = transcript & "|selectBelowWindowFree=" & _
+        CStr(Not app.PointClaimedByChrome(310, 330, "vol"))
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid28_zone"
 
     ' A modal overlay claims everything it covers until it closes.
     app.Confirm "Sure?", "Chrome claim check.", vbNullString

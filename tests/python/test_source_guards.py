@@ -10,6 +10,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from vba_sources import RELEASE_SOURCES, release_header
+
 REDIMUI = Path(__file__).resolve().parents[2] / "src" / "ReDimUI.cls"
 
 # A bare IsArray call, not IsArrayValue: "IsArray" followed by optional
@@ -35,3 +37,17 @@ def test_isarray_appears_once_inside_the_guard():
         "the one IsArray call must live inside the IsArrayValue guard, "
         "which short-circuits on IsObject before testing"
     )
+
+
+def test_release_sources_carry_license_and_version():
+    """Every source a release ships opens with the version and release date,
+    the repository, and the MIT license, built from REDIM_VERSION, the
+    CHANGELOG, and LICENSE; tools/stamp_release.py writes it."""
+    header = release_header()
+    for path in RELEASE_SOURCES:
+        text = path.read_text(encoding="utf-8").replace("\r\n", "\n")
+        preamble = text.split("\nOption Explicit", 1)[0]
+        assert header in preamble, (
+            f"{path.name} lacks the current release header; run "
+            "python tools/stamp_release.py:\n" + header
+        )

@@ -50,12 +50,22 @@ def test_select_box(run_widgets):
     assert facts["pickedFace"] == "East"
     assert facts["closedAfterPick"] == "True"
     assert facts["changeRan"] == "1"
+    assert facts["repickQuiet"] == "True", (
+        "re-picking the current item must close the list without firing"
+        " OnChange"
+    )
     assert facts["toggleClosed"] == "True"
 
 
 def test_text_input(run_widgets):
     facts = parse_transcript(run_widgets("TestTextInput"))
     assert facts["frameExists"] == "True"
+    assert facts["clickSelectsCell"] == "True", (
+        "clicking a cell-backed input's frame must select its anchor cell"
+    )
+    assert facts["clickNoChange"] == "True", (
+        "a click is not an edit and must not fire the change handler"
+    )
     assert facts["apiWriteState"] == "Ada"
     assert facts["apiNoChangeProc"] == "True", (
         "API writes must not fire the change handler"
@@ -254,6 +264,10 @@ def test_item_api(run_widgets):
 def test_combo_box(run_widgets):
     facts = parse_transcript(run_widgets("TestComboBox"))
     assert facts["frameAndCaret"] == "True"
+    assert facts["faceSelectsCell"] == "True", (
+        "clicking a cell-backed combo's face must select its anchor cell"
+        " and open the list"
+    )
     assert facts["openAll"] == "True"
     assert facts["optText"] == "Green"
     assert facts["pickedCell"] == "Green"
@@ -261,6 +275,12 @@ def test_combo_box(run_widgets):
     assert facts["pickChangeRan"] == "1"
     assert facts["closedAfterPick"] == "True"
     assert facts["pickedIndex"] == "2"
+    assert facts["reopenAll"] == "True", (
+        "a picked value must reopen onto the whole list, not its one match"
+    )
+    assert facts["repickQuiet"] == "True", (
+        "re-picking the item the cell holds must not fire OnChange"
+    )
     assert facts["filteredCount"] == "True", (
         "the caret must open the list filtered by the typed text"
     )
@@ -304,6 +324,12 @@ def test_float_field(run_widgets):
     assert facts["picked"] == "Green"
     assert facts["pickBlurred"] == "True"
     assert facts["pickClosed"] == "True"
+    assert facts["reopenShowsAll"] == "True", (
+        "refocusing after a pick must show every item, not only the pick"
+    )
+    assert facts["editFilters"] == "True", (
+        "the first edit after reopening must filter the list again"
+    )
     assert facts["escCleared"] == "True", (
         "Esc on a combo must clear the value, reopen the full list, and"
         " keep focus"
@@ -490,6 +516,45 @@ def test_long_lists(run_widgets):
         "a Down after mouse paging starts the highlight in the window"
     )
     assert facts["pagedBack"] == "True"
+    assert facts["reopenRow1"] == "Item03", (
+        "a combo must reopen onto the whole list scrolled to its pick"
+    )
+    assert facts["reopenWindowed"] == "True"
+    assert facts["downFromPick"] == "True", (
+        "Down on a reopened list must walk on from the pick"
+    )
+    assert facts["typingFilters"] == "True"
+    assert facts["keyPickFires"] == "1", (
+        "an Enter pick that changes the value must fire OnChange once"
+    )
+    assert facts["keyPickState"] == "Item01"
+    assert facts["keyPickNoRefire"] == "1", (
+        "the blur after a keyboard pick must not fire OnChange again"
+    )
+    assert facts["keyRepickQuiet"] == "0", (
+        "an Enter re-pick of the current value must not fire OnChange"
+    )
+    assert facts["mouseRepickQuiet"] == "0", (
+        "a mouse re-pick of the current value must not fire OnChange"
+    )
+    assert facts["mousePickFires"] == "1"
+    assert facts["mousePickState"] == "Item03"
+    assert facts["comboListRows"] == "True", "ListRows must size the combo window"
+    assert facts["selectWindow"] == "True", (
+        "an open SelectBox must window to eight rows behind pagers"
+    )
+    assert facts["selectShowsPick"] == "Item10", (
+        "opening a SelectBox must scroll its selection into view"
+    )
+    assert facts["selectPagedBack"] == "True"
+    assert facts["selectRowMaps"] == "Item02", (
+        "clicked SelectBox rows must map through the scroll offset"
+    )
+    assert facts["selectListRows"] == "True", (
+        "ListRows must size the SelectBox window"
+    )
+    assert facts["listRowsKindGuard"] == "True"
+    assert facts["listRowsMinimum"] == "True"
     assert facts["poolRows"] == "True"
     assert facts["pagedRow1"] == "Item05", (
         "the panel scroll button must page the window"
@@ -510,6 +575,10 @@ def test_chrome_claim(run_widgets):
     assert facts["besideNotClaimed"] == "True"
     assert facts["exceptSelf"] == "True"
     assert facts["closedAgain"] == "True"
+    assert facts["selectClaimsWindow"] == "True"
+    assert facts["selectBelowWindowFree"] == "True", (
+        "an open SelectBox claims its windowed depth, not every item"
+    )
     assert facts["overlayClaims"] == "True", (
         "a modal overlay must claim everything it covers"
     )

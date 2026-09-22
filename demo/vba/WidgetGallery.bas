@@ -1,4 +1,29 @@
 Attribute VB_Name = "WidgetGallery"
+' ReDim 0.20.0 (2026-09-22)
+' https://github.com/WilliamSmithEdward/ReDim
+'
+' MIT License
+'
+' Copyright (c) 2026 William Smith
+'
+' Permission is hereby granted, free of charge, to any person obtaining a copy
+' of this software and associated documentation files (the "Software"), to deal
+' in the Software without restriction, including without limitation the rights
+' to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+' copies of the Software, and to permit persons to whom the Software is
+' furnished to do so, subject to the following conditions:
+'
+' The above copyright notice and this permission notice shall be included in all
+' copies or substantial portions of the Software.
+'
+' THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+' IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+' FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+' AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+' LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+' OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+' SOFTWARE.
+
 Option Explicit
 
 ' Widget Gallery: every ReDim component on one sheet, wired to a live state
@@ -15,133 +40,133 @@ Public Function GalleryApp() As ReDimUI
 End Function
 
 Public Sub BuildWidgetGallery()
-    Dim app As ReDimUI
+    Dim ui As ReDimUI
     Dim host As Worksheet
 
     Set host = ThisWorkbook.Worksheets(1)
-    Set app = ReDimUI.Mount(host, APP_ID)
-    app.ProtectSurface False
-    app.PrepareCanvas
+    Set ui = ReDimUI.Mount(host, APP_ID)
+    ui.ProtectSurface False
+    ui.PrepareCanvas
 
-    app.Label("title").AtRect(24, 16, 300, 30).Text("Widget Gallery") _
+    ui.Label("title").AtRect(24, 16, 300, 30).Text("Widget Gallery") _
         .FontSize(20).Bold
 
-    app.Label("lblButtons").AtRect(24, 60, 200, 16).Text("Buttons").Bold
-    app.Button("primary").AtRect(24, 80, 96, 30).Text("Primary").Primary _
+    ui.Label("lblButtons").AtRect(24, 60, 200, 16).Text("Buttons").Bold
+    ui.Button("primary").AtRect(24, 80, 96, 30).Text("Primary").Primary _
         .OnClick "WidgetGallery.HandlePing"
-    app.Button("secondary").AtRect(128, 80, 96, 30).Text("Secondary") _
+    ui.Button("secondary").AtRect(128, 80, 96, 30).Text("Secondary") _
         .Secondary.OnClick "WidgetGallery.HandlePing"
-    app.Button("success").AtRect(232, 80, 96, 30).Text("Success").Success _
+    ui.Button("success").AtRect(232, 80, 96, 30).Text("Success").Success _
         .OnClick "WidgetGallery.HandleToastSuccess"
-    app.Button("danger").AtRect(336, 80, 96, 30).Text("Danger").Danger _
+    ui.Button("danger").AtRect(336, 80, 96, 30).Text("Danger").Danger _
         .OnClick "WidgetGallery.HandleModal"
-    app.Button("busywork").AtRect(440, 80, 120, 30).Text("Run async work") _
+    ui.Button("busywork").AtRect(440, 80, 120, 30).Text("Run async work") _
         .OnClickAsync "WidgetGallery.SimulatedWork"
-    app.Label("oplog").AtRect(440, 114, 220, 16).BindText "oplog"
+    ui.Label("oplog").AtRect(440, 114, 220, 16).BindText "oplog"
 
-    app.Label("lblValues").AtRect(24, 128, 200, 16).Text("Value controls").Bold
-    app.Toggle("notify").AtRect(24, 150, 44, 22).WritesTo "notifications"
-    app.Label("notifyLbl").AtRect(76, 152, 110, 18).Text("Notifications")
-    app.SelectBox("region").AtRect(196, 148, 130, 24) _
+    ui.Label("lblValues").AtRect(24, 128, 200, 16).Text("Value controls").Bold
+    ui.Toggle("notify").AtRect(24, 150, 44, 22).WritesTo "notifications"
+    ui.Label("notifyLbl").AtRect(76, 152, 110, 18).Text("Notifications")
+    ui.SelectBox("region").AtRect(196, 148, 130, 24) _
         .Items("North", "South", "East", "West").Value(1).WritesTo "region"
-    app.SelectBox("region").OnChange "WidgetGallery.HandleRegionChange"
+    ui.SelectBox("region").OnChange "WidgetGallery.HandleRegionChange"
 
-    app.Label("lblDrawn").AtRect(24, 188, 300, 16) _
+    ui.Label("lblDrawn").AtRect(24, 188, 300, 16) _
         .Text("Drawn controls (fully themed)").Bold
-    app.TickBox("consent").AtRect(24, 212, 140, 18).Text("Log activity") _
+    ui.TickBox("consent").AtRect(24, 212, 140, 18).Text("Log activity") _
         .WritesTo "drawnCheck"
-    app.RadioGroup("priority").AtRect(190, 204, 130, 60) _
+    ui.RadioGroup("priority").AtRect(190, 204, 130, 60) _
         .Items("Low", "Medium", "High").Value(2).WritesTo "priority"
-    app.Stepper("volume").AtRect(350, 206, 120, 24).SliderRange(0, 100, 5) _
+    ui.Stepper("volume").AtRect(350, 206, 120, 24).SliderRange(0, 100, 5) _
         .Value(35).WritesTo("volume").BindValue "volume"
 
-    app.Label("lblInput").AtRect(24, 280, 200, 16).Text("Cell-free fields").Bold
-    app.TextInput("username").AtRect(24, 304, 150, 22).WritesTo "userName"
-    app.ComboBox("fruit").AtRect(196, 304, 150, 22).WritesTo "fruit"
-    app.ComboBox("fruit").Items "Apple", "Apricot", "Avocado", "Banana", _
+    ui.Label("lblInput").AtRect(24, 280, 200, 16).Text("Cell-free fields").Bold
+    ui.TextInput("username").AtRect(24, 304, 150, 22).WritesTo "userName"
+    ui.ComboBox("fruit").AtRect(196, 304, 150, 22).WritesTo "fruit"
+    ui.ComboBox("fruit").Items "Apple", "Apricot", "Avocado", "Banana", _
         "Blackberry", "Blueberry", "Cherry", "Coconut", "Cranberry", _
         "Date", "Fig", "Grape", "Grapefruit", "Guava", "Kiwi", "Lemon", _
         "Lime", "Mango", "Nectarine", "Orange"
-    app.TextInput("notes").AtRect(360, 288, 150, 44).MultiLine.WritesTo "notes"
-    app.Label("inputHint").AtRect(24, 336, 520, 16) _
+    ui.TextInput("notes").AtRect(360, 288, 150, 44).MultiLine.WritesTo "notes"
+    ui.Label("inputHint").AtRect(24, 336, 520, 16) _
         .Text("Click a field and type: the combo filters live; multi-line notes commit with Tab or Ctrl+Enter.")
 
-    app.Label("lblTransfer").AtRect(24, 356, 300, 16) _
+    ui.Label("lblTransfer").AtRect(24, 356, 300, 16) _
         .Text("Transfer list (dual listbox)").Bold
-    app.Label("lblCheck").AtRect(420, 356, 150, 16) _
+    ui.Label("lblCheck").AtRect(420, 356, 150, 16) _
         .Text("Checkbox list").Bold
-    app.CheckList("options").AtRect 420, 378, 160, 125
-    app.CheckList("options").ItemsFrom( _
+    ui.CheckList("options").AtRect 420, 378, 160, 125
+    ui.CheckList("options").ItemsFrom( _
         Array("Alerts", "Auto-save", "Dark mode", "Sync")) _
         .CheckedFrom(Array("Auto-save")) _
         .WritesTo "options"
-    app.TransferList("crew").AtRect 24, 378, 380, 132
-    app.TransferList("crew").ItemsFrom( _
+    ui.TransferList("crew").AtRect 24, 378, 380, 132
+    ui.TransferList("crew").ItemsFrom( _
         Array("Ada", "Grace", "Edsger", "Alan", "Donald", "Katherine", _
             "Margaret", "John", "Dennis", "Ken", "Bjarne", "Linus", _
             "Guido", "Tim")) _
         .ChosenFrom(Array("Barbara")) _
         .Captions("Available", "On mission") _
         .WritesTo "crew"
-    app.TransferList("crew").OnChange "WidgetGallery.HandleCrewChange"
+    ui.TransferList("crew").OnChange "WidgetGallery.HandleCrewChange"
 
-    app.Label("lblImage").AtRect(420, 507, 150, 14).Text("Image").Bold
-    app.Image("logo").AtRect 420, 524, 160, 74
-    app.Image("logo").Source EnsureDemoImage(host)
+    ui.Label("lblImage").AtRect(420, 507, 150, 14).Text("Image").Bold
+    ui.Image("logo").AtRect 420, 524, 160, 74
+    ui.Image("logo").Source EnsureDemoImage(host)
 
-    app.Label("lblProgress").AtRect(24, 526, 200, 16) _
+    ui.Label("lblProgress").AtRect(24, 526, 200, 16) _
         .Text("Slider, stepper, and meter share one state key").Bold
-    app.SlideBar("volumeslide").AtRect(24, 548, 240, 18) _
+    ui.SlideBar("volumeslide").AtRect(24, 548, 240, 18) _
         .SliderRange(0, 100, 5).Value(35).WritesTo("volume").BindValue "volume"
-    app.ProgressBar("meter").AtRect(24, 574, 240, 12).BindValue "volume"
-    app.Label("meterLbl").AtRect(276, 568, 220, 18) _
+    ui.ProgressBar("meter").AtRect(24, 574, 240, 12).BindValue "volume"
+    ui.Label("meterLbl").AtRect(276, 568, 220, 18) _
         .BindText "volume", "Slide, step, or watch: {0}"
-    app.Spinner("spin").AtRect 490, 564, 26, 26
+    ui.Spinner("spin").AtRect 490, 564, 26, 26
 
-    app.Card("inspector").AtRect(24, 606, 560, 110).Text("State inspector")
-    app.Label("inspectorBody").AtRect(36, 634, 536, 74).BindText "inspector"
+    ui.Card("inspector").AtRect(24, 606, 560, 110).Text("State inspector")
+    ui.Label("inspectorBody").AtRect(36, 634, 536, 74).BindText "inspector"
 
-    app.SetState "notifications", False
-    app.SetState "region", "North"
-    app.SetState "drawnCheck", False
-    app.SetState "priority", "Medium"
-    app.SetState "volume", 35
-    app.SetState "userName", vbNullString
-    app.SetState "fruit", vbNullString
-    app.SetState "notes", vbNullString
-    app.SetState "crew", "Barbara"
-    app.SetState "options", "Auto-save"
-    app.SetState "lastAction", "none yet"
-    app.SetState "oplog", "no run yet"
+    ui.SetState "notifications", False
+    ui.SetState "region", "North"
+    ui.SetState "drawnCheck", False
+    ui.SetState "priority", "Medium"
+    ui.SetState "volume", 35
+    ui.SetState "userName", vbNullString
+    ui.SetState "fruit", vbNullString
+    ui.SetState "notes", vbNullString
+    ui.SetState "crew", "Barbara"
+    ui.SetState "options", "Auto-save"
+    ui.SetState "lastAction", "none yet"
+    ui.SetState "oplog", "no run yet"
     RefreshInspector
-    WireInspector app
-    app.Render
-    app.ProtectSurface
+    WireInspector ui
+    ui.Render
+    ui.ProtectSurface
 End Sub
 
-Private Sub WireInspector(ByVal app As ReDimUI)
-    app.OnStateChanged "notifications", "WidgetGallery.RefreshInspector"
-    app.OnStateChanged "region", "WidgetGallery.RefreshInspector"
-    app.OnStateChanged "drawnCheck", "WidgetGallery.RefreshInspector"
-    app.OnStateChanged "priority", "WidgetGallery.RefreshInspector"
-    app.OnStateChanged "volume", "WidgetGallery.RefreshInspector"
-    app.OnStateChanged "userName", "WidgetGallery.RefreshInspector"
-    app.OnStateChanged "lastAction", "WidgetGallery.RefreshInspector"
+Private Sub WireInspector(ByVal ui As ReDimUI)
+    ui.OnStateChanged "notifications", "WidgetGallery.RefreshInspector"
+    ui.OnStateChanged "region", "WidgetGallery.RefreshInspector"
+    ui.OnStateChanged "drawnCheck", "WidgetGallery.RefreshInspector"
+    ui.OnStateChanged "priority", "WidgetGallery.RefreshInspector"
+    ui.OnStateChanged "volume", "WidgetGallery.RefreshInspector"
+    ui.OnStateChanged "userName", "WidgetGallery.RefreshInspector"
+    ui.OnStateChanged "lastAction", "WidgetGallery.RefreshInspector"
 End Sub
 
 Public Sub RefreshInspector()
-    Dim app As ReDimUI
-    Dim summary As String
+    Dim ui As ReDimUI
+    Dim inspectorText As String
 
-    Set app = GalleryApp()
-    summary = "notifications = " & CStr(app.State("notifications")) & _
-        "   region = " & CStr(app.State("region")) & _
-        "   check = " & CStr(app.State("drawnCheck")) & vbLf & _
-        "volume = " & CStr(app.State("volume")) & _
-        "   priority = " & CStr(app.State("priority")) & _
-        "   userName = " & CStr(app.State("userName")) & vbLf & _
-        "last action = " & CStr(app.State("lastAction"))
-    app.SetState "inspector", summary
+    Set ui = GalleryApp()
+    inspectorText = "notifications = " & CStr(ui.State("notifications")) & _
+        "   region = " & CStr(ui.State("region")) & _
+        "   check = " & CStr(ui.State("drawnCheck")) & vbLf & _
+        "volume = " & CStr(ui.State("volume")) & _
+        "   priority = " & CStr(ui.State("priority")) & _
+        "   userName = " & CStr(ui.State("userName")) & vbLf & _
+        "last action = " & CStr(ui.State("lastAction"))
+    ui.SetState "inspector", inspectorText
 End Sub
 
 Public Sub HandleRegionChange()
@@ -189,19 +214,19 @@ Private Function EnsureDemoImage(ByVal host As Worksheet) As String
 End Function
 
 Public Sub HandlePing()
-    Dim app As ReDimUI
+    Dim ui As ReDimUI
 
-    Set app = GalleryApp()
-    app.SetState "lastAction", ReDimUI.SenderId & " clicked"
-    app.Toast ReDimUI.SenderId & " clicked.", 1800
+    Set ui = GalleryApp()
+    ui.SetState "lastAction", ReDimUI.SenderId & " clicked"
+    ui.Toast ReDimUI.SenderId & " clicked.", 1800
 End Sub
 
 Public Sub HandleToastSuccess()
-    Dim app As ReDimUI
+    Dim ui As ReDimUI
 
-    Set app = GalleryApp()
-    app.SetState "lastAction", "success toast"
-    app.Toast "Everything saved cleanly.", 2500
+    Set ui = GalleryApp()
+    ui.SetState "lastAction", "success toast"
+    ui.Toast "Everything saved cleanly.", 2500
 End Sub
 
 Public Sub HandleModal()
@@ -219,16 +244,16 @@ Public Sub HandleModalCancel()
 End Sub
 
 Public Sub SimulatedWork()
-    Dim app As ReDimUI
+    Dim ui As ReDimUI
     Dim ignored As Variant
     Dim startedAt As Double
 
-    Set app = GalleryApp()
+    Set ui = GalleryApp()
     startedAt = Timer
-    app.SetState "lastAction", "async work running"
-    app.SetState "oplog", "op started " & Format$(startedAt, "0.0") & "s"
+    ui.SetState "lastAction", "async work running"
+    ui.SetState "oplog", "op started " & Format$(startedAt, "0.0") & "s"
     ignored = ROneCOne.Task.Delay(1200).Await
-    app.SetState "lastAction", "async work finished"
-    app.SetState "oplog", "op ran " & Format$(Timer - startedAt, "0.00") & _
+    ui.SetState "lastAction", "async work finished"
+    ui.SetState "oplog", "op ran " & Format$(Timer - startedAt, "0.00") & _
         "s (expected 1.2)"
 End Sub

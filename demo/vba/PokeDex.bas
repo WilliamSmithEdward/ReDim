@@ -1,4 +1,29 @@
 Attribute VB_Name = "PokeDex"
+' ReDim 0.20.0 (2026-09-22)
+' https://github.com/WilliamSmithEdward/ReDim
+'
+' MIT License
+'
+' Copyright (c) 2026 William Smith
+'
+' Permission is hereby granted, free of charge, to any person obtaining a copy
+' of this software and associated documentation files (the "Software"), to deal
+' in the Software without restriction, including without limitation the rights
+' to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+' copies of the Software, and to permit persons to whom the Software is
+' furnished to do so, subject to the following conditions:
+'
+' The above copyright notice and this permission notice shall be included in all
+' copies or substantial portions of the Software.
+'
+' THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+' IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+' FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+' AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+' LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+' OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+' SOFTWARE.
+
 Option Explicit
 
 ' ReDex: a living Pokedex in Excel, and the full-framework showcase.
@@ -55,174 +80,174 @@ End Sub
 ' =====================================================================
 
 Private Sub BuildBrowse()
-    Dim app As ReDimUI
+    Dim ui As ReDimUI
     Dim host As Worksheet
-    Dim rowIndex As Long
+    Dim statRow As Long
 
     Set host = EnsureSheet("DexBrowse")
-    Set app = ReDimUI.Mount(host, "dexbrowse")
-    app.ProtectSurface False
-    app.PrepareCanvas
-    app.SetTheme PokeTheme(False)
-    app.AsWindow.WindowTitle "Pokedex"
-    app.NavBar
-    app.OnShow "PokeDex.HandleBrowseShown"
+    Set ui = ReDimUI.Mount(host, "dexbrowse")
+    ui.ProtectSurface False
+    ui.PrepareCanvas
+    ui.SetTheme PokeTheme(False)
+    ui.AsWindow.WindowTitle "Pokedex"
+    ui.NavBar
+    ui.OnShow "PokeDex.HandleBrowseShown"
 
-    app.Label("title").AtRect(24, 46, 220, 34).Text("ReDex").FontSize(24).Bold
-    app.Label("tag").AtRect(24, 82, 400, 16) _
+    ui.Label("title").AtRect(24, 46, 220, 34).Text("ReDex").FontSize(24).Bold
+    ui.Label("tag").AtRect(24, 82, 400, 16) _
         .Text("A living Pokedex, drawn from shapes, fed by PokeAPI.")
 
-    app.ComboBox("species").AtRect(24, 108, 200, 24).WritesTo "speciesPick"
-    app.ComboBox("species").OnChange "PokeDex.HandleSpeciesPick"
-    app.Button("prev").AtRect(240, 108, 70, 24).Text("< F2").Secondary _
+    ui.ComboBox("species").AtRect(24, 108, 200, 24).WritesTo "speciesPick"
+    ui.ComboBox("species").OnChange "PokeDex.HandleSpeciesPick"
+    ui.Button("prev").AtRect(240, 108, 70, 24).Text("< F2").Secondary _
         .OnClick "PokeDex.GoPrev"
-    app.Button("nextb").AtRect(318, 108, 70, 24).Text("F3 >").Secondary _
+    ui.Button("nextb").AtRect(318, 108, 70, 24).Text("F3 >").Secondary _
         .OnClick "PokeDex.GoNext"
-    app.Spinner("spn").AtRect 400, 108, 22, 22
-    app.Label("status").AtRect(432, 112, 170, 16).BindText "fetchStatus"
+    ui.Spinner("spn").AtRect 400, 108, 22, 22
+    ui.Label("status").AtRect(432, 112, 170, 16).BindText "fetchStatus"
 
-    app.Image("sprite").AtRect(24, 148, 150, 150).BindSource "spriteFile"
-    app.Card("infocard").AtRect(190, 148, 412, 150).Text("")
-    app.Label("pokename").AtRect(206, 160, 280, 24).FontSize(15).Bold _
+    ui.Image("sprite").AtRect(24, 148, 150, 150).BindSource "spriteFile"
+    ui.Card("infocard").AtRect(190, 148, 412, 150).Text("")
+    ui.Label("pokename").AtRect(206, 160, 280, 24).FontSize(15).Bold _
         .BindText "pokeName"
-    app.Label("typea").AtRect(206, 192, 88, 20).BindText("typeA") _
+    ui.Label("typea").AtRect(206, 192, 88, 20).BindText("typeA") _
         .BindVisible "typeAOn"
-    app.Label("typeb").AtRect(302, 192, 88, 20).BindText("typeB") _
+    ui.Label("typeb").AtRect(302, 192, 88, 20).BindText("typeB") _
         .BindVisible "typeBOn"
-    app.Label("sizes").AtRect(206, 222, 380, 16).BindText "sizeLine"
-    app.Label("dexline").AtRect(206, 244, 380, 16).BindText "dexLine"
+    ui.Label("sizes").AtRect(206, 222, 380, 16).BindText "sizeLine"
+    ui.Label("dexline").AtRect(206, 244, 380, 16).BindText "dexLine"
 
-    app.Label("statshdr").AtRect(24, 314, 200, 16).Text("Base stats").Bold
-    For rowIndex = 1 To 6
-        app.Label("statn" & rowIndex) _
-            .AtRect(24, 320 + rowIndex * 22, 64, 16).Text(StatCaption(rowIndex))
-        app.ProgressBar("statb" & rowIndex) _
-            .AtRect(94, 323 + rowIndex * 22, 220, 10).BindValue StatPctKey(rowIndex)
-        app.Label("statv" & rowIndex) _
-            .AtRect(322, 320 + rowIndex * 22, 44, 16).BindText StatKey(rowIndex)
-    Next rowIndex
+    ui.Label("statshdr").AtRect(24, 314, 200, 16).Text("Base stats").Bold
+    For statRow = 1 To 6
+        ui.Label("statn" & statRow) _
+            .AtRect(24, 320 + statRow * 22, 64, 16).Text(StatCaption(statRow))
+        ui.ProgressBar("statb" & statRow) _
+            .AtRect(94, 323 + statRow * 22, 220, 10).BindValue StatPctKey(statRow)
+        ui.Label("statv" & statRow) _
+            .AtRect(322, 320 + statRow * 22, 44, 16).BindText StatKey(statRow)
+    Next statRow
 
-    app.Button("catch").AtRect(400, 342, 202, 34).Text("Catch!").Primary _
+    ui.Button("catch").AtRect(400, 342, 202, 34).Text("Catch!").Primary _
         .OnClick "PokeDex.CatchCurrent"
-    app.Button("hunt").AtRect(400, 386, 130, 26).Text("Shiny hunt") _
+    ui.Button("hunt").AtRect(400, 386, 130, 26).Text("Shiny hunt") _
         .Secondary.OnClick "PokeDex.StartShinyHunt"
-    app.Button("stophunt").AtRect(538, 386, 64, 26).Text("Stop").Danger _
+    ui.Button("stophunt").AtRect(538, 386, 64, 26).Text("Stop").Danger _
         .OnClick "PokeDex.StopShinyHunt"
-    app.Button("hunt").BindEnabled "hunting", True
-    app.Button("stophunt").BindEnabled "hunting"
-    app.ProgressBar("huntbar").AtRect(400, 420, 202, 8).BindValue "huntPct"
+    ui.Button("hunt").BindEnabled "hunting", True
+    ui.Button("stophunt").BindEnabled "hunting"
+    ui.ProgressBar("huntbar").AtRect(400, 420, 202, 8).BindValue "huntPct"
 
-    app.SetStateDefault "fetchStatus", "idle"
-    app.SetStateDefault "pokeName", "Loading the Kanto dex..."
-    app.SetStateDefault "typeAOn", False
-    app.SetStateDefault "typeBOn", False
-    app.SetStateDefault "sizeLine", ""
-    app.SetStateDefault "dexLine", ""
-    app.SetStateDefault "spriteFile", ""
-    app.SetStateDefault "hunting", False
-    app.SetStateDefault "huntPct", 0
-    app.SetStateDefault "tweening", False
-    app.SetStateDefault "namesLoaded", False
-    app.SetStateDefault "dexId", 0
-    app.HotKey "{F2}", "PokeDex.GoPrev"
-    app.HotKey "{F3}", "PokeDex.GoNext"
-    app.Render
-    app.ProtectSurface
+    ui.SetStateDefault "fetchStatus", "idle"
+    ui.SetStateDefault "pokeName", "Loading the Kanto dex..."
+    ui.SetStateDefault "typeAOn", False
+    ui.SetStateDefault "typeBOn", False
+    ui.SetStateDefault "sizeLine", ""
+    ui.SetStateDefault "dexLine", ""
+    ui.SetStateDefault "spriteFile", ""
+    ui.SetStateDefault "hunting", False
+    ui.SetStateDefault "huntPct", 0
+    ui.SetStateDefault "tweening", False
+    ui.SetStateDefault "namesLoaded", False
+    ui.SetStateDefault "dexId", 0
+    ui.HotKey "{F2}", "PokeDex.GoPrev"
+    ui.HotKey "{F3}", "PokeDex.GoNext"
+    ui.Render
+    ui.ProtectSurface
 End Sub
 
 Private Sub BuildTeam()
-    Dim app As ReDimUI
+    Dim ui As ReDimUI
     Dim host As Worksheet
 
     Set host = EnsureSheet("DexTeam")
-    Set app = ReDimUI.Mount(host, "dexteam")
-    app.ProtectSurface False
-    app.PrepareCanvas
-    app.SetTheme PokeTheme(False)
-    app.AsWindow.WindowTitle "Team"
-    app.NavBar
-    app.OnShow "PokeDex.HandleTeamShown"
+    Set ui = ReDimUI.Mount(host, "dexteam")
+    ui.ProtectSurface False
+    ui.PrepareCanvas
+    ui.SetTheme PokeTheme(False)
+    ui.AsWindow.WindowTitle "Team"
+    ui.NavBar
+    ui.OnShow "PokeDex.HandleTeamShown"
 
-    app.Label("title").AtRect(24, 46, 300, 26).Text("Team builder") _
+    ui.Label("title").AtRect(24, 46, 300, 26).Text("Team builder") _
         .FontSize(18).Bold
-    app.Label("hint").AtRect(24, 76, 420, 16) _
+    ui.Label("hint").AtRect(24, 76, 420, 16) _
         .Text("Catch species in the Pokedex, then build a party of six.")
-    app.TransferList("team").AtRect 24, 100, 420, 152
-    app.TransferList("team").Captions("Caught", "Party") _
+    ui.TransferList("team").AtRect 24, 100, 420, 152
+    ui.TransferList("team").Captions("Caught", "Party") _
         .WritesTo("party").OnChange "PokeDex.HandlePartyChange"
 
-    app.Label("preflbl").AtRect(470, 76, 150, 16).Text("House rules").Bold
-    app.CheckList("prefs").AtRect 470, 100, 160, 152
-    app.CheckList("prefs").ItemsFrom( _
+    ui.Label("preflbl").AtRect(470, 76, 150, 16).Text("House rules").Bold
+    ui.CheckList("prefs").AtRect 470, 100, 160, 152
+    ui.CheckList("prefs").ItemsFrom( _
         Array("Nicknames", "Auto-heal", "Hard mode", "Shiny only")) _
         .CheckedFrom(Array("Auto-heal")) _
         .WritesTo "houseRules"
 
-    app.Label("noteslbl").AtRect(24, 268, 200, 16).Text("Strategy notes").Bold
-    app.TextInput("strategy").AtRect(24, 288, 300, 58).MultiLine _
+    ui.Label("noteslbl").AtRect(24, 268, 200, 16).Text("Strategy notes").Bold
+    ui.TextInput("strategy").AtRect(24, 288, 300, 58).MultiLine _
         .WritesTo "strategy"
-    app.Label("partylbl").AtRect(340, 288, 290, 58) _
+    ui.Label("partylbl").AtRect(340, 288, 290, 58) _
         .BindText "party", "Party: {0}"
-    app.Label("visits").AtRect(24, 360, 300, 16).BindText _
+    ui.Label("visits").AtRect(24, 360, 300, 16).BindText _
         "teamVisits", "Window shown {0} times this session."
 
-    app.SetStateDefault "party", ""
-    app.SetStateDefault "strategy", ""
-    app.SetStateDefault "teamVisits", 0
-    app.Render
-    app.ProtectSurface
+    ui.SetStateDefault "party", ""
+    ui.SetStateDefault "strategy", ""
+    ui.SetStateDefault "teamVisits", 0
+    ui.Render
+    ui.ProtectSurface
 End Sub
 
 Private Sub BuildTrainer()
-    Dim app As ReDimUI
+    Dim ui As ReDimUI
     Dim host As Worksheet
 
     Set host = EnsureSheet("DexTrainer")
-    Set app = ReDimUI.Mount(host, "dextrainer")
-    app.ProtectSurface False
-    app.PrepareCanvas
-    app.SetTheme PokeTheme(False)
-    app.AsWindow.WindowTitle "Trainer"
-    app.NavBar
-    app.OnShow "PokeDex.RefreshTrainerCard"
+    Set ui = ReDimUI.Mount(host, "dextrainer")
+    ui.ProtectSurface False
+    ui.PrepareCanvas
+    ui.SetTheme PokeTheme(False)
+    ui.AsWindow.WindowTitle "Trainer"
+    ui.NavBar
+    ui.OnShow "PokeDex.RefreshTrainerCard"
 
-    app.Label("title").AtRect(24, 46, 300, 26).Text("Trainer card") _
+    ui.Label("title").AtRect(24, 46, 300, 26).Text("Trainer card") _
         .FontSize(18).Bold
-    app.Label("namelbl").AtRect(24, 84, 120, 18).Text("Name")
-    app.TextInput("trainer").AtRect(120, 82, 170, 22).WritesTo "trainerName"
-    app.Label("starterlbl").AtRect(24, 118, 120, 18).Text("Starter").Bold
-    app.RadioGroup("starter").AtRect(24, 140, 160, 62) _
+    ui.Label("namelbl").AtRect(24, 84, 120, 18).Text("Name")
+    ui.TextInput("trainer").AtRect(120, 82, 170, 22).WritesTo "trainerName"
+    ui.Label("starterlbl").AtRect(24, 118, 120, 18).Text("Starter").Bold
+    ui.RadioGroup("starter").AtRect(24, 140, 160, 62) _
         .Items("Bulbasaur", "Charmander", "Squirtle").Value(1) _
         .WritesTo("starter").OnChange "PokeDex.HandleStarterPick"
-    app.Label("favlbl").AtRect(220, 118, 120, 18).Text("Favorite type").Bold
-    app.SelectBox("favtype").AtRect(220, 140, 140, 24) _
+    ui.Label("favlbl").AtRect(220, 118, 120, 18).Text("Favorite type").Bold
+    ui.SelectBox("favtype").AtRect(220, 140, 140, 24) _
         .Items("Fire", "Water", "Grass", "Electric", "Dragon") _
         .Value(2).WritesTo "favType"
-    app.Label("lvllbl").AtRect(220, 178, 120, 18).Text("Ambition (level)")
-    app.Stepper("level").AtRect(220, 198, 140, 24).SliderRange(1, 100, 5) _
+    ui.Label("lvllbl").AtRect(220, 178, 120, 18).Text("Ambition (level)")
+    ui.Stepper("level").AtRect(220, 198, 140, 24).SliderRange(1, 100, 5) _
         .Value(5).WritesTo "ambition"
 
-    app.Toggle("darkmode").AtRect(24, 226, 44, 22).WritesTo("darkMode") _
+    ui.Toggle("darkmode").AtRect(24, 226, 44, 22).WritesTo("darkMode") _
         .OnChange "PokeDex.ApplyThemeChoice"
-    app.Label("darklbl").AtRect(76, 228, 160, 18).Text("Night mode")
+    ui.Label("darklbl").AtRect(76, 228, 160, 18).Text("Night mode")
 
-    app.Card("card").AtRect(24, 262, 420, 96).Text("Trainer summary")
-    app.Label("cardbody").AtRect(36, 290, 396, 60).BindText "cardText"
-    app.Button("reset").AtRect(470, 262, 150, 30).Text("Reset journey") _
+    ui.Card("card").AtRect(24, 262, 420, 96).Text("Trainer summary")
+    ui.Label("cardbody").AtRect(36, 290, 396, 60).BindText "cardText"
+    ui.Button("reset").AtRect(470, 262, 150, 30).Text("Reset journey") _
         .Danger.OnClick "PokeDex.ConfirmReset"
 
-    app.SetStateDefault "trainerName", "Red"
-    app.SetStateDefault "starter", "Bulbasaur"
-    app.SetStateDefault "favType", "Water"
-    app.SetStateDefault "ambition", 5
-    app.SetStateDefault "darkMode", False
-    app.SetStateDefault "cardText", ""
-    app.OnStateChanged "trainerName", "PokeDex.RefreshTrainerCard"
-    app.OnStateChanged "starter", "PokeDex.RefreshTrainerCard"
-    app.OnStateChanged "favType", "PokeDex.RefreshTrainerCard"
-    app.OnStateChanged "ambition", "PokeDex.RefreshTrainerCard"
-    app.Render
-    app.ProtectSurface
+    ui.SetStateDefault "trainerName", "Red"
+    ui.SetStateDefault "starter", "Bulbasaur"
+    ui.SetStateDefault "favType", "Water"
+    ui.SetStateDefault "ambition", 5
+    ui.SetStateDefault "darkMode", False
+    ui.SetStateDefault "cardText", ""
+    ui.OnStateChanged "trainerName", "PokeDex.RefreshTrainerCard"
+    ui.OnStateChanged "starter", "PokeDex.RefreshTrainerCard"
+    ui.OnStateChanged "favType", "PokeDex.RefreshTrainerCard"
+    ui.OnStateChanged "ambition", "PokeDex.RefreshTrainerCard"
+    ui.Render
+    ui.ProtectSurface
 End Sub
 
 ' =====================================================================
@@ -230,58 +255,58 @@ End Sub
 ' =====================================================================
 
 Public Sub HandleBrowseShown()
-    Dim app As ReDimUI
+    Dim ui As ReDimUI
 
-    Set app = ReDimUI.App("dexbrowse")
-    If CBool(app.StateOrDefault("namesLoaded", False)) Then Exit Sub
-    If app.IsOpRunning("names") Then Exit Sub
+    Set ui = ReDimUI.App("dexbrowse")
+    If CBool(ui.StateOrDefault("namesLoaded", False)) Then Exit Sub
+    If ui.IsOpRunning("names") Then Exit Sub
     Set gNamesTask = ROneCOne.HttpClient.GetStringAsync( _
         API_BASE & "?limit=" & DEX_MAX)
-    With app.Async("names")
+    With ui.Async("names")
         .RunsTask gNamesTask
         .ShowsSpinner "spn"
         .TracksState "fetchStatus"
         .OnDone "PokeDex.ApplyNamesList"
         .OnFail "PokeDex.NamesFailed"
     End With
-    app.Async("names").Start
+    ui.Async("names").Start
 End Sub
 
 Public Sub ApplyNamesList()
-    Dim app As ReDimUI
-    Dim doc As ROneCOne
+    Dim ui As ReDimUI
+    Dim jsonDoc As ROneCOne
     Dim resultsList As ROneCOne
     Dim entry As ROneCOne
-    Dim names As Collection
-    Dim position As Long
+    Dim speciesNames As Collection
+    Dim idx As Long
 
-    Set app = ReDimUI.App("dexbrowse")
-    Set doc = ROneCOne.Json.Deserialize(CStr(gNamesTask.Result))
-    Set resultsList = doc.Item("results")
-    Set names = New Collection
-    For position = 0 To resultsList.Count - 1
-        Set entry = resultsList.Item(position)
-        names.Add StrConv(CStr(entry.Item("name")), vbProperCase)
-    Next position
-    app.ComboBox("species").ItemsFrom names
-    app.SetState "namesLoaded", True
-    app.Toast names.Count & " Kanto species loaded. Pick one!", 3500
+    Set ui = ReDimUI.App("dexbrowse")
+    Set jsonDoc = ROneCOne.Json.Deserialize(CStr(gNamesTask.Result))
+    Set resultsList = jsonDoc.Item("results")
+    Set speciesNames = New Collection
+    For idx = 0 To resultsList.Count - 1
+        Set entry = resultsList.Item(idx)
+        speciesNames.Add StrConv(CStr(entry.Item("name")), vbProperCase)
+    Next idx
+    ui.ComboBox("species").ItemsFrom speciesNames
+    ui.SetState "namesLoaded", True
+    ui.Toast speciesNames.Count & " Kanto species loaded. Pick one!", 3500
     FetchByPath "1"
 End Sub
 
 Public Sub NamesFailed()
-    Dim app As ReDimUI
+    Dim ui As ReDimUI
 
-    Set app = ReDimUI.App("dexbrowse")
-    app.SetState "pokeName", "PokeAPI unreachable."
-    app.Toast "Could not reach PokeAPI: " & app.AsyncError("names"), 6000
+    Set ui = ReDimUI.App("dexbrowse")
+    ui.SetState "pokeName", "PokeAPI unreachable."
+    ui.Toast "Could not reach PokeAPI: " & ui.AsyncError("names"), 6000
 End Sub
 
 Public Sub HandleSpeciesPick()
-    Dim app As ReDimUI
+    Dim ui As ReDimUI
 
-    Set app = ReDimUI.App("dexbrowse")
-    FetchByPath LCase$(CStr(app.StateOrDefault("speciesPick", "")))
+    Set ui = ReDimUI.App("dexbrowse")
+    FetchByPath LCase$(CStr(ui.StateOrDefault("speciesPick", "")))
 End Sub
 
 Public Sub GoPrev()
@@ -292,14 +317,14 @@ Public Sub GoNext()
     StepDex 1
 End Sub
 
-Private Sub StepDex(ByVal delta As Long)
-    Dim app As ReDimUI
+Private Sub StepDex(ByVal stepBy As Long)
+    Dim ui As ReDimUI
     Dim dexId As Long
 
-    Set app = ReDimUI.App("dexbrowse")
+    Set ui = ReDimUI.App("dexbrowse")
     dexId = gNavId
-    If dexId < 1 Then dexId = CLng(app.StateOrDefault("dexId", 0))
-    dexId = dexId + delta
+    If dexId < 1 Then dexId = CLng(ui.StateOrDefault("dexId", 0))
+    dexId = dexId + stepBy
     If dexId < 1 Then dexId = DEX_MAX
     If dexId > DEX_MAX Then dexId = 1
     gNavId = dexId
@@ -309,7 +334,7 @@ End Sub
 ' Latest wins: a cached payload applies instantly, and a busy op just
 ' records the newest intent, which the op chases when it settles.
 Private Sub FetchByPath(ByVal pathPart As String)
-    Dim app As ReDimUI
+    Dim ui As ReDimUI
     Dim cached As ROneCOne
 
     If LenB(pathPart) = 0 Then Exit Sub
@@ -321,33 +346,33 @@ Private Sub FetchByPath(ByVal pathPart As String)
         ApplyDetailDoc cached
         Exit Sub
     End If
-    Set app = ReDimUI.App("dexbrowse")
-    If app.IsOpRunning("detail") Then Exit Sub
+    Set ui = ReDimUI.App("dexbrowse")
+    If ui.IsOpRunning("detail") Then Exit Sub
     gFlightPath = pathPart
     Set gDetailTask = ROneCOne.HttpClient.GetStringAsync(API_BASE & pathPart)
-    With app.Async("detail")
+    With ui.Async("detail")
         .RunsTask gDetailTask
         .ShowsSpinner "spn"
         .TracksState "fetchStatus"
         .OnDone "PokeDex.ApplyDetails"
         .OnFail "PokeDex.DetailFailed"
     End With
-    app.Async("detail").Start
+    ui.Async("detail").Start
 End Sub
 
 Public Sub ApplyDetails()
-    Dim doc As ROneCOne
+    Dim jsonDoc As ROneCOne
 
     ' A PokeAPI response runs a few hundred KB and the dex draws under
     ' 2 KB of it. The allowlist materializes those members and steps
     ' over the rest, so the move lists and per-game sprite variants are
     ' never built at all.
-    Set doc = ROneCOne.Json.DeserializeOnly( _
+    Set jsonDoc = ROneCOne.Json.DeserializeOnly( _
         CStr(gDetailTask.Result), DetailPaths())
-    CacheDetail gFlightPath, doc
+    CacheDetail gFlightPath, jsonDoc
     If gFlightPath = gWantPath Then
         gShownPath = gFlightPath
-        ApplyDetailDoc doc
+        ApplyDetailDoc jsonDoc
     ElseIf gWantPath <> gShownPath Then
         ' The user moved on mid-flight; chase the newest intent.
         FetchByPath gWantPath
@@ -360,80 +385,80 @@ Private Function DetailPaths() As Variant
         "$.types", "$.stats", "$.sprites.front_default")
 End Function
 
-Private Sub ApplyDetailDoc(ByVal doc As ROneCOne)
-    Dim app As ReDimUI
+Private Sub ApplyDetailDoc(ByVal jsonDoc As ROneCOne)
+    Dim ui As ReDimUI
     Dim typesList As ROneCOne
     Dim statsList As ROneCOne
     Dim entry As ROneCOne
     Dim inner As ROneCOne
-    Dim displayName As String
+    Dim speciesName As String
     Dim dexId As Long
-    Dim position As Long
+    Dim idx As Long
     Dim statIndex As Long
 
-    Set app = ReDimUI.App("dexbrowse")
-    dexId = CLng(doc.Item("id"))
-    displayName = StrConv(CStr(doc.Item("name")), vbProperCase)
-    CacheDetail CStr(dexId), doc
-    CacheDetail LCase$(CStr(doc.Item("name"))), doc
+    Set ui = ReDimUI.App("dexbrowse")
+    dexId = CLng(jsonDoc.Item("id"))
+    speciesName = StrConv(CStr(jsonDoc.Item("name")), vbProperCase)
+    CacheDetail CStr(dexId), jsonDoc
+    CacheDetail LCase$(CStr(jsonDoc.Item("name"))), jsonDoc
     gNavId = dexId
 
-    app.BeginUpdate
-    app.SetState "dexId", dexId
-    app.SetState "pokeName", "#" & Format$(dexId, "000") & "  " & displayName
-    app.SetState "sizeLine", _
-        Format$(CDbl(doc.Item("height")) / 10, "0.0") & " m  /  " & _
-        Format$(CDbl(doc.Item("weight")) / 10, "0.0") & " kg"
-    app.SetState "dexLine", "Kanto dex " & dexId & " of " & DEX_MAX
+    ui.BeginUpdate
+    ui.SetState "dexId", dexId
+    ui.SetState "pokeName", "#" & Format$(dexId, "000") & "  " & speciesName
+    ui.SetState "sizeLine", _
+        Format$(CDbl(jsonDoc.Item("height")) / 10, "0.0") & " m  /  " & _
+        Format$(CDbl(jsonDoc.Item("weight")) / 10, "0.0") & " kg"
+    ui.SetState "dexLine", "Kanto dex " & dexId & " of " & DEX_MAX
 
-    Set typesList = doc.Item("types")
-    ApplyTypeBadge app, "typea", "typeA", typesList, 0
-    ApplyTypeBadge app, "typeb", "typeB", typesList, 1
+    Set typesList = jsonDoc.Item("types")
+    ApplyTypeBadge ui, "typea", "typeA", typesList, 0
+    ApplyTypeBadge ui, "typeb", "typeB", typesList, 1
 
-    Set statsList = doc.Item("stats")
-    For position = 0 To statsList.Count - 1
-        Set entry = statsList.Item(position)
+    Set statsList = jsonDoc.Item("stats")
+    For idx = 0 To statsList.Count - 1
+        Set entry = statsList.Item(idx)
         Set inner = entry.Item("stat")
         statIndex = StatIndexOf(CStr(inner.Item("name")))
         If statIndex > 0 Then
             gStatTarget(statIndex) = CDbl(entry.Item("base_stat"))
         End If
-    Next position
-    app.EndUpdate
+    Next idx
+    ui.EndUpdate
     StartStatTween
 
-    app.ComboBox("species").InputValue = displayName
-    ApplySprite app, doc, dexId
+    ui.ComboBox("species").InputValue = speciesName
+    ApplySprite ui, jsonDoc, dexId
 End Sub
 
 Public Sub DetailFailed()
-    Dim app As ReDimUI
+    Dim ui As ReDimUI
 
-    Set app = ReDimUI.App("dexbrowse")
-    app.Toast "Fetch failed: " & app.AsyncError("detail"), 5000
+    Set ui = ReDimUI.App("dexbrowse")
+    ui.Toast "Fetch failed: " & ui.AsyncError("detail"), 5000
     If gWantPath <> gFlightPath And gWantPath <> gShownPath Then
         FetchByPath gWantPath
     End If
 End Sub
 
 Private Function TryCachedDetail( _
-    ByVal key As String, _
-    ByRef doc As ROneCOne _
+    ByVal cacheKey As String, _
+    ByRef jsonDoc As ROneCOne _
 ) As Boolean
     Dim cached As ROneCOne
 
     EnsureDetailCache
-    If Not gDetailCache.ContainsKey(key) Then Exit Function
-    Set cached = gDetailCache.Item(key)
-    Set doc = cached
+    If Not gDetailCache.ContainsKey(cacheKey) Then Exit Function
+    Set cached = gDetailCache.Item(cacheKey)
+    Set jsonDoc = cached
     TryCachedDetail = True
 End Function
 
-Private Sub CacheDetail(ByVal key As String, ByVal doc As ROneCOne)
-    If LenB(key) = 0 Then Exit Sub
+Private Sub CacheDetail(ByVal cacheKey As String, ByVal jsonDoc As ROneCOne)
+    If LenB(cacheKey) = 0 Then Exit Sub
     EnsureDetailCache
-    If gDetailCache.ContainsKey(key) Then Exit Sub
-    gDetailCache.Add key, doc
+    If gDetailCache.ContainsKey(cacheKey) Then Exit Sub
+    gDetailCache.Add cacheKey, jsonDoc
 End Sub
 
 ' A typed dictionary rather than a bare Collection: real string keys,
@@ -445,32 +470,32 @@ Private Sub EnsureDetailCache()
 End Sub
 
 Private Sub ApplyTypeBadge( _
-    ByVal app As ReDimUI, _
-    ByVal labelId As String, _
+    ByVal ui As ReDimUI, _
+    ByVal badgeId As String, _
     ByVal stateKey As String, _
     ByVal typesList As ROneCOne, _
     ByVal slotIndex As Long _
 )
     Dim entry As ROneCOne
     Dim inner As ROneCOne
-    Dim typeName As String
+    Dim typeLabel As String
 
     If slotIndex < typesList.Count Then
         Set entry = typesList.Item(slotIndex)
         Set inner = entry.Item("type")
-        typeName = CStr(inner.Item("name"))
-        app.Label(labelId).Fill(TypeColor(typeName)) _
+        typeLabel = CStr(inner.Item("name"))
+        ui.Label(badgeId).Fill(TypeColor(typeLabel)) _
             .TextColor RGB(255, 255, 255)
-        app.SetState stateKey, "  " & StrConv(typeName, vbProperCase)
-        app.SetState stateKey & "On", True
+        ui.SetState stateKey, "  " & StrConv(typeLabel, vbProperCase)
+        ui.SetState stateKey & "On", True
     Else
-        app.SetState stateKey & "On", False
+        ui.SetState stateKey & "On", False
     End If
 End Sub
 
 Private Sub ApplySprite( _
-    ByVal app As ReDimUI, _
-    ByVal doc As ROneCOne, _
+    ByVal ui As ReDimUI, _
+    ByVal jsonDoc As ROneCOne, _
     ByVal dexId As Long _
 )
     Dim sprites As ROneCOne
@@ -479,14 +504,14 @@ Private Sub ApplySprite( _
 
     ' An allowlist omits a path the response did not carry, so the
     ' members are checked rather than assumed.
-    If Not doc.ContainsKey("sprites") Then Exit Sub
-    Set sprites = doc.Item("sprites")
+    If Not jsonDoc.ContainsKey("sprites") Then Exit Sub
+    Set sprites = jsonDoc.Item("sprites")
     If Not sprites.ContainsKey("front_default") Then Exit Sub
     spriteUrl = sprites.Item("front_default")
     If IsNull(spriteUrl) Or LenB(CStr(spriteUrl)) = 0 Then Exit Sub
     localPath = SpritePath(dexId)
     If ROneCOne.File.Exists(localPath) Then
-        app.SetState "spriteFile", localPath
+        ui.SetState "spriteFile", localPath
         Exit Sub
     End If
     ' Not on disk yet, so fetch it through the pump instead of blocking
@@ -494,42 +519,42 @@ Private Sub ApplySprite( _
     ' which reads better than flashing a placeholder.
     gSpriteWantId = dexId
     gSpriteWantUrl = CStr(spriteUrl)
-    StartSpriteFetch app
+    StartSpriteFetch ui
 End Sub
 
-Private Sub StartSpriteFetch(ByVal app As ReDimUI)
+Private Sub StartSpriteFetch(ByVal ui As ReDimUI)
     If gSpriteWantId = 0 Then Exit Sub
-    If app.IsOpRunning("sprite") Then Exit Sub
+    If ui.IsOpRunning("sprite") Then Exit Sub
     gSpriteFlightId = gSpriteWantId
     Set gSpriteTask = ROneCOne.HttpClient.DownloadFileAsync( _
         gSpriteWantUrl, SpritePath(gSpriteFlightId))
-    With app.Async("sprite")
+    With ui.Async("sprite")
         .RunsTask gSpriteTask
         .ShowsSpinner "spn"
         .OnDone "PokeDex.SpriteReady"
         .OnFail "PokeDex.SpriteFailed"
     End With
-    app.Async("sprite").Start
+    ui.Async("sprite").Start
 End Sub
 
 Public Sub SpriteReady()
-    Dim app As ReDimUI
+    Dim ui As ReDimUI
 
-    Set app = ReDimUI.App("dexbrowse")
+    Set ui = ReDimUI.App("dexbrowse")
     ' Paint it only if the dex still shows the species it belongs to; a
     ' fast switch can land a sprite nobody is looking at any more.
-    If gSpriteFlightId = CLng(app.StateOrDefault("dexId", 0)) Then
-        app.SetState "spriteFile", SpritePath(gSpriteFlightId)
+    If gSpriteFlightId = CLng(ui.StateOrDefault("dexId", 0)) Then
+        ui.SetState "spriteFile", SpritePath(gSpriteFlightId)
     End If
-    If gSpriteWantId <> gSpriteFlightId Then StartSpriteFetch app
+    If gSpriteWantId <> gSpriteFlightId Then StartSpriteFetch ui
 End Sub
 
 Public Sub SpriteFailed()
-    Dim app As ReDimUI
+    Dim ui As ReDimUI
 
-    Set app = ReDimUI.App("dexbrowse")
-    app.Toast "Sprite download failed: " & app.AsyncError("sprite"), 4000
-    If gSpriteWantId <> gSpriteFlightId Then StartSpriteFetch app
+    Set ui = ReDimUI.App("dexbrowse")
+    ui.Toast "Sprite download failed: " & ui.AsyncError("sprite"), 4000
+    If gSpriteWantId <> gSpriteFlightId Then StartSpriteFetch ui
 End Sub
 
 Private Function SpritePath(ByVal dexId As Long) As String
@@ -542,23 +567,23 @@ End Function
 ' =====================================================================
 
 Private Sub StartStatTween()
-    Dim app As ReDimUI
+    Dim ui As ReDimUI
 
-    Set app = ReDimUI.App("dexbrowse")
-    If CBool(app.StateOrDefault("tweening", False)) Then Exit Sub
-    app.SetState "tweening", True
-    app.Job("tween").Steps("PokeDex.TweenStats").PacedMs 33
-    app.Job("tween").StartJob
+    Set ui = ReDimUI.App("dexbrowse")
+    If CBool(ui.StateOrDefault("tweening", False)) Then Exit Sub
+    ui.SetState "tweening", True
+    ui.Job("tween").Steps("PokeDex.TweenStats").PacedMs 33
+    ui.Job("tween").StartJob
 End Sub
 
 Public Function TweenStats() As Boolean
-    Dim app As ReDimUI
+    Dim ui As ReDimUI
     Dim statIndex As Long
     Dim allDone As Boolean
 
-    Set app = ReDimUI.App("dexbrowse")
+    Set ui = ReDimUI.App("dexbrowse")
     allDone = True
-    app.BeginUpdate
+    ui.BeginUpdate
     For statIndex = 1 To 6
         gStatNow(statIndex) = gStatNow(statIndex) + _
             (gStatTarget(statIndex) - gStatNow(statIndex)) * 0.35
@@ -567,12 +592,12 @@ Public Function TweenStats() As Boolean
         Else
             gStatNow(statIndex) = gStatTarget(statIndex)
         End If
-        app.SetState StatKey(statIndex), CLng(gStatNow(statIndex))
-        app.SetState StatPctKey(statIndex), _
+        ui.SetState StatKey(statIndex), CLng(gStatNow(statIndex))
+        ui.SetState StatPctKey(statIndex), _
             CLng(gStatNow(statIndex) / 1.6)
     Next statIndex
-    app.EndUpdate
-    If allDone Then app.SetState "tweening", False
+    ui.EndUpdate
+    If allDone Then ui.SetState "tweening", False
     TweenStats = allDone
 End Function
 
@@ -584,91 +609,91 @@ Public Sub CatchCurrent()
     Dim browseApp As ReDimUI
     Dim teamApp As ReDimUI
     Dim caughtName As String
-    Dim position As Long
+    Dim idx As Long
 
     Set browseApp = ReDimUI.App("dexbrowse")
     caughtName = CStr(browseApp.StateOrDefault("pokeName", ""))
     If InStr(caughtName, "  ") = 0 Then Exit Sub
     caughtName = Mid$(caughtName, InStr(caughtName, "  ") + 2)
     Set teamApp = ReDimUI.App("dexteam")
-    For position = 1 To teamApp.TransferList("team").ItemCount
-        If teamApp.TransferList("team").ItemTextAt(position) = caughtName Then
+    For idx = 1 To teamApp.TransferList("team").ItemCount
+        If teamApp.TransferList("team").ItemTextAt(idx) = caughtName Then
             browseApp.Toast caughtName & " is already in your box.", 3000
             Exit Sub
         End If
-    Next position
+    Next idx
     teamApp.TransferList("team").AddItem caughtName
     browseApp.Toast "Gotcha! " & caughtName & " was caught!", 3500
 End Sub
 
 Public Sub StartShinyHunt()
-    Dim app As ReDimUI
+    Dim ui As ReDimUI
 
-    Set app = ReDimUI.App("dexbrowse")
-    If CBool(app.StateOrDefault("hunting", False)) Then Exit Sub
+    Set ui = ReDimUI.App("dexbrowse")
+    If CBool(ui.StateOrDefault("hunting", False)) Then Exit Sub
     gHuntStep = 0
-    app.SetState "hunting", True
-    app.SetState "huntPct", 0
-    app.Job("hunt").Steps("PokeDex.HuntStep").PacedMs 60
-    app.Job("hunt").JobOnDone "PokeDex.HuntDone"
-    app.Job("hunt").StartJob
+    ui.SetState "hunting", True
+    ui.SetState "huntPct", 0
+    ui.Job("hunt").Steps("PokeDex.HuntStep").PacedMs 60
+    ui.Job("hunt").JobOnDone "PokeDex.HuntDone"
+    ui.Job("hunt").StartJob
 End Sub
 
 Public Function HuntStep() As Boolean
-    Dim app As ReDimUI
+    Dim ui As ReDimUI
 
-    Set app = ReDimUI.App("dexbrowse")
+    Set ui = ReDimUI.App("dexbrowse")
     gHuntStep = gHuntStep + 1
-    app.SetState "huntPct", gHuntStep
+    ui.SetState "huntPct", gHuntStep
     HuntStep = (gHuntStep >= 100)
 End Function
 
 Public Sub HuntDone()
-    Dim app As ReDimUI
+    Dim ui As ReDimUI
 
-    Set app = ReDimUI.App("dexbrowse")
-    app.SetState "hunting", False
-    app.SetState "huntPct", 0
-    If CLng(app.StateOrDefault("dexId", 0)) Mod 8 = 1 Then
-        app.Toast "It sparkles... a SHINY appeared!", 6000
+    Set ui = ReDimUI.App("dexbrowse")
+    ui.SetState "hunting", False
+    ui.SetState "huntPct", 0
+    If CLng(ui.StateOrDefault("dexId", 0)) Mod 8 = 1 Then
+        ui.Toast "It sparkles... a SHINY appeared!", 6000
     Else
-        app.Toast "No shiny this time. The hunt continues.", 4000
+        ui.Toast "No shiny this time. The hunt continues.", 4000
     End If
 End Sub
 
 Public Sub StopShinyHunt()
-    Dim app As ReDimUI
+    Dim ui As ReDimUI
 
-    Set app = ReDimUI.App("dexbrowse")
-    If Not CBool(app.StateOrDefault("hunting", False)) Then Exit Sub
-    app.CancelJob "hunt"
-    app.SetState "hunting", False
-    app.SetState "huntPct", 0
-    app.Toast "Hunt called off.", 3000
+    Set ui = ReDimUI.App("dexbrowse")
+    If Not CBool(ui.StateOrDefault("hunting", False)) Then Exit Sub
+    ui.CancelJob "hunt"
+    ui.SetState "hunting", False
+    ui.SetState "huntPct", 0
+    ui.Toast "Hunt called off.", 3000
 End Sub
 
 Public Sub HandlePartyChange()
-    Dim app As ReDimUI
+    Dim ui As ReDimUI
 
-    Set app = ReDimUI.App("dexteam")
-    If app.TransferList("team").ChosenCount > 6 Then
-        app.Toast "A party carries six! The rest ride in the box.", 4000
+    Set ui = ReDimUI.App("dexteam")
+    If ui.TransferList("team").ChosenCount > 6 Then
+        ui.Toast "A party carries six! The rest ride in the box.", 4000
     End If
 End Sub
 
 Public Sub HandleTeamShown()
-    Dim app As ReDimUI
+    Dim ui As ReDimUI
 
-    Set app = ReDimUI.App("dexteam")
-    app.SetState "teamVisits", CLng(app.StateOrDefault("teamVisits", 0)) + 1
+    Set ui = ReDimUI.App("dexteam")
+    ui.SetState "teamVisits", CLng(ui.StateOrDefault("teamVisits", 0)) + 1
 End Sub
 
 Public Sub HandleStarterPick()
-    Dim app As ReDimUI
+    Dim ui As ReDimUI
 
-    Set app = ReDimUI.App("dextrainer")
-    app.Toast CStr(app.State("starter")) & ", I choose you!", 3000
-    FetchByPath LCase$(CStr(app.State("starter")))
+    Set ui = ReDimUI.App("dextrainer")
+    ui.Toast CStr(ui.State("starter")) & ", I choose you!", 3000
+    FetchByPath LCase$(CStr(ui.State("starter")))
     ReDimUI.Navigate "dexbrowse"
 End Sub
 
@@ -677,14 +702,14 @@ End Sub
 ' =====================================================================
 
 Public Sub RefreshTrainerCard()
-    Dim app As ReDimUI
+    Dim ui As ReDimUI
 
-    Set app = ReDimUI.App("dextrainer")
-    app.SetState "cardText", _
-        "Trainer " & CStr(app.StateOrDefault("trainerName", "Red")) & _
-        "   Starter: " & CStr(app.StateOrDefault("starter", "-")) & vbLf & _
-        "Favorite type: " & CStr(app.StateOrDefault("favType", "-")) & _
-        "   Aiming for level " & CStr(app.StateOrDefault("ambition", 5))
+    Set ui = ReDimUI.App("dextrainer")
+    ui.SetState "cardText", _
+        "Trainer " & CStr(ui.StateOrDefault("trainerName", "Red")) & _
+        "   Starter: " & CStr(ui.StateOrDefault("starter", "-")) & vbLf & _
+        "Favorite type: " & CStr(ui.StateOrDefault("favType", "-")) & _
+        "   Aiming for level " & CStr(ui.StateOrDefault("ambition", 5))
 End Sub
 
 Public Sub ApplyThemeChoice()
@@ -700,10 +725,10 @@ Public Sub ApplyThemeChoice()
 End Sub
 
 Public Sub ConfirmReset()
-    Dim app As ReDimUI
+    Dim ui As ReDimUI
 
-    Set app = ReDimUI.App("dextrainer")
-    app.Confirm "Reset journey?", _
+    Set ui = ReDimUI.App("dextrainer")
+    ui.Confirm "Reset journey?", _
         "Your box, party, and notes go back to square one.", _
         "PokeDex.DoReset"
 End Sub
@@ -801,8 +826,8 @@ Private Function StatIndexOf(ByVal apiName As String) As Long
 End Function
 
 ' Canonical franchise type colors.
-Private Function TypeColor(ByVal typeName As String) As Long
-    Select Case typeName
+Private Function TypeColor(ByVal typeLabel As String) As Long
+    Select Case typeLabel
         Case "normal": TypeColor = RGB(168, 168, 120)
         Case "fire": TypeColor = RGB(240, 128, 48)
         Case "water": TypeColor = RGB(104, 144, 240)

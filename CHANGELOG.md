@@ -1,5 +1,104 @@
 # Changelog
 
+## 0.20.0 - 2026-09-22
+
+- ReDim no longer recases the host project's identifiers. VBA keeps
+  one spelling per name across a project, and a declaration in any
+  module can set it. ReDim's lowercase parameters and locals (`value`,
+  `color`, `name`, `caption`, `source`, `size`, `title`, `target`, and
+  more) turned `.Value`, `.Color`, `.Name`, `.Caption`, and ten other
+  Excel members lowercase in every host module, then into every
+  exported diff. Its camelCase parameters did the same to its own
+  `AppId`, `ComponentId`, and `OwnerApp`. Every such name is renamed,
+  so the runtime declares nothing in a casing that differs from the
+  Excel, Office, VBA, or stdole type libraries or from its own members.
+  A new `tests/python/test_casing.py` holds the runtime and the demos
+  to that rule and exports ReDim, every demo, and sample host code
+  through the VBE, requiring every token back as written. Against
+  0.19.2 the same export recased 67 tokens across the modules, 20 of
+  them in the host code alone.
+- The samples name their app variable `ui`. A variable named `app`, as
+  the README and every demo wrote it, collides with `ReDimUI.App`, so
+  exporting a demo rewrote its own calls as `ReDimUI.app(...)`. The
+  demos also drop a dozen locals that clashed the same way, such as
+  `key`, `doc`, `names`, `typeName`, and `startRow`. The test modules
+  keep `app`; they are never exported.
+- ROneCOne still declares `value`, `text`, `cells`, and similar names in
+  lowercase, so a project that holds it keeps those Excel members
+  recased: a probe of common ones found 18, `.Value`, `.Text`,
+  `.Names`, `.Cells`, `.Count`, and `.Item` among them. That comes from
+  ROneCOne, and the casing test leaves it out of its round trip for
+  that reason.
+- Breaking for named-argument callers only; positional calls are
+  untouched. Public parameters renamed: component factories and
+  `Component` (`componentId` to `targetComponentId`), `Mount`, `App`,
+  `HasApp`, `Navigate`, and `NavigatesTo` (`appId` to `targetAppId`),
+  every handler registration (`procName` to `handlerProc`), `Text` and
+  `BusyText` (`displayText`), `Visible`, `Enabled`, `Checked`, and
+  `Bold` (`flag`), `Fill` (`fillRgb`), `TextColor` (`inkRgb`), `At` and
+  `ToastTray` (`rangeAddress`), `Toast` and `Confirm` (`messageText`,
+  `titleText`), `WindowTitle` (`titleText`), `ProtectSurface`
+  (`protectOn`), `AutoPump` (`pumpOn`), `PinPumpCursor` (`pinOn`),
+  `MultiLine` (`multiLineOn`), `WithSelectAll` (`selectAllOn`),
+  `ItemsFrom`, `ChosenFrom`, and `CheckedFrom` (`itemSource`),
+  `ItemTextAt`, `ChosenTextAt`, `SetItemChecked`, and `IsItemChecked`
+  (`itemNumber`), `SliderRange` (`lowestValue`, `highestValue`),
+  `FontSize` (`fontPoints`), `Source` (`picturePath`), `PacedMs`
+  (`paceMs`), `Value` (`newNumber`), `InputValue` (`assignedText`),
+  `WithFont` (`fontFace`, `fontPoints`), and `WithPrimary`
+  (`primaryRgb`, `onPrimaryRgb`).
+- Clicking a cell-backed `TextInput` selects its cell. The frame drawn
+  over the anchor cell carries the dispatcher, so the click reached
+  ReDim instead of the grid and the cell never took focus; the click
+  also ran the input's `OnChange` handler as if an edit had happened.
+  It now selects the cell, where typing replaces the value and F2 edits
+  it in place, and fires nothing. A cell-backed `ComboBox` face gets the
+  same fix: its click selects the cell as well as opening the list.
+- `SelectBox` drop lists window. A select drew every item as a row, so
+  a long list ran down the sheet. It now shares the combo's windowed
+  list: eight rows by default, clickable pager rows at the edges with
+  the count beyond them, and the selection scrolled into view on open.
+  The new `ListRows(n)` sets the window for either control. An open
+  select also claims only its drawn depth from the slider press watch,
+  where it used to claim the height of every item.
+- A combo reopens onto its whole list after a pick. The list filters by
+  the field text, and after a pick the text is the item, so reopening
+  showed that one item until the user backspaced it away a character
+  at a time. While the text names an item and the user has not edited
+  it since the list opened, the list is now unfiltered and scrolled to
+  that item, and Down walks on from it. The first edit filters as
+  before.
+- Keyboard picks fire `OnChange`. Enter on a highlighted combo option
+  wrote the value and the state but never ran the handler, so ReDex's
+  species combo, whose handler fetches the pick, ignored every keyboard
+  pick. A pick now commits the way the field's other commit paths do,
+  from the keyboard or the mouse: when it changes the value it writes
+  the `WritesTo` state and runs the handlers once, and a re-pick of the
+  value already there only closes the list. Mouse re-picks used to fire
+  anyway, and a list that now opens on its current item makes clicking
+  that row the natural way to close it. The float combo measures the
+  change against the text it held when focus arrived, the same
+  reference its Enter and Tab commits use. The `SelectBox` follows the
+  same rule, as `RadioGroup` already did for its selected row.
+- The API guide documents what was discoverable only from source: a
+  `SelectBox` shows its `Text` as the placeholder while nothing is
+  selected, and `Value(0)` clears the selection back to it.
+- Every source a release ships, both runtime files and each demo
+  module, opens with the MIT license text, the repository link, and a
+  version line, `ReDim 0.20.0 (2026-09-22)` for this release, so a
+  module copied out of a release or a project still says what it is
+  and under what terms. `tools/stamp_release.py` writes the header from
+  `REDIM_VERSION`, the CHANGELOG date, and `LICENSE`, and a source
+  guard fails the suite when any file's header falls behind.
+- Releases attach `ReDimUI.cls` and `ReDimHost.bas` beside the demo
+  workbooks, and v0.19.2 carries them now too. The README installs from
+  those copies: the repository stores the sources with LF line endings,
+  and the VBE imports an LF-only class file as a standard module with
+  its header pasted in as code. The release copies are CRLF.
+- Smaller fixes on the same paths: an open drop list repaints its rows
+  when the theme changes, and removing a combo or select deletes its
+  pager rows instead of leaving them for the next render to sweep.
+
 ## 0.19.2 - 2026-08-02
 
 - The item-source readers no longer trip over an object. `ItemsFrom`,

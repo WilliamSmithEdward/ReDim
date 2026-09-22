@@ -1,4 +1,29 @@
 Attribute VB_Name = "ReDimHost"
+' ReDim 0.20.0 (2026-09-22)
+' https://github.com/WilliamSmithEdward/ReDim
+'
+' MIT License
+'
+' Copyright (c) 2026 William Smith
+'
+' Permission is hereby granted, free of charge, to any person obtaining a copy
+' of this software and associated documentation files (the "Software"), to deal
+' in the Software without restriction, including without limitation the rights
+' to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+' copies of the Software, and to permit persons to whom the Software is
+' furnished to do so, subject to the following conditions:
+'
+' The above copyright notice and this permission notice shall be included in all
+' copies or substantial portions of the Software.
+'
+' THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+' IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+' FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+' AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+' LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+' OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+' SOFTWARE.
+
 Option Explicit
 
 ' ReDim host module. Excel can only route Shape.OnAction and SetTimer
@@ -7,14 +32,14 @@ Option Explicit
 ' behavior lives in ReDimUI.cls.
 
 Private Declare PtrSafe Function SetTimer Lib "user32" ( _
-    ByVal hwnd As LongPtr, _
+    ByVal windowHandle As LongPtr, _
     ByVal nIDEvent As LongPtr, _
     ByVal uElapse As Long, _
     ByVal lpTimerFunc As LongPtr _
 ) As LongPtr
 
 Private Declare PtrSafe Function KillTimer Lib "user32" ( _
-    ByVal hwnd As LongPtr, _
+    ByVal windowHandle As LongPtr, _
     ByVal nIDEvent As LongPtr _
 ) As Long
 
@@ -146,7 +171,7 @@ End Sub
 ' SetTimer callback. Keep this minimal: one guarded call into the runtime.
 ' An error escaping a TIMERPROC can take down the Excel process.
 Public Sub RdxPumpCallback( _
-    ByVal hwnd As LongPtr, _
+    ByVal windowHandle As LongPtr, _
     ByVal uMsg As Long, _
     ByVal idEvent As LongPtr, _
     ByVal dwTime As Long _
@@ -198,10 +223,10 @@ End Sub
 ' during each tick, but it also overrides context cursors, hiding the
 ' hover hand on interactive shapes while work runs. Lean frames made the
 ' strobe negligible, so hover affordance wins by default.
-Public Sub RdxSetCursorPin(ByVal enabled As Boolean)
-    gPinCursor = enabled
+Public Sub RdxSetCursorPin(ByVal pinOn As Boolean)
+    gPinCursor = pinOn
     If gTimerId <> 0 Then
-        If enabled Then
+        If pinOn Then
             RdxApplyCursorPin
         Else
             RdxReleaseCursorPin

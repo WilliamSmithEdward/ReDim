@@ -50,11 +50,11 @@ Widget set, v1:
 
 Each app owns a store mapping `String` keys to `Variant` values.
 
-- `app.SetState key, value` writes, marks bound components dirty, and flushes unless batched
-- `app.State(key)` reads
+- `ui.SetState key, value` writes, marks bound components dirty, and flushes unless batched
+- `ui.State(key)` reads
 - Bindings: `.BindText key`, optional format applied through ROneCOne composite formatting,
   `.BindValue`, `.BindVisible`, `.BindEnabled`
-- `app.OnStateChanged key, "Module.Proc"` registers a handler (Action taking the key name)
+- `ui.OnStateChanged key, "Module.Proc"` registers a handler (Action taking the key name)
 
 ## Event dispatch
 
@@ -83,7 +83,7 @@ Task kinds and how they behave under the pump:
   bars stay live during heavy loops
 
 Sugar: `btn.OnClickAsync "Module.Proc"` disables the button, shows busy state, runs the work
-through the pump, and restores on completion. Explicit form: `app.Async(id)` builder with
+through the pump, and restores on completion. Explicit form: `ui.Async(id)` builder with
 `Disables`, `ShowsSpinner`, `OnDone`, `OnFail`, `OnCancel`, `TracksState`, `Start`. Cancellation
 uses ROneCOne `CancellationTokenSource`.
 
@@ -102,7 +102,7 @@ Pump safety rails, in order of importance:
 ## Theming
 
 `ReDimUI.ThemeLight` and `ReDimUI.ThemeDark` presets plus a custom builder: primary, success,
-danger, surface, border, text, muted colors, font name and size, corner radius. `app.SetTheme`
+danger, surface, border, text, muted colors, font name and size, corner radius. `ui.SetTheme`
 restyles every component through the normal diff path.
 
 ## Build and verification
@@ -110,12 +110,21 @@ restyles every component through the normal diff path.
 - `tools/build_workbooks.py` injects sources into `.xlsm` files with pyOpenVBA and verifies
   byte-for-byte round trips, matching the ROneCOne pipeline
 - `tools/check.py` runs pyvbaanalysis over every `.bas` and `.cls`; any finding fails the gate
+- `tools/stamp_release.py` writes the release header into every source a release ships (both
+  runtime files and each demo module): the version from `REDIM_VERSION`, that version's
+  CHANGELOG date, the repository, and the MIT license text from `LICENSE`, ahead of
+  `Option Explicit`. `tests/python/test_source_guards.py` fails until every source carries the
+  current header, so a version bump cannot ship a stale one
 - `tests/python/test_compile.py` compiles every shipped workbook with the real VBA compiler via
   pyvbaharness, because two grammar rules bit during development that static analysis does not
   model: statement-position calls with multiple parenthesized arguments, and case-insensitive
   locals shadowing same-named members
 - `tests/python` drives live Excel through pyvbaharness: mount, render, dispatch, state,
   pump stepping via `PumpOnce`, async lifecycle, teardown
+- `tests/python/test_casing.py` guards the host project's identifier casing: VBA keeps one
+  spelling per name project-wide, so the runtime and demos may not declare a name in a casing
+  that differs from the default type libraries or from ReDim's and ROneCOne's members, and a
+  VBE export of ReDim, every demo, and sample host code must return every token as written
 - Demos are smoke-run live before release
 
 Harness constraint, pinned by the spike suite: module globals do not survive across
@@ -132,5 +141,3 @@ timer, which covers real state-loss events such as an unhandled error ending exe
   another macro, cell edit mode, or a modal dialog. This is documented, not hidden.
 - `AdvanceTask` is Friend scope, which requires ReDim modules to live in the same VBA project as
   `ROneCOne.cls`. That is already the installation model.
-- Form controls carry Excel's native look; drawn widgets (Button, Toggle, ProgressBar) carry the
-  theme.

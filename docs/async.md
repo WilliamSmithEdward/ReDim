@@ -24,7 +24,7 @@ A delegate task runs its whole body inside one tick, so long CPU-bound VBA belon
 ## Async ops
 
 ```vba
-With app.Async("refresh")
+With ui.Async("refresh")
     .RunsTask ROneCOne.HttpClient.GetStringAsync("https://example.com/data")
     .Disables "btnRefresh"
     .ShowsSpinner "spn"
@@ -32,11 +32,11 @@ With app.Async("refresh")
     .OnDone "Demo.ApplyData"
     .OnFail "Demo.ShowError"
 End With
-app.Async("refresh").Start
+ui.Async("refresh").Start
 ```
 
 `RunsProc "Module.Proc"` wraps a workbook procedure instead of a task. `WithCancellation` gives
-the op a ROneCOne token source: `app.CancelAsync "refresh"` cancels, `Token` exposes the token
+the op a ROneCOne token source: `ui.CancelAsync "refresh"` cancels, `Token` exposes the token
 for task factories such as `ROneCOne.Task.Delay(5000, op.Token)`. Disabled controls show busy
 state (buttons swap to `BusyText`); everything restores on any terminal state. `AsyncError(opId)`
 returns the failure message after a fault.
@@ -49,9 +49,9 @@ runs the procedure, and restores it. Clicks while busy are ignored.
 CPU-bound work stays responsive by running in slices:
 
 ```vba
-app.Job("import").Steps("Demo.ImportChunk").BudgetMs(15) _
+ui.Job("import").Steps("Demo.ImportChunk").BudgetMs(15) _
     .JobOnDone("Demo.ImportFinished").JobOnFail "Demo.ImportFailed"
-app.Job("import").StartJob
+ui.Job("import").StartJob
 ```
 
 The step procedure is a zero-argument `Function` returning `True` when finished. Budget mode
@@ -59,7 +59,7 @@ repeats the step inside each tick until the budget elapses. Paced mode runs at m
 interval, the right shape for game loops and animations, and the pace can change while running:
 
 ```vba
-app.Job("loop").Steps("Game.Frame").PacedMs 150
+ui.Job("loop").Steps("Game.Frame").PacedMs 150
 ```
 
 `CancelJob` requests a stop; the job's cancel handler runs on the next tick. Step errors finish
