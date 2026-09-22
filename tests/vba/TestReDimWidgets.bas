@@ -5,6 +5,7 @@ Option Explicit
 ' inputs, toasts, and the shapes-based modal.
 
 Private Declare PtrSafe Sub Sleep Lib "kernel32" (ByVal milliseconds As Long)
+Private Declare PtrSafe Function GetCaretBlinkTime Lib "user32" () As Long
 
 Private gChangeCount As Long
 Private gConfirmRan As Long
@@ -101,6 +102,7 @@ Public Function TestSelectBox() As String
 
     Set host = NewCanvas()
     gChangeCount = 0
+    ReDimUI.AutoPump False
     Set app = ReDimUI.Mount(host, "wid7")
     app.SelectBox("pick").AtRect(24, 24, 130, 24) _
         .Items("North", "South", "East", "West").Value(2).WritesTo "region"
@@ -126,7 +128,7 @@ Public Function TestSelectBox() As String
     transcript = transcript & "|optionFontSize=" & _
         host.Shapes("rdm_wid7_pick__opt3").TextFrame2.TextRange.Font.Size
     transcript = transcript & "|optionText=" & _
-        host.Shapes("rdm_wid7_pick__opt3").TextFrame2.TextRange.Text
+        RowItem(host, "rdm_wid7_pick__opt3")
 
     Sleep 200
     ReDimUI.DispatchShape "rdm_wid7_pick__opt3"
@@ -153,6 +155,7 @@ Public Function TestSelectBox() As String
     ReDimUI.DispatchShape "rdm_wid7_pick"
     transcript = transcript & "|toggleClosed=" & _
         CStr(Not ShapeExists(host, "rdm_wid7_pick__opt1"))
+    ReDimUI.AutoPump True
     TestSelectBox = transcript
 End Function
 
@@ -207,6 +210,8 @@ Public Function TestToastLifecycle() As String
 
     Set host = NewCanvas()
     ReDimUI.AutoPump False
+    ' The slides and fades under test play only with full motion.
+    ReDimUI.ReduceMotion False
     Set app = ReDimUI.Mount(host, "wid5")
     app.Label("anchorlbl").At("B2").Text("x")
     app.Render
@@ -252,6 +257,7 @@ Public Function TestToastLifecycle() As String
     transcript = transcript & "|darkInk=" & _
         CStr(host.Shapes(toastName).TextFrame2.TextRange.Font.Fill.ForeColor.RGB _
             = app.Theme.OnSurfaceColor)
+    ReDimUI.ReduceMotion
     ReDimUI.AutoPump True
     TestToastLifecycle = transcript
 End Function
@@ -270,6 +276,20 @@ Private Function InkOf(ByVal host As Worksheet, ByVal shapeName As String) As Lo
     InkOf = host.Shapes(shapeName).TextFrame2.TextRange.Font.Fill.ForeColor.RGB
 End Function
 
+' A list row's item, after the check gutter and its tab.
+Private Function RowItem(ByVal host As Worksheet, ByVal shapeName As String) As String
+    Dim rowText As String
+
+    rowText = host.Shapes(shapeName).TextFrame2.TextRange.Text
+    RowItem = Mid$(rowText, InStr(1, rowText, vbTab) + 1)
+End Function
+
+' True when a list row's gutter carries the check.
+Private Function RowChecked(ByVal host As Worksheet, ByVal shapeName As String) As Boolean
+    RowChecked = (Left$(host.Shapes(shapeName).TextFrame2.TextRange.Text, 2) _
+        = ChrW(10003) & vbTab)
+End Function
+
 Public Function TestToastSlots() As String
     Dim app As ReDimUI
     Dim host As Worksheet
@@ -284,6 +304,8 @@ Public Function TestToastSlots() As String
 
     Set host = NewCanvas()
     ReDimUI.AutoPump False
+    ' The slides and fades under test play only with full motion.
+    ReDimUI.ReduceMotion False
     ReDimUI.ResetTickFaults
     Set app = ReDimUI.Mount(host, "wid8")
     app.Label("anchor").AtRect(24, 24, 200, 20).Text("x")
@@ -299,6 +321,10 @@ Public Function TestToastSlots() As String
     Next ticks
     transcript = "entranceSlid=" & _
         CStr(Abs((entryTop - host.Shapes(firstName).Top) - 14) < 0.1)
+    ' The close button rides the slide and settles with the card.
+    transcript = transcript & "|closeRides=" & _
+        CStr(Abs(host.Shapes(firstName & "__tx").Top - _
+            (host.Shapes(firstName).Top + 3)) < 0.1)
 
     Set secondToast = app.Toast("two", 60000)
     For ticks = 1 To 10
@@ -375,6 +401,7 @@ Public Function TestToastSlots() As String
     ' The pump swallows faults silently by design; this proves the
     ' silence across the scenario's dozens of forced ticks was earned.
     transcript = transcript & "|tickFaults=" & ReDimUI.TickFaultCount
+    ReDimUI.ReduceMotion
     ReDimUI.AutoPump True
     TestToastSlots = transcript
 End Function
@@ -870,7 +897,7 @@ Public Function TestComboBox() As String
     transcript = transcript & "|openAll=" & _
         CStr(ShapeExists(host, "rdm_wid20_color__opt4"))
     transcript = transcript & "|optText=" & _
-        host.Shapes("rdm_wid20_color__opt2").TextFrame2.TextRange.Text
+        RowItem(host, "rdm_wid20_color__opt2")
 
     ' Picking writes the cell, the state, fires OnChange, and closes.
     Sleep 200
@@ -903,7 +930,7 @@ Public Function TestComboBox() As String
         CStr(ShapeExists(host, "rdm_wid20_color__opt1") And _
              Not ShapeExists(host, "rdm_wid20_color__opt2"))
     transcript = transcript & "|filteredText=" & _
-        host.Shapes("rdm_wid20_color__opt1").TextFrame2.TextRange.Text
+        RowItem(host, "rdm_wid20_color__opt1")
 
     ' A real Enter commit with partial text auto-drops the suggestions.
     eventsWereOn = Application.EnableEvents
@@ -1124,13 +1151,19 @@ Public Function TestTransferList() As String
         CStr(host.Shapes("rdm_wid22_teams__al2").Fill.ForeColor.RGB = _
             app.Theme.PrimaryColor And _
             InkOf(host, "rdm_wid22_teams__al2") = app.Theme.OnPrimaryColor)
+    ' Selection shows as a check too, not by color alone.
+    transcript = transcript & "|selectedCheck=" & _
+        CStr(RowChecked(host, "rdm_wid22_teams__al2") And _
+            Not RowChecked(host, "rdm_wid22_teams__al1") And _
+            RowItem(host, "rdm_wid22_teams__al2") = "Bravo")
     transcript = transcript & "|selectNoChange=" & CStr(gChangeCount = 0)
     Sleep 200
     ReDimUI.DispatchShape "rdm_wid22_teams__al2"
     transcript = transcript & "|toggledOff=" & _
         CStr(host.Shapes("rdm_wid22_teams__al2").Fill.ForeColor.RGB <> _
             app.Theme.PrimaryColor And _
-            InkOf(host, "rdm_wid22_teams__al2") = app.Theme.OnSurfaceColor)
+            InkOf(host, "rdm_wid22_teams__al2") = app.Theme.OnSurfaceColor _
+            And Not RowChecked(host, "rdm_wid22_teams__al2"))
 
     ' Multi-select: toggle two rows, both carry the accent, one move
     ' transfers both in list order.
@@ -1612,7 +1645,7 @@ Public Function TestLongLists() As String
         RdxKeyChar "{DOWN}"
     Next keyNo
     transcript = transcript & "|scrolledRow1=" & _
-        host.Shapes("rdm_wid27_pick__opt1").TextFrame2.TextRange.Text
+        RowItem(host, "rdm_wid27_pick__opt1")
     transcript = transcript & "|highlightLast=" & _
         CStr(host.Shapes("rdm_wid27_pick__opt8").Fill.ForeColor.RGB = _
             app.Theme.PrimaryColor)
@@ -1642,7 +1675,7 @@ Public Function TestLongLists() As String
     Sleep 200
     ReDimUI.DispatchShape "rdm_wid27_pick__optd"
     transcript = transcript & "|comboPagedRow1=" & _
-        host.Shapes("rdm_wid27_pick__opt1").TextFrame2.TextRange.Text
+        RowItem(host, "rdm_wid27_pick__opt1")
     transcript = transcript & "|optuText=" & _
         host.Shapes("rdm_wid27_pick__optu").TextFrame2.TextRange.Text
     transcript = transcript & "|optdGoneAtEnd=" & _
@@ -1655,7 +1688,7 @@ Public Function TestLongLists() As String
     Sleep 200
     ReDimUI.DispatchShape "rdm_wid27_pick__optu"
     transcript = transcript & "|pagedBack=" & _
-        CStr(host.Shapes("rdm_wid27_pick__opt1").TextFrame2.TextRange.Text _
+        CStr(RowItem(host, "rdm_wid27_pick__opt1") _
             = "Item01" And Not ShapeExists(host, "rdm_wid27_pick__optu"))
     RdxKeyChar "{ESC}"
 
@@ -1671,7 +1704,7 @@ Public Function TestLongLists() As String
     Sleep 200
     ReDimUI.DispatchShape "rdm_wid27_pick"
     transcript = transcript & "|reopenRow1=" & _
-        host.Shapes("rdm_wid27_pick__opt1").TextFrame2.TextRange.Text
+        RowItem(host, "rdm_wid27_pick__opt1")
     transcript = transcript & "|reopenWindowed=" & _
         CStr(ShapeExists(host, "rdm_wid27_pick__opt8") And _
             ShapeExists(host, "rdm_wid27_pick__optu") And _
@@ -1749,11 +1782,11 @@ Public Function TestLongLists() As String
             ShapeExists(host, "rdm_wid27_zone__optu") And _
             Not ShapeExists(host, "rdm_wid27_zone__optd"))
     transcript = transcript & "|selectShowsPick=" & _
-        host.Shapes("rdm_wid27_zone__opt6").TextFrame2.TextRange.Text
+        RowItem(host, "rdm_wid27_zone__opt6")
     Sleep 200
     ReDimUI.DispatchShape "rdm_wid27_zone__optu"
     transcript = transcript & "|selectPagedBack=" & _
-        CStr(host.Shapes("rdm_wid27_zone__opt1").TextFrame2.TextRange.Text _
+        CStr(RowItem(host, "rdm_wid27_zone__opt1") _
             = "Item01" And ShapeExists(host, "rdm_wid27_zone__optd"))
     Sleep 200
     ReDimUI.DispatchShape "rdm_wid27_zone__opt2"
@@ -1764,7 +1797,7 @@ Public Function TestLongLists() As String
     transcript = transcript & "|selectListRows=" & _
         CStr(ShapeExists(host, "rdm_wid27_zone__opt4") And _
             Not ShapeExists(host, "rdm_wid27_zone__opt5") And _
-            host.Shapes("rdm_wid27_zone__opt1").TextFrame2.TextRange.Text _
+            RowItem(host, "rdm_wid27_zone__opt1") _
                 = "Item02")
     Sleep 200
     ReDimUI.DispatchShape "rdm_wid27_zone"
@@ -1784,10 +1817,16 @@ Public Function TestLongLists() As String
         CStr(ShapeExists(host, "rdm_wid27_pool__al5") And _
             Not ShapeExists(host, "rdm_wid27_pool__al6") And _
             ShapeExists(host, "rdm_wid27_pool__ald"))
+    transcript = transcript & "|pagerTarget=" & _
+        CStr(host.Shapes("rdm_wid27_pool__ald").Width >= 18 And _
+            host.Shapes("rdm_wid27_pool__ald").Height >= 18 And _
+            host.Shapes("rdm_wid27_pool__al1").Left + _
+            host.Shapes("rdm_wid27_pool__al1").Width < _
+            host.Shapes("rdm_wid27_pool__ald").Left)
     Sleep 200
     ReDimUI.DispatchShape "rdm_wid27_pool__ald"
     transcript = transcript & "|pagedRow1=" & _
-        host.Shapes("rdm_wid27_pool__al1").TextFrame2.TextRange.Text
+        RowItem(host, "rdm_wid27_pool__al1")
     Sleep 200
     ReDimUI.DispatchShape "rdm_wid27_pool__al2"
     Sleep 200
@@ -1905,4 +1944,314 @@ Public Function TestModalConfirm() As String
     transcript = transcript & "|overlayHiddenAgain=" & _
         CStr(host.Shapes("rdm_wid6_mdl_ov").Visible = msoFalse)
     TestModalConfirm = transcript
+End Function
+
+' Drop lists dismiss the native way: another list opening, a click on
+' another control, a press off the face and rows, or a moved grid
+' selection closes an open list; a press on its own rows keeps it open.
+Public Function TestListDismiss() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim transcript As String
+
+    ' The forced press edge goes to the first app that ticks.
+    ReDimUI.Shutdown
+    ReDimUI.AutoPump False
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "wid29")
+    app.SelectBox("one").AtRect(24, 24, 140, 22).Items "Red", "Green", "Blue"
+    app.SelectBox("two").AtRect(200, 24, 140, 22).Items "North", "South"
+    app.Button("go").AtRect(24, 200, 80, 26).Text "Go"
+    app.Render
+
+    ReDimUI.DispatchShape "rdm_wid29_one"
+    ReDimUI.DispatchShape "rdm_wid29_two"
+    transcript = "oneListPerApp=" & _
+        CStr(Not ShapeExists(host, "rdm_wid29_one__opt1") And _
+            ShapeExists(host, "rdm_wid29_two__opt1"))
+    ReDimUI.DispatchShape "rdm_wid29_go"
+    transcript = transcript & "|clickElsewhereCloses=" & _
+        CStr(Not ShapeExists(host, "rdm_wid29_two__opt1"))
+
+    ' Row one of the first list spans 46 to 68 points down the sheet.
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid29_one"
+    ReDimUI.OverridePointer 60, 57
+    ReDimUI.ForcePressEdge
+    ReDimUI.PumpOnce
+    transcript = transcript & "|pressOnRowsKeeps=" & _
+        CStr(ShapeExists(host, "rdm_wid29_one__opt1"))
+    ReDimUI.OverridePointer 420, 300
+    ReDimUI.ForcePressEdge
+    ReDimUI.PumpOnce
+    transcript = transcript & "|pressOffCloses=" & _
+        CStr(Not ShapeExists(host, "rdm_wid29_one__opt1"))
+    ReDimUI.ClearPointerOverride
+
+    Sleep 200
+    host.Range("A1").Select
+    ReDimUI.DispatchShape "rdm_wid29_one"
+    ReDimUI.PumpOnce
+    transcript = transcript & "|selectionHeldKeeps=" & _
+        CStr(ShapeExists(host, "rdm_wid29_one__opt1"))
+    host.Range("D5").Select
+    ReDimUI.PumpOnce
+    transcript = transcript & "|selectionMoveCloses=" & _
+        CStr(Not ShapeExists(host, "rdm_wid29_one__opt1"))
+    ReDimUI.AutoPump True
+    TestListDismiss = transcript
+End Function
+
+' List conventions: the current item's row carries a check in its gutter,
+' an open list with nothing to show says so in an inert row, and a list
+' with no room below the visible window opens upward.
+Public Function TestListConventions() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim transcript As String
+    Dim viewBottom As Double
+    Dim faceTop As Double
+
+    ReDimUI.AutoPump False
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "wid30")
+    app.SelectBox("pick").AtRect(24, 24, 140, 22) _
+        .Items("Red", "Green", "Blue").Value 2
+    app.SelectBox("none").AtRect 200, 24, 140, 22
+    app.ComboBox("find").AtRect(24, 120, 160, 22).Items "Alpha", "Beta", "Gamma"
+    app.Render
+
+    ReDimUI.DispatchShape "rdm_wid30_pick"
+    transcript = "currentChecked=" & _
+        CStr(RowChecked(host, "rdm_wid30_pick__opt2") And _
+            Not RowChecked(host, "rdm_wid30_pick__opt1") And _
+            Not RowChecked(host, "rdm_wid30_pick__opt3"))
+    transcript = transcript & "|rowItem=" & RowItem(host, "rdm_wid30_pick__opt2")
+    ReDimUI.DispatchShape "rdm_wid30_none"
+    transcript = transcript & "|noItemsRow=" & RowItem(host, "rdm_wid30_none__optn")
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid30_none__optn"
+    transcript = transcript & "|emptyRowInert=" & _
+        CStr(ShapeExists(host, "rdm_wid30_none__optn"))
+
+    ' A filter that matches nothing shows the row; a match replaces it.
+    ReDimUI.DispatchShape "rdm_wid30_find"
+    RdxKeyChar "z"
+    transcript = transcript & "|noMatchesRow=" & RowItem(host, "rdm_wid30_find__optn")
+    RdxKeyChar "{BS}"
+    RdxKeyChar "a"
+    transcript = transcript & "|emptyRowGone=" & _
+        CStr(Not ShapeExists(host, "rdm_wid30_find__optn") And _
+            ShapeExists(host, "rdm_wid30_find__opt1"))
+    RdxKeyChar "{ESC}"
+    RdxKeyChar "{ESC}"
+
+    ' No room below the visible window: the list opens upward, its last
+    ' row against the face and its first row on top.
+    viewBottom = ActiveWindow.VisibleRange.Top + ActiveWindow.VisibleRange.Height
+    faceTop = viewBottom - 30
+    If faceTop < 150 Then faceTop = 150
+    app.SelectBox("low").AtRect(24, faceTop, 140, 22) _
+        .Items "One", "Two", "Three", "Four"
+    app.Render
+    ReDimUI.DispatchShape "rdm_wid30_low"
+    transcript = transcript & "|opensUpward=" & _
+        CStr(Abs(host.Shapes("rdm_wid30_low__opt4").Top + _
+            host.Shapes("rdm_wid30_low__opt4").Height - faceTop) < 0.5)
+    transcript = transcript & "|firstRowOnTop=" & _
+        CStr(host.Shapes("rdm_wid30_low__opt1").Top < _
+            host.Shapes("rdm_wid30_low__opt4").Top)
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid30_low__opt1"
+    transcript = transcript & "|upwardPick=" & CStr(app.SelectBox("low").CurrentValue = 1)
+    ReDimUI.AutoPump True
+    TestListConventions = transcript
+End Function
+
+' Reduced motion: toasts appear in their slot, move up at once when an
+' earlier toast leaves, and leave without a fade. The caret blinks at
+' the Windows rate, or not at all when Windows says not to.
+Public Function TestMotionAndBlink() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim firstToast As ReDimUI
+    Dim secondToast As ReDimUI
+    Dim firstName As String
+    Dim secondName As String
+    Dim slotTop As Double
+    Dim fieldShape As Shape
+    Dim systemBlink As Long
+    Dim tickNo As Long
+    Dim transcript As String
+
+    ReDimUI.AutoPump False
+    ReDimUI.ReduceMotion True
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "wid31")
+    app.Label("anchorlbl").At("B2").Text "x"
+    app.TextInput("name").AtRect 24, 200, 160, 22
+    app.Render
+    transcript = "motionReduced=" & CStr(ReDimUI.MotionReduced)
+
+    Set firstToast = app.Toast("First.", 60000)
+    Set secondToast = app.Toast("Second.", 60000)
+    firstName = "rdm_wid31_" & firstToast.ComponentId
+    secondName = "rdm_wid31_" & secondToast.ComponentId
+    slotTop = host.Shapes(firstName).Top
+    transcript = transcript & "|noEntranceSlide=" & _
+        CStr(Abs(host.Shapes(secondName).Top - slotTop - _
+            host.Shapes(firstName).Height - 6) < 0.5)
+    ReDimUI.DispatchShape firstName
+    ReDimUI.PumpOnce
+    transcript = transcript & "|leavesAtOnce=" & _
+        CStr(Not ShapeExists(host, firstName))
+    transcript = transcript & "|survivorMovesAtOnce=" & _
+        CStr(Abs(host.Shapes(secondName).Top - slotTop) < 0.5)
+    ReDimUI.ReduceMotion False
+    transcript = transcript & "|overrideFull=" & CStr(Not ReDimUI.MotionReduced)
+    ReDimUI.ReduceMotion
+
+    ' Each forced tick is 50 ms, so the caret turns off on the first
+    ' tick that reaches the Windows interval.
+    systemBlink = GetCaretBlinkTime()
+    ReDimUI.DispatchShape "rdm_wid31_name"
+    Set fieldShape = host.Shapes("rdm_wid31_name")
+    For tickNo = 1 To 60
+        ReDimUI.PumpOnce
+        If NormalizedFace(fieldShape) = " " Then Exit For
+    Next tickNo
+    If systemBlink > 0 Then
+        transcript = transcript & "|blinkAtSystemRate=" & _
+            CStr(tickNo = -Int(-systemBlink / 50))
+    Else
+        transcript = transcript & "|blinkAtSystemRate=" & CStr(tickNo > 60)
+    End If
+    RdxKeyChar "{ESC}"
+    ReDimUI.AutoPump True
+    TestMotionAndBlink = transcript
+End Function
+
+' Accessibility: each control's shape carries alternative text from its
+' kind, text, and state, AltText overrides it, the contrast math matches
+' WCAG, and the high-contrast theme passes every pairing.
+Public Function TestAccessibility() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim transcript As String
+
+    ReDimUI.AutoPump False
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "wid32")
+    app.Button("save").AtRect(24, 24, 90, 28).Text "Save"
+    app.TickBox("agree").AtRect(24, 70, 160, 20).Text "Agree"
+    app.Toggle("dark").AtRect 24, 100, 44, 22
+    app.SelectBox("zone").AtRect(24, 140, 140, 22) _
+        .Items("North", "South").Value 2
+    app.ProgressBar("load").AtRect(24, 180, 160, 10).Value 40
+    app.Render
+
+    transcript = "buttonAlt=" & host.Shapes("rdm_wid32_save").AlternativeText
+    app.Button("save").Enabled False
+    transcript = transcript & "|disabledAlt=" & _
+        host.Shapes("rdm_wid32_save").AlternativeText
+    ReDimUI.DispatchShape "rdm_wid32_agree"
+    transcript = transcript & "|tickAlt=" & _
+        host.Shapes("rdm_wid32_agree").AlternativeText
+    transcript = transcript & "|toggleAlt=" & _
+        host.Shapes("rdm_wid32_dark").AlternativeText
+    transcript = transcript & "|selectAlt=" & _
+        host.Shapes("rdm_wid32_zone").AlternativeText
+    transcript = transcript & "|progressAlt=" & _
+        host.Shapes("rdm_wid32_load").AlternativeText
+    app.Toggle("dark").AltText "Dark mode"
+    transcript = transcript & "|overrideAlt=" & _
+        host.Shapes("rdm_wid32_dark").AlternativeText
+
+    transcript = transcript & "|blackOnWhite=" & _
+        Format$(ReDimUI.ContrastRatio(RGB(0, 0, 0), RGB(255, 255, 255)), "0.00")
+    transcript = transcript & "|sameColor=" & _
+        Format$(ReDimUI.ContrastRatio(RGB(90, 90, 90), RGB(90, 90, 90)), "0.00")
+    transcript = transcript & "|highContrastFails=" & _
+        CStr(UBound(Split(ReDimUI.ThemeHighContrast.ContrastReport, "fail")))
+    transcript = transcript & "|reportLines=" & _
+        CStr(UBound(Split(ReDimUI.ThemeLight.ContrastReport, vbLf)) + 1)
+
+    ' On high contrast's yellow track the knob turns black.
+    app.SetTheme ReDimUI.ThemeHighContrast
+    ReDimUI.DispatchShape "rdm_wid32_dark"
+    transcript = transcript & "|knobOnAccent=" & _
+        CStr(host.Shapes("rdm_wid32_dark__knob").Fill.ForeColor.RGB = _
+            app.Theme.OnPrimaryColor)
+    ReDimUI.AutoPump True
+    TestAccessibility = transcript
+End Function
+
+' Toast conventions: a close button on every toast, a reading-time TTL
+' when none is given, a tone's icon and edge, and an action button that
+' dismisses the toast and runs its handler.
+Public Function TestToastConventions() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim toastValue As ReDimUI
+    Dim toastName As String
+    Dim longText As String
+    Dim transcript As String
+
+    gChangeCount = 0
+    ReDimUI.AutoPump False
+    ' Reduced motion makes each dismissal finish on one tick.
+    ReDimUI.ReduceMotion True
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "wid33")
+    app.Label("anchorlbl").At("B2").Text "x"
+    app.Render
+
+    Set toastValue = app.Toast("Saved.")
+    toastName = "rdm_wid33_" & toastValue.ComponentId
+    transcript = "closeButton=" & CStr(ShapeExists(host, toastName & "__tx"))
+    transcript = transcript & "|plainText=" & _
+        host.Shapes(toastName).TextFrame2.TextRange.Text
+    transcript = transcript & "|shortTtl=" & _
+        CStr(toastValue.ToastRemainingMs > 3800 And toastValue.ToastRemainingMs <= 4000)
+    ReDimUI.DispatchShape toastName & "__tx"
+    ReDimUI.PumpOnce
+    transcript = transcript & "|closeDismisses=" & _
+        CStr(Not ShapeExists(host, toastName) And _
+            Not ShapeExists(host, toastName & "__tx"))
+
+    longText = String$(100, "a")
+    Set toastValue = app.Toast(longText)
+    transcript = transcript & "|longTtl=" & _
+        CStr(toastValue.ToastRemainingMs > 8800 And toastValue.ToastRemainingMs <= 9000)
+    ReDimUI.DispatchShape "rdm_wid33_" & toastValue.ComponentId
+    ReDimUI.PumpOnce
+
+    Set toastValue = app.Toast("Low disk space.").Warning
+    toastName = "rdm_wid33_" & toastValue.ComponentId
+    transcript = transcript & "|warningIcon=" & _
+        CStr(Left$(host.Shapes(toastName).TextFrame2.TextRange.Text, 2) = _
+            ChrW(&H26A0) & vbTab)
+    transcript = transcript & "|toneColors=" & _
+        CStr(host.Shapes(toastName).Line.ForeColor.RGB = app.Theme.WarningColor _
+            And host.Shapes(toastName).TextFrame2.TextRange.Characters(1, 1) _
+                .Font.Fill.ForeColor.RGB = app.Theme.WarningColor _
+            And InkOf(host, toastName & "__tx") = app.Theme.OnMutedColor)
+    ReDimUI.DispatchShape toastName
+    ReDimUI.PumpOnce
+
+    Set toastValue = app.Toast("Row deleted.", 5000)
+    toastValue.Action "Undo", "TestReDimWidgets.RecordChange"
+    toastName = "rdm_wid33_" & toastValue.ComponentId
+    transcript = transcript & "|actionText=" & _
+        host.Shapes(toastName & "__ta").TextFrame2.TextRange.Text
+    transcript = transcript & "|actionLongerTtl=" & _
+        CStr(toastValue.ToastRemainingMs > 8800)
+    ReDimUI.DispatchShape toastName & "__ta"
+    ReDimUI.PumpOnce
+    transcript = transcript & "|actionRan=" & CStr(gChangeCount = 1)
+    transcript = transcript & "|actionDismisses=" & _
+        CStr(Not ShapeExists(host, toastName & "__ta"))
+    ReDimUI.ReduceMotion
+    ReDimUI.AutoPump True
+    TestToastConventions = transcript
 End Function

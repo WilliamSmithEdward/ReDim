@@ -61,11 +61,17 @@ Private Declare PtrSafe Function GetDeviceCaps Lib "gdi32" ( _
     ByVal deviceContext As LongPtr, ByVal capabilityIndex As Long) As Long
 Private Declare PtrSafe Function GetAsyncKeyState Lib "user32" ( _
     ByVal virtualKey As Long) As Integer
+Private Declare PtrSafe Function GetCaretBlinkTime Lib "user32" () As Long
+Private Declare PtrSafe Function SystemParametersInfo Lib "user32" _
+    Alias "SystemParametersInfoW" (ByVal actionCode As Long, _
+    ByVal actionParam As Long, ByRef resultValue As Long, _
+    ByVal profileFlags As Long) As Long
 
 Private Const LOGPIXELSX As Long = 88
 Private Const LOGPIXELSY As Long = 90
 Private Const VK_LEFT_BUTTON As Long = 1
 Private Const VK_RIGHT_BUTTON As Long = 2
+Private Const SPI_GETCLIENTAREAANIMATION As Long = &H1042
 
 Private Const SHAPE_PREFIX As String = "rdm_"
 Private Const PART_SEPARATOR As String = "__"
@@ -107,6 +113,15 @@ Private Const KIND_IMAGE As Long = 21
 ' ListRows says otherwise; longer lists window behind pager rows.
 Private Const DEFAULT_LIST_ROWS As Long = 8
 
+' List rows open with a gutter for the check that marks the current or
+' selected item: the glyph, a tab, then the item, aligned by a tab stop
+' this many points in.
+Private Const LIST_GUTTER As Double = 14
+
+' Transfer paging arrows are square pointer targets of this many points,
+' 24 pixels at 96 DPI: the WCAG 2.5.8 minimum target size.
+Private Const PAGER_TARGET As Double = 18
+
 ' Sentinel for "the source could not be loaded"; contains characters no
 ' real path can, so it never collides with one.
 Private Const IMAGE_MISSING As String = "?missing?"
@@ -116,6 +131,7 @@ Private Const VARIANT_SECONDARY As Long = 1
 Private Const VARIANT_SUCCESS As Long = 2
 Private Const VARIANT_DANGER As Long = 3
 Private Const VARIANT_NEUTRAL As Long = 4
+Private Const VARIANT_WARNING As Long = 5
 
 Private Const REL_NONE As Long = 0
 Private Const REL_BELOW As Long = 1
@@ -144,6 +160,16 @@ Private mFocusHandoff As Boolean
 ' Test seam: the next real tick treats the field-watch press edge as
 ' fired, so in-tick blur paths are testable without physical input.
 Private mForcePressEdge As Boolean
+' Test seam: a fixed pointer position, in sheet points, that stands in
+' for the cursor until cleared.
+Private mPointerOverridden As Boolean
+Private mPointerX As Double
+Private mPointerY As Double
+' The caret blink interval Windows reported when a field last took
+' focus; 0 when the user turned blinking off.
+Private mCaretBlinkMs As Long
+' Motion preference: follow Windows (0), reduced (1), or full (2).
+Private mMotionChoice As Long
 ' Guarded-swallow observability: every silently trapped tick or key
 ' dispatch fault counts here, so tests can prove a run was clean.
 Private mTickFaults As Long
@@ -202,6 +228,8 @@ Private mHasRect As Boolean
 Private mText As String
 Private mBusyText As String
 Private mStyleVariant As Long
+' Set once a variant builder ran; a toast reads its tone only then.
+Private mVariantChosen As Boolean
 Private mFillColor As Long
 Private mTextColor As Long
 Private mFontSize As Double
@@ -224,6 +252,8 @@ Private mBindEnabledInvert As Boolean
 Private mWritesToKey As String
 Private mLastClickMs As LongLong
 Private mExpiresAtMs As LongLong
+Private mToastActionLabel As String
+Private mToastActionProc As String
 Private mSlideRemaining As Double
 Private mToastExiting As Boolean
 Private mExitRemaining As Double
@@ -257,13 +287,15 @@ Private mAppliedTransferSig As String
 Private mAppliedCheckSig As String
 Private mAppliedProgressSig As String
 ' Composite part signatures: the kind's extra parts (tick box, knob,
-' radio rows, stepper, slider, drop-list caret), drop-list rows and
-' pagers, check-list rows, transfer headers, rows, and scrollers. A part
-' is rewritten only when its signature changes; Render forgets them all.
+' radio rows, stepper, slider, drop-list caret), drop-list rows, pagers,
+' and empty row, check-list rows, transfer headers, rows, and scrollers.
+' A part is rewritten only when its signature changes. Render forgets
+' the extras signature; a recreated main shape forgets them all.
 Private mAppliedExtrasSig As String
 Private mAppliedRowStates() As String
 Private mAppliedPagerUpSig As String
 Private mAppliedPagerDownSig As String
+Private mAppliedEmptyRowSig As String
 Private mAppliedCheckHeaderSig As String
 Private mAppliedHeaderLeftSig As String
 Private mAppliedHeaderRightSig As String
@@ -272,6 +304,10 @@ Private mAppliedRightRowStates() As String
 Private mAppliedScrollLeftSig As String
 Private mAppliedScrollRightSig As String
 Private mAppliedCellFill As Long
+' AltText's override of the generated description, and the description
+' last written to the shape.
+Private mAltText As String
+Private mAppliedAltText As String
 ' The caret index: characters before the caret, 0 through Len(mText).
 Private mCaretPos As Long
 ' Windowed long lists: a SelectBox or ComboBox drop list shows at most
@@ -283,6 +319,8 @@ Private mCaretPos As Long
 Private mListRows As Long
 Private mListMatches As Collection
 Private mListMatchesFilter As String
+' Set when the list opened upward for want of room below the face.
+Private mListFlipped As Boolean
 ' Items as a String array (1-based), rebuilt by one For Each after any
 ' change: a VBA Collection read by index walks the list, so loops that
 ' indexed mItems went quadratic on long lists.
@@ -309,6 +347,9 @@ Private mSlideValueAtEngage As Double
 Private mSlideSuppressUntilMs As LongLong
 Private mFieldTextAtFocus As String
 Private mFieldSelAtFocus As String
+' The grid selection an open list's watch compares against; empty until
+' the watch's first frame records it.
+Private mListSelAtOpen As String
 Private mCaretOn As Boolean
 Private mCaretAccumMs As Long
 Private mRelMode As Long
@@ -489,6 +530,9 @@ Friend Sub DispatchShape(ByVal clickedName As String)
     End If
     If Not TryGetObject(mApps, targetAppId, appValue) Then Exit Sub
     If Not appValue.TryGetComponent(targetComponentId, componentValue) Then Exit Sub
+    ' A click anywhere else closes an open list, even a click the target
+    ' then ignores.
+    appValue.CloseListsExcept targetComponentId
     If Not componentValue.CanClick Then Exit Sub
     componentValue.MarkClicked
     Set mSenderApp = appValue
@@ -571,9 +615,27 @@ Friend Sub SetKeyboardFocus(ByVal hostApp As ReDimUI, ByVal componentValue As Re
     End If
     mFocusAppId = hostApp.AppId
     mFocusComponentId = componentValue.ComponentId
+    mCaretBlinkMs = SystemCaretBlinkMs()
     RdxBindKeys
     RequestPump
 End Sub
+
+' The Windows caret blink interval, or 0 when the user turned blinking
+' off (GetCaretBlinkTime reports INFINITE) or the call fails.
+Private Function SystemCaretBlinkMs() As Long
+    Dim reportedMs As Long
+
+    reportedMs = GetCaretBlinkTime()
+    If reportedMs > 0 Then SystemCaretBlinkMs = reportedMs
+End Function
+
+Friend Property Get CaretBlinkMs() As Long
+    If Not IsFactory(Me) Then
+        CaretBlinkMs = ReDimUI.CaretBlinkMs
+        Exit Property
+    End If
+    CaretBlinkMs = mCaretBlinkMs
+End Property
 
 Friend Sub ClearKeyboardFocus()
     If Not IsFactory(Me) Then
@@ -603,6 +665,40 @@ Friend Function ConsumeForcedPressEdge() As Boolean
     End If
     ConsumeForcedPressEdge = mForcePressEdge
     mForcePressEdge = False
+End Function
+
+' Test seam: pointer-driven behavior (outside presses, slider drags) reads
+' this sheet position instead of the cursor until ClearPointerOverride.
+Friend Sub OverridePointer(ByVal pointsX As Double, ByVal pointsY As Double)
+    If Not IsFactory(Me) Then
+        ReDimUI.OverridePointer pointsX, pointsY
+        Exit Sub
+    End If
+    mPointerOverridden = True
+    mPointerX = pointsX
+    mPointerY = pointsY
+End Sub
+
+Friend Sub ClearPointerOverride()
+    If Not IsFactory(Me) Then
+        ReDimUI.ClearPointerOverride
+        Exit Sub
+    End If
+    mPointerOverridden = False
+End Sub
+
+Friend Function PointerOverride( _
+    ByRef pointsX As Double, _
+    ByRef pointsY As Double _
+) As Boolean
+    If Not IsFactory(Me) Then
+        PointerOverride = ReDimUI.PointerOverride(pointsX, pointsY)
+        Exit Function
+    End If
+    If Not mPointerOverridden Then Exit Function
+    pointsX = mPointerX
+    pointsY = mPointerY
+    PointerOverride = True
 End Function
 
 ' The count of silently trapped faults since the last reset. The pump
@@ -742,6 +838,47 @@ Public Sub PinPumpCursor(ByVal pinOn As Boolean)
     RdxSetCursorPin pinOn
 End Sub
 
+' Toasts slide in, glide up as others leave, and fade out, unless motion
+' is reduced: then they appear, move, and leave at once. Reduction
+' follows the Windows "Show animations in Windows" setting; pass True
+' or False to override it, or nothing to follow Windows again.
+Public Sub ReduceMotion(Optional ByVal motionOff As Variant)
+    If Not IsFactory(Me) Then
+        ReDimUI.ReduceMotion motionOff
+        Exit Sub
+    End If
+    If IsMissing(motionOff) Then
+        mMotionChoice = 0
+    ElseIf CBool(motionOff) Then
+        mMotionChoice = 1
+    Else
+        mMotionChoice = 2
+    End If
+End Sub
+
+' True when animations should not play: the ReduceMotion override when
+' set, else the Windows setting, read each time since users change it.
+Public Property Get MotionReduced() As Boolean
+    Dim animationsOn As Long
+
+    If Not IsFactory(Me) Then
+        MotionReduced = ReDimUI.MotionReduced
+        Exit Property
+    End If
+    Select Case mMotionChoice
+        Case 1
+            MotionReduced = True
+        Case 2
+            MotionReduced = False
+        Case Else
+            animationsOn = 1
+            If SystemParametersInfo(SPI_GETCLIENTAREAANIMATION, 0, _
+                animationsOn, 0) <> 0 Then
+                MotionReduced = (animationsOn = 0)
+            End If
+    End Select
+End Property
+
 ' Deterministic tests turn the wall-clock timer off and drive PumpOnce
 ' themselves. Production leaves it on.
 Public Sub AutoPump(ByVal pumpOn As Boolean)
@@ -797,6 +934,7 @@ Public Sub Shutdown()
     Set mWindows = Nothing
     Set mNavStack = Nothing
     mActiveWindowId = vbNullString
+    mPointerOverridden = False
     Set mSenderApp = Nothing
     Set mSenderComponent = Nothing
 End Sub
@@ -957,6 +1095,99 @@ Public Function ThemeLight() As ReDimUI
     Set ThemeLight = themeValue
 End Function
 
+' White and yellow on black with white edges. Every pairing the
+' controls draw clears WCAG AA, most by a wide margin; ContrastReport
+' lists them.
+Public Function ThemeHighContrast() As ReDimUI
+    Dim themeValue As ReDimUI
+
+    Set themeValue = New ReDimUI
+    themeValue.ConfigureTheme _
+        RGB(255, 255, 0), RGB(0, 0, 0), _
+        RGB(0, 0, 0), RGB(255, 255, 255), _
+        RGB(38, 38, 38), RGB(200, 200, 200), _
+        RGB(0, 255, 0), RGB(255, 128, 128), _
+        RGB(255, 255, 255), RGB(0, 0, 0), _
+        "Segoe UI", 11
+    Set ThemeHighContrast = themeValue
+End Function
+
+' The WCAG 2 contrast ratio of two RGB colors, from 1 (none) to 21
+' (black on white). Text needs 4.5 (3 when large); the edges and
+' accents that mark controls and their states need 3.
+Public Function ContrastRatio(ByVal foreRgb As Long, ByVal backRgb As Long) As Double
+    Dim foreLight As Double
+    Dim backLight As Double
+
+    foreLight = RelativeLuminance(foreRgb)
+    backLight = RelativeLuminance(backRgb)
+    If foreLight < backLight Then
+        ContrastRatio = (backLight + 0.05) / (foreLight + 0.05)
+    Else
+        ContrastRatio = (foreLight + 0.05) / (backLight + 0.05)
+    End If
+End Function
+
+Private Function RelativeLuminance(ByVal colorRgb As Long) As Double
+    RelativeLuminance = 0.2126 * LinearChannel(colorRgb And &HFF&) _
+        + 0.7152 * LinearChannel((colorRgb \ &H100&) And &HFF&) _
+        + 0.0722 * LinearChannel((colorRgb \ &H10000) And &HFF&)
+End Function
+
+Private Function LinearChannel(ByVal channelValue As Long) As Double
+    Dim fraction As Double
+
+    fraction = channelValue / 255#
+    If fraction <= 0.04045 Then
+        LinearChannel = fraction / 12.92
+    Else
+        LinearChannel = ((fraction + 0.055) / 1.055) ^ 2.4
+    End If
+End Function
+
+' One line per color pairing the controls draw: its contrast ratio, the
+' ratio it needs, and pass or fail. Text pairs need 4.5:1; field edges
+' and the accent that marks states need 3:1. Ratios are truncated, so a
+' listed ratio never rounds up past a threshold it misses.
+Public Function ContrastReport() As String
+    RequireRole ROLE_THEME, "ContrastReport"
+    ContrastReport = _
+        ContrastLine("Body text", "OnSurface on Surface", _
+            mThemeOnSurface, mThemeSurface, 4.5) & vbLf & _
+        ContrastLine("Canvas text", "OnSurface on Canvas", _
+            mThemeOnSurface, mThemeCanvas, 4.5) & vbLf & _
+        ContrastLine("Primary button", "OnPrimary on Primary", _
+            mThemeOnPrimary, mThemePrimary, 4.5) & vbLf & _
+        ContrastLine("Success button", "OnPrimary on Success", _
+            mThemeOnPrimary, mThemeSuccess, 4.5) & vbLf & _
+        ContrastLine("Danger button", "OnPrimary on Danger", _
+            mThemeOnPrimary, mThemeDanger, 4.5) & vbLf & _
+        ContrastLine("Muted fill text", "OnSurface on Muted", _
+            mThemeOnSurface, mThemeMuted, 4.5) & vbLf & _
+        ContrastLine("Secondary text", "OnMuted on Surface", _
+            mThemeOnMuted, mThemeSurface, 4.5) & vbLf & _
+        ContrastLine("Field edge", "Border on Surface", _
+            mThemeBorder, mThemeSurface, 3) & vbLf & _
+        ContrastLine("Accent", "Primary on Surface", _
+            mThemePrimary, mThemeSurface, 3)
+End Function
+
+Private Function ContrastLine( _
+    ByVal pairName As String, _
+    ByVal pairColors As String, _
+    ByVal foreRgb As Long, _
+    ByVal backRgb As Long, _
+    ByVal neededRatio As Double _
+) As String
+    Dim shownRatio As Double
+
+    shownRatio = Int(ContrastRatio(foreRgb, backRgb) * 100) / 100
+    ContrastLine = pairName & " (" & pairColors & "): " & _
+        Format$(shownRatio, "0.00") & ":1, needs " & _
+        Format$(neededRatio, "0.0") & ":1, " & _
+        IIf(shownRatio >= neededRatio, "pass", "fail")
+End Function
+
 Public Function ThemeDark() As ReDimUI
     Dim themeValue As ReDimUI
 
@@ -1102,15 +1333,23 @@ Public Function TextInput(ByVal targetComponentId As String) As ReDimUI
     Set TextInput = GetOrCreateComponent(targetComponentId, KIND_INPUT)
 End Function
 
-' Transient notification card. Expires on the pump after ttlMs, or when
-' clicked.
+' Transient notification card with a close button. Expires on the pump
+' after ttlMs, or when clicked. Without ttlMs it stays long enough to
+' read: three seconds plus 60 ms a character, from four seconds to
+' twelve. Primary, Success, Warning, and Danger give it an info,
+' success, warning, or error tone: an icon and a matching edge.
 Public Function Toast( _
     ByVal messageText As String, _
-    Optional ByVal ttlMs As Long = 3000 _
+    Optional ByVal ttlMs As Long = 0 _
 ) As ReDimUI
     Dim toastValue As ReDimUI
 
     RequireRole ROLE_APP, "Toast"
+    If ttlMs <= 0 Then
+        ttlMs = 3000 + 60 * Len(messageText)
+        If ttlMs < 4000 Then ttlMs = 4000
+        If ttlMs > 12000 Then ttlMs = 12000
+    End If
     mToastCounter = mToastCounter + 1
     Set toastValue = GetOrCreateComponent("toast_" & mToastCounter, KIND_TOAST)
     toastValue.ConfigureToast messageText, ttlMs, NextToastSlot()
@@ -2005,6 +2244,7 @@ Private Sub TickComponentsSection( _
         componentValue.TickAnimation mSheet, elapsedMs
         componentValue.TickSlideDrag Me, leftButtonDown
         componentValue.TickFieldWatch Me, anyButtonDown, pressEdge, runWork
+        componentValue.TickListWatch pressEdge, runWork
         If runWork Then
             If componentValue.IsExpiredToast(nowMs) Then
                 componentValue.BeginToastExit
@@ -2092,6 +2332,10 @@ Friend Function HasAppWork() As Boolean
             Exit Function
         End If
         If componentValue.NeedsDragWatch(mSheet) Then
+            HasAppWork = True
+            Exit Function
+        End If
+        If componentValue.NeedsListWatch Then
             HasAppWork = True
             Exit Function
         End If
@@ -2257,7 +2501,8 @@ End Property
 
 Friend Property Get IsTickable() As Boolean
     Select Case mKind
-        Case KIND_SPINNER, KIND_TOAST, KIND_SLIDEBAR, KIND_INPUT, KIND_COMBO
+        Case KIND_SPINNER, KIND_TOAST, KIND_SLIDEBAR, KIND_INPUT, KIND_COMBO, _
+            KIND_SELECT
             IsTickable = True
     End Select
 End Property
@@ -2423,9 +2668,15 @@ Public Function Danger() As ReDimUI
     Set Danger = SetVariant(VARIANT_DANGER)
 End Function
 
+' Amber, for actions that need care. On a toast it is the warning tone.
+Public Function Warning() As ReDimUI
+    Set Warning = SetVariant(VARIANT_WARNING)
+End Function
+
 Private Function SetVariant(ByVal variantCode As Long) As ReDimUI
     RequireRole ROLE_COMPONENT, "Variant"
     mStyleVariant = variantCode
+    mVariantChosen = True
     Touch
     Set SetVariant = Me
 End Function
@@ -2442,6 +2693,31 @@ Public Function Enabled(ByVal flag As Boolean) As ReDimUI
     mEnabled = flag
     Touch
     Set Enabled = Me
+End Function
+
+' The alternative text screen readers announce for the control. ReDim
+' writes one from the kind, text, and state ("Save, button", "Agree,
+' checkbox, checked", ", unavailable" when disabled); AltText replaces
+' it, and an empty string restores the generated one.
+' A toast's action button, such as Undo: a click dismisses the toast and
+' runs handlerProc. A toast with an action stays four seconds longer.
+Public Function Action(ByVal actionLabel As String, ByVal handlerProc As String) As ReDimUI
+    RequireRole ROLE_COMPONENT, "Action"
+    If mKind <> KIND_TOAST Then
+        RaiseError ERROR_INVALID_ARGUMENT, "Action", "Action applies to toasts."
+    End If
+    If LenB(mToastActionLabel) = 0 Then mExpiresAtMs = mExpiresAtMs + 4000
+    mToastActionLabel = actionLabel
+    mToastActionProc = handlerProc
+    Touch
+    Set Action = Me
+End Function
+
+Public Function AltText(ByVal altDescription As String) As ReDimUI
+    RequireRole ROLE_COMPONENT, "AltText"
+    mAltText = altDescription
+    Touch
+    Set AltText = Me
 End Function
 
 Public Function Value(ByVal newNumber As Double) As ReDimUI
@@ -3000,6 +3276,7 @@ Friend Sub SyncInputFromSheet(ByVal hostApp As ReDimUI, ByVal changed As Range)
         ElseIf LenB(cellText) > 0 _
             And FilterItems(cellText).Count > 0 Then
             mValue = 0
+            If Not mSelectOpen Then NoteListOpened
             mSelectOpen = True
             mFilterPristine = False
             mListOffset = 0
@@ -3081,6 +3358,7 @@ Friend Sub ConfigureToast( _
             mSlideRemaining = occupiedTop + mHeight + 6 - mTop
         End If
     End If
+    If ReDimUI.MotionReduced Then mSlideRemaining = 0
     mHasRect = True
     mVisible = True
 End Sub
@@ -3104,6 +3382,7 @@ Friend Sub BeginToastExit()
     If mToastExiting Then Exit Sub
     mToastExiting = True
     mExitRemaining = 1
+    If ReDimUI.MotionReduced Then mExitRemaining = 0
     ReDimUI.RequestPump
 End Sub
 
@@ -3127,6 +3406,12 @@ Friend Sub ReslotToast(ByVal newSlot As Long)
     mTop = originTop + (newSlot - 1) * slotPitch
     mSlideRemaining = visualTop - mTop
     If mSlideRemaining < 0 Then mSlideRemaining = 0
+    If ReDimUI.MotionReduced Then
+        ' No glide: the next apply moves the shape to its slot, and its
+        ' buttons with it.
+        mSlideRemaining = 0
+        Touch
+    End If
     ReDimUI.RequestPump
 End Sub
 
@@ -3134,6 +3419,11 @@ Friend Function IsExpiredToast(ByVal nowMs As LongLong) As Boolean
     If mKind <> KIND_TOAST Then Exit Function
     IsExpiredToast = (nowMs >= mExpiresAtMs)
 End Function
+
+' Test seam: milliseconds until the toast expires.
+Friend Property Get ToastRemainingMs() As Long
+    If mKind = KIND_TOAST Then ToastRemainingMs = CLng(mExpiresAtMs - GetTickCount64())
+End Property
 
 Friend Property Get IsPendingToast() As Boolean
     IsPendingToast = (mKind = KIND_TOAST)
@@ -3235,6 +3525,19 @@ Friend Function PointClaimedByChrome( _
         End If
     Next componentValue
 End Function
+
+' One open list per app: a list opening, or a click on any other
+' control, closes the rest.
+Friend Sub CloseListsExcept(ByVal keepComponentId As String)
+    Dim componentValue As ReDimUI
+
+    RequireRole ROLE_APP, "CloseListsExcept"
+    For Each componentValue In mComponents
+        If componentValue.ComponentId <> keepComponentId Then
+            componentValue.CloseDropList
+        End If
+    Next componentValue
+End Sub
 
 ' Rows a transfer panel can draw; mirrors the renderer's header height
 ' (18), row height (20), and row inset (6). Keep in sync with
@@ -3473,7 +3776,10 @@ Friend Sub RunClickBehavior()
             End If
             Exit Sub
         Case KIND_COMBO
-            If ReDimUI.SenderPart = "optu" Or ReDimUI.SenderPart = "optd" Then
+            If ReDimUI.SenderPart = "optn" Then
+                ' The empty row is a message, not an option.
+                Exit Sub
+            ElseIf ReDimUI.SenderPart = "optu" Or ReDimUI.SenderPart = "optd" Then
                 PageDropList (ReDimUI.SenderPart = "optd")
                 Exit Sub
             ElseIf Left$(ReDimUI.SenderPart, 3) = "opt" _
@@ -3500,7 +3806,9 @@ Friend Sub RunClickBehavior()
                 Exit Sub
             End If
         Case KIND_SELECT
-            If ReDimUI.SenderPart = "optu" Or ReDimUI.SenderPart = "optd" Then
+            If ReDimUI.SenderPart = "optn" Then
+                Exit Sub
+            ElseIf ReDimUI.SenderPart = "optu" Or ReDimUI.SenderPart = "optd" Then
                 PageDropList (ReDimUI.SenderPart = "optd")
                 Exit Sub
             ElseIf Left$(ReDimUI.SenderPart, 3) = "opt" _
@@ -3645,8 +3953,13 @@ Friend Sub RunClickBehavior()
             End If
             Exit Sub
         Case KIND_TOAST
+            ' Any click dismisses; the action button also runs its
+            ' handler, whose errors reach the app's error handler.
             mExpiresAtMs = 1
             ReDimUI.RequestPump
+            If ReDimUI.SenderPart = "ta" And LenB(mToastActionProc) > 0 Then
+                Application.Run mToastActionProc
+            End If
             Exit Sub
     End Select
     RunClickHandlers hostApp
@@ -3751,8 +4064,82 @@ Friend Sub Apply( _
     ApplyText mainShape, themeValue
     ApplyBehavior mainShape, hostSheet
     ApplyKindExtras mainShape, hostSheet, themeValue
+    ApplyAltText mainShape
     mAppliedValid = True
 End Sub
+
+Private Sub ApplyAltText(ByVal mainShape As Shape)
+    Dim described As String
+
+    described = AccessibleDescription()
+    If described = mAppliedAltText Then
+        If mAppliedValid Or LenB(described) = 0 Then Exit Sub
+    End If
+    mAppliedAltText = described
+    On Error Resume Next
+    mainShape.AlternativeText = described
+    On Error GoTo 0
+End Sub
+
+' What a screen reader says for the control: the AltText override, or
+' its text, its role, and the state that matters for the kind. Labels,
+' cards, and toasts are their text, which a reader already gets, so
+' they carry none; typed field text stays out for the same reason, and
+' progress reads in 5 percent steps. Each of those would otherwise
+' cost a write on the hottest update paths.
+Private Function AccessibleDescription() As String
+    Dim described As String
+
+    If LenB(mAltText) > 0 Then
+        AccessibleDescription = mAltText
+        Exit Function
+    End If
+    Select Case mKind
+        Case KIND_BUTTON
+            described = mText & ", button"
+            If mBusy Then described = described & ", busy"
+        Case KIND_PROGRESS
+            described = "Progress, " & CStr(CLng(mValue / 5) * 5) & " percent"
+        Case KIND_SPINNER
+            described = "Busy"
+        Case KIND_TOGGLE
+            described = "Switch, " & IIf(mChecked, "on", "off")
+        Case KIND_INPUT
+            described = "Edit field"
+        Case KIND_COMBO
+            described = "Combo box"
+        Case KIND_SELECT
+            If CLng(mValue) >= 1 And CLng(mValue) <= ItemCount Then
+                described = "Drop-down, " & ItemAt(CLng(mValue))
+            Else
+                described = "Drop-down, " & mText
+            End If
+        Case KIND_TICKBOX
+            described = mText & ", checkbox, " & _
+                IIf(mChecked, "checked", "not checked")
+        Case KIND_RADIO
+            described = "Radio group"
+            If CLng(mValue) >= 1 And CLng(mValue) <= ItemCount Then
+                described = described & ", " & ItemAt(CLng(mValue)) & " selected"
+            End If
+        Case KIND_STEPPER
+            described = "Stepper, " & CStr(mValue)
+        Case KIND_SLIDEBAR
+            described = "Slider, " & CStr(mValue)
+        Case KIND_TRANSFER
+            described = "Transfer list"
+        Case KIND_CHECKLIST
+            EnsureCheckedSet
+            described = "Checklist, " & CStr(mCheckedSet.Count) & " of " & _
+                CStr(ItemCount) & " checked"
+        Case KIND_IMAGE
+            described = "Image"
+    End Select
+    If Not mEnabled And LenB(described) > 0 Then
+        described = described & ", unavailable"
+    End If
+    AccessibleDescription = described
+End Function
 
 Private Sub ResolveBindings(ByVal hostApp As ReDimUI)
     Dim bound As Variant
@@ -4208,6 +4595,8 @@ Private Function ResolveFill(ByVal themeValue As ReDimUI) As Long
             ResolveFill = themeValue.SuccessColor
         Case VARIANT_DANGER
             ResolveFill = themeValue.DangerColor
+        Case VARIANT_WARNING
+            ResolveFill = themeValue.WarningColor
         Case Else
             If mKind = KIND_CARD Then
                 ResolveFill = themeValue.SurfaceColor
@@ -4254,6 +4643,12 @@ Friend Function ResolveText(ByVal hostApp As ReDimUI) As String
         ResolveText = ItemAt(CLng(mValue))
         If LenB(ResolveText) = 0 Then ResolveText = mText
         Exit Function
+    End If
+    If mKind = KIND_TOAST Then
+        If LenB(ToastIcon()) > 0 Then
+            ResolveText = ToastIcon() & vbTab & mText
+            Exit Function
+        End If
     End If
     ' A focused float field shows the blinking insertion bar at the
     ' caret index; the blink swaps to a space so text never shifts.
@@ -4500,7 +4895,132 @@ Private Sub ApplyKindExtras( _
             ApplyCheckListParts mainShape, hostSheet, themeValue
         Case KIND_TOAST
             If mSlideRemaining > 0 Then mainShape.Top = mTop + mSlideRemaining
+            ApplyToastParts mainShape, hostSheet, themeValue
     End Select
+End Sub
+
+' A toast's tone from its variant: none unless a variant builder ran;
+' Primary reads as information.
+Private Function ToastIcon() As String
+    If Not mVariantChosen Then Exit Function
+    Select Case mStyleVariant
+        Case VARIANT_PRIMARY
+            ToastIcon = ChrW(&H2139)
+        Case VARIANT_SUCCESS
+            ToastIcon = ChrW(&H2713)
+        Case VARIANT_WARNING
+            ToastIcon = ChrW(&H26A0)
+        Case VARIANT_DANGER
+            ToastIcon = ChrW(&H2715)
+    End Select
+End Function
+
+Private Function ToastToneColor(ByVal themeValue As ReDimUI) As Long
+    Select Case mStyleVariant
+        Case VARIANT_SUCCESS
+            ToastToneColor = themeValue.SuccessColor
+        Case VARIANT_WARNING
+            ToastToneColor = themeValue.WarningColor
+        Case VARIANT_DANGER
+            ToastToneColor = themeValue.DangerColor
+        Case Else
+            ToastToneColor = themeValue.PrimaryColor
+    End Select
+End Function
+
+' The tone's icon color and edge, the close button, and the action
+' button, placed at the toast's current visual top; the pump carries
+' them through the slide and the fade from there.
+Private Sub ApplyToastParts( _
+    ByVal mainShape As Shape, _
+    ByVal hostSheet As Worksheet, _
+    ByVal themeValue As ReDimUI _
+)
+    Dim visualTop As Double
+    Dim closeButton As Shape
+    Dim actionButton As Shape
+    Dim actionWidth As Double
+    Dim resolvedSize As Double
+
+    visualTop = mTop + mSlideRemaining
+    If ExtrasCurrent(PartsState(themeValue) & ":" & ToastIcon() & ":" & _
+        mToastActionLabel & ":" & CStr(visualTop)) Then Exit Sub
+    resolvedSize = mFontSize
+    If resolvedSize <= 0 Then resolvedSize = themeValue.BaseFontSize
+    If LenB(ToastIcon()) > 0 Then
+        mainShape.Line.ForeColor.RGB = ToastToneColor(themeValue)
+        mainShape.Line.Weight = 1.5
+        With mainShape.TextFrame2.TextRange
+            .Characters(1, 1).Font.Fill.ForeColor.RGB = ToastToneColor(themeValue)
+            With .ParagraphFormat.TabStops
+                If .Count = 0 Then .Add msoTabStopLeft, 18
+            End With
+        End With
+    End If
+
+    Set closeButton = EnsurePartShape(hostSheet, "tx", msoShapeRectangle)
+    closeButton.Left = mLeft + mWidth - PAGER_TARGET - 3
+    closeButton.Top = visualTop + 3
+    closeButton.Width = PAGER_TARGET
+    closeButton.Height = PAGER_TARGET
+    closeButton.Fill.Visible = msoTrue
+    closeButton.Fill.ForeColor.RGB = ResolveSurfaceFill(themeValue)
+    closeButton.Line.Visible = msoFalse
+    StyleGlyphText closeButton, ChrW(&H2715), themeValue.OnMutedColor, 8, _
+        themeValue
+    closeButton.Visible = BoolToMso(mVisible)
+    closeButton.OnAction = mAppliedOnAction
+
+    If LenB(mToastActionLabel) > 0 Then
+        ' Sized from the label; ink in surface text, since the accent
+        ' does not reach 4.5:1 as text on every theme's surface.
+        actionWidth = Len(mToastActionLabel) * resolvedSize * 0.62 + 14
+        Set actionButton = EnsurePartShape( _
+            hostSheet, "ta", msoShapeRoundedRectangle)
+        actionButton.Left = mLeft + mWidth - PAGER_TARGET - 7 - actionWidth
+        actionButton.Top = visualTop + (mHeight - 22) / 2
+        actionButton.Width = actionWidth
+        actionButton.Height = 22
+        actionButton.Fill.Visible = msoTrue
+        actionButton.Fill.ForeColor.RGB = ResolveSurfaceFill(themeValue)
+        actionButton.Line.Visible = msoTrue
+        actionButton.Line.ForeColor.RGB = themeValue.PrimaryColor
+        actionButton.Line.Weight = 1
+        StyleGlyphText actionButton, mToastActionLabel, _
+            themeValue.OnSurfaceColor, resolvedSize - 1, themeValue
+        actionButton.Visible = BoolToMso(mVisible)
+        actionButton.OnAction = mAppliedOnAction
+        mainShape.TextFrame2.MarginRight = PAGER_TARGET + 11 + actionWidth
+    Else
+        mainShape.TextFrame2.MarginRight = PAGER_TARGET + 6
+    End If
+    mainShape.TextFrame2.MarginLeft = 8
+End Sub
+
+' Carries the close and action buttons with the toast's slide and fade.
+Private Sub TrackToastParts(ByVal hostSheet As Worksheet)
+    Dim visualTop As Double
+
+    visualTop = mTop + mSlideRemaining
+    On Error Resume Next
+    hostSheet.Shapes(ShapeName & PART_SEPARATOR & "tx").Top = visualTop + 3
+    hostSheet.Shapes(ShapeName & PART_SEPARATOR & "ta").Top = _
+        visualTop + (mHeight - 22) / 2
+    If mToastExiting Then
+        FadeToastPart hostSheet, "tx"
+        FadeToastPart hostSheet, "ta"
+    End If
+    On Error GoTo 0
+End Sub
+
+Private Sub FadeToastPart(ByVal hostSheet As Worksheet, ByVal partName As String)
+    On Error Resume Next
+    With hostSheet.Shapes(ShapeName & PART_SEPARATOR & partName)
+        .Fill.Transparency = 1 - mExitRemaining
+        .Line.Transparency = 1 - mExitRemaining
+        .TextFrame2.TextRange.Font.Fill.Transparency = 1 - mExitRemaining
+    End With
+    On Error GoTo 0
 End Sub
 
 Private Sub StyleGlyphText( _
@@ -4602,6 +5122,7 @@ Friend Sub ForgetPartSignatures()
     ' redraw when needed and one delete when not.
     mAppliedPagerUpSig = "?"
     mAppliedPagerDownSig = "?"
+    mAppliedEmptyRowSig = "?"
     mAppliedHeaderLeftSig = vbNullString
     mAppliedHeaderRightSig = vbNullString
     mAppliedScrollLeftSig = "?"
@@ -5043,7 +5564,14 @@ Private Sub ApplyToggleKnob( _
         knob.Left = mLeft + 2
     End If
     knob.Fill.Visible = msoTrue
-    knob.Fill.ForeColor.RGB = RGB(255, 255, 255)
+    ' On, the knob takes the ink that reads on the accent track, the way
+    ' Windows draws it: white on the light theme's green, dark on the
+    ' dark theme's, black on high contrast's yellow.
+    If mChecked And mEnabled Then
+        knob.Fill.ForeColor.RGB = themeValue.OnPrimaryColor
+    Else
+        knob.Fill.ForeColor.RGB = RGB(255, 255, 255)
+    End If
     knob.Visible = BoolToMso(mVisible)
     knob.OnAction = mAppliedOnAction
 End Sub
@@ -5230,27 +5758,27 @@ Private Sub ApplyTransferScroller( _
         appliedKey = scrollKey
         Set scrollButton = EnsurePartShape( _
             hostSheet, upPart, msoShapeRoundedRectangle)
-        scrollButton.Left = panelX + panelW - 17
+        scrollButton.Left = panelX + panelW - PAGER_TARGET - 3
         scrollButton.Top = panelTop + 3
-        scrollButton.Width = 14
-        scrollButton.Height = 14
+        scrollButton.Width = PAGER_TARGET
+        scrollButton.Height = PAGER_TARGET
         scrollButton.Fill.Visible = msoTrue
         scrollButton.Fill.ForeColor.RGB = themeValue.MutedColor
         StyleGlyphText scrollButton, ChrW(9650), _
-            ResolveDrawnInk(themeValue), 7, themeValue
+            ResolveDrawnInk(themeValue), 9, themeValue
         scrollButton.Visible = msoTrue
         scrollButton.OnAction = mAppliedOnAction
         If firstDraw Then scrollButton.ZOrder msoBringToFront
         Set scrollButton = EnsurePartShape( _
             hostSheet, downPart, msoShapeRoundedRectangle)
-        scrollButton.Left = panelX + panelW - 17
-        scrollButton.Top = panelTop + panelH - 17
-        scrollButton.Width = 14
-        scrollButton.Height = 14
+        scrollButton.Left = panelX + panelW - PAGER_TARGET - 3
+        scrollButton.Top = panelTop + panelH - PAGER_TARGET - 3
+        scrollButton.Width = PAGER_TARGET
+        scrollButton.Height = PAGER_TARGET
         scrollButton.Fill.Visible = msoTrue
         scrollButton.Fill.ForeColor.RGB = themeValue.MutedColor
         StyleGlyphText scrollButton, ChrW(9660), _
-            ResolveDrawnInk(themeValue), 7, themeValue
+            ResolveDrawnInk(themeValue), 9, themeValue
         scrollButton.Visible = msoTrue
         scrollButton.OnAction = mAppliedOnAction
         If firstDraw Then scrollButton.ZOrder msoBringToFront
@@ -5317,6 +5845,7 @@ Private Sub SyncTransferRows( _
     Dim itemIndex As Long
     Dim rowWidth As Double
     Dim resolvedSize As Double
+    Dim rowSelected As Boolean
     Dim rowKey As String
     Dim priorKey As String
     Dim rowText As String
@@ -5334,7 +5863,7 @@ Private Sub SyncTransferRows( _
     rowWidth = panelW - 6
     If itemsRef.Count > Int((panelH - 6) / ROW_H) Then
         ' Leave room for the paging arrows.
-        rowWidth = rowWidth - 16
+        rowWidth = rowWidth - PAGER_TARGET - 2
     End If
     resolvedSize = mFontSize
     If resolvedSize <= 0 Then resolvedSize = themeValue.BaseFontSize
@@ -5343,14 +5872,15 @@ Private Sub SyncTransferRows( _
     EnsureRowStates rowStates, wanted
     For idx = 1 To wanted
         itemIndex = scrollOffset + idx
-        If TransferSelectionHas(selectionSet, itemIndex) Then
+        rowSelected = TransferSelectionHas(selectionSet, itemIndex)
+        If rowSelected Then
             rowFill = themeValue.PrimaryColor
             rowInk = themeValue.OnPrimaryColor
         Else
             rowFill = ResolveSurfaceFill(themeValue)
             rowInk = themeValue.OnSurfaceColor
         End If
-        rowText = CStr(itemsRef.Item(itemIndex))
+        rowText = GutterText(rowSelected, CStr(itemsRef.Item(itemIndex)))
         rowKey = layoutKey & Chr$(1) & CStr(rowFill) & ":" & _
             CStr(rowInk) & ":" & rowText
         priorKey = rowStates(idx)
@@ -5388,6 +5918,9 @@ Private Sub SyncTransferRows( _
                         .Fill.ForeColor.RGB = rowInk
                     End With
                 End With
+                If LenB(priorKey) = 0 Or partCreated Then
+                    EnsureGutterTab rowShape
+                End If
                 rowShape.Visible = msoTrue
                 rowShape.OnAction = mAppliedOnAction
                 If LenB(priorKey) = 0 Then rowShape.ZOrder msoBringToFront
@@ -5590,17 +6123,49 @@ Friend Sub TickSlideDrag(ByVal hostApp As ReDimUI, ByVal buttonDown As Boolean)
 End Sub
 
 Private Function PressClaimedByChrome(ByVal hostApp As ReDimUI) As Boolean
-    Dim screenPoint As RdxScreenPoint
     Dim pointsX As Double
     Dim pointsY As Double
 
+    If Not PointerPoints(pointsX, pointsY) Then Exit Function
+    PressClaimedByChrome = hostApp.PointClaimedByChrome( _
+        pointsX, pointsY, mComponentId)
+End Function
+
+' The pointer in sheet points: the test override when one is set, else
+' the cursor mapped through the active window. False when unmappable.
+Private Function PointerPoints( _
+    ByRef pointsX As Double, _
+    ByRef pointsY As Double _
+) As Boolean
+    Dim screenPoint As RdxScreenPoint
+
+    If ReDimUI.PointerOverride(pointsX, pointsY) Then
+        PointerPoints = True
+        Exit Function
+    End If
     If GetCursorPos(screenPoint) = 0 Then Exit Function
     pointsX = ScreenXToSheetPoints(screenPoint.pixelX)
     If pointsX = UNMAPPABLE_POINTS Then Exit Function
     pointsY = ScreenYToSheetPoints(screenPoint.pixelY)
     If pointsY = UNMAPPABLE_POINTS Then Exit Function
-    PressClaimedByChrome = hostApp.PointClaimedByChrome( _
-        pointsX, pointsY, mComponentId)
+    PointerPoints = True
+End Function
+
+' True when a sheet point lies on the face or on the open list's rows and
+' pagers, below the face or above it, with a two-point slop.
+Private Function ListAreaHolds( _
+    ByVal pointsX As Double, _
+    ByVal pointsY As Double _
+) As Boolean
+    If pointsX < mLeft - 2 Or pointsX > mLeft + mWidth + 2 Then Exit Function
+    If mListFlipped Then
+        If pointsY < mTop - DropListDepth() - 2 Then Exit Function
+        If pointsY > mTop + mHeight + 2 Then Exit Function
+    Else
+        If pointsY < mTop - 2 Then Exit Function
+        If pointsY > mTop + mHeight + DropListDepth() + 2 Then Exit Function
+    End If
+    ListAreaHolds = True
 End Function
 
 ' True when this component projects floating chrome over the given
@@ -5610,8 +6175,6 @@ Friend Function ChromeClaimsPoint( _
     ByVal pointsX As Double, _
     ByVal pointsY As Double _
 ) As Boolean
-    Dim listDepth As Double
-
     If Not mVisible Then Exit Function
     If mKind = KIND_OVERLAY Then
         If pointsX >= mLeft And pointsX <= mLeft + mWidth _
@@ -5621,12 +6184,7 @@ Friend Function ChromeClaimsPoint( _
         Exit Function
     End If
     If (mKind = KIND_COMBO Or mKind = KIND_SELECT) And mSelectOpen Then
-        listDepth = DropListDepth()
-        If pointsX >= mLeft - 2 And pointsX <= mLeft + mWidth + 2 _
-            And pointsY >= mTop _
-            And pointsY <= mTop + mHeight + listDepth + 2 Then
-            ChromeClaimsPoint = True
-        End If
+        ChromeClaimsPoint = ListAreaHolds(pointsX, pointsY)
     End If
 End Function
 
@@ -5673,28 +6231,28 @@ Friend Function NeedsDragWatch(ByVal hostSheet As Worksheet) As Boolean
 End Function
 
 Private Function CursorOverTrack() As Boolean
-    Dim screenPoint As RdxScreenPoint
     Dim pointsX As Double
     Dim pointsY As Double
 
-    If GetCursorPos(screenPoint) = 0 Then Exit Function
-    pointsX = ScreenXToSheetPoints(screenPoint.pixelX)
-    If pointsX = UNMAPPABLE_POINTS Then Exit Function
-    pointsY = ScreenYToSheetPoints(screenPoint.pixelY)
-    If pointsY = UNMAPPABLE_POINTS Then Exit Function
+    If Not PointerPoints(pointsX, pointsY) Then Exit Function
     If pointsX < mLeft - 8 Or pointsX > mLeft + mWidth + 8 Then Exit Function
     If pointsY < mTop - 4 Or pointsY > mTop + mHeight + 4 Then Exit Function
     CursorOverTrack = True
 End Function
 
+' Horizontal only: a drag keeps tracking while the cursor strays above or
+' below the grid, where its vertical position cannot be mapped.
 Private Function CursorTrackFraction() As Double
     Dim screenPoint As RdxScreenPoint
     Dim cursorPoints As Double
+    Dim overriddenY As Double
 
     CursorTrackFraction = -1
-    If GetCursorPos(screenPoint) = 0 Then Exit Function
-    cursorPoints = ScreenXToSheetPoints(screenPoint.pixelX)
-    If cursorPoints = UNMAPPABLE_POINTS Then Exit Function
+    If Not ReDimUI.PointerOverride(cursorPoints, overriddenY) Then
+        If GetCursorPos(screenPoint) = 0 Then Exit Function
+        cursorPoints = ScreenXToSheetPoints(screenPoint.pixelX)
+        If cursorPoints = UNMAPPABLE_POINTS Then Exit Function
+    End If
     If mWidth <= 0 Then Exit Function
     CursorTrackFraction = (cursorPoints - mLeft) / mWidth
     If CursorTrackFraction < 0 Then CursorTrackFraction = 0
@@ -5839,9 +6397,12 @@ Private Sub SyncDropList( _
     Dim rowInk As Long
     Dim rowKey As String
     Dim rowFrame As String
+    Dim rowText As String
     Dim priorKey As String
     Dim partCreated As Boolean
     Dim listSig As String
+    Dim showEmpty As Boolean
+    Dim listTopAt As Double
 
     ' A closed list draws nothing, so it skips the match walk: an item
     ' change on a closed long list would otherwise rebuild every match.
@@ -5865,13 +6426,16 @@ Private Sub SyncDropList( _
     rowPitch = DropRowPitch()
     resolvedSize = mFontSize
     If resolvedSize <= 0 Then resolvedSize = themeValue.BaseFontSize
+    showEmpty = (mSelectOpen And mVisible And matchTotal = 0)
+    listTopAt = ListTop()
     ' Keystrokes and repaints that leave the visible list identical (same
-    ' window, rows, highlight, selection, geometry, and theme) skip the
-    ' shape work entirely.
+    ' window, rows, highlight, selection, direction, geometry, and theme)
+    ' skip the shape work entirely.
     listSig = CStr(ObjPtr(themeValue)) & ":" & CStr(wanted) & ":" & _
         CStr(mValue) & ":" & CStr(mListOffset) & ":" & _
         CStr(mListHighlight) & ":" & CStr(aboveCount) & ":" & _
-        CStr(belowCount) & ":" & CStr(mLeft) & ":" & CStr(mTop) & ":" & _
+        CStr(belowCount) & ":" & CStr(showEmpty) & ":" & _
+        CStr(listTopAt) & ":" & CStr(mLeft) & ":" & CStr(mTop) & ":" & _
         CStr(mWidth) & ":" & CStr(mHeight) & ":" & CStr(resolvedSize)
     For idx = 1 To wanted
         itemIndex = CLng(mListMatches.Item(mListOffset + idx))
@@ -5886,12 +6450,14 @@ Private Sub SyncDropList( _
         On Error GoTo 0
     End If
     SyncListPager hostSheet, themeValue, "optu", ChrW(9650), _
-        aboveCount, mTop + mHeight, resolvedSize, mAppliedPagerUpSig
+        aboveCount, listTopAt, resolvedSize, mAppliedPagerUpSig
+    SyncEmptyRow hostSheet, themeValue, showEmpty, listTopAt, rowPitch, _
+        resolvedSize
     EnsureRowStates mAppliedRowStates, wanted
     For idx = 1 To wanted
         matchIndex = mListOffset + idx
         itemIndex = CLng(mListMatches.Item(matchIndex))
-        rowTop = mTop + mHeight + (rowShift + idx - 1) * rowPitch
+        rowTop = listTopAt + (rowShift + idx - 1) * rowPitch
         If matchIndex = mListHighlight Then
             rowFill = themeValue.PrimaryColor
             rowInk = themeValue.OnPrimaryColor
@@ -5904,8 +6470,9 @@ Private Sub SyncDropList( _
         End If
         rowFrame = PartsState(themeValue) & ":" & CStr(rowTop) & ":" & _
             CStr(rowPitch) & ":" & CStr(resolvedSize)
+        rowText = GutterText(itemIndex = CLng(mValue), ItemAt(itemIndex))
         rowKey = rowFrame & Chr$(1) & CStr(rowFill) & ":" & _
-            CStr(rowInk) & ":" & ItemAt(itemIndex)
+            CStr(rowInk) & ":" & rowText
         priorKey = mAppliedRowStates(idx)
         If rowKey <> priorKey Then
             mAppliedRowStates(idx) = rowKey
@@ -5915,7 +6482,7 @@ Private Sub SyncDropList( _
                 ' Same frame: only the fill, the text, and the ink move.
                 optionShape.Fill.ForeColor.RGB = rowFill
                 With optionShape.TextFrame2.TextRange
-                    .Text = ItemAt(itemIndex)
+                    .Text = rowText
                     .Font.Fill.ForeColor.RGB = rowInk
                 End With
             Else
@@ -5935,7 +6502,7 @@ Private Sub SyncDropList( _
                     .MarginBottom = 2
                     .VerticalAnchor = msoAnchorMiddle
                     .WordWrap = msoFalse
-                    .TextRange.Text = ItemAt(itemIndex)
+                    .TextRange.Text = rowText
                     .TextRange.ParagraphFormat.Alignment = msoAlignLeft
                     With .TextRange.Font
                         .Name = themeValue.FontName
@@ -5944,6 +6511,9 @@ Private Sub SyncDropList( _
                         .Fill.ForeColor.RGB = rowInk
                     End With
                 End With
+                If LenB(priorKey) = 0 Or partCreated Then
+                    EnsureGutterTab optionShape
+                End If
                 optionShape.Visible = msoTrue
                 optionShape.OnAction = mAppliedOnAction
                 If LenB(priorKey) = 0 Then optionShape.ZOrder msoBringToFront
@@ -5959,9 +6529,125 @@ Private Sub SyncDropList( _
     Next idx
     mAppliedOptionCount = wanted
     SyncListPager hostSheet, themeValue, "optd", ChrW(9660), _
-        belowCount, mTop + mHeight + (rowShift + wanted) * rowPitch, _
+        belowCount, listTopAt + (rowShift + wanted) * rowPitch, _
         resolvedSize, mAppliedPagerDownSig
 End Sub
+
+' A list row's text: the check in the gutter when the row is marked,
+' then a tab and the item, so marked and unmarked rows align.
+Private Function GutterText(ByVal marked As Boolean, ByVal itemText As String) As String
+    If marked Then
+        GutterText = ChrW(10003) & vbTab & itemText
+    Else
+        GutterText = vbTab & itemText
+    End If
+End Function
+
+' The tab stop the gutter aligns to. Shape text keeps it through later
+' text writes, so rows check for it only when first drawn.
+Private Sub EnsureGutterTab(ByVal rowShape As Shape)
+    With rowShape.TextFrame2.TextRange.ParagraphFormat.TabStops
+        If .Count = 0 Then .Add msoTabStopLeft, LIST_GUTTER
+    End With
+End Sub
+
+' The inert row an open list shows when it has nothing to list, in
+' muted italic: "No matches" under a combo's filter, "No items" in
+' an empty select.
+Private Sub SyncEmptyRow( _
+    ByVal hostSheet As Worksheet, _
+    ByVal themeValue As ReDimUI, _
+    ByVal showIt As Boolean, _
+    ByVal rowTop As Double, _
+    ByVal rowPitch As Double, _
+    ByVal resolvedSize As Double _
+)
+    Dim emptyShape As Shape
+    Dim emptyKey As String
+    Dim emptyText As String
+
+    If showIt Then
+        If mKind = KIND_COMBO Then
+            emptyText = "No matches"
+        Else
+            emptyText = "No items"
+        End If
+        emptyKey = PartsState(themeValue) & ":" & CStr(rowTop) & ":" & _
+            CStr(rowPitch) & ":" & CStr(resolvedSize) & ":" & emptyText
+        If emptyKey = mAppliedEmptyRowSig Then Exit Sub
+        mAppliedEmptyRowSig = emptyKey
+        Set emptyShape = EnsurePartShape(hostSheet, "optn", msoShapeRectangle)
+        emptyShape.Left = mLeft
+        emptyShape.Top = rowTop
+        emptyShape.Width = mWidth
+        emptyShape.Height = rowPitch
+        emptyShape.Fill.Visible = msoTrue
+        emptyShape.Fill.ForeColor.RGB = themeValue.SurfaceColor
+        emptyShape.Line.Visible = msoTrue
+        emptyShape.Line.ForeColor.RGB = themeValue.BorderColor
+        emptyShape.Line.Weight = 1
+        With emptyShape.TextFrame2
+            .MarginLeft = 6
+            .MarginRight = 6
+            .MarginTop = 2
+            .MarginBottom = 2
+            .VerticalAnchor = msoAnchorMiddle
+            .WordWrap = msoFalse
+            .TextRange.Text = GutterText(False, emptyText)
+            .TextRange.ParagraphFormat.Alignment = msoAlignLeft
+            With .TextRange.Font
+                .Name = themeValue.FontName
+                .Size = resolvedSize
+                .Bold = msoFalse
+                .Italic = msoTrue
+                .Fill.ForeColor.RGB = themeValue.OnMutedColor
+            End With
+        End With
+        EnsureGutterTab emptyShape
+        emptyShape.Visible = msoTrue
+        emptyShape.OnAction = mAppliedOnAction
+        emptyShape.ZOrder msoBringToFront
+    ElseIf LenB(mAppliedEmptyRowSig) > 0 Then
+        mAppliedEmptyRowSig = vbNullString
+        On Error Resume Next
+        hostSheet.Shapes(ShapeName & PART_SEPARATOR & "optn").Delete
+        On Error GoTo 0
+    End If
+End Sub
+
+' The top edge of the open list: right under the face, or above it with
+' its last row touching the face when the list opened upward.
+Private Function ListTop() As Double
+    If mListFlipped Then
+        ListTop = mTop - DropListDepth()
+    Else
+        ListTop = mTop + mHeight
+    End If
+End Function
+
+' A list that would run past the bottom of the visible window opens
+' upward instead, when the window has more room above the face than
+' below it. Decided once per opening, so a filter that shrinks the list
+' never makes it jump sides.
+Private Function ListOpensUpward() As Boolean
+    Dim viewLeft As Double
+    Dim viewTop As Double
+    Dim viewWidth As Double
+    Dim viewHeight As Double
+    Dim shownRows As Long
+    Dim fullDepth As Double
+    Dim roomBelow As Double
+
+    shownRows = ItemCount
+    If shownRows > mListRows Then shownRows = mListRows
+    If shownRows < 1 Then shownRows = 1
+    fullDepth = shownRows * DropRowPitch()
+    If ItemCount > mListRows Then fullDepth = fullDepth + 2 * mHeight
+    OwnerApp.ResolveViewport viewLeft, viewTop, viewWidth, viewHeight
+    roomBelow = viewTop + viewHeight - (mTop + mHeight)
+    If fullDepth <= roomBelow Then Exit Function
+    ListOpensUpward = (mTop - viewTop > roomBelow)
+End Function
 
 ' The frame half of a stored row key (frame & Chr$(1) & content): when a
 ' row's new frame matches, only its content needs writing.
@@ -6010,6 +6696,11 @@ Private Function DropListDepth() As Double
 
     If Not mSelectOpen Or mListMatches Is Nothing Then Exit Function
     matchTotal = mListMatches.Count
+    ' An empty list still shows its one inert row.
+    If matchTotal = 0 Then
+        DropListDepth = DropRowPitch()
+        Exit Function
+    End If
     shownRows = matchTotal - mListOffset
     If shownRows > mListRows Then shownRows = mListRows
     If shownRows < 0 Then shownRows = 0
@@ -6052,6 +6743,7 @@ Private Sub OpenDropList(ByVal hostSheet As Worksheet)
     Dim currentItem As Long
 
     mSelectOpen = True
+    NoteListOpened
     mFilterPristine = True
     mListHighlight = 0
     If mKind = KIND_COMBO Then
@@ -6324,6 +7016,7 @@ Friend Sub HandleKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
     ' nothing reopen a closed list as it was.
     If mKind = KIND_COMBO Then
         If mText <> textBeforeKey Then
+            If Not mSelectOpen Then NoteListOpened
             mSelectOpen = True
             mFilterPristine = False
             mListOffset = 0
@@ -6467,24 +7160,57 @@ Friend Sub TickFieldWatch( _
     BlurField hostApp, True
 End Sub
 
+' An open list that no field watch covers (a SelectBox, or a cell-backed
+' combo's suggestions) closes the way a native drop-down does: on a press
+' off its face and rows, or when the grid selection moves. The first frame
+' records the selection, since a cell combo opens from an edit whose Enter
+' moves the selection right after.
+Friend Function NeedsListWatch() As Boolean
+    If Not mSelectOpen Or Not mVisible Then Exit Function
+    NeedsListWatch = (mKind = KIND_SELECT) _
+        Or (mKind = KIND_COMBO And Not IsFloatField())
+End Function
+
+Friend Sub TickListWatch(ByVal pressEdge As Boolean, ByVal pollSelection As Boolean)
+    If Not NeedsListWatch() Then Exit Sub
+    If pollSelection Then
+        If LenB(mListSelAtOpen) = 0 Then
+            mListSelAtOpen = CurrentSelectionKey()
+        ElseIf CurrentSelectionKey() <> mListSelAtOpen Then
+            CloseDropList
+            Exit Sub
+        End If
+    End If
+    If pressEdge Then
+        If Not CursorOverField() Then CloseDropList
+    End If
+End Sub
+
+' Closes an open list without picking anything.
+Friend Sub CloseDropList()
+    If Not mSelectOpen Then Exit Sub
+    mSelectOpen = False
+    mListHighlight = 0
+    Touch
+End Sub
+
+' Every path that opens the list: the app's other lists close, the list
+' picks its side, the watch starts over, and the pump runs so the watch
+' sees presses elsewhere.
+Private Sub NoteListOpened()
+    mListSelAtOpen = vbNullString
+    mListFlipped = ListOpensUpward()
+    OwnerApp.CloseListsExcept mComponentId
+    ReDimUI.RequestPump
+End Sub
+
 Private Function CursorOverField() As Boolean
-    Dim screenPoint As RdxScreenPoint
     Dim pointsX As Double
     Dim pointsY As Double
-    Dim listDepth As Double
 
-    If GetCursorPos(screenPoint) = 0 Then Exit Function
-    pointsX = ScreenXToSheetPoints(screenPoint.pixelX)
-    If pointsX = UNMAPPABLE_POINTS Then Exit Function
-    pointsY = ScreenYToSheetPoints(screenPoint.pixelY)
-    If pointsY = UNMAPPABLE_POINTS Then Exit Function
+    If Not PointerPoints(pointsX, pointsY) Then Exit Function
     ' The open option list counts as part of the field.
-    listDepth = DropListDepth()
-    If pointsX < mLeft - 2 Or pointsX > mLeft + mWidth + 2 Then Exit Function
-    If pointsY < mTop - 2 Or pointsY > mTop + mHeight + listDepth + 2 Then
-        Exit Function
-    End If
-    CursorOverField = True
+    CursorOverField = ListAreaHolds(pointsX, pointsY)
 End Function
 
 ' Item indexes whose text contains the filter, case-insensitively; every
@@ -6618,7 +7344,7 @@ End Sub
 Private Function HasParts() As Boolean
     Select Case mKind
         Case KIND_BUTTON, KIND_LABEL, KIND_CARD, KIND_SPINNER, _
-            KIND_TOAST, KIND_OVERLAY, KIND_IMAGE
+            KIND_OVERLAY, KIND_IMAGE
             HasParts = False
         Case KIND_INPUT
             HasParts = False
@@ -6678,6 +7404,8 @@ End Function
 ' frame rate changes smoothness, never speed: the spinner turns at 600
 ' degrees per second and the slide decays with a 50 ms half-life factor.
 Friend Sub TickAnimation(ByVal hostSheet As Worksheet, ByVal elapsedMs As Long)
+    Dim blinkMs As Long
+
     If Not NeedsAnimation() Then Exit Sub
     On Error Resume Next
     Select Case mKind
@@ -6707,12 +7435,20 @@ Friend Sub TickAnimation(ByVal hostSheet As Worksheet, ByVal elapsedMs As Long)
                         1 - mExitRemaining
                 End With
             End If
+            TrackToastParts hostSheet
         Case KIND_INPUT, KIND_COMBO
-            ' Insertion bar blink for the focused float field.
-            mCaretAccumMs = mCaretAccumMs + elapsedMs
-            If mCaretAccumMs >= 500 Then
-                mCaretAccumMs = 0
-                mCaretOn = Not mCaretOn
+            ' Insertion bar blink for the focused float field, at the
+            ' Windows rate; a caret set not to blink stays on.
+            blinkMs = ReDimUI.CaretBlinkMs
+            If blinkMs > 0 Then
+                mCaretAccumMs = mCaretAccumMs + elapsedMs
+                If mCaretAccumMs >= blinkMs Then
+                    mCaretAccumMs = 0
+                    mCaretOn = Not mCaretOn
+                    Touch
+                End If
+            ElseIf Not mCaretOn Then
+                mCaretOn = True
                 Touch
             End If
     End Select
@@ -7130,6 +7866,16 @@ End Property
 
 Public Property Get DangerColor() As Long
     DangerColor = mThemeDanger
+End Property
+
+' Amber for warnings: dark on light surfaces and bright on dark ones, so
+' it keeps its contrast in every theme without a slot of its own.
+Public Property Get WarningColor() As Long
+    If RelativeLuminance(mThemeSurface) < 0.2 Then
+        WarningColor = RGB(252, 200, 60)
+    Else
+        WarningColor = RGB(157, 93, 0)
+    End If
 End Property
 
 Public Property Get BorderColor() As Long

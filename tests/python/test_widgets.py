@@ -96,6 +96,9 @@ def test_toast_slots(run_widgets):
     assert facts["entranceSlid"] == "True", (
         "the entrance slide must ease the toast up exactly its spawn offset"
     )
+    assert facts["closeRides"] == "True", (
+        "the close button must move with the toast through its slide"
+    )
     assert facts["secondBelowFirst"] == "True"
     assert facts["survivorSlidUp"] == "True", (
         "dismissing a toast must slide the survivor up into the freed slot"
@@ -357,6 +360,9 @@ def test_transfer_list(run_widgets):
         "panel headers must show live item counts"
     )
     assert facts["rowSelected"] == "True"
+    assert facts["selectedCheck"] == "True", (
+        "a selected row must show a check, not only the accent fill"
+    )
     assert facts["selectNoChange"] == "True", (
         "selecting a row must not fire OnChange; only transfers do"
     )
@@ -566,6 +572,10 @@ def test_long_lists(run_widgets):
     assert facts["listRowsKindGuard"] == "True"
     assert facts["listRowsMinimum"] == "True"
     assert facts["poolRows"] == "True"
+    assert facts["pagerTarget"] == "True", (
+        "transfer paging arrows must be at least 18 points square, clear"
+        " of the rows"
+    )
     assert facts["pagedRow1"] == "Item05", (
         "the panel scroll button must page the window"
     )
@@ -608,3 +618,105 @@ def test_modal_confirm(run_widgets):
     assert facts["cancelRan"] == "1"
     assert facts["confirmStillOne"] == "True"
     assert facts["overlayHiddenAgain"] == "True"
+
+
+def test_list_dismiss(run_widgets):
+    facts = parse_transcript(run_widgets("TestListDismiss"))
+    assert facts["oneListPerApp"] == "True", (
+        "opening a list must close the app's other open list"
+    )
+    assert facts["clickElsewhereCloses"] == "True", (
+        "a click on another control must close an open list"
+    )
+    assert facts["pressOnRowsKeeps"] == "True", (
+        "a press on the list's own rows must leave it open"
+    )
+    assert facts["pressOffCloses"] == "True", (
+        "a press off the face and rows must close the list"
+    )
+    assert facts["selectionHeldKeeps"] == "True"
+    assert facts["selectionMoveCloses"] == "True", (
+        "moving the grid selection must close an open list"
+    )
+
+
+def test_list_conventions(run_widgets):
+    facts = parse_transcript(run_widgets("TestListConventions"))
+    assert facts["currentChecked"] == "True", (
+        "only the current item's row carries the check"
+    )
+    assert facts["rowItem"] == "Green"
+    assert facts["noItemsRow"] == "No items"
+    assert facts["emptyRowInert"] == "True", (
+        "clicking the empty row must leave the list as it is"
+    )
+    assert facts["noMatchesRow"] == "No matches"
+    assert facts["emptyRowGone"] == "True"
+    assert facts["opensUpward"] == "True", (
+        "a list without room below the window must open above its face"
+    )
+    assert facts["firstRowOnTop"] == "True", (
+        "an upward list keeps its items in order, first on top"
+    )
+    assert facts["upwardPick"] == "True"
+
+
+def test_motion_and_blink(run_widgets):
+    facts = parse_transcript(run_widgets("TestMotionAndBlink"))
+    assert facts["motionReduced"] == "True"
+    assert facts["noEntranceSlide"] == "True", (
+        "with motion reduced a toast must appear in its slot"
+    )
+    assert facts["leavesAtOnce"] == "True", (
+        "with motion reduced a dismissed toast must leave without a fade"
+    )
+    assert facts["survivorMovesAtOnce"] == "True", (
+        "with motion reduced a survivor must move to its new slot at once"
+    )
+    assert facts["overrideFull"] == "True"
+    assert facts["blinkAtSystemRate"] == "True", (
+        "the caret must blink at the Windows GetCaretBlinkTime interval"
+    )
+
+
+def test_accessibility(run_widgets):
+    facts = parse_transcript(run_widgets("TestAccessibility"))
+    assert facts["buttonAlt"] == "Save, button"
+    assert facts["disabledAlt"] == "Save, button, unavailable"
+    assert facts["tickAlt"] == "Agree, checkbox, checked"
+    assert facts["toggleAlt"] == "Switch, off"
+    assert facts["selectAlt"] == "Drop-down, South"
+    assert facts["progressAlt"] == "Progress, 40 percent"
+    assert facts["overrideAlt"] == "Dark mode", (
+        "AltText must replace the generated description"
+    )
+    assert facts["blackOnWhite"] == "21.00"
+    assert facts["sameColor"] == "1.00"
+    assert facts["highContrastFails"] == "0", (
+        "every pairing in the high-contrast theme must pass WCAG AA"
+    )
+    assert facts["reportLines"] == "9"
+    assert facts["knobOnAccent"] == "True"
+
+
+def test_toast_conventions(run_widgets):
+    facts = parse_transcript(run_widgets("TestToastConventions"))
+    assert facts["closeButton"] == "True", "every toast needs a visible close"
+    assert facts["plainText"] == "Saved.", (
+        "a toast with no tone must carry no icon"
+    )
+    assert facts["shortTtl"] == "True", "short messages stay four seconds"
+    assert facts["closeDismisses"] == "True"
+    assert facts["longTtl"] == "True", (
+        "a 100-character message stays three seconds plus 60 ms a character"
+    )
+    assert facts["warningIcon"] == "True"
+    assert facts["toneColors"] == "True", (
+        "a tone colors the icon and the edge; the close glyph stays muted"
+    )
+    assert facts["actionText"] == "Undo"
+    assert facts["actionLongerTtl"] == "True", (
+        "an action adds four seconds to the toast's time"
+    )
+    assert facts["actionRan"] == "True"
+    assert facts["actionDismisses"] == "True"

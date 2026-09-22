@@ -16,7 +16,9 @@ only the members of its role and raises a clear error otherwise.
 | `ReDimUI.PinPumpCursor pinOn` | Opt-in steady arrow cursor while the pump is armed. Off by default so interactive shapes keep their hover hand; turn on if busy-cursor flicker is visible on your hardware. |
 | `ReDimUI.AutoPump pumpOn` | Turn the wall-clock timer off for deterministic runs. |
 | `ReDimUI.Shutdown` | Kill the pump and forget every app, with its window registration and the back stack. Shapes stay. |
-| `ReDimUI.ThemeLight`, `ThemeDark` | Theme presets; customize with `WithPrimary`, `WithFont`. |
+| `ReDimUI.ThemeLight`, `ThemeDark`, `ThemeHighContrast` | Theme presets; customize with `WithPrimary`, `WithFont`. High contrast is white and yellow on black, and every pairing the controls draw passes WCAG AA. |
+| `theme.ContrastReport` / `ReDimUI.ContrastRatio(foreRgb, backRgb)` | The report lists every color pairing the controls draw with its WCAG ratio, what it needs (4.5:1 for text, 3:1 for edges and the accent), and pass or fail; `ContrastRatio` computes one pair. |
+| `ReDimUI.ReduceMotion motionOff` / `ReDimUI.MotionReduced` | Reduced motion follows the Windows "Show animations" setting; `True` or `False` overrides it and no argument follows Windows again. Reduced, toasts appear, move, and leave without sliding or fading. |
 
 App ids use letters and digits only. Component ids may add single underscores.
 
@@ -59,7 +61,7 @@ controls in the framework. Also:
 | `Render` | Mark everything dirty and paint. Call once after building the UI. |
 | `SetTheme theme` | Restyle every component, and repaint the canvas background if `PrepareCanvas` painted one. |
 | `PrepareCanvas` | Paint the sheet background and hide gridlines. |
-| `Toast messageText, ttlMs` | Transient card on a rail beside the content, clamped into the visible viewport. Toasts slide up on entrance, and when one leaves the survivors slide up to fill its slot; modal chrome never shifts the rail. |
+| `Toast messageText, ttlMs` | Transient card on a rail beside the content, clamped into the visible viewport, with a close button. Without `ttlMs` it stays long enough to read: three seconds plus 60 ms a character, from four seconds to twelve. `Primary`, `Success`, `Warning`, or `Danger` on the returned toast gives it an info, success, warning, or error tone, an icon and a matching edge; `.Action "Undo", "Module.Proc"` adds a button that dismisses the toast and runs the handler, and keeps the toast four seconds longer. Toasts slide up on entrance, and when one leaves the survivors slide up to fill its slot; modal chrome never shifts the rail. |
 | `ToastTray rangeAddress` | Pins the tray's top-left to a range, exactly and unclamped. |
 | `Confirm titleText, messageText, okProc, cancelProc, okText, cancelText` | Shapes-based modal. |
 | `CloseModal` | Hide the modal set. |
@@ -79,8 +81,12 @@ All fluent, all return the component:
   `RightOf(otherId, gap)` place relative to another component with `Sized(w, h)` for
   dimensions. Circular relative chains raise a clear error.
 - Content: `Text`, `FontSize`, `Bold`, `BusyText`.
-- Style: `Primary`, `Secondary`, `Success`, `Danger`, `Fill(color)`, `TextColor(color)`.
+- Style: `Primary`, `Secondary`, `Success`, `Warning`, `Danger`, `Fill(color)`,
+  `TextColor(color)`. `Warning` is amber, dark on light surfaces and bright on dark ones
+  (`theme.WarningColor`).
 - Visibility: `Visible(flag)`, `Enabled(flag)`.
+- Accessibility: `AltText(text)` replaces the alternative text ReDim writes on the
+  control's shape (see [Accessibility](#accessibility)); an empty string restores it.
 - Values: `Value(number)` (progress, slider, picker index), `Checked(flag)`,
   `SliderRange(min, max, step)`.
 - Item lists (`SelectBox`, `ComboBox`, `RadioGroup`, `TransferList`, `CheckList`):
@@ -96,7 +102,13 @@ All fluent, all return the component:
   clear writes no `WritesTo` state and fires no `OnChange`.
 - Drop lists (`SelectBox`, `ComboBox`): `ListRows(n)` sets how many item rows the open
   list shows at once, eight by default. A longer list windows behind clickable pager rows
-  at its edges, each showing an arrow and the count of items beyond it.
+  at its edges, each showing an arrow and the count of items beyond it. The current item's
+  row carries a check in a gutter every row shares, so the selection reads without color.
+  An open list with nothing to show says so in an inert row, "No matches" under a combo's
+  filter or "No items" in an empty select. A list that would run past the bottom of the
+  visible window opens upward when there is more room above. One list is open per app:
+  opening one closes the others, and so does a click on another control, a press anywhere
+  off the face and rows, or a move of the grid selection.
 - Bindings: `BindText(key, template)` where `{0}` is the value, `BindValue(key)`,
   `BindVisible(key, invert)`, `BindEnabled(key, invert)`, `WritesTo(key)`. The invert flag
   serves the disable-while-busy pattern: `BindEnabled "anyRunning", True`.
@@ -150,9 +162,10 @@ dependencies:
   reserves modifier-clicks on macro shapes for selecting the shape itself, the same rule
   behind the design-time escape hatch below.) `WritesTo` carries the chosen items joined
   with a comma and space; `OnChange` fires once per user transfer, and selecting rows
-  fires nothing. Rows render up to the panel's height; when a list outgrows its panel,
-  paging arrows appear on the panel's right edge and move the window a page at a time,
-  and the header counts stay honest about totals.
+  fires nothing. A selected row shows a check as well as the accent fill. Rows render up
+  to the panel's height; when a list outgrows its panel, paging arrows appear on the
+  panel's right edge, 18-point targets, and move the window a page at a time, and the
+  header counts stay honest about totals.
 - `ComboBox`: an editable combo with a caret and a filtered drop list, sharing the item
   APIs. Place it with `AtRect` (or `Below`/`RightOf`) and it is a float field: click to
   focus, type, and the list re-filters on every keystroke. Anchoring to a cell with `At`
@@ -187,13 +200,15 @@ dependencies:
   `BindSource(key)` drives it from state. The image stretches to the declared rectangle;
   a missing source renders a themed placeholder, but an already-embedded picture is kept
   even after its source file goes away.
-- `Toggle`: the pill switch for booleans.
+- `Toggle`: the pill switch for booleans. Switched on, the knob takes the theme's
+  `OnPrimary` ink, as Windows draws it, so it stays visible on every accent track.
 
 ## Float fields and keyboard focus
 
 As of 0.9.0 no control needs a cell. `TextInput` and `ComboBox` placed with `AtRect`,
 `Below`, or `RightOf` render and edit entirely on their shapes: clicking a field gives it
-keyboard focus, an accent ring and a blinking insertion bar appear, and characters go to the
+keyboard focus, an accent ring and an insertion bar appear (blinking at the Windows caret
+rate, or steady when Windows is set not to blink), and characters go to the
 component's text buffer instead of a cell. That sidesteps Excel's edit-mode VBA pause - the
 framework sees every keystroke, which is what makes live combo filtering possible - and it
 means typing works on `ProtectSurface` sheets, where cell edit is locked out.
@@ -245,6 +260,24 @@ under protection (verified with message-level keystrokes). Apps that bind arrow 
 should re-arm them after field focus sessions if they mix the two. `ReDimUI.HasKeyboardFocus`
 and `ReDimUI.FocusedComponentId` report the current holder; `RdxReleaseKeys` is the panic
 release that unbinds everything regardless of state.
+
+## Accessibility
+
+- Alternative text: ReDim writes a description on each control's shape from its kind, text,
+  and state, such as "Save, button", "Agree, checkbox, checked", "Drop-down, South",
+  "Progress, 40 percent" (in 5 percent steps), with ", unavailable" when disabled. Labels,
+  cards, and toasts carry none, since their text is what a reader announces. `AltText`
+  replaces the description.
+- State without color: a drop list's current item and a transfer panel's selected rows
+  show a check, not only a fill.
+- Contrast: `ThemeHighContrast` passes WCAG AA for every pairing the controls draw, and
+  `theme.ContrastReport` checks any theme, a custom one included. The light and dark
+  presets keep their look, and their reports show one shortfall each: the field edge
+  (`Border` on `Surface`) reaches 1.32:1 and 2.01:1 against the 3:1 non-text minimum.
+- Motion: toasts stop sliding and fading when Windows animations are off or
+  `ReduceMotion True` is set. The spinner keeps turning; it is status, not decoration.
+- Targets: transfer paging arrows and the toast close button are 18 points square, the
+  WCAG 2.5.8 minimum of 24 pixels at 96 DPI.
 
 ## Shapes are framework-owned
 

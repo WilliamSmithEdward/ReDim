@@ -121,10 +121,10 @@
   time instead of one cell at a time, and loading 2,000 items fell from
   3.4 ms to 0.5 ms.
 - The frame pump visits only the controls that tick: spinners, toasts,
-  sliders, and the text fields and combos whose caret blinks. An idle
-  frame over 100 controls fell from 0.26 ms to 0.008 ms. Focus moving
-  from one text field to another keeps the eighty typing keys bound
-  instead of releasing and binding them again.
+  sliders, the text fields and combos whose caret blinks, and open drop
+  lists. An idle frame over 100 controls fell from 0.26 ms to 0.008 ms.
+  Focus moving from one text field to another keeps the eighty typing
+  keys bound instead of releasing and binding them again.
 - `Unmount` deletes an app's shapes in one pass over the sheet and one
   batch delete. It used to try every name a part could have, eight per
   control and four more per item, and each absent part cost a failed
@@ -144,6 +144,57 @@
   build, warm build, and rebuild in a live Excel, and compares against
   a saved run with `--save NAME` and `--compare NAME`. The numbers
   above come from it.
+- Drop lists dismiss the way native ones do. A press anywhere off an
+  open list's face and rows closes it, and so does a move of the grid
+  selection, a click on another control, or another list opening, so
+  one list is open per app. The pump watches an open list for this the
+  way it already watched a focused field.
+- The current item's row in a drop list, and each selected row in a
+  transfer panel, shows a check in a gutter every row shares, so a
+  selection no longer reads by color alone.
+- An open list with nothing to show says so in an inert row: "No
+  matches" under a combo's filter, "No items" in an empty select. The
+  list used to vanish while it was still open.
+- A drop list that would run past the bottom of the visible window
+  opens upward when there is more room above its face.
+- Transfer paging arrows grow from 14 to 18 points square, and the new
+  toast close button matches: 24 pixels at 96 DPI, the WCAG 2.5.8
+  minimum target size.
+- The insertion bar blinks at the Windows caret rate from
+  `GetCaretBlinkTime` instead of a fixed 500 ms, and stays solid when
+  Windows is set not to blink.
+- Reduced motion: when the Windows "Show animations" setting is off,
+  toasts appear, move up, and leave without sliding or fading.
+  `ReDimUI.ReduceMotion` overrides the setting, and
+  `ReDimUI.MotionReduced` reports the result.
+- Toasts gain a close button, a reading-time TTL, tones, and actions.
+  Without a TTL a toast stays three seconds plus 60 ms a character,
+  from four seconds to twelve; it was a flat three. `Primary`,
+  `Success`, `Warning`, and `Danger` give it an info, success, warning,
+  or error tone, an icon and a matching edge. `.Action "Undo",
+  "Module.Proc"` adds a button that dismisses the toast and runs the
+  handler, and gives the toast four more seconds. The close button adds
+  about 2 ms to a toast's appearance.
+- A `Warning` style variant joins the set: amber, from
+  `theme.WarningColor`, which picks a dark shade on light surfaces and
+  a bright one on dark surfaces so it keeps its contrast in every
+  theme.
+- Every control's shape carries alternative text for screen readers,
+  written from its kind, text, and state ("Save, button, unavailable",
+  "Agree, checkbox, checked"), and `AltText` replaces it. Labels, cards,
+  and toasts carry none, since their text is what a reader announces,
+  and progress reads in 5 percent steps. Both keep the writes off the
+  busiest update paths.
+- `ReDimUI.ThemeHighContrast` is white and yellow on black, and every
+  pairing the controls draw passes WCAG AA. `theme.ContrastReport`
+  lists those pairings for any theme with their ratios and verdicts,
+  and `ReDimUI.ContrastRatio` computes one pair. The light and dark
+  presets keep their look; each falls short in one place, the field
+  edge, at 1.32:1 and 2.01:1 against the 3:1 non-text minimum.
+- A switched-on toggle's knob takes the theme's `OnPrimary` ink instead
+  of fixed white, as Windows draws it: unchanged on the light theme,
+  dark on the dark theme's green, and black on the high-contrast
+  yellow, where white would vanish.
 
 ## 0.19.2 - 2026-08-02
 
