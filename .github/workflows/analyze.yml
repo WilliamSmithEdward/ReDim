@@ -18,11 +18,13 @@ jobs:
         uses: actions/checkout@v5
 
       # The analyzer resolves cross-module references against the runtime,
-      # which lives in its own repository beside this one.
+      # which lives in its own repository beside this one. The ref is the
+      # ROneCOne release ReDim ships and is tested against, not its main.
       - name: Check out ROneCOne
         uses: actions/checkout@v5
         with:
           repository: WilliamSmithEdward/ROneCOne
+          ref: v1.10.1
           path: .ronecone
 
       - name: Set up Python
@@ -31,9 +33,10 @@ jobs:
           python-version: '3.12'
 
       # Only the analyzer: requirements-dev.txt also pulls the live-Excel
-      # harness, which has no meaning on a Linux runner.
+      # harness, which has no meaning on a Linux runner. 2.2.0 also fails
+      # on variables and constants that are declared but never used or read.
       - name: Install the analyzer
-        run: pip install pyvbaanalysis==1.2.0
+        run: pip install pyvbaanalysis==2.2.0
 
       - name: Run the static gate
         env:

@@ -82,6 +82,12 @@
   as unused. A click reads its part once instead of at every branch.
   The Widget Gallery and the pump and timer tests await their delays as
   statements rather than into a variable they never read.
+- CI's static gate runs pyvbaanalysis 2.2.0, which also fails on a
+  variable or constant that is declared but never used or never read,
+  and analyzes against the ROneCOne release ReDim ships instead of
+  ROneCOne's main. One line carries a suppression: the analyzer's Excel
+  model says `Shape.Duplicate` returns a ShapeRange, where Excel's type
+  library says Shape.
 
 ## 1.0.0 - 2026-09-23
 

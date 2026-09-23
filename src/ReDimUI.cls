@@ -8566,6 +8566,9 @@ Private Function CopyPartShape( _
         If Not protectionLifted Then Exit Function
     End If
     On Error Resume Next
+    ' Excel's type library declares Shape.Duplicate As Shape; the analyzer's
+    ' Excel model says ShapeRange, from XLIDE's data through 10.7.0.
+    '@pyvba-ignore-next-line: assignment-object-type-mismatch
     Set partShape = templateShape.Duplicate
     On Error GoTo 0
     If protectionLifted Then hostApp.RestoreSurfaceProtection
