@@ -1,5 +1,5 @@
 Attribute VB_Name = "MissionControl"
-' ReDim 0.20.0 (2026-09-22)
+' ReDim 1.0.0 (2026-09-23)
 ' https://github.com/WilliamSmithEdward/ReDim
 '
 ' MIT License

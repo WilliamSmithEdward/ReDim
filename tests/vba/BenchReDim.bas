@@ -406,7 +406,7 @@ Public Function BenchNavigate() As String
     BenchNavigate = gTranscript
 End Function
 
-' The 0.20.0 components: a tab switch over panels of ten buttons, a date
+' The 1.0.0 components: a tab switch over panels of ten buttons, a date
 ' picker's calendar opening, turning a month, and picking a day, a
 ' skeleton's pulse frames, and a 1000-row table filled from an array,
 ' sorted by a header, paged, and a row picked.

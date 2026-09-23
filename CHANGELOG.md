@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.20.0 - 2026-09-22
+## 1.0.0 - 2026-09-23
 
 - ReDim no longer recases the host project's identifiers. VBA keeps
   one spelling per name across a project, and a declaration in any
@@ -96,7 +96,7 @@
   selected, and `Value(0)` clears the selection back to it.
 - Every source a release ships, both runtime files and each demo
   module, opens with the MIT license text, the repository link, and a
-  version line, `ReDim 0.20.0 (2026-09-22)` for this release, so a
+  version line, `ReDim 1.0.0 (2026-09-23)` for this release, so a
   module copied out of a release or a project still says what it is
   and under what terms. `tools/stamp_release.py` writes the header from
   `REDIM_VERSION`, the CHANGELOG date, and `LICENSE`, and a source
@@ -157,7 +157,7 @@
   mounted app is named", because the bar still tabbed to the unmounted
   windows. The new bench's warm builds found it in Navigator and ReDex.
 - `tools/bench.py` times framework scenarios, the controls new in
-  0.20.0, and each demo's first build, warm build, and rebuild in a
+  1.0.0, and each demo's first build, warm build, and rebuild in a
   live Excel, and compares against a saved run with `--save NAME` and
   `--compare NAME`. The numbers in these notes come from it.
 - Drop lists dismiss the way native ones do. A press anywhere off an

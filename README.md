@@ -115,7 +115,7 @@ and it builds itself (each ships an `Auto_Open`); the entry macro rebuilds on de
 | Workbook | Shows | Entry macro |
 |---|---|---|
 | `ReDim_Mission_Control.xlsm` | Three cancellable feeds with live progress, toasts, KPI cards, dark mode, confirm modal | `BuildMissionControl` |
-| `ReDim_Widget_Gallery.xlsm` | Every component wired to a live state inspector, with the 0.20 controls in a tabbed section: form fields, a date picker, a sortable table, a skeleton | `BuildWidgetGallery` |
+| `ReDim_Widget_Gallery.xlsm` | Every component wired to a live state inspector, with the 1.0 controls in a tabbed section: form fields, a date picker, a sortable table, a skeleton | `BuildWidgetGallery` |
 | `ReDim_Snake.xlsm` | A real game loop: paced pump job, arrow-key steering, score state, game-over modal | `BuildSnake` |
 | `ReDim_Navigator.xlsm` | Sheets as forms: Navigate, back stack, lifecycle hooks | `BuildNavigator` |
 | `ReDim_ReDex.xlsm` | The full-framework showcase: a living Pokedex on PokeAPI - async HTTP + JSON, sprite images, tweened stat bars, team building, custom theme with night mode | `BuildPokeDex` |

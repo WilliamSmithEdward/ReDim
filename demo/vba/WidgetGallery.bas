@@ -1,5 +1,5 @@
 Attribute VB_Name = "WidgetGallery"
-' ReDim 0.20.0 (2026-09-22)
+' ReDim 1.0.0 (2026-09-23)
 ' https://github.com/WilliamSmithEdward/ReDim
 '
 ' MIT License
@@ -28,7 +28,7 @@ Option Explicit
 
 ' Widget Gallery: every ReDim component on one sheet, wired to a live state
 ' inspector so interactions are visible as data, not just pixels. The
-' controls new in 0.20 sit in a tabbed section on the right, and the
+' controls new in 1.0 sit in a tabbed section on the right, and the
 ' gallery turns on the hover and press looks.
 
 Private Const APP_ID As String = "gallery"
@@ -171,12 +171,12 @@ Private Sub WireInspector(ByVal ui As ReDimUI)
     ui.OnStateChanged "stock", "WidgetGallery.RefreshInspector"
 End Sub
 
-' New in 0.20: a tab strip whose panels hold a form with captions, hints,
+' New in 1.0: a tab strip whose panels hold a form with captions, hints,
 ' a date picker, and a grouped select; a sortable table that pages; and
 ' a loading placeholder the button swaps for its content.
 Private Sub BuildNewSection(ByVal ui As ReDimUI)
     ui.Label("lblNew").AtRect(616, 60, 420, 16) _
-        .Text("New in 0.20: tabs, form fields, dates, and tables").Bold
+        .Text("New in 1.0: tabs, form fields, dates, and tables").Bold
     ui.Tabs("newTabs").AtRect(616, 80, 420, 30).Items "Form", "Table", "Loading"
 
     ui.TextInput("email").AtRect(616, 140, 200, 22).Placeholder("name@example.com") _
