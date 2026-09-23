@@ -7,13 +7,18 @@ turns every `.Value` in the host's modules into `.value`, which lands as
 noise in every exported diff. The static tests hold the runtime and the
 demos to three rules over their code tokens: one spelling per name, the
 type-library spelling for any name the default references define, and
-ROneCOne's spelling for any name it exposes as a member. The live test
-checks the outcome directly: modules exported through the VBE come back
-token for token as they went in.
+ROneCOne's spelling for any name it spells, a member or a local, since the
+two always share a project. The live test checks the outcome directly:
+modules exported through the VBE come back token for token as they went in.
 
-ROneCOne stays out of the round-trip workbook. It declares names such as
-`value` and `text` in lowercase itself, which is its own defect to fix;
-with it present, the export would measure ROneCOne rather than ReDim.
+The round-trip workbook holds ROneCOne too, since every ReDim project
+does. ROneCOne 1.9.1 stopped declaring names such as `value` and `text` in
+lowercase (ROneCOne issue #6), so the export now measures the project as
+users build it. One collision stays on ROneCOne's side: a ROneCOne name
+spelled like one of ReDim's public members, a local such as `items` or
+MSXML's `dom.async`, takes the member's spelling, and ReDim's API cannot
+move to avoid it. Both tests let exactly those names through and hold
+everything else.
 """
 
 from __future__ import annotations
@@ -68,6 +73,10 @@ NUMBER = re.compile(
     r"(?<![A-Za-z0-9_])\d+(?:\.\d+)?(?:[eE][+-]?\d+)?[#!@&%^]?")
 MEMBER = re.compile(
     r"^\s*(?:Public|Friend)\s+(?:Static\s+)?"
+    r"(?:Function|Sub|Property\s+(?:Get|Let|Set))\s+([A-Za-z_][A-Za-z0-9_]*)",
+    re.MULTILINE)
+PUBLIC_MEMBER = re.compile(
+    r"^\s*Public\s+(?:Static\s+)?"
     r"(?:Function|Sub|Property\s+(?:Get|Let|Set))\s+([A-Za-z_][A-Za-z0-9_]*)",
     re.MULTILINE)
 
@@ -182,12 +191,37 @@ def ronecone_members() -> dict[str, str]:
     return {name.lower(): name for name in MEMBER.findall(text)}
 
 
+def redim_api() -> set[str]:
+    """ReDim's public member names, lowercased. They are its API, so a
+    ROneCOne local that shares one takes ReDim's spelling in a shared
+    project, and the rename that would stop it is ROneCOne's."""
+    names: set[str] = set()
+    for path in RUNTIME:
+        text = path.read_text(encoding="utf-8")
+        names.update(name.lower() for name in PUBLIC_MEMBER.findall(text))
+    return names
+
+
+def ronecone_spellings() -> dict[str, str]:
+    """Every name ROneCOne's code spells, locals and Declare parameters
+    included. A project holds one spelling per name, so ReDim spelling a
+    shared name differently would recase ROneCOne's module, or be recased
+    by it."""
+    text = ronecone_class_path().read_text(encoding="utf-8")
+    spellings: dict[str, str] = {}
+    for token in code_tokens(text):
+        spellings.setdefault(token.lower(), token)
+    return spellings
+
+
 def casing_problems(paths: list[Path]) -> list[str]:
     try:
         canon = typelib_spellings()
     except Exception as exc:  # noqa: BLE001 - any load failure means no oracle
         pytest.skip(f"default type libraries unavailable: {exc}")
     members = ronecone_members()
+    neighbours = ronecone_spellings()
+    api = redim_api()
     spellings: dict[str, dict[str, list[str]]] = defaultdict(lambda: defaultdict(list))
     for path in paths:
         for token in code_tokens(path.read_text(encoding="utf-8")):
@@ -200,6 +234,8 @@ def casing_problems(paths: list[Path]) -> list[str]:
         if lower in KEYWORDS:
             continue
         wanted = canon.get(lower) or members.get(lower)
+        if wanted is None and lower not in api:
+            wanted = neighbours.get(lower)
         if wanted is not None:
             for name in names:
                 if name != wanted:
@@ -225,10 +261,11 @@ def test_demo_casing():
 
 
 def test_vbe_export_round_trips():
-    """The user's own scenario: a project holding ReDim, every demo, and
-    host code exports through the VBE with every token spelled as
-    written."""
+    """The user's own scenario: a project holding ROneCOne, ReDim, every
+    demo, and host code exports through the VBE with every token spelled
+    as written."""
     modules: dict[str, tuple[str, VBAModuleKind]] = {
+        "ROneCOne": (prepare_class_source(ronecone_class_path()), VBAModuleKind.other),
         "ReDimUI": (prepare_class_source(SRC / "ReDimUI.cls"), VBAModuleKind.other),
         "ReDimHost": (read_vba(SRC / "ReDimHost.bas"), VBAModuleKind.standard),
     }
@@ -250,12 +287,21 @@ def test_vbe_export_round_trips():
     with ExcelSession() as excel:
         excel.open_workbook(str(workbook))
         excel.export_modules(export_dir)
+    api = redim_api()
     changed = []
     for name, (source, _) in modules.items():
         exported = next(export_dir.glob(f"{name}.*")).read_text(
             encoding="utf-8", errors="replace")
-        before, after = code_tokens(source), code_tokens(exported)
+        # Line continuations are layout: the VBE joins a continued Attribute
+        # line on export, as ROneCOne's member descriptions show.
+        before = [token for token in code_tokens(source) if token != "_"]
+        after = [token for token in code_tokens(exported) if token != "_"]
         assert len(before) == len(after), f"{name}: token count changed"
         pairs = sorted({(a, b) for a, b in zip(before, after) if a != b})
+        if name == "ROneCOne":
+            # A ROneCOne name spelled like one of ReDim's public members takes
+            # the member's spelling. ReDim's API cannot move, so that rename
+            # is ROneCOne's; any other change to its module still fails.
+            pairs = [(a, b) for a, b in pairs if a.lower() not in api]
         changed.extend(f"{name}: {a} -> {b}" for a, b in pairs)
     assert not changed, "the VBE recased these tokens:\n" + "\n".join(changed)

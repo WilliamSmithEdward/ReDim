@@ -13,22 +13,33 @@
   so the runtime declares nothing in a casing that differs from the
   Excel, Office, VBA, or stdole type libraries or from its own members.
   A new `tests/python/test_casing.py` holds the runtime and the demos
-  to that rule and exports ReDim, every demo, and sample host code
-  through the VBE, requiring every token back as written. Against
-  0.19.2 the same export recased 67 tokens across the modules, 20 of
-  them in the host code alone.
+  to that rule and exports ROneCOne, ReDim, every demo, and sample host
+  code through the VBE as one project, requiring every token back as
+  written. Against 0.19.2 the same export recased 67 tokens across the
+  modules, 20 of them in the host code alone.
 - The samples name their app variable `ui`. A variable named `app`, as
   the README and every demo wrote it, collides with `ReDimUI.App`, so
   exporting a demo rewrote its own calls as `ReDimUI.app(...)`. The
   demos also drop a dozen locals that clashed the same way, such as
   `key`, `doc`, `names`, `typeName`, and `startRow`. The test modules
   keep `app`; they are never exported.
-- ROneCOne still declares `value`, `text`, `cells`, and similar names in
-  lowercase, so a project that holds it keeps those Excel members
-  recased: a probe of common ones found 18, `.Value`, `.Text`,
-  `.Names`, `.Cells`, `.Count`, and `.Item` among them. That comes from
-  ROneCOne, and the casing test leaves it out of its round trip for
-  that reason.
+- Requires ROneCOne 1.9.1 or later, and is tested against 1.10.0.
+  Earlier ROneCOne releases declared `value`, `text`, `cells`, and
+  similar names in lowercase, so importing one recased `.Value`,
+  `.Text`, `.Cells`, and more across the whole project. ROneCOne 1.9.1
+  fixed that in its
+  [issue #6](https://github.com/WilliamSmithEdward/ROneCOne/issues/6),
+  and 1.10.0 changes only its demo workbooks. With ROneCOne in the
+  round trip, two internal ReDim names turned out to clash with
+  ROneCOne's own, `InstancePointer` and `FieldText`. They are now
+  `FactoryPointer` and `FieldTextNow`.
+- Five ROneCOne locals share a name with a ReDim public member: `at`,
+  `currentValue`, `itemCount`, `items`, and `steps`. Imported in the
+  README's order, ReDim's spelling wins and only ROneCOne's own module
+  changes. Importing a newer ROneCOne into a project that already
+  holds ReDim reverses that: `.At`, `.CurrentValue`, `.ItemCount`,
+  `.Items`, and `.Steps` come back lowercase in ReDim and in every
+  module that calls them. Reimporting ReDim afterward restores them.
 - Breaking for named-argument callers only; positional calls are
   untouched. Public parameters renamed: component factories and
   `Component` (`componentId` to `targetComponentId`), `Mount`, `App`,

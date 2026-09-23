@@ -10746,7 +10746,7 @@ Private Function BuildListMatches(ByVal hostSheet As Worksheet) As Collection
     Dim filterText As String
 
     If mKind = KIND_COMBO Then
-        filterText = FieldText(hostSheet)
+        filterText = FieldTextNow(hostSheet)
         If mFilterPristine Then
             If ExactItemMatch(filterText) > 0 Then filterText = vbNullString
         End If
@@ -10773,7 +10773,7 @@ Private Sub OpenDropList(ByVal hostSheet As Worksheet)
     mFilterPristine = True
     mListHighlight = 0
     If mKind = KIND_COMBO Then
-        currentItem = ExactItemMatch(FieldText(hostSheet))
+        currentItem = ExactItemMatch(FieldTextNow(hostSheet))
     Else
         currentItem = CLng(mValue)
     End If
@@ -10882,16 +10882,16 @@ Friend Function IsFloatField() As Boolean
         And LenB(mAnchor) = 0)
 End Function
 
-Private Function FieldText(ByVal hostSheet As Worksheet) As String
+Private Function FieldTextNow(ByVal hostSheet As Worksheet) As String
     Dim cell As Range
 
     If IsFloatField() Then
-        FieldText = mText
+        FieldTextNow = mText
         Exit Function
     End If
     On Error Resume Next
     Set cell = InputCell(hostSheet)
-    If Not cell Is Nothing Then FieldText = CStr(cell.Value)
+    If Not cell Is Nothing Then FieldTextNow = CStr(cell.Value)
     On Error GoTo 0
 End Function
 
@@ -11276,7 +11276,7 @@ Private Sub ComboListNav(ByVal hostApp As ReDimUI, ByVal rowDelta As Long)
         ' is also its row; otherwise the walk starts at the window's
         ' first visible row (after mouse paging, or on a first press).
         If mFilterPristine Then
-            currentItem = ExactItemMatch(FieldText(hostApp.Sheet))
+            currentItem = ExactItemMatch(FieldTextNow(hostApp.Sheet))
         End If
         If currentItem > 0 Then
             mListHighlight = currentItem + rowDelta
@@ -11818,7 +11818,7 @@ Friend Function PickComboItem( _
     If matchRow < 1 Or matchRow > mListMatches.Count Then Exit Function
     itemIndex = CLng(mListMatches.Item(matchRow))
     picked = ItemAt(itemIndex)
-    replacedText = FieldText(hostApp.Sheet)
+    replacedText = FieldTextNow(hostApp.Sheet)
     If IsFloatField() Then
         If ReDimUI.IsComponentFocused(hostApp.AppId, mComponentId) Then
             replacedText = mFieldTextAtFocus
@@ -12466,12 +12466,12 @@ End Function
 ' Shared helpers
 ' =====================================================================
 
-Friend Property Get InstancePointer() As LongPtr
-    InstancePointer = ObjPtr(Me)
+Friend Property Get FactoryPointer() As LongPtr
+    FactoryPointer = ObjPtr(Me)
 End Property
 
 Private Function IsFactory(ByVal instance As ReDimUI) As Boolean
-    IsFactory = (ObjPtr(instance) = ReDimUI.InstancePointer)
+    IsFactory = (ObjPtr(instance) = ReDimUI.FactoryPointer)
 End Function
 
 Private Sub EnsureFactory()
