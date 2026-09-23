@@ -424,6 +424,16 @@
   panel of controls that join it with `InExpander`, shown while it is
   open. In a stack, what follows moves down as it opens and back up as
   it closes.
+- `MenuButton` drops a menu of commands added with `AddCommand`, each
+  with its handler and an icon in the gutter. A pick runs the command
+  with the menu as the sender and the face keeps its text; group
+  headers, disabled commands, windowing, and the keys come from the
+  drop list.
+- `ui.CommandPalette` adds a searchable palette of everything the app
+  can do, opened with Ctrl+Shift+P or `OpenCommandPalette`: the app's
+  own `AddCommand` entries, every button with a click handler, and
+  every menu command. Typing filters it, a pick runs the entry, and
+  leaving it runs nothing.
 
 ## 0.19.2 - 2026-08-02
 

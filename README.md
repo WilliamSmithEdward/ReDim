@@ -51,7 +51,8 @@ user keeps working in the workbook.
   focus layer, or anchor to a cell if you want one), and no dependencies beyond a stock
   Excel 365 install.
 - **Keyboard and pointer.** Every control takes keyboard focus, with Tab order, arrow keys,
-  access keys, and a default button. Float fields edit like Windows text boxes: selection,
+  access keys, and a default button, and a command palette (Ctrl+Shift+P) finds and runs
+  anything the app can do. Float fields edit like Windows text boxes: selection,
   word moves, the clipboard, and undo. Opt-in hover and press looks, tooltips,
   hold-to-repeat, and drag gestures come from the pump watching the pointer. Every
   control carries alternative text for screen readers, a high-contrast theme passes WCAG

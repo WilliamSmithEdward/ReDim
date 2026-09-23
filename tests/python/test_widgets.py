@@ -1214,3 +1214,27 @@ def test_expander(run_widgets):
     assert facts["alt"] == "True"
     assert facts["keyCloses"] == "True,60"
     assert facts["keyOpens"] == "True"
+
+
+def test_menu_button(run_widgets):
+    facts = parse_transcript(run_widgets("TestMenuButton"))
+    assert facts["face"] == "True"
+    assert facts["iconRow"] == "True", "a menu row shows its icon in the gutter"
+    assert facts["picks"] == "Duplicate/1/True", (
+        "a pick runs the command with the menu as sender and keeps the face text"
+    )
+    assert facts["disabledRunsNothing"] == "True"
+    assert facts["alt"] == "True"
+    assert facts["keys"] == "Duplicate/2"
+    assert facts["primary"] == "True"
+
+
+def test_command_palette(run_widgets):
+    facts = parse_transcript(run_widgets("TestCommandPalette"))
+    assert facts["lists"] == "3:Say hello,Save report,More: Archive"
+    assert facts["focused"] == "True"
+    assert facts["menuEntry"] == "Archive/1/True", "a menu entry runs through the menu"
+    assert facts["buttonEntry"] == "1", "a button entry clicks the button"
+    assert facts["appEntry"] == "app:Say hello/2"
+    assert facts["leaveCancels"] == "True", "leaving the palette runs nothing"
+    assert facts["keyOpens"] == "True"

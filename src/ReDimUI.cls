@@ -112,6 +112,10 @@ Private Const REG_TYPE_DWORD As Long = &H10
 Private Const REG_TYPE_ANY As Long = &HFFFF&
 ' Apps that follow the Windows look compare it at most this often.
 Private Const SYSTEM_LOOK_CHECK_MS As Long = 2000
+' The command palette's parts; the mdl_ prefix keeps a click on them
+' from ending the field's focus.
+Private Const PALETTE_CARD_ID As String = "mdl_pal_card"
+Private Const PALETTE_FIELD_ID As String = "mdl_pal_field"
 
 Private Const SHAPE_PREFIX As String = "rdm_"
 Private Const PART_SEPARATOR As String = "__"
@@ -307,6 +311,11 @@ Private mAppliedSystemLook As String
 ' Stacks whose members' flow changed during a flush, laid out again when
 ' the flush ends.
 Private mPendingReflows As Collection
+' The command palette: whether it is on, what each entry it lists runs,
+' and the control that had the keys when it opened.
+Private mPaletteOn As Boolean
+Private mPaletteActions As Collection
+Private mFocusBeforePalette As String
 
 ' Component fields.
 Private mComponentId As String
@@ -629,6 +638,14 @@ Private mStackAutoWidth As Boolean
 ' A control in a stack: the stack, and the flow it last took there.
 Private mStackId As String
 Private mAppliedFlowSig As String
+' Commands: a MenuButton's rows, or an app's palette entries. Whether a
+' select is a menu, each command's handler and icon by its text, the
+' texts in the order they came (apps), and the command run last.
+Private mIsMenu As Boolean
+Private mCommandProcs As Collection
+Private mCommandIcons As Collection
+Private mCommandOrder As Collection
+Private mLastCommand As String
 ' AutoGrow: the line cap (0 for off) and how far the field has grown past
 ' the height it was given; the geometry setters start that over.
 Private mAutoGrowLines As Long
@@ -1893,6 +1910,42 @@ End Sub
 ' Re-themes the apps that follow the Windows look when it changed, dark
 ' mode or the accent. The registry is read at most every two seconds
 ' unless forced, and only while some app follows.
+' The palette key: opens the palette of the app on the active sheet.
+Friend Sub OpenPaletteOnActiveSheet()
+    Dim appValue As ReDimUI
+
+    If Not IsFactory(Me) Then
+        ReDimUI.OpenPaletteOnActiveSheet
+        Exit Sub
+    End If
+    If mApps Is Nothing Then Exit Sub
+    For Each appValue In mApps
+        If appValue.PaletteOn Then
+            If appValue.Sheet Is ActiveSheet Then
+                appValue.OpenCommandPalette
+                Exit Sub
+            End If
+        End If
+    Next appValue
+End Sub
+
+' The palette field's pick: the app whose palette is open runs it.
+Friend Sub RunPalettePick()
+    Dim appValue As ReDimUI
+
+    If Not IsFactory(Me) Then
+        ReDimUI.RunPalettePick
+        Exit Sub
+    End If
+    If mApps Is Nothing Then Exit Sub
+    For Each appValue In mApps
+        If appValue.PaletteOpen Then
+            appValue.RunPaletteEntry
+            Exit Sub
+        End If
+    Next appValue
+End Sub
+
 Friend Sub CheckSystemLook(Optional ByVal forceRead As Boolean = False)
     Dim appValue As ReDimUI
     Dim nowMs As LongLong
@@ -2190,6 +2243,15 @@ End Function
 ' stack the controls after them move up.
 Public Function Expander(ByVal targetComponentId As String) As ReDimUI
     Set Expander = GetOrCreateComponent(targetComponentId, KIND_EXPANDER)
+End Function
+
+' A button whose click drops a menu of commands, each added with
+' AddCommand: a pick runs the command's handler, and the button keeps
+' its own text. It shares the drop list's keys, windowing, group
+' headers, and disabled items.
+Public Function MenuButton(ByVal targetComponentId As String) As ReDimUI
+    Set MenuButton = GetOrCreateComponent(targetComponentId, KIND_SELECT)
+    MenuButton.MarkMenu
 End Function
 
 ' Drawn single-select option rows. Items supplies the rows, Value the
@@ -2528,6 +2590,171 @@ Friend Sub ReapplyTabMembers(ByVal tabsId As String, ByVal panelNow As Long)
             End If
         End If
     Next componentValue
+End Sub
+
+' Turns on the command palette: paletteKey, Ctrl+Shift+P unless another
+' OnKey code is given ("" for none), opens it while the app's sheet is
+' in front, and so does OpenCommandPalette from code.
+Public Function CommandPalette(Optional ByVal paletteKey As String = "^+p") As ReDimUI
+    RequireRole ROLE_APP, "CommandPalette"
+    mPaletteOn = True
+    If LenB(paletteKey) > 0 Then HotKey paletteKey, "RdxOpenPalette"
+    Set CommandPalette = Me
+End Function
+
+Friend Property Get PaletteOn() As Boolean
+    PaletteOn = mPaletteOn
+End Property
+
+' The command palette: a field at the top of the visible window over a
+' list of what the app can do. It lists the app's AddCommand entries,
+' then each shown, enabled button with a click handler, then each
+' MenuButton command as "Menu: Command"; typing filters them, and a
+' pick closes the palette and runs its entry.
+Public Sub OpenCommandPalette()
+    Dim viewLeft As Double
+    Dim viewTop As Double
+    Dim viewWidth As Double
+    Dim viewHeight As Double
+    Dim cardWidth As Double
+    Dim cardLeft As Double
+    Dim cardTop As Double
+    Dim entryTexts As Collection
+    Dim paletteField As ReDimUI
+
+    RequireRole ROLE_APP, "OpenCommandPalette"
+    ResolveViewport viewLeft, viewTop, viewWidth, viewHeight
+    cardWidth = 440
+    If cardWidth > viewWidth - 16 Then cardWidth = viewWidth - 16
+    If cardWidth < 160 Then cardWidth = 160
+    cardLeft = viewLeft + (viewWidth - cardWidth) / 2
+    cardTop = viewTop + 24
+    Set entryTexts = BuildPaletteEntries()
+    mFocusBeforePalette = vbNullString
+    If ReDimUI.IsComponentFocused(mAppId, ReDimUI.FocusedComponentId) Then
+        mFocusBeforePalette = ReDimUI.FocusedComponentId
+    End If
+    BeginUpdate
+    Card(PALETTE_CARD_ID).AtRect(cardLeft, cardTop, cardWidth, 48).Text("").Visible True
+    Set paletteField = ComboBox(PALETTE_FIELD_ID)
+    paletteField.AtRect(cardLeft + 12, cardTop + 12, cardWidth - 24, 24) _
+        .Placeholder("Type a command").RestrictToItems.Visible True
+    paletteField.ItemsFrom entryTexts
+    paletteField.InputValue = vbNullString
+    paletteField.OnChange "ReDimHost.RdxPalettePick"
+    EndUpdate
+    If Not mRendered Then Render
+    On Error Resume Next
+    mSheet.Shapes(Card(PALETTE_CARD_ID).ShapeName).ZOrder msoBringToFront
+    mSheet.Shapes(paletteField.ShapeName).ZOrder msoBringToFront
+    On Error GoTo 0
+    paletteField.TakeFocus Me, True
+End Sub
+
+' What the palette lists, with what each entry runs: the app's commands,
+' each shown and enabled button with a click handler, and each menu's
+' commands. A text listed once keeps its first entry.
+Private Function BuildPaletteEntries() As Collection
+    Dim entryTexts As Collection
+    Dim componentValue As ReDimUI
+    Dim commandWords As Variant
+
+    Set entryTexts = New Collection
+    Set mPaletteActions = New Collection
+    If Not mCommandOrder Is Nothing Then
+        For Each commandWords In mCommandOrder
+            AddPaletteEntry entryTexts, CStr(commandWords), "cmd" & vbTab & CStr(commandWords)
+        Next commandWords
+    End If
+    For Each componentValue In mComponents
+        componentValue.OfferPaletteEntries Me, entryTexts
+    Next componentValue
+    Set BuildPaletteEntries = entryTexts
+End Function
+
+Friend Sub AddPaletteEntry( _
+    ByVal entryTexts As Collection, _
+    ByVal entryText As String, _
+    ByVal entryAction As String _
+)
+    Dim existing As Variant
+
+    If LenB(entryText) = 0 Then Exit Sub
+    If TryGetItem(mPaletteActions, LCase$(entryText), existing) Then Exit Sub
+    mPaletteActions.Add entryAction, LCase$(entryText)
+    entryTexts.Add entryText
+End Sub
+
+Friend Property Get PaletteOpen() As Boolean
+    Dim paletteField As ReDimUI
+
+    If TryGetComponent(PALETTE_FIELD_ID, paletteField) Then
+        PaletteOpen = paletteField.IsVisible
+    End If
+End Property
+
+' The palette's pick: the palette closes, the keys go back where they
+' were, and the entry runs.
+Friend Sub RunPaletteEntry()
+    Dim paletteField As ReDimUI
+    Dim found As Variant
+    Dim entryParts() As String
+    Dim targetValue As ReDimUI
+    Dim pickedText As String
+
+    If Not TryGetComponent(PALETTE_FIELD_ID, paletteField) Then Exit Sub
+    pickedText = paletteField.InputValue
+    If mPaletteActions Is Nothing Then Exit Sub
+    If Not TryGetItem(mPaletteActions, LCase$(pickedText), found) Then Exit Sub
+    ClosePalette True
+    entryParts = Split(CStr(found), vbTab)
+    Select Case entryParts(0)
+        Case "cmd"
+            mLastCommand = entryParts(1)
+            If LenB(CommandProcOf(entryParts(1))) > 0 Then
+                ReDimUI.RunHandlerAs Me, Nothing, CommandProcOf(entryParts(1))
+            End If
+        Case "btn"
+            If TryGetComponent(entryParts(1), targetValue) Then
+                ReDimUI.DispatchShape targetValue.ShapeName
+            End If
+        Case "menu"
+            If TryGetComponent(entryParts(1), targetValue) Then
+                targetValue.RunCommandNamed Me, entryParts(2)
+            End If
+    End Select
+End Sub
+
+' Hides the palette; with restoreFocus the control that had the keys
+' when it opened takes them back.
+Friend Sub ClosePalette(ByVal restoreFocus As Boolean)
+    Dim returnTo As ReDimUI
+
+    If ReDimUI.FocusedComponentId = PALETTE_FIELD_ID Then
+        If ReDimUI.IsComponentFocused(mAppId, PALETTE_FIELD_ID) Then
+            ReDimUI.ClearKeyboardFocus
+        End If
+    End If
+    BeginUpdate
+    HideIfExists PALETTE_FIELD_ID
+    HideIfExists PALETTE_CARD_ID
+    EndUpdate
+    If restoreFocus And LenB(mFocusBeforePalette) > 0 Then
+        If TryGetComponent(mFocusBeforePalette, returnTo) Then
+            If returnTo.IsFocusable Then returnTo.TakeFocus Me, False
+        End If
+    End If
+    mFocusBeforePalette = vbNullString
+End Sub
+
+' The palette field is blurring: its own blur finishes first, so the
+' palette hides after it.
+Friend Sub HidePaletteSoon()
+    BeginUpdate
+    HideIfExists PALETTE_FIELD_ID
+    HideIfExists PALETTE_CARD_ID
+    EndUpdate
+    mFocusBeforePalette = vbNullString
 End Sub
 
 ' A stack member changed: the stack lays out again when next asked.
@@ -4685,6 +4912,144 @@ Public Property Get IsExpanded() As Boolean
     IsExpanded = (mKind = KIND_EXPANDER And mChecked)
 End Property
 
+' The palette entries a control offers: a shown, enabled button with a
+' click handler offers its text; a menu offers each command as
+' "Menu: Command".
+Friend Sub OfferPaletteEntries(ByVal hostApp As ReDimUI, ByVal entryTexts As Collection)
+    Dim commandWords As Variant
+
+    If Not mVisible Or Not mEnabled Then Exit Sub
+    If Left$(mComponentId, 4) = "mdl_" Then Exit Sub
+    If mKind = KIND_BUTTON Then
+        If LenB(mClickProc) > 0 Or LenB(mAsyncClickProc) > 0 Then
+            hostApp.AddPaletteEntry entryTexts, mText, "btn" & vbTab & mComponentId
+        End If
+    ElseIf mIsMenu And Not mCommandOrder Is Nothing Then
+        For Each commandWords In mCommandOrder
+            If ItemPickable(ItemIndexOf(CStr(commandWords))) Then
+                hostApp.AddPaletteEntry entryTexts, mText & ": " & CStr(commandWords), _
+                    "menu" & vbTab & mComponentId & vbTab & CStr(commandWords)
+            End If
+        Next commandWords
+    End If
+End Sub
+
+' The item number of an item's text, 0 when no item has it.
+Private Function ItemIndexOf(ByVal itemText As String) As Long
+    Dim idx As Long
+
+    EnsureItemTexts
+    For idx = 1 To ItemCount
+        If StrComp(mItemTexts(idx), itemText, vbTextCompare) = 0 Then
+            ItemIndexOf = idx
+            Exit Function
+        End If
+    Next idx
+End Function
+
+Friend Sub MarkMenu()
+    If mIsMenu Then Exit Sub
+    mIsMenu = True
+    If Not mVariantChosen Then mStyleVariant = VARIANT_SECONDARY
+    Touch
+End Sub
+
+' A command. On a MenuButton it adds a row to the menu; on an app it adds
+' an entry to the command palette. commandWords names it, handlerProc is
+' the Public procedure it runs, and iconName an optional icon from
+' IconNames. A menu command without a handler runs the menu's OnClick,
+' where LastCommand names it.
+Public Function AddCommand( _
+    ByVal commandWords As String, _
+    Optional ByVal handlerProc As String, _
+    Optional ByVal iconName As String _
+) As ReDimUI
+    Dim commandKey As String
+    Dim existing As Variant
+
+    If mRole <> ROLE_APP Then
+        RequireRole ROLE_COMPONENT, "AddCommand"
+        If Not mIsMenu Then
+            RaiseError ERROR_INVALID_OPERATION, "AddCommand", _
+                "AddCommand applies to a MenuButton or an app."
+        End If
+    End If
+    commandKey = LCase$(commandWords)
+    If mCommandProcs Is Nothing Then
+        Set mCommandProcs = New Collection
+        Set mCommandIcons = New Collection
+        Set mCommandOrder = New Collection
+    End If
+    If TryGetItem(mCommandProcs, commandKey, existing) Then
+        mCommandProcs.Remove commandKey
+        mCommandIcons.Remove commandKey
+    Else
+        mCommandOrder.Add commandWords
+        If mRole <> ROLE_APP Then AddItem commandWords
+    End If
+    mCommandProcs.Add handlerProc, commandKey
+    If LenB(iconName) > 0 Then
+        mCommandIcons.Add ReDimUI.IconGlyph(iconName), commandKey
+    Else
+        mCommandIcons.Add vbNullString, commandKey
+    End If
+    Set AddCommand = Me
+End Function
+
+' The text of the command run last, on a MenuButton or an app.
+Public Property Get LastCommand() As String
+    LastCommand = mLastCommand
+End Property
+
+Private Function CommandProcOf(ByVal commandWords As String) As String
+    Dim found As Variant
+
+    If mCommandProcs Is Nothing Then Exit Function
+    If TryGetItem(mCommandProcs, LCase$(commandWords), found) Then CommandProcOf = CStr(found)
+End Function
+
+Private Function CommandGlyphOf(ByVal commandWords As String) As String
+    Dim found As Variant
+
+    If mCommandIcons Is Nothing Then Exit Function
+    If TryGetItem(mCommandIcons, LCase$(commandWords), found) Then CommandGlyphOf = CStr(found)
+End Function
+
+' A menu pick: the menu closes and the command's handler runs, with the
+' menu as the sender; a command without one runs the menu's OnClick.
+Private Sub RunMenuCommand(ByVal hostApp As ReDimUI, ByVal commandWords As String)
+    Dim commandProc As String
+
+    mSelectOpen = False
+    mListHighlight = 0
+    mLastCommand = commandWords
+    Touch
+    commandProc = CommandProcOf(commandWords)
+    If LenB(commandProc) > 0 Then
+        ReDimUI.RunHandlerAs hostApp, Me, commandProc
+    Else
+        RunClickHandlers hostApp
+    End If
+End Sub
+
+' The palette runs a menu's command by its text.
+Friend Sub RunCommandNamed(ByVal hostApp As ReDimUI, ByVal commandWords As String)
+    RunMenuCommand hostApp, commandWords
+End Sub
+
+' A menu row's text: its icon in the icon font, then the command in the
+' theme's, whatever font the replaced text began with.
+Private Sub StyleMenuRow( _
+    ByVal rowLetters As Object, _
+    ByVal themeValue As ReDimUI, _
+    ByVal rowText As String _
+)
+    rowLetters.Font.Name = themeValue.FontName
+    If Left$(rowText, 1) <> vbTab And Mid$(rowText, 2, 1) = vbTab Then
+        rowLetters.Characters(1, 1).Font.Name = ReDimUI.IconFont
+    End If
+End Sub
+
 Private Sub RequireStackKind(ByVal memberName As String)
     RequireRole ROLE_COMPONENT, memberName
     If mKind <> KIND_STACK Then
@@ -5179,6 +5544,9 @@ End Function
 Public Function ClearItems() As ReDimUI
     RequireRole ROLE_COMPONENT, "ClearItems"
     Set mItems = New Collection
+    Set mCommandProcs = Nothing
+    Set mCommandIcons = Nothing
+    Set mCommandOrder = Nothing
     ResetItemValues
     ForgetItemMarks
     ItemsChanged
@@ -6743,7 +7111,9 @@ Private Function AccessibleDescription() As String
             described = "Combo box"
             If LenB(mPlaceholder) > 0 Then described = described & ", " & mPlaceholder
         Case KIND_SELECT
-            If CLng(mValue) >= 1 And CLng(mValue) <= ItemCount Then
+            If mIsMenu Then
+                described = mText & ", menu button"
+            ElseIf CLng(mValue) >= 1 And CLng(mValue) <= ItemCount Then
                 described = "Drop-down, " & ItemAt(CLng(mValue))
             Else
                 described = "Drop-down, " & mText
@@ -7313,8 +7683,13 @@ Private Sub ApplyStyle(ByVal mainShape As Shape, ByVal themeValue As ReDimUI)
                 mAppliedFill = themeValue.BorderColor
             End If
         Case KIND_SELECT, KIND_DATE
-            resolvedFill = PointerTint(ResolveSurfaceFill(themeValue), _
-                themeValue.OnSurfaceColor)
+            ' A menu's face is a button in its variant's colors.
+            If mIsMenu Then
+                resolvedFill = PointerTint(ResolveFill(themeValue), ResolveTextColor(themeValue))
+            Else
+                resolvedFill = PointerTint(ResolveSurfaceFill(themeValue), _
+                    themeValue.OnSurfaceColor)
+            End If
             If Not mAppliedValid Or mAppliedFill <> resolvedFill Then
                 mainShape.Fill.Visible = msoTrue
                 mainShape.Fill.ForeColor.RGB = resolvedFill
@@ -7451,6 +7826,15 @@ Private Function ResolveTextColor(ByVal themeValue As ReDimUI) As Long
     End If
     If mTextColor >= 0 Then
         ResolveTextColor = mTextColor
+        Exit Function
+    End If
+    ' A menu's face inks like a button's.
+    If mIsMenu Then
+        If mStyleVariant = VARIANT_SECONDARY Or mStyleVariant = VARIANT_NEUTRAL Then
+            ResolveTextColor = themeValue.OnSurfaceColor
+        Else
+            ResolveTextColor = themeValue.OnPrimaryColor
+        End If
         Exit Function
     End If
     ' A date picker's placeholder reads muted, as a field's does.
@@ -7834,7 +8218,8 @@ Private Sub ApplyText(ByVal mainShape As Shape, ByVal themeValue As ReDimUI)
         With mainShape.TextFrame2.TextRange.Font
             .Name = themeValue.FontName
             .Size = resolvedSize
-            .Bold = BoolToMso(mFontBold Or mKind = KIND_BUTTON Or mKind = KIND_BADGE)
+            .Bold = BoolToMso(mFontBold Or mKind = KIND_BUTTON Or mKind = KIND_BADGE _
+                Or mIsMenu)
             .Fill.ForeColor.RGB = resolvedColor
         End With
         If LenB(mIconGlyph) > 0 Then
@@ -7886,7 +8271,7 @@ End Sub
 Private Sub HandleControlKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
     Select Case keyText
         Case "{TAB}", "{BACKTAB}"
-            If mKind = KIND_DATE And mSelectOpen Then CloseDropList
+            If mSelectOpen And (mKind = KIND_DATE Or mIsMenu) Then CloseDropList
             If mKind = KIND_SELECT And mSelectOpen Then
                 ' Tab takes the highlighted item, as a native list does.
                 If mListHighlight >= 1 Then
@@ -8157,6 +8542,17 @@ Private Sub HandleSelectKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
         HighlightListItem aimRow
         Exit Sub
     End If
+    ' A closed menu opens on the keys that open a list; it has no
+    ' selection for the arrows to move.
+    If mIsMenu Then
+        Select Case keyText
+            Case " ", "{ENTER}", "{DOWN}", "{UP}", "{ALTDOWN}", "{F4}"
+                OpenDropList hostApp.Sheet
+                aimRow = PickableNear(1, 1)
+                If aimRow > 0 Then HighlightListItem aimRow
+        End Select
+        Exit Sub
+    End If
     anchorItem = CLng(mValue)
     stepDirection = 1
     Select Case keyText
@@ -8208,6 +8604,11 @@ End Sub
 ' value changed, which is when the caller runs the handlers; taking the
 ' current item again only closes the list.
 Private Function PickSelectItem(ByVal hostApp As ReDimUI, ByVal itemIndex As Long) As Boolean
+    ' A menu keeps no selection: its pick runs the command.
+    If mIsMenu Then
+        RunMenuCommand hostApp, ItemAt(itemIndex)
+        Exit Function
+    End If
     mSelectOpen = False
     mListHighlight = 0
     If itemIndex = CLng(mValue) Then
@@ -12480,7 +12881,7 @@ Private Sub ApplyListCaret( _
 )
     Dim caret As Shape
 
-    If ExtrasCurrent(PartsState(themeValue)) Then Exit Sub
+    If ExtrasCurrent(PartsState(themeValue) & ":" & CStr(mStyleVariant)) Then Exit Sub
     Set caret = EnsurePartShape(hostSheet, "caret", msoShapeIsoscelesTriangle)
     caret.Width = 8
     caret.Height = 5
@@ -12488,7 +12889,11 @@ Private Sub ApplyListCaret( _
     caret.Top = mTop + (mHeight - 5) / 2
     caret.Rotation = 180
     caret.Fill.Visible = msoTrue
-    caret.Fill.ForeColor.RGB = themeValue.OnMutedColor
+    If mIsMenu Then
+        caret.Fill.ForeColor.RGB = ResolveTextColor(themeValue)
+    Else
+        caret.Fill.ForeColor.RGB = themeValue.OnMutedColor
+    End If
     caret.Visible = BoolToMso(mVisible)
     caret.OnAction = mAppliedOnAction
 End Sub
@@ -13785,7 +14190,11 @@ Private Sub SyncDropList( _
         End If
         rowFrame = PartsState(themeValue) & ":" & CStr(rowTop) & ":" & _
             CStr(rowPitch) & ":" & CStr(resolvedSize)
-        rowText = GutterText(itemIndex = CLng(mValue), ItemAt(itemIndex))
+        If mIsMenu Then
+            rowText = CommandGlyphOf(ItemAt(itemIndex)) & vbTab & ItemAt(itemIndex)
+        Else
+            rowText = GutterText(itemIndex = CLng(mValue), ItemAt(itemIndex))
+        End If
         ' A filtering combo bolds what the text matched in each row. The
         ' gutter leads every row and is never bold, so a text write
         ' clears an older match. A group header sits flush left, all
@@ -13828,6 +14237,8 @@ Private Sub SyncDropList( _
                 With optionShape.TextFrame2.TextRange
                     .Text = rowText
                     .Font.Fill.ForeColor.RGB = rowInk
+                    If mIsMenu Then StyleMenuRow optionShape.TextFrame2.TextRange, _
+                        themeValue, rowText
                     If Not mGroupHeaders Is Nothing Then .Font.Bold = msoFalse
                     If boldAt > 0 Then
                         .Characters(boldAt, boldLength).Font.Bold = msoTrue
@@ -13862,6 +14273,8 @@ Private Sub SyncDropList( _
                         .TextRange.Characters(boldAt, boldLength).Font.Bold = msoTrue
                     End If
                 End With
+                If mIsMenu Then StyleMenuRow optionShape.TextFrame2.TextRange, _
+                    themeValue, rowText
                 If LenB(priorKey) = 0 Or partCreated Then
                     EnsureGutterTab optionShape
                 End If
@@ -14388,6 +14801,9 @@ Friend Sub BlurField(ByVal hostApp As ReDimUI, ByVal keepEdits As Boolean)
     Dim exactAt As Long
 
     If Not ReDimUI.IsComponentFocused(hostApp.AppId, mComponentId) Then Exit Sub
+    ' Leaving the command palette cancels it: typed text never runs a
+    ' command on the way out, and the palette hides once the blur is done.
+    If mComponentId = PALETTE_FIELD_ID Then keepEdits = False
     ReDimUI.ClearKeyboardFocus
     mCaretOn = False
     mSelAnchor = mCaretPos
@@ -14432,6 +14848,7 @@ Friend Sub BlurField(ByVal hostApp As ReDimUI, ByVal keepEdits As Boolean)
     End If
     mSelectOpen = False
     Touch
+    If mComponentId = PALETTE_FIELD_ID Then hostApp.HidePaletteSoon
 End Sub
 
 Friend Sub HandleKey(ByVal hostApp As ReDimUI, ByVal keyText As String)

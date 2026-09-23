@@ -13,6 +13,8 @@ Private gConfirmRan As Long
 Private gInputCount As Long
 Private gLastInput As String
 Private gCancelRan As Long
+Private gCommandCount As Long
+Private gLastCommand As String
 
 Private Function NewCanvas() As Worksheet
     Set NewCanvas = ActiveWorkbook.Worksheets.Add
@@ -24,6 +26,18 @@ End Sub
 
 Public Sub RecordConfirm()
     gConfirmRan = gConfirmRan + 1
+End Sub
+
+' A menu command's handler: the sender is the menu.
+Public Sub RecordCommand()
+    gCommandCount = gCommandCount + 1
+    gLastCommand = ReDimUI.Sender.LastCommand
+End Sub
+
+' An app command's handler: the sender app names it.
+Public Sub RecordAppCommand()
+    gCommandCount = gCommandCount + 1
+    gLastCommand = "app:" & ReDimUI.SenderApp.LastCommand
 End Sub
 
 Public Sub RecordCancelChoice()
@@ -4175,4 +4189,135 @@ Public Function TestExpander() As String
     RdxReleaseKeys
     ReDimUI.AutoPump True
     TestExpander = transcript
+End Function
+
+' MenuButton: a button face in its variant's colors under the menu's own
+' text. A click drops the commands with their icons in the gutter; a pick
+' runs the command's handler with the menu as the sender and keeps the
+' face's text; a disabled command runs nothing. The keys open the menu,
+' walk it, and run the highlighted command.
+Public Function TestMenuButton() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim transcript As String
+
+    gCommandCount = 0
+    gLastCommand = vbNullString
+    ReDimUI.AutoPump False
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "wid61")
+    app.MenuButton("actions").AtRect(24, 24, 120, 28).Text("Actions") _
+        .AddCommand("Export", "TestReDimWidgets.RecordCommand", "Download") _
+        .AddCommand "Duplicate", "TestReDimWidgets.RecordCommand", "Copy"
+    app.MenuButton("actions").AddGroup "Danger zone"
+    app.MenuButton("actions").AddCommand("Delete", "TestReDimWidgets.RecordCommand", "Delete") _
+        .ItemEnabled 4, False
+    app.Render
+
+    With host.Shapes("rdm_wid61_actions")
+        transcript = "face=" & CStr(.TextFrame2.TextRange.Text = "Actions" _
+            And .TextFrame2.TextRange.Font.Bold = msoTrue _
+            And .Fill.ForeColor.RGB = app.Theme.SurfaceColor)
+    End With
+    ReDimUI.DispatchShape "rdm_wid61_actions"
+    With host.Shapes("rdm_wid61_actions__opt1").TextFrame2.TextRange
+        transcript = transcript & "|iconRow=" & CStr( _
+            .Text = ReDimUI.IconGlyph("Download") & vbTab & "Export" _
+            And .Characters(1, 1).Font.Name = ReDimUI.IconFont _
+            And .Characters(3, 3).Font.Name = app.Theme.FontName)
+    End With
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid61_actions__opt2"
+    transcript = transcript & "|picks=" & gLastCommand & "/" & gCommandCount & "/" & _
+        CStr(Not ShapeExists(host, "rdm_wid61_actions__opt1") _
+            And host.Shapes("rdm_wid61_actions").TextFrame2.TextRange.Text = "Actions")
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid61_actions"
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid61_actions__opt4"
+    transcript = transcript & "|disabledRunsNothing=" & CStr(gCommandCount = 1)
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid61_actions"
+    transcript = transcript & "|alt=" & CStr(InStr(1, _
+        host.Shapes("rdm_wid61_actions").AlternativeText, "Actions, menu button") > 0)
+
+    app.MenuButton("actions").Focus
+    RdxKeyChar "{DOWN}"
+    RdxKeyChar "{DOWN}"
+    RdxKeyChar "{ENTER}"
+    transcript = transcript & "|keys=" & gLastCommand & "/" & gCommandCount
+    RdxReleaseKeys
+    app.MenuButton("actions").Primary
+    transcript = transcript & "|primary=" & CStr( _
+        host.Shapes("rdm_wid61_actions").Fill.ForeColor.RGB = app.Theme.PrimaryColor _
+        And host.Shapes("rdm_wid61_actions").TextFrame2.TextRange.Font.Fill.ForeColor.RGB _
+            = app.Theme.OnPrimaryColor)
+    ReDimUI.AutoPump True
+    TestMenuButton = transcript
+End Function
+
+' Command palette: it lists the app's commands, then each button with a
+' click handler, then each menu's commands. Typing filters it, and a pick
+' closes it and runs the entry: a menu's command through the menu, a
+' button as if clicked, an app command with the app as the sender.
+' Leaving it cancels without running what was typed, and the palette key
+' opens it on the app's sheet.
+Public Function TestCommandPalette() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim transcript As String
+
+    gChangeCount = 0
+    gCommandCount = 0
+    gLastCommand = vbNullString
+    ReDimUI.AutoPump False
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "wid62")
+    app.AddCommand "Say hello", "TestReDimWidgets.RecordAppCommand", "Send"
+    app.Button("save").AtRect(24, 24, 110, 30).Text("Save report") _
+        .OnClick "TestReDimWidgets.RecordChange"
+    app.Button("idle").AtRect(24, 70, 110, 30).Text "No handler"
+    app.MenuButton("more").AtRect(150, 24, 100, 28).Text("More") _
+        .AddCommand "Archive", "TestReDimWidgets.RecordCommand"
+    app.CommandPalette
+    app.Render
+
+    app.OpenCommandPalette
+    With app.ComboBox("mdl_pal_field")
+        transcript = "lists=" & .ItemCount & ":" & .ItemTextAt(1) & "," & .ItemTextAt(2) & _
+            "," & .ItemTextAt(3)
+    End With
+    transcript = transcript & "|focused=" & CStr( _
+        ReDimUI.IsComponentFocused("wid62", "mdl_pal_field") _
+        And host.Shapes("rdm_wid62_mdl_pal_card").Visible = msoTrue)
+    TypeText "arch"
+    RdxKeyChar "{DOWN}"
+    RdxKeyChar "{ENTER}"
+    transcript = transcript & "|menuEntry=" & gLastCommand & "/" & gCommandCount & "/" & _
+        CStr(host.Shapes("rdm_wid62_mdl_pal_field").Visible = msoFalse)
+
+    app.OpenCommandPalette
+    RdxKeyChar "{DOWN}"
+    RdxKeyChar "{DOWN}"
+    RdxKeyChar "{ENTER}"
+    transcript = transcript & "|buttonEntry=" & gChangeCount
+
+    app.OpenCommandPalette
+    RdxKeyChar "{DOWN}"
+    RdxKeyChar "{ENTER}"
+    transcript = transcript & "|appEntry=" & gLastCommand & "/" & gCommandCount
+
+    app.OpenCommandPalette
+    TypeText "Say"
+    ReDimUI.EndKeyboardFocus
+    transcript = transcript & "|leaveCancels=" & CStr(gCommandCount = 2 _
+        And host.Shapes("rdm_wid62_mdl_pal_field").Visible = msoFalse)
+
+    RdxOpenPalette
+    transcript = transcript & "|keyOpens=" & CStr( _
+        host.Shapes("rdm_wid62_mdl_pal_field").Visible = msoTrue)
+    ReDimUI.EndKeyboardFocus
+    RdxReleaseKeys
+    ReDimUI.AutoPump True
+    TestCommandPalette = transcript
 End Function

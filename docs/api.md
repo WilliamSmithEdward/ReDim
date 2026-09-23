@@ -50,8 +50,9 @@ demo is the working reference.
 Component factories, get-or-create by id: `Button`, `Label`, `Card`, `Spinner`, `ProgressBar`,
 `Skeleton`, `Toggle`, `TickBox`, `RadioGroup`, `Stepper`, `SlideBar`, `SelectBox`, `ComboBox`,
 `TransferList`, `CheckList`, `TextInput`, `DatePicker`, `Image`, `Tabs`, `Table`, `Badge`,
-`Expander`, and the `Stack` layout container (see [Layout](#layout)). Every control is drawn
-from shapes and fully themed; there are no native form controls in the framework. Also:
+`Expander`, `MenuButton`, and the `Stack` layout container (see [Layout](#layout)). Every
+control is drawn from shapes and fully themed; there are no native form controls in the
+framework. Also:
 
 | Member | Purpose |
 |---|---|
@@ -69,6 +70,8 @@ from shapes and fully themed; there are no native form controls in the framework
 | `Confirm titleText, messageText, okProc, cancelProc, okText, cancelText` | Shapes-based modal. It takes keyboard focus: Enter confirms, Esc cancels, and Tab stays among its buttons. |
 | `FocusFirst` / `DefaultButton componentId` | Keyboard focus to the first control in Tab order; the button Enter clicks from controls that do not use Enter themselves. |
 | `PointerEffects effectsOn` | Hover and press looks for the app's controls, and an open list whose highlight follows the pointer (see [Pointer](#pointer)). Off by default. |
+| `AddCommand commandWords, handlerProc, iconName` | Adds an entry to the app's command palette: its text, the Public procedure it runs, and an optional icon. Inside the handler, `ReDimUI.SenderApp.LastCommand` names the entry. On a `MenuButton` the same builder adds a menu row. |
+| `CommandPalette paletteKey` / `OpenCommandPalette` | Turns on the command palette and binds its key, Ctrl+Shift+P unless another OnKey code is given (`""` binds none); `OpenCommandPalette` opens it from code (see [Command palette](#command-palette)). |
 | `FollowSystemTheme followOn` | The app takes `ReDimUI.ThemeSystem` now, and again whenever Windows switches between light and dark mode or changes its accent. The app notices as its sheets activate, the selection moves, or the pump runs, reading the registry at most every two seconds. Called before `Render`, it sets the theme without rendering early. `False` stops following and keeps the theme in place. |
 | `CloseModal` | Hide the modal set. |
 | `Async(opId)` / `CancelAsync opId` / `AsyncError(opId)` | Async ops (see [async.md](async.md)). |
@@ -284,6 +287,15 @@ dependencies:
   even after its source file goes away.
 - `Toggle`: the pill switch for booleans. Switched on, the knob takes the theme's
   `OnPrimary` ink, as Windows draws it, so it stays visible on every accent track.
+- `MenuButton`: a button that drops a menu of commands. `AddCommand "Export",
+  "Module.Export", "Download"` adds a row with its text, the Public procedure it runs, and
+  an optional icon, which shows in the row's gutter. `AddGroup` labels a section, and
+  `ItemEnabled n, False` leaves a command showing but out of reach. A pick closes the menu
+  and runs the command's handler with the menu as `ReDimUI.Sender`, whose `LastCommand`
+  names the command; a command without a handler runs the menu's `OnClick` instead. The
+  face keeps the menu's own `Text` and looks like a button in its variant, `Secondary` by
+  default, with a caret. It shares the drop list's windowing, keys, and dismissal, and
+  `ClearItems` drops the commands.
 - `Expander`: a collapsible section. Its header shows a chevron and its `Text` in bold;
   a click, or Space and Enter while it has the keys, opens and closes it, and Right opens
   and Left closes. Controls join its panel with `InExpander "adv"`, the same as
@@ -540,6 +552,31 @@ ui.Button("ok").Sized(90, 30).Text("Save").Primary.InStack "buttons"
 ui.Button("cancel").Sized(90, 30).Text("Cancel").Secondary.InStack "buttons"
 ```
 
+## Command palette
+
+`ui.CommandPalette` gives an app a searchable list of everything it can do, the way code
+editors do. Ctrl+Shift+P opens it while the app's sheet is in front, and so does
+`ui.OpenCommandPalette` from code. It opens as a field at the top of the visible window,
+over a list with the keys in the field. The list holds, in this order:
+
+- the app's own entries, added with `ui.AddCommand "Export to CSV", "Module.Export",
+  "Download"`;
+- every shown, enabled button with a click handler, under its text;
+- every `MenuButton` command that can be picked, as "Menu: Command".
+
+Typing filters the list and bolds what matched; the arrows walk it. Enter or a click
+closes the palette, gives the keys back to the control that had them, and runs the
+entry. An app entry runs its handler with the app as `ReDimUI.SenderApp`, whose
+`LastCommand` names it. A button entry clicks the button, with its debounce, busy state,
+and handlers. A menu entry runs through the menu. Esc closes the list and then the
+palette, and so does a click anywhere else; leaving it never runs what was typed. A
+text listed twice keeps its first entry.
+
+```vba
+ui.AddCommand "Clear the form", "Form.ClearAll", "Delete"
+ui.CommandPalette
+```
+
 ## Icons
 
 `Icon("Save")` on a `Button` or `Label` draws a Windows icon before the control's text, two
@@ -641,6 +678,7 @@ keep the keys.
 | RadioGroup | Arrows move the selection, wrapping at the ends; Home and End jump. Each move fires `OnChange`. |
 | Tabs | Left and Right show the tab beside, wrapping at the ends; Home and End jump. Each move fires `OnChange`. |
 | Expander | Space or Enter opens or closes it; Right opens and Left closes. Each change fires `OnChange`. |
+| MenuButton | Closed: Space, Enter, Down, Up, Alt+Down, or F4 opens the menu with the first command highlighted. Open: the arrows, Page Up, Page Down, Home, and End move the highlight past disabled commands and headers, letters jump by name, Enter or Space runs the highlighted command, and Esc, F4, Alt+Up, or Tab closes. |
 | Table | Up and Down move the selection a row in the order shown, Page Up and Page Down a page, Home and End to the first and last row; the rows scroll to keep it in view, and each move fires `OnChange`. |
 | DatePicker | Closed: Alt+Down, F4, Space, or Down opens the calendar on the date held, or today. Open: Left and Right move a day, Up and Down a week, Page Up and Page Down a month, Home and End to the month's first and last day; Enter or Space picks the day reached, and Esc, F4, or Alt+Up closes. A dashed ring marks the day reached. |
 | Stepper | Up and Right step up, Down and Left step down, Page Up and Page Down step ten times, Home and End jump to the range ends. |

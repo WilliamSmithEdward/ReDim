@@ -228,6 +228,23 @@ Public Sub RdxAccessKey(ByVal keyLetter As String)
     End If
 End Sub
 
+' The command palette's key: opens the palette of the app on the active
+' sheet. Never raises.
+Public Sub RdxOpenPalette()
+    On Error Resume Next
+    Err.Clear
+    ReDimUI.OpenPaletteOnActiveSheet
+    If Err.Number <> 0 Then
+        Err.Clear
+        ReDimUI.NoteTickFault
+    End If
+End Sub
+
+' The command palette field's OnChange: runs the entry picked.
+Public Sub RdxPalettePick()
+    ReDimUI.RunPalettePick
+End Sub
+
 ' Shape.OnAction target for every ReDim component. Application.Caller carries
 ' the clicked shape's name.
 Public Sub RdxDispatch()
