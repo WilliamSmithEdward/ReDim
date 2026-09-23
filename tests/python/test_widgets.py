@@ -1099,3 +1099,30 @@ def test_tabs(run_widgets):
     assert facts["tabsHidden"] == "True"
     assert facts["tabsBack"] == "True"
     assert facts["removedShowsAll"] == "True"
+
+
+def test_date_picker(run_widgets):
+    facts = parse_transcript(run_widgets("TestDatePicker"))
+    assert facts["placeholder"] == "True", "the placeholder must read muted"
+    assert facts["faceFormat"] == "2026-09-22"
+    assert facts["picked"] == "2026-09-22"
+    assert facts["programSilent"] == "True", (
+        "PickDate must write nothing and fire nothing"
+    )
+    assert facts["opens"] == "True", "a click must open the calendar on the date's month"
+    assert facts["dateFilled"] == "True"
+    assert facts["outOfRangeKeeps"] == "True", "a day outside DateRange must not pick"
+    assert facts["nextMonth"] == "True"
+    assert facts["dayPicks"] == "True", (
+        "a day must write a Date, fire OnChange once, and close the calendar"
+    )
+    assert facts["written"] == "2026-10-15"
+    assert facts["faceShows"] == "2026-10-15"
+    assert facts["keyOpens"] == "True"
+    assert facts["keysPick"] == "2026-11-23/2", (
+        "Right, Down, and Page Down walk a day, a week, and a month; Enter picks"
+    )
+    assert facts["escCloses"] == "True"
+    assert facts["pressOnKeeps"] == "True"
+    assert facts["hoverTints"] == "True"
+    assert facts["pressOffCloses"] == "True"

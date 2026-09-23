@@ -3741,3 +3741,98 @@ Public Function TestTabs() As String
     ReDimUI.AutoPump True
     TestTabs = transcript
 End Function
+
+' DatePicker: the face shows its placeholder muted, then the date in the
+' format asked for; PickDate writes nothing and fires nothing. A click
+' opens a calendar on the date's month with the date filled; a day
+' outside DateRange does not pick, the arrow turns the month, and a day
+' writes a Date, fires OnChange once, and closes. The keys open, walk,
+' and pick; Esc closes. A press on the calendar keeps it, a press off it
+' closes it, and the pointer tints the day under it.
+Public Function TestDatePicker() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim transcript As String
+    Dim firstCell As Long
+
+    gChangeCount = 0
+    ReDimUI.AutoPump False
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "wid54")
+    app.DatePicker("due").AtRect(24, 24, 150, 24).Text("Pick a date").WritesTo "dueState"
+    app.DatePicker("due").OnChange "TestReDimWidgets.RecordChange"
+    app.DatePicker("due").DateRange DateSerial(2026, 9, 5), DateSerial(2026, 12, 31)
+    app.Render
+
+    With host.Shapes("rdm_wid54_due").TextFrame2.TextRange
+        transcript = "placeholder=" & CStr(.Text = "Pick a date" _
+            And .Font.Fill.ForeColor.RGB = app.Theme.OnMutedColor)
+    End With
+    app.DatePicker("due").DateFormat("yyyy-mm-dd").PickDate DateSerial(2026, 9, 22)
+    transcript = transcript & "|faceFormat=" & _
+        host.Shapes("rdm_wid54_due").TextFrame2.TextRange.Text
+    transcript = transcript & "|picked=" & Format$(app.DatePicker("due").PickedDate, "yyyy-mm-dd")
+    transcript = transcript & "|programSilent=" & _
+        CStr(Not app.HasState("dueState") And gChangeCount = 0)
+
+    ReDimUI.DispatchShape "rdm_wid54_due"
+    transcript = transcript & "|opens=" & CStr(ShapeExists(host, "rdm_wid54_due__cd42") _
+        And host.Shapes("rdm_wid54_due__ch").TextFrame2.TextRange.Text _
+            = Format$(DateSerial(2026, 9, 1), "mmmm yyyy"))
+    firstCell = Weekday(DateSerial(2026, 9, 1), vbUseSystemDayOfWeek)
+    With host.Shapes("rdm_wid54_due__cd" & (firstCell + 21))
+        transcript = transcript & "|dateFilled=" & CStr(.TextFrame2.TextRange.Text = "22" _
+            And .Fill.Visible = msoTrue And .Fill.ForeColor.RGB = app.Theme.PrimaryColor)
+    End With
+    ReDimUI.DispatchShape "rdm_wid54_due__cd" & (firstCell + 2)
+    transcript = transcript & "|outOfRangeKeeps=" & _
+        CStr(ShapeExists(host, "rdm_wid54_due__cd1") And gChangeCount = 0)
+    ReDimUI.DispatchShape "rdm_wid54_due__cn"
+    transcript = transcript & "|nextMonth=" & CStr( _
+        host.Shapes("rdm_wid54_due__ch").TextFrame2.TextRange.Text _
+            = Format$(DateSerial(2026, 10, 1), "mmmm yyyy"))
+    firstCell = Weekday(DateSerial(2026, 10, 1), vbUseSystemDayOfWeek)
+    ReDimUI.DispatchShape "rdm_wid54_due__cd" & (firstCell + 14)
+    transcript = transcript & "|dayPicks=" & CStr(Not ShapeExists(host, "rdm_wid54_due__cd1") _
+        And VarType(app.State("dueState")) = vbDate _
+        And gChangeCount = 1)
+    transcript = transcript & "|written=" & Format$(app.State("dueState"), "yyyy-mm-dd")
+    transcript = transcript & "|faceShows=" & _
+        host.Shapes("rdm_wid54_due").TextFrame2.TextRange.Text
+
+    app.DatePicker("due").Focus
+    RdxKeyChar "{ALTDOWN}"
+    transcript = transcript & "|keyOpens=" & CStr(ShapeExists(host, "rdm_wid54_due__cd1"))
+    RdxKeyChar "{RIGHT}"
+    RdxKeyChar "{DOWN}"
+    RdxKeyChar "{PGDN}"
+    RdxKeyChar "{ENTER}"
+    transcript = transcript & "|keysPick=" & Format$(app.State("dueState"), "yyyy-mm-dd") & _
+        "/" & gChangeCount
+    RdxKeyChar "{ALTDOWN}"
+    RdxKeyChar "{ESC}"
+    transcript = transcript & "|escCloses=" & CStr(Not ShapeExists(host, "rdm_wid54_due__cd1"))
+    RdxReleaseKeys
+
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid54_due"
+    ReDimUI.OverridePointer 124, 150
+    ReDimUI.ForcePressEdge
+    ReDimUI.PumpOnce
+    transcript = transcript & "|pressOnKeeps=" & CStr(ShapeExists(host, "rdm_wid54_due__cd1"))
+    app.PointerEffects
+    ReDimUI.OverridePointer host.Shapes("rdm_wid54_due__cd10").Left + 12, _
+        host.Shapes("rdm_wid54_due__cd10").Top + 10
+    ReDimUI.PumpOnce
+    transcript = transcript & "|hoverTints=" & CStr( _
+        host.Shapes("rdm_wid54_due__cd10").Fill.Visible = msoTrue _
+        And host.Shapes("rdm_wid54_due__cd11").Fill.Visible = msoFalse)
+    app.PointerEffects False
+    ReDimUI.OverridePointer 420, 300
+    ReDimUI.ForcePressEdge
+    ReDimUI.PumpOnce
+    transcript = transcript & "|pressOffCloses=" & CStr(Not ShapeExists(host, "rdm_wid54_due__cd1"))
+    ReDimUI.ClearPointerOverride
+    ReDimUI.AutoPump True
+    TestDatePicker = transcript
+End Function

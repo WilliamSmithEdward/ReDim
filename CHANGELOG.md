@@ -364,6 +364,13 @@
   the tab, and a change made while the tab hides them waits for it. A
   panel that hides closes its open list and commits a focused field,
   and hiding the strip hides every panel.
+- `DatePicker` is a date field with a month calendar that drops under
+  its face. The face shows the date in the system's short date or a
+  `DateFormat` pattern; a day click, or the arrows, Page Up, Page Down,
+  and Enter with the keys, picks, writes a `Date` to `WritesTo`, and
+  fires `OnChange`. `DateRange` limits the days that pick, `PickDate`
+  and `PickedDate` set and read the date from code, and the calendar
+  closes the way a drop list does.
 
 ## 0.19.2 - 2026-08-02
 

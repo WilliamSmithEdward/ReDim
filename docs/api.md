@@ -47,7 +47,7 @@ demo is the working reference.
 
 Component factories, get-or-create by id: `Button`, `Label`, `Card`, `Spinner`, `ProgressBar`,
 `Skeleton`, `Toggle`, `TickBox`, `RadioGroup`, `Stepper`, `SlideBar`, `SelectBox`, `ComboBox`,
-`TransferList`, `CheckList`, `TextInput`, `Image`, and `Tabs`. Every control is drawn from shapes and
+`TransferList`, `CheckList`, `TextInput`, `DatePicker`, `Image`, and `Tabs`. Every control is drawn from shapes and
 fully themed; there are no native form controls in the framework. Also:
 
 | Member | Purpose |
@@ -233,6 +233,21 @@ dependencies:
   what was typed. A click on a focused combo's text places the caret, and the arrow at
   its right edge toggles the list. `RestrictToItems` limits a float combo's commits to
   its items (see [Field rules](#field-rules)).
+- `DatePicker`: a date field. Its face shows the date in the system's short date, or in
+  a `Format$` pattern given with `DateFormat "yyyy-mm-dd"`, and `Text` is the placeholder
+  it shows in muted ink while it holds none. A click, or Alt+Down, F4, Space, or Down
+  while it has the keys, opens a month calendar under the face, over it when there is no
+  room below: the month between two arrows, the weekday initials from the system's
+  first day of the week, and six weeks of days. The date held fills with the accent,
+  today wears an accent ring, and days of other months read muted. A day picks: the
+  calendar closes, and a new date writes to `WritesTo` as a VBA `Date` and fires
+  `OnChange`. `DateRange earliest, latest` limits what picks, with either side left
+  out; days outside read muted and take no clicks. `PickDate` sets the date from code
+  and `Value 0` clears it, both writing nothing and firing nothing, and `PickedDate`
+  reads it as a `Date`, or `Empty` while there is none. `BindValue` takes a `Date` or a
+  date serial. The calendar is the control's list: one list is open per app, and a
+  press off the calendar and face, a click on another control, Esc, or a move of the
+  grid selection closes it.
 - `TextInput`: a text field. Float by default (`AtRect`), cell-backed with `At` when you
   want the value to live in the grid. A cell-backed field's frame covers its cell, so a
   click on the frame selects the cell: typing replaces the value and F2 edits it in place,
@@ -482,8 +497,8 @@ the pointer at most once a frame and act only while their sheet is in front.
 ## Keyboard focus for every control
 
 Every interactive control takes keyboard focus: buttons, toggles, tick boxes, radio groups,
-steppers, sliders, selects, check lists, transfer lists, tab strips, images with a click
-handler, and float fields. Focus comes from the keyboard or from code: Tab and Shift+Tab walk the app's
+steppers, sliders, selects, check lists, transfer lists, tab strips, date pickers, images
+with a click handler, and float fields. Focus comes from the keyboard or from code: Tab and Shift+Tab walk the app's
 controls, `component.Focus` and `ui.FocusFirst` place it, and a modal takes it. A click
 focuses only a text field, since someone who clicks a button in Excel expects the grid to
 keep the keys.
@@ -515,6 +530,7 @@ keep the keys.
 | Toggle, TickBox | Space toggles. |
 | RadioGroup | Arrows move the selection, wrapping at the ends; Home and End jump. Each move fires `OnChange`. |
 | Tabs | Left and Right show the tab beside, wrapping at the ends; Home and End jump. Each move fires `OnChange`. |
+| DatePicker | Closed: Alt+Down, F4, Space, or Down opens the calendar on the date held, or today. Open: Left and Right move a day, Up and Down a week, Page Up and Page Down a month, Home and End to the month's first and last day; Enter or Space picks the day reached, and Esc, F4, or Alt+Up closes. A dashed ring marks the day reached. |
 | Stepper | Up and Right step up, Down and Left step down, Page Up and Page Down step ten times, Home and End jump to the range ends. |
 | SlideBar | Arrows move a step, Page Up and Page Down a tenth of the range in whole steps, Home and End go to the ends. |
 | SelectBox | Closed: arrows, Home, End, Page Up, and Page Down change the selection, and Space, Alt+Down, or F4 opens the list. Open: they move the highlight; Enter, Space, or Alt+Up takes it, Tab takes it and moves on, and Esc or F4 closes. Letters jump to the next item that starts with them, open or closed: letters typed within a second build a prefix, and one letter typed again steps through its items. Every move passes over disabled items and group headers. |

@@ -139,6 +139,7 @@ Private Const KIND_CHECKLIST As Long = 20
 Private Const KIND_IMAGE As Long = 21
 Private Const KIND_SKELETON As Long = 22
 Private Const KIND_TABS As Long = 23
+Private Const KIND_DATE As Long = 24
 
 ' Option rows a SelectBox or ComboBox drop list draws at once unless
 ' ListRows says otherwise; longer lists window behind pager rows.
@@ -160,6 +161,16 @@ Private Const TRANSFER_BUTTON_W As Double = 26
 Private Const TRANSFER_BUTTON_H As Double = 22
 Private Const TRANSFER_GAP As Double = 6
 Private Const TRANSFER_ROW_H As Double = 20
+
+' Date picker calendar layout, in points: a day cell, the padding inside
+' the card, the month row and the weekday row, and the card they make.
+Private Const CAL_CELL_W As Double = 26
+Private Const CAL_CELL_H As Double = 22
+Private Const CAL_PAD As Double = 6
+Private Const CAL_HEAD_H As Double = 24
+Private Const CAL_WEEK_H As Double = 16
+Private Const CAL_WIDTH As Double = 194
+Private Const CAL_DEPTH As Double = 184
 
 ' Sentinel for "the source could not be loaded"; contains characters no
 ' real path can, so it never collides with one.
@@ -512,6 +523,15 @@ Private mTabOwnerId As String
 Private mTabNumber As Long
 Private mTabShut As Boolean
 Private mVisibleBeforeTab As Boolean
+' Date picker: the month its calendar shows (the first of it), the day
+' the keys have reached, the earliest and latest days it picks (0 for
+' an open side), and the face's Format$ pattern (empty for the system's
+' short date). The date itself is mValue, 0 while none is picked.
+Private mCalendarMonth As Date
+Private mCalendarCursor As Date
+Private mDateEarliest As Date
+Private mDateLatest As Date
+Private mDateFormat As String
 ' AutoGrow: the line cap (0 for off) and how far the field has grown past
 ' the height it was given; the geometry setters start that over.
 Private mAutoGrowLines As Long
@@ -1750,6 +1770,12 @@ End Function
 ' tab is the one shown.
 Public Function Tabs(ByVal targetComponentId As String) As ReDimUI
     Set Tabs = GetOrCreateComponent(targetComponentId, KIND_TABS)
+End Function
+
+' A date field: its face shows the date picked, and a click opens a month
+' calendar under it to pick another. WritesTo writes a Date.
+Public Function DatePicker(ByVal targetComponentId As String) As ReDimUI
+    Set DatePicker = GetOrCreateComponent(targetComponentId, KIND_DATE)
 End Function
 
 ' Drawn single-select option rows. Items supplies the rows, Value the
@@ -3288,6 +3314,8 @@ Friend Sub ConfigureComponent( _
             mWidth = 120: mHeight = 80
         Case KIND_SKELETON
             mWidth = 200: mHeight = 60
+        Case KIND_DATE
+            mWidth = 130: mHeight = 24
         Case KIND_TABS
             mWidth = 360: mHeight = 32
             mValue = 1
@@ -3673,6 +3701,54 @@ Public Function SkeletonLines(ByVal lineCount As Long) As ReDimUI
     Touch
     Set SkeletonLines = Me
 End Function
+
+' Sets the date a DatePicker shows, as a program change: nothing is
+' written to WritesTo and OnChange does not fire. Any time of day is
+' dropped; Value 0 clears the date.
+Public Function PickDate(ByVal chosenDate As Date) As ReDimUI
+    RequireDatePicker "PickDate"
+    mValue = CDbl(DayOnly(chosenDate))
+    Touch
+    Set PickDate = Me
+End Function
+
+' The date a DatePicker holds, as a Date, or Empty while none is picked.
+Public Property Get PickedDate() As Variant
+    RequireDatePicker "PickedDate"
+    If mValue <> 0 Then PickedDate = CDate(mValue)
+End Property
+
+' The earliest and latest days the calendar picks; days outside read
+' muted and take no clicks. A side left out stays open.
+Public Function DateRange( _
+    Optional ByVal earliest As Variant, _
+    Optional ByVal latest As Variant _
+) As ReDimUI
+    RequireDatePicker "DateRange"
+    mDateEarliest = 0
+    mDateLatest = 0
+    If Not IsMissing(earliest) Then mDateEarliest = DayOnly(CDate(earliest))
+    If Not IsMissing(latest) Then mDateLatest = DayOnly(CDate(latest))
+    Touch
+    Set DateRange = Me
+End Function
+
+' The face's Format$ pattern, such as "yyyy-mm-dd" or "d mmm yyyy";
+' the system's short date by default, and "" goes back to it.
+Public Function DateFormat(ByVal formatPattern As String) As ReDimUI
+    RequireDatePicker "DateFormat"
+    mDateFormat = formatPattern
+    Touch
+    Set DateFormat = Me
+End Function
+
+Private Sub RequireDatePicker(ByVal memberName As String)
+    RequireRole ROLE_COMPONENT, memberName
+    If mKind <> KIND_DATE Then
+        RaiseError ERROR_INVALID_OPERATION, memberName, _
+            memberName & " applies to DatePicker only."
+    End If
+End Sub
 
 ' A float TextInput or ComboBox shows this hint in muted ink while it is
 ' empty, focused or not.
@@ -5398,8 +5474,10 @@ Friend Function CanClick() As Boolean
     If Not mVisible Or Not mEnabled Or mBusy Then Exit Function
     ' A float field and a transfer list take every click, so the second
     ' of a double click reaches them: it selects a field's word or moves
-    ' a transfer row across.
-    If Not IsFloatField() And mKind <> KIND_TRANSFER Then
+    ' a transfer row across. An open calendar takes quick clicks on its
+    ' month arrows.
+    If Not IsFloatField() And mKind <> KIND_TRANSFER _
+        And Not (mKind = KIND_DATE And mSelectOpen) Then
         If GetTickCount64() - mLastClickMs < CLICK_DEBOUNCE_MS Then Exit Function
     End If
     CanClick = True
@@ -5557,6 +5635,8 @@ Friend Sub RunClickBehavior()
                 ReorderChosen hostApp, (transferPart = "mvu")
             End If
             Exit Sub
+        Case KIND_DATE
+            If Not ClickCalendar(hostApp, ReDimUI.SenderPart) Then Exit Sub
         Case KIND_TABS
             Dim tabPicked As Long
             If Left$(ReDimUI.SenderPart, 2) = "tb" _
@@ -5796,6 +5876,12 @@ Private Function AccessibleDescription() As String
             described = "Image"
         Case KIND_SKELETON
             described = "Loading"
+        Case KIND_DATE
+            If mValue <> 0 Then
+                described = "Date picker, " & FormatDateTime(CDate(mValue), vbLongDate)
+            Else
+                described = "Date picker, " & mText
+            End If
         Case KIND_TABS
             described = "Tabs"
             If ShownTab() >= 1 Then
@@ -5831,7 +5917,14 @@ Private Sub ResolveBindings(ByVal hostApp As ReDimUI)
     If LenB(mBindValueKey) > 0 Then
         If hostApp.HasState(mBindValueKey) Then
             bound = hostApp.State(mBindValueKey)
-            If IsNumeric(bound) Then mValue = CDbl(bound)
+            If mKind = KIND_DATE Then
+                ' A Date is not numeric to VBA; a date picker takes either.
+                If IsDate(bound) Or IsNumeric(bound) Then
+                    mValue = CDbl(DayOnly(CDate(bound)))
+                End If
+            ElseIf IsNumeric(bound) Then
+                mValue = CDbl(bound)
+            End If
         End If
     End If
     If LenB(mBindVisibleKey) > 0 Then
@@ -6042,7 +6135,7 @@ Private Function CreateShapeForKind(ByVal hostSheet As Worksheet) As Shape
                 msoShapeRoundedRectangle, mLeft, mTop + mSlideRemaining, _
                 mWidth, mHeight)
             mainShape.Adjustments(1) = 0.2
-        Case KIND_SELECT
+        Case KIND_SELECT, KIND_DATE
             Set mainShape = hostSheet.Shapes.AddShape( _
                 msoShapeRoundedRectangle, mLeft, mTop, mWidth, mHeight)
             mainShape.Adjustments(1) = 0.15
@@ -6248,7 +6341,7 @@ Private Sub ApplyStyle(ByVal mainShape As Shape, ByVal themeValue As ReDimUI)
                 mainShape.Line.Weight = 1
                 mAppliedFill = themeValue.BorderColor
             End If
-        Case KIND_SELECT
+        Case KIND_SELECT, KIND_DATE
             resolvedFill = PointerTint(ResolveSurfaceFill(themeValue), _
                 themeValue.OnSurfaceColor)
             If Not mAppliedValid Or mAppliedFill <> resolvedFill Then
@@ -6389,9 +6482,14 @@ Private Function ResolveTextColor(ByVal themeValue As ReDimUI) As Long
         ResolveTextColor = mTextColor
         Exit Function
     End If
+    ' A date picker's placeholder reads muted, as a field's does.
+    If mKind = KIND_DATE And mValue = 0 Then
+        ResolveTextColor = themeValue.OnMutedColor
+        Exit Function
+    End If
     Select Case mKind
         Case KIND_LABEL, KIND_CARD, KIND_SELECT, KIND_TOAST, _
-            KIND_INPUT, KIND_COMBO
+            KIND_INPUT, KIND_COMBO, KIND_DATE
             ' Surface-filled kinds read in surface ink regardless of variant;
             ' the variant fall-through below is for filled buttons only.
             ' Float fields especially: their implicit variant is primary,
@@ -6416,6 +6514,16 @@ Friend Function ResolveText(ByVal hostApp As ReDimUI) As String
     If mKind = KIND_SELECT Then
         ResolveText = ItemAt(CLng(mValue))
         If LenB(ResolveText) = 0 Then ResolveText = mText
+        Exit Function
+    End If
+    If mKind = KIND_DATE Then
+        If mValue = 0 Then
+            ResolveText = mText
+        ElseIf LenB(mDateFormat) > 0 Then
+            ResolveText = Format$(CDate(mValue), mDateFormat)
+        Else
+            ResolveText = FormatDateTime(CDate(mValue), vbShortDate)
+        End If
         Exit Function
     End If
     If mKind = KIND_TOAST Then
@@ -6778,6 +6886,7 @@ End Sub
 Private Sub HandleControlKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
     Select Case keyText
         Case "{TAB}", "{BACKTAB}"
+            If mKind = KIND_DATE And mSelectOpen Then CloseDropList
             If mKind = KIND_SELECT And mSelectOpen Then
                 ' Tab takes the highlighted item, as a native list does.
                 If mListHighlight >= 1 Then
@@ -6817,6 +6926,8 @@ Private Sub HandleControlKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
             HandleRadioKey hostApp, keyText
         Case KIND_TABS
             HandleTabsKey hostApp, keyText
+        Case KIND_DATE
+            HandleDateKey hostApp, keyText
         Case KIND_STEPPER
             HandleStepperKey hostApp, keyText
         Case KIND_SLIDEBAR
@@ -7928,6 +8039,9 @@ Private Sub ApplyKindExtras( _
             ApplyRadioGroup mainShape, hostSheet, themeValue
         Case KIND_TABS
             ApplyTabs mainShape, hostSheet, themeValue
+        Case KIND_DATE
+            ApplyListCaret hostSheet, themeValue, 14
+            SyncCalendar hostSheet, themeValue
         Case KIND_STEPPER
             ApplyStepper mainShape, hostSheet, themeValue
         Case KIND_SLIDEBAR
@@ -8361,6 +8475,352 @@ Private Sub ApplyTabs( _
         On Error GoTo 0
     Next idx
     mAppliedOptionCount = tabTotal
+End Sub
+
+' A date without its time of day.
+Private Function DayOnly(ByVal anyDate As Date) As Date
+    DayOnly = DateSerial(Year(anyDate), Month(anyDate), Day(anyDate))
+End Function
+
+Private Function DayInRange(ByVal candidateDay As Date) As Boolean
+    If mDateEarliest <> 0 And candidateDay < mDateEarliest Then Exit Function
+    If mDateLatest <> 0 And candidateDay > mDateLatest Then Exit Function
+    DayInRange = True
+End Function
+
+' Where the calendar card sits: under the face, or over it when the list
+' rule found no room below.
+Private Function CalendarTop() As Double
+    If mListFlipped Then
+        CalendarTop = mTop - CAL_DEPTH - 2
+    Else
+        CalendarTop = mTop + mHeight + 2
+    End If
+End Function
+
+' The first day the grid shows: the start of the week that holds the
+' month's first day, by the system's first day of the week.
+Private Function CalendarGridStart() As Date
+    CalendarGridStart = mCalendarMonth - (Weekday(mCalendarMonth, vbUseSystemDayOfWeek) - 1)
+End Function
+
+Private Sub OpenCalendar()
+    Dim anchorDay As Date
+
+    mSelectOpen = True
+    If mValue <> 0 Then
+        anchorDay = CDate(mValue)
+    Else
+        anchorDay = Date
+    End If
+    mCalendarMonth = DateSerial(Year(anchorDay), Month(anchorDay), 1)
+    mCalendarCursor = anchorDay
+    NoteListOpened
+End Sub
+
+' A click on the face or its caret opens or closes the calendar, an
+' arrow turns the month, and a day picks it. True when the date changed,
+' so the handlers run.
+Private Function ClickCalendar(ByVal hostApp As ReDimUI, ByVal partName As String) As Boolean
+    Select Case partName
+        Case vbNullString, "caret"
+            If mSelectOpen Then
+                mSelectOpen = False
+            Else
+                OpenCalendar
+            End If
+            Touch
+        Case "cp", "cn"
+            If Not mSelectOpen Then Exit Function
+            mCalendarMonth = DateAdd("m", IIf(partName = "cp", -1, 1), mCalendarMonth)
+            mCalendarCursor = DateSerial(Year(mCalendarMonth), Month(mCalendarMonth), _
+                Day(mCalendarCursor))
+            If Month(mCalendarCursor) <> Month(mCalendarMonth) Then
+                mCalendarCursor = DateSerial(Year(mCalendarMonth), Month(mCalendarMonth) + 1, 0)
+            End If
+            Touch
+        Case Else
+            If Left$(partName, 2) <> "cd" Or Not IsNumeric(Mid$(partName, 3)) Then
+                Exit Function
+            End If
+            If Not mSelectOpen Then Exit Function
+            ClickCalendar = PickCalendarDay(hostApp, _
+                CalendarGridStart() + CLng(Mid$(partName, 3)) - 1)
+    End Select
+End Function
+
+' Picks a calendar day: the calendar closes, and a new date writes to
+' WritesTo and returns True for OnChange. A day outside DateRange is not
+' picked.
+Private Function PickCalendarDay(ByVal hostApp As ReDimUI, ByVal pickedDay As Date) As Boolean
+    If Not DayInRange(pickedDay) Then Exit Function
+    mSelectOpen = False
+    If CDbl(pickedDay) <> mValue Then
+        mValue = CDbl(pickedDay)
+        If LenB(mWritesToKey) > 0 Then hostApp.SetState mWritesToKey, pickedDay
+        PickCalendarDay = True
+    End If
+    Touch
+End Function
+
+' Closed, Alt+Down, F4, Space, and Down open the calendar on the date
+' held or today. Open, the arrows move a day or a week, Page Up and
+' Page Down a month, Home and End to the month's first and last day,
+' and Enter or Space picks the day the keys reached.
+Private Sub HandleDateKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
+    Dim aimDay As Date
+
+    If Not mSelectOpen Then
+        Select Case keyText
+            Case "{ALTDOWN}", "{F4}", " ", "{DOWN}"
+                OpenCalendar
+                Touch
+            Case "{ENTER}"
+                hostApp.ClickDefaultButton
+        End Select
+        Exit Sub
+    End If
+    aimDay = mCalendarCursor
+    Select Case keyText
+        Case "{LEFT}"
+            aimDay = aimDay - 1
+        Case "{RIGHT}"
+            aimDay = aimDay + 1
+        Case "{UP}"
+            aimDay = aimDay - 7
+        Case "{DOWN}"
+            aimDay = aimDay + 7
+        Case "{PGUP}"
+            aimDay = DateAdd("m", -1, aimDay)
+        Case "{PGDN}"
+            aimDay = DateAdd("m", 1, aimDay)
+        Case "{HOME}"
+            aimDay = DateSerial(Year(aimDay), Month(aimDay), 1)
+        Case "{END}"
+            aimDay = DateSerial(Year(aimDay), Month(aimDay) + 1, 0)
+        Case "{ENTER}", " "
+            If PickCalendarDay(hostApp, mCalendarCursor) Then RunClickHandlers hostApp
+            Exit Sub
+        Case "{F4}", "{ALTUP}"
+            CloseDropList
+            Exit Sub
+        Case Else
+            Exit Sub
+    End Select
+    mCalendarCursor = aimDay
+    mCalendarMonth = DateSerial(Year(aimDay), Month(aimDay), 1)
+    Touch
+End Sub
+
+' The calendar part under a point: the month arrows, or a day cell.
+Private Function CalendarPartAt(ByVal pointsX As Double, ByVal pointsY As Double) As String
+    Dim gridX As Double
+    Dim gridY As Double
+
+    gridX = pointsX - mLeft - CAL_PAD
+    gridY = pointsY - CalendarTop() - CAL_PAD
+    If gridX < 0 Or gridX >= 7 * CAL_CELL_W Or gridY < 0 Then Exit Function
+    If gridY < CAL_HEAD_H Then
+        If gridX < CAL_CELL_W Then
+            CalendarPartAt = "cp"
+        ElseIf gridX >= 6 * CAL_CELL_W Then
+            CalendarPartAt = "cn"
+        End If
+        Exit Function
+    End If
+    gridY = gridY - CAL_HEAD_H - CAL_WEEK_H
+    If gridY < 0 Or gridY >= 6 * CAL_CELL_H Then Exit Function
+    CalendarPartAt = "cd" & (Int(gridY / CAL_CELL_H) * 7 + Int(gridX / CAL_CELL_W) + 1)
+End Function
+
+' The open calendar: a card under the face (over it when there is no room
+' below) with the month between its arrows, the weekday initials, and
+' six weeks of days. The date held fills with the accent, today wears an
+' accent ring, the day the keys reached a dashed one while the picker has
+' the keys, and days of other months or outside DateRange read muted.
+' Each part is rewritten only when its own look changed.
+Private Sub SyncCalendar(ByVal hostSheet As Worksheet, ByVal themeValue As ReDimUI)
+    Dim cardTop As Double
+    Dim textSize As Double
+    Dim gridStart As Date
+    Dim cellNo As Long
+    Dim cellDay As Date
+    Dim cellLeft As Double
+    Dim cellTop As Double
+    Dim cellFill As Long
+    Dim cellInk As Long
+    Dim cellRing As Long
+    Dim cursorShown As Boolean
+    Dim partShape As Shape
+
+    If Not (mSelectOpen And mVisible) Then
+        DeleteCalendarParts hostSheet
+        Exit Sub
+    End If
+    EnsureRowStates mAppliedRowStates, 53
+    textSize = mFontSize
+    If textSize <= 0 Then textSize = themeValue.BaseFontSize
+    cardTop = CalendarTop()
+    If mAppliedRowStates(1) <> PartsState(themeValue) & ":" & CStr(cardTop) Then
+        mAppliedRowStates(1) = PartsState(themeValue) & ":" & CStr(cardTop)
+        Set partShape = EnsurePartShape(hostSheet, "cb", msoShapeRoundedRectangle)
+        On Error Resume Next
+        partShape.Adjustments(1) = 0.04
+        On Error GoTo 0
+        partShape.Left = mLeft
+        partShape.Top = cardTop
+        partShape.Width = CAL_WIDTH
+        partShape.Height = CAL_DEPTH
+        partShape.Fill.Visible = msoTrue
+        partShape.Fill.ForeColor.RGB = themeValue.SurfaceColor
+        partShape.Line.Visible = msoTrue
+        partShape.Line.ForeColor.RGB = themeValue.BorderColor
+        partShape.Line.Weight = 1
+        partShape.OnAction = mAppliedOnAction
+    End If
+    SyncCalendarPart hostSheet, themeValue, 2, "ch", mLeft + CAL_PAD + CAL_CELL_W, _
+        cardTop + CAL_PAD, 5 * CAL_CELL_W, CAL_HEAD_H, _
+        Format$(mCalendarMonth, "mmmm yyyy"), -1, themeValue.OnSurfaceColor, -1, _
+        True, textSize
+    SyncCalendarPart hostSheet, themeValue, 3, "cp", mLeft + CAL_PAD, _
+        cardTop + CAL_PAD, CAL_CELL_W, CAL_HEAD_H, ChrW(9664), _
+        PartFill("cp", themeValue), themeValue.OnMutedColor, -1, False, textSize - 2
+    SyncCalendarPart hostSheet, themeValue, 4, "cn", mLeft + CAL_PAD + 6 * CAL_CELL_W, _
+        cardTop + CAL_PAD, CAL_CELL_W, CAL_HEAD_H, ChrW(9654), _
+        PartFill("cn", themeValue), themeValue.OnMutedColor, -1, False, textSize - 2
+    gridStart = CalendarGridStart()
+    For cellNo = 1 To 7
+        SyncCalendarPart hostSheet, themeValue, 4 + cellNo, "cw" & cellNo, _
+            mLeft + CAL_PAD + (cellNo - 1) * CAL_CELL_W, cardTop + CAL_PAD + CAL_HEAD_H, _
+            CAL_CELL_W, CAL_WEEK_H, _
+            Left$(WeekdayName(Weekday(gridStart + cellNo - 1), True), 2), -1, _
+            themeValue.OnMutedColor, -1, False, textSize - 2
+    Next cellNo
+    cursorShown = ReDimUI.IsComponentFocused(mOwnerAppId, mComponentId)
+    For cellNo = 1 To 42
+        cellDay = gridStart + cellNo - 1
+        cellLeft = mLeft + CAL_PAD + ((cellNo - 1) Mod 7) * CAL_CELL_W
+        cellTop = cardTop + CAL_PAD + CAL_HEAD_H + CAL_WEEK_H + _
+            ((cellNo - 1) \ 7) * CAL_CELL_H
+        cellRing = -1
+        If CDbl(cellDay) = mValue Then
+            cellFill = themeValue.PrimaryColor
+            cellInk = themeValue.OnPrimaryColor
+        Else
+            cellFill = PartFill("cd" & cellNo, themeValue)
+            If Month(cellDay) = Month(mCalendarMonth) And DayInRange(cellDay) Then
+                cellInk = themeValue.OnSurfaceColor
+            Else
+                cellInk = themeValue.OnMutedColor
+            End If
+            If cellDay = Date Then cellRing = themeValue.PrimaryColor
+        End If
+        If cursorShown And cellDay = mCalendarCursor Then
+            cellRing = themeValue.OnSurfaceColor
+        End If
+        SyncCalendarPart hostSheet, themeValue, 11 + cellNo, "cd" & cellNo, _
+            cellLeft + 1, cellTop + 1, CAL_CELL_W - 2, CAL_CELL_H - 2, _
+            CStr(Day(cellDay)), cellFill, cellInk, cellRing, _
+            (cellDay = Date), textSize - 1, (cursorShown And cellDay = mCalendarCursor)
+    Next cellNo
+End Sub
+
+' The hover look of a calendar part: a tint of the card under PointerEffects,
+' otherwise no fill (-1).
+Private Function PartFill(ByVal partName As String, ByVal themeValue As ReDimUI) As Long
+    PartFill = PointerTint(themeValue.SurfaceColor, themeValue.OnSurfaceColor, partName)
+    If PartFill = themeValue.SurfaceColor Then PartFill = -1
+End Function
+
+' One calendar part: a rounded cell with centered text, written only
+' when its look differs from what its slot recorded.
+Private Sub SyncCalendarPart( _
+    ByVal hostSheet As Worksheet, _
+    ByVal themeValue As ReDimUI, _
+    ByVal stateSlot As Long, _
+    ByVal partName As String, _
+    ByVal partLeft As Double, _
+    ByVal partTop As Double, _
+    ByVal partWidth As Double, _
+    ByVal partHeight As Double, _
+    ByVal partWords As String, _
+    ByVal fillRgb As Long, _
+    ByVal inkRgb As Long, _
+    ByVal ringRgb As Long, _
+    ByVal wordsBold As Boolean, _
+    ByVal textSize As Double, _
+    Optional ByVal ringDashed As Boolean _
+)
+    Dim partKey As String
+    Dim partShape As Shape
+
+    partKey = CStr(ObjPtr(themeValue)) & ":" & CStr(partLeft) & ":" & CStr(partTop) & _
+        ":" & CStr(partWidth) & ":" & partWords & ":" & CStr(fillRgb) & ":" & _
+        CStr(inkRgb) & ":" & CStr(ringRgb) & ":" & CStr(wordsBold) & ":" & _
+        CStr(textSize) & ":" & CStr(ringDashed) & ":" & mAppliedOnAction
+    If mAppliedRowStates(stateSlot) = partKey Then Exit Sub
+    mAppliedRowStates(stateSlot) = partKey
+    Set partShape = EnsurePartShape(hostSheet, partName, msoShapeRoundedRectangle)
+    On Error Resume Next
+    partShape.Adjustments(1) = 0.3
+    On Error GoTo 0
+    partShape.Left = partLeft
+    partShape.Top = partTop
+    partShape.Width = partWidth
+    partShape.Height = partHeight
+    partShape.Fill.Visible = BoolToMso(fillRgb >= 0)
+    If fillRgb >= 0 Then partShape.Fill.ForeColor.RGB = fillRgb
+    partShape.Line.Visible = BoolToMso(ringRgb >= 0)
+    If ringRgb >= 0 Then
+        partShape.Line.ForeColor.RGB = ringRgb
+        partShape.Line.Weight = 1.25
+        If ringDashed Then
+            partShape.Line.DashStyle = msoLineDash
+        Else
+            partShape.Line.DashStyle = msoLineSolid
+        End If
+    End If
+    With partShape.TextFrame2
+        .MarginLeft = 0
+        .MarginRight = 0
+        .MarginTop = 0
+        .MarginBottom = 0
+        .VerticalAnchor = msoAnchorMiddle
+        .WordWrap = msoFalse
+        .TextRange.Text = partWords
+        .TextRange.ParagraphFormat.Alignment = msoAlignCenter
+        With .TextRange.Font
+            .Name = themeValue.FontName
+            .Size = textSize
+            .Bold = BoolToMso(wordsBold)
+            .Fill.ForeColor.RGB = inkRgb
+        End With
+    End With
+    partShape.OnAction = mAppliedOnAction
+End Sub
+
+' A closed calendar leaves no shapes behind.
+Private Sub DeleteCalendarParts(ByVal hostSheet As Worksheet)
+    Dim partNo As Long
+    Dim partHeld As Boolean
+
+    On Error Resume Next
+    partHeld = (LenB(mAppliedRowStates(1)) > 0)
+    On Error GoTo 0
+    If Not partHeld Then Exit Sub
+    On Error Resume Next
+    hostSheet.Shapes(ShapeName & PART_SEPARATOR & "cb").Delete
+    hostSheet.Shapes(ShapeName & PART_SEPARATOR & "ch").Delete
+    hostSheet.Shapes(ShapeName & PART_SEPARATOR & "cp").Delete
+    hostSheet.Shapes(ShapeName & PART_SEPARATOR & "cn").Delete
+    For partNo = 1 To 7
+        hostSheet.Shapes(ShapeName & PART_SEPARATOR & "cw" & partNo).Delete
+    Next partNo
+    For partNo = 1 To 42
+        hostSheet.Shapes(ShapeName & PART_SEPARATOR & "cd" & partNo).Delete
+    Next partNo
+    On Error GoTo 0
+    Erase mAppliedRowStates
 End Sub
 
 ' The tab a Tabs control shows: its value held to its tabs, the first
@@ -10020,6 +10480,14 @@ Private Function ListAreaHolds( _
     ByVal pointsX As Double, _
     ByVal pointsY As Double _
 ) As Boolean
+    If mKind = KIND_DATE Then
+        ListAreaHolds = (pointsX >= mLeft - 2 And pointsX <= mLeft + mWidth + 2 _
+            And pointsY >= mTop - 2 And pointsY <= mTop + mHeight + 2) _
+            Or (pointsX >= mLeft - 2 And pointsX <= mLeft + CAL_WIDTH + 2 _
+            And pointsY >= CalendarTop() - 2 _
+            And pointsY <= CalendarTop() + CAL_DEPTH + 2)
+        Exit Function
+    End If
     If pointsX < mLeft - 2 Or pointsX > mLeft + mWidth + 2 Then Exit Function
     If mListFlipped Then
         If pointsY < mTop - DropListDepth() - 2 Then Exit Function
@@ -10046,7 +10514,8 @@ Friend Function ChromeClaimsPoint( _
         End If
         Exit Function
     End If
-    If (mKind = KIND_COMBO Or mKind = KIND_SELECT) And mSelectOpen Then
+    If (mKind = KIND_COMBO Or mKind = KIND_SELECT Or mKind = KIND_DATE) _
+        And mSelectOpen Then
         ChromeClaimsPoint = ListAreaHolds(pointsX, pointsY)
     End If
 End Function
@@ -10055,7 +10524,8 @@ End Function
 ' its rows and pagers.
 Friend Function ListHoldsPoint(ByVal pointsX As Double, ByVal pointsY As Double) As Boolean
     If Not mVisible Then Exit Function
-    If (mKind = KIND_COMBO Or mKind = KIND_SELECT) And mSelectOpen Then
+    If (mKind = KIND_COMBO Or mKind = KIND_SELECT Or mKind = KIND_DATE) _
+        And mSelectOpen Then
         ListHoldsPoint = ListAreaHolds(pointsX, pointsY)
     End If
 End Function
@@ -10107,6 +10577,8 @@ Friend Function PartAtPoint(ByVal pointsX As Double, ByVal pointsY As Double) As
             If mSelectOpen Then PartAtPoint = ListPartAt(pointsY)
         Case KIND_TRANSFER
             PartAtPoint = TransferPartAt(pointsX, pointsY)
+        Case KIND_DATE
+            If mSelectOpen Then PartAtPoint = CalendarPartAt(pointsX, pointsY)
         Case KIND_TABS
             If itemTotal > 0 And mAppliedOptionCount = itemTotal Then
                 For slot = 1 To itemTotal
@@ -10650,7 +11122,7 @@ Friend Sub SetPointerLook( _
         Select Case mKind
             Case KIND_BUTTON, KIND_TOGGLE, KIND_TICKBOX, KIND_RADIO, _
                 KIND_STEPPER, KIND_SLIDEBAR, KIND_SELECT, KIND_CHECKLIST, _
-                KIND_TRANSFER, KIND_TABS
+                KIND_TRANSFER, KIND_TABS, KIND_DATE
             Case KIND_INPUT, KIND_COMBO
                 If Not IsFloatField() Then Exit Sub
             Case Else
@@ -11263,11 +11735,15 @@ Private Function ListOpensUpward() As Boolean
     Dim fullDepth As Double
     Dim roomBelow As Double
 
-    shownRows = ItemCount
-    If shownRows > mListRows Then shownRows = mListRows
-    If shownRows < 1 Then shownRows = 1
-    fullDepth = shownRows * DropRowPitch()
-    If ItemCount > mListRows Then fullDepth = fullDepth + 2 * mHeight
+    If mKind = KIND_DATE Then
+        fullDepth = CAL_DEPTH + 2
+    Else
+        shownRows = ItemCount
+        If shownRows > mListRows Then shownRows = mListRows
+        If shownRows < 1 Then shownRows = 1
+        fullDepth = shownRows * DropRowPitch()
+        If ItemCount > mListRows Then fullDepth = fullDepth + 2 * mHeight
+    End If
     OwnerApp.ResolveViewport viewLeft, viewTop, viewWidth, viewHeight
     roomBelow = viewTop + viewHeight - (mTop + mHeight)
     If fullDepth <= roomBelow Then Exit Function
@@ -11502,7 +11978,7 @@ Friend Function IsFocusable() As Boolean
     Select Case mKind
         Case KIND_BUTTON, KIND_TOGGLE, KIND_TICKBOX, KIND_RADIO, _
             KIND_STEPPER, KIND_SLIDEBAR, KIND_SELECT, KIND_CHECKLIST, _
-            KIND_TRANSFER, KIND_TABS
+            KIND_TRANSFER, KIND_TABS, KIND_DATE
             IsFocusable = True
         Case KIND_INPUT, KIND_COMBO
             IsFocusable = IsFloatField()
@@ -12247,7 +12723,7 @@ End Sub
 ' moves the selection right after.
 Friend Function NeedsListWatch() As Boolean
     If Not mSelectOpen Or Not mVisible Then Exit Function
-    NeedsListWatch = (mKind = KIND_SELECT) _
+    NeedsListWatch = (mKind = KIND_SELECT Or mKind = KIND_DATE) _
         Or (mKind = KIND_COMBO And Not IsFloatField())
 End Function
 
