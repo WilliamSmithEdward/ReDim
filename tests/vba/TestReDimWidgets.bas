@@ -3836,3 +3836,106 @@ Public Function TestDatePicker() As String
     ReDimUI.AutoPump True
     TestDatePicker = transcript
 End Function
+
+' Table: headers over the columns, a number column aligned right, rows in
+' the order they came, formats applied. A header click sorts ascending
+' and a second click descending, keeping equal rows in order. A row click
+' selects, writes the first cell, and fires OnChange once. The footer
+' pages when the rows outgrow the table, and the keys move the selection
+' and scroll it into view. TableFrom reads a range under its header row,
+' and SortBy puts empty cells last.
+Public Function TestTable() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim transcript As String
+    Dim rowNo As Long
+
+    gChangeCount = 0
+    ReDimUI.AutoPump False
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "wid55")
+    app.Table("orders").AtRect(24, 24, 360, 160).Columns("Item", "Qty", "Price") _
+        .WritesTo "orderState"
+    app.Table("orders").OnChange "TestReDimWidgets.RecordChange"
+    app.Table("orders").AddRow "Pear", 3, 1.25
+    app.Table("orders").AddRow "Apple", 12, 0.5
+    app.Table("orders").AddRow "Fig", 3, 2
+    app.Table("orders").AddRow "Kiwi", 7, 0.75
+    app.Table("orders").ColumnFormat 3, "0.00"
+    app.Render
+
+    transcript = "heads=" & host.Shapes("rdm_wid55_orders__th1").TextFrame2.TextRange.Text & _
+        "/" & host.Shapes("rdm_wid55_orders__th2").TextFrame2.TextRange.Text
+    transcript = transcript & "|numberRight=" & CStr( _
+        host.Shapes("rdm_wid55_orders__th2").TextFrame2.TextRange.ParagraphFormat.Alignment _
+            = msoAlignRight _
+        And host.Shapes("rdm_wid55_orders__th1").TextFrame2.TextRange.ParagraphFormat.Alignment _
+            = msoAlignLeft)
+    transcript = transcript & "|firstRow=" & TableRowShown(host, "rdm_wid55_orders__tr1")
+    transcript = transcript & "|noFooter=" & CStr(Not ShapeExists(host, "rdm_wid55_orders__tf"))
+
+    ReDimUI.DispatchShape "rdm_wid55_orders__th2"
+    transcript = transcript & "|sortUp=" & TableRowShown(host, "rdm_wid55_orders__tr1") & _
+        "," & TableRowShown(host, "rdm_wid55_orders__tr2") & _
+        "," & TableRowShown(host, "rdm_wid55_orders__tr4")
+    transcript = transcript & "|arrowUp=" & CStr( _
+        host.Shapes("rdm_wid55_orders__th2").TextFrame2.TextRange.Text = "Qty " & ChrW(9650))
+    ReDimUI.DispatchShape "rdm_wid55_orders__th2"
+    transcript = transcript & "|sortDown=" & TableRowShown(host, "rdm_wid55_orders__tr1") & _
+        "," & TableRowShown(host, "rdm_wid55_orders__tr3") & _
+        "," & TableRowShown(host, "rdm_wid55_orders__tr4")
+    transcript = transcript & "|sortSilent=" & CStr(gChangeCount = 0)
+
+    ReDimUI.DispatchShape "rdm_wid55_orders__tr2"
+    transcript = transcript & "|rowPicks=" & CStr(app.State("orderState")) & "/" & _
+        CStr(app.Table("orders").CurrentValue) & "/" & gChangeCount
+    transcript = transcript & "|rowFilled=" & CStr( _
+        host.Shapes("rdm_wid55_orders__tr2").Fill.Visible = msoTrue _
+        And host.Shapes("rdm_wid55_orders__tr2").Fill.ForeColor.RGB = app.Theme.PrimaryColor)
+    ReDimUI.DispatchShape "rdm_wid55_orders__tr2"
+    transcript = transcript & "|repickSilent=" & CStr(gChangeCount = 1)
+
+    For rowNo = 1 To 10
+        app.Table("orders").AddRow "Item " & rowNo, rowNo, rowNo / 4
+    Next rowNo
+    transcript = transcript & "|footer=" & _
+        host.Shapes("rdm_wid55_orders__tf").TextFrame2.TextRange.Text
+    ReDimUI.DispatchShape "rdm_wid55_orders__tn"
+    transcript = transcript & "|paged=" & _
+        host.Shapes("rdm_wid55_orders__tf").TextFrame2.TextRange.Text
+
+    app.Table("orders").Focus
+    RdxKeyChar "{HOME}"
+    transcript = transcript & "|keyHome=" & _
+        host.Shapes("rdm_wid55_orders__tf").TextFrame2.TextRange.Text & "/" & _
+        CStr(app.State("orderState"))
+    RdxKeyChar "{END}"
+    transcript = transcript & "|keyEnd=" & _
+        host.Shapes("rdm_wid55_orders__tf").TextFrame2.TextRange.Text & "/" & _
+        CStr(app.State("orderState"))
+    RdxKeyChar "{UP}"
+    transcript = transcript & "|keyUp=" & CStr(app.State("orderState")) & "/" & gChangeCount
+    RdxReleaseKeys
+
+    host.Range("H1:I4").Value = Array("Name", "Score")
+    host.Range("H2").Value = "Ann"
+    host.Range("I2").Value = 90
+    host.Range("H3").Value = "Bob"
+    host.Range("I3").Value = 85
+    host.Range("H4").Value = "Cy"
+    host.Range("I4").ClearContents
+    app.Table("scores").AtRect(24, 220, 240, 120).TableFrom host.Range("H1:I4")
+    app.Table("scores").SortBy 2
+    transcript = transcript & "|fromRange=" & _
+        host.Shapes("rdm_wid55_scores__th1").TextFrame2.TextRange.Text & "/" & _
+        app.Table("scores").RowCount & "/" & app.Table("scores").CellValue(2, 2)
+    transcript = transcript & "|blanksLast=" & TableRowShown(host, "rdm_wid55_scores__tr1") & _
+        "," & TableRowShown(host, "rdm_wid55_scores__tr3")
+    ReDimUI.AutoPump True
+    TestTable = transcript
+End Function
+
+' A table row's text with its tabs as spaces and outer spaces trimmed.
+Private Function TableRowShown(ByVal host As Worksheet, ByVal shapeName As String) As String
+    TableRowShown = Trim$(Replace(host.Shapes(shapeName).TextFrame2.TextRange.Text, vbTab, " "))
+End Function

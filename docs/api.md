@@ -47,8 +47,9 @@ demo is the working reference.
 
 Component factories, get-or-create by id: `Button`, `Label`, `Card`, `Spinner`, `ProgressBar`,
 `Skeleton`, `Toggle`, `TickBox`, `RadioGroup`, `Stepper`, `SlideBar`, `SelectBox`, `ComboBox`,
-`TransferList`, `CheckList`, `TextInput`, `DatePicker`, `Image`, and `Tabs`. Every control is drawn from shapes and
-fully themed; there are no native form controls in the framework. Also:
+`TransferList`, `CheckList`, `TextInput`, `DatePicker`, `Image`, `Tabs`, and `Table`. Every
+control is drawn from shapes and fully themed; there are no native form controls in the
+framework. Also:
 
 | Member | Purpose |
 |---|---|
@@ -301,6 +302,30 @@ ui.TextInput("name").AtRect(24, 70, 200, 22).OnTab "tabs", 1
 ui.TickBox("beta").AtRect(24, 70, 200, 18).Text("Beta features").OnTab "tabs", 2
 ```
 
+- `Table`: a data table. `Columns("Item", "Qty")` names the columns and `AddRow "Pear", 3`
+  appends a row; `TableFrom source` replaces the rows from a Range or a two-dimensional
+  array, its first row naming the columns unless `firstRowHeads:=False`. `ClearRows`
+  empties it. Columns share the width by the length of their content unless
+  `ColumnWidths` gives points (0 keeps a column's share), and `ColumnFormat 3, "0.00"`
+  shows a column through a `Format$` pattern. A column whose filled cells are all numbers
+  or dates aligns right, header included; text aligns left and cells too long for their
+  column end in an ellipsis. A click on a header sorts by that column, ascending and then
+  descending, with an arrow on the header; the sort is stable, numbers and dates sort by
+  value ahead of text, text sorts without case, and empty cells sort last either way.
+  `SortBy n, descending` sorts from code and `SortBy 0` restores the order the rows came
+  in; sorting writes nothing and fires nothing. A click on a row selects it: it fills
+  with the accent, its first cell writes to `WritesTo`, and `OnChange` fires. `Value(n)`
+  and `CurrentValue` set and read the selection as the row's number in the order the
+  rows came in, whatever the sort. Rows show as many as the height holds; more add a
+  footer that counts them (`6-10 of 14`) with arrows that page. `RowCount`,
+  `CellValue(row, column)`, `SortColumn`, and `SortedDescending` read it back.
+
+```vba
+ui.Table("orders").AtRect(24, 24, 360, 160).TableFrom Range("Orders!A1:C40")
+ui.Table("orders").ColumnFormat 3, "#,##0.00"
+ui.Table("orders").WritesTo "orderId"
+```
+
 ## Float fields and keyboard focus
 
 As of 0.9.0 no control needs a cell. `TextInput` and `ComboBox` placed with `AtRect`,
@@ -465,9 +490,10 @@ the pointer at most once a frame and act only while their sheet is in front.
 - Hover and press looks, with `ui.PointerEffects`: the fill under the pointer moves
   toward its ink, 8 percent on hover and 16 while the left button that went down on it
   stays down, the state layers Material Design draws. A press that went down elsewhere
-  presses nothing it crosses. Buttons, toggles, select and field faces, stepper buttons,
-  a slider's thumb, and a transfer list's rows, move buttons, and paging arrows tint; a
-  check box's or radio button's edge takes the accent; an open drop list's highlight
+  presses nothing it crosses. Buttons, toggles, select, date, and field faces, stepper
+  buttons, a slider's thumb, a transfer list's rows, move buttons, and paging arrows, a
+  tab, a calendar's days and month arrows, and a table's headers, rows, and paging arrows
+  tint; a check box's or radio button's edge takes the accent; an open drop list's highlight
   follows the pointer as it moves, as a Windows list's does, and Enter from a combo or a
   keyboard-focused select takes that row. Off by default, since while it is on the pump
   reads the pointer every frame the app's sheet is in front.
@@ -497,8 +523,8 @@ the pointer at most once a frame and act only while their sheet is in front.
 ## Keyboard focus for every control
 
 Every interactive control takes keyboard focus: buttons, toggles, tick boxes, radio groups,
-steppers, sliders, selects, check lists, transfer lists, tab strips, date pickers, images
-with a click handler, and float fields. Focus comes from the keyboard or from code: Tab and Shift+Tab walk the app's
+steppers, sliders, selects, check lists, transfer lists, tab strips, date pickers, tables,
+images with a click handler, and float fields. Focus comes from the keyboard or from code: Tab and Shift+Tab walk the app's
 controls, `component.Focus` and `ui.FocusFirst` place it, and a modal takes it. A click
 focuses only a text field, since someone who clicks a button in Excel expects the grid to
 keep the keys.
@@ -530,6 +556,7 @@ keep the keys.
 | Toggle, TickBox | Space toggles. |
 | RadioGroup | Arrows move the selection, wrapping at the ends; Home and End jump. Each move fires `OnChange`. |
 | Tabs | Left and Right show the tab beside, wrapping at the ends; Home and End jump. Each move fires `OnChange`. |
+| Table | Up and Down move the selection a row in the order shown, Page Up and Page Down a page, Home and End to the first and last row; the rows scroll to keep it in view, and each move fires `OnChange`. |
 | DatePicker | Closed: Alt+Down, F4, Space, or Down opens the calendar on the date held, or today. Open: Left and Right move a day, Up and Down a week, Page Up and Page Down a month, Home and End to the month's first and last day; Enter or Space picks the day reached, and Esc, F4, or Alt+Up closes. A dashed ring marks the day reached. |
 | Stepper | Up and Right step up, Down and Left step down, Page Up and Page Down step ten times, Home and End jump to the range ends. |
 | SlideBar | Arrows move a step, Page Up and Page Down a tenth of the range in whole steps, Home and End go to the ends. |

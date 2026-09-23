@@ -1126,3 +1126,29 @@ def test_date_picker(run_widgets):
     assert facts["pressOnKeeps"] == "True"
     assert facts["hoverTints"] == "True"
     assert facts["pressOffCloses"] == "True"
+
+
+def test_table(run_widgets):
+    facts = parse_transcript(run_widgets("TestTable"))
+    assert facts["heads"] == "Item/Qty"
+    assert facts["numberRight"] == "True", "a number column aligns right"
+    assert facts["firstRow"] == "Pear 3 1.25"
+    assert facts["noFooter"] == "True"
+    assert facts["sortUp"] == "Pear 3 1.25,Fig 3 2.00,Apple 12 0.50", (
+        "an ascending sort keeps equal rows in the order they came"
+    )
+    assert facts["arrowUp"] == "True"
+    assert facts["sortDown"] == "Apple 12 0.50,Pear 3 1.25,Fig 3 2.00"
+    assert facts["sortSilent"] == "True", "sorting fires nothing"
+    assert facts["rowPicks"] == "Kiwi/4/1", (
+        "a row click must write its first cell, select its source row, and fire once"
+    )
+    assert facts["rowFilled"] == "True"
+    assert facts["repickSilent"] == "True"
+    assert facts["footer"] == "1-5 of 14"
+    assert facts["paged"] == "6-10 of 14"
+    assert facts["keyHome"] == "1-5 of 14/Apple"
+    assert facts["keyEnd"] == "10-14 of 14/Item 1"
+    assert facts["keyUp"] == "Item 2/4"
+    assert facts["fromRange"] == "Name/3/85"
+    assert facts["blanksLast"] == "Bob 85,Cy"

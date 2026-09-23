@@ -140,6 +140,7 @@ Private Const KIND_IMAGE As Long = 21
 Private Const KIND_SKELETON As Long = 22
 Private Const KIND_TABS As Long = 23
 Private Const KIND_DATE As Long = 24
+Private Const KIND_TABLE As Long = 25
 
 ' Option rows a SelectBox or ComboBox drop list draws at once unless
 ' ListRows says otherwise; longer lists window behind pager rows.
@@ -171,6 +172,9 @@ Private Const CAL_HEAD_H As Double = 24
 Private Const CAL_WEEK_H As Double = 16
 Private Const CAL_WIDTH As Double = 194
 Private Const CAL_DEPTH As Double = 184
+
+' Table cells keep this many points clear at each side of their text.
+Private Const TABLE_CELL_PAD As Double = 6
 
 ' Sentinel for "the source could not be loaded"; contains characters no
 ' real path can, so it never collides with one.
@@ -532,6 +536,38 @@ Private mCalendarCursor As Date
 Private mDateEarliest As Date
 Private mDateLatest As Date
 Private mDateFormat As String
+' Table: cells by column, then row, so rows can grow; each column's
+' header, Format$ pattern, asked width (0 fits the content), and whether
+' it holds numbers; the columns and rows held and a count of data
+' changes; the order rows show in, as source row numbers, and whether it
+' is current; the column sorted by (0 for the source order) and its
+' direction; the rows scrolled past the top; and what the last draw
+' laid out: each column's right edge from the table's left, with the
+' key it was measured under, the row pitch, the row slots, whether the
+' footer shows, and each part's look.
+Private mTableCells() As Variant
+Private mTableHeads() As String
+Private mColumnFormats() As String
+Private mColumnPoints() As Double
+Private mColumnNumeric() As Boolean
+Private mTableCols As Long
+Private mTableRows As Long
+Private mTableVersion As Long
+Private mTableOrder() As Long
+Private mTableOrderCurrent As Boolean
+Private mSortColumn As Long
+Private mSortDescending As Boolean
+Private mTableOffset As Long
+Private mColumnEdges() As Double
+Private mColumnLayoutKey As String
+Private mTableRowPitch As Double
+Private mTableSlots As Long
+Private mTableFooterOn As Boolean
+Private mAppliedTableRowStates() As String
+Private mAppliedTableHeadStates() As String
+Private mAppliedTableFootSig As String
+Private mAppliedTableColsDrawn As Long
+Private mAppliedTableSlotsDrawn As Long
 ' AutoGrow: the line cap (0 for off) and how far the field has grown past
 ' the height it was given; the geometry setters start that over.
 Private mAutoGrowLines As Long
@@ -1776,6 +1812,12 @@ End Function
 ' calendar under it to pick another. WritesTo writes a Date.
 Public Function DatePicker(ByVal targetComponentId As String) As ReDimUI
     Set DatePicker = GetOrCreateComponent(targetComponentId, KIND_DATE)
+End Function
+
+' A data table: a header row whose cells sort by their column, rows that
+' page within the table's height, and one selected row.
+Public Function Table(ByVal targetComponentId As String) As ReDimUI
+    Set Table = GetOrCreateComponent(targetComponentId, KIND_TABLE)
 End Function
 
 ' Drawn single-select option rows. Items supplies the rows, Value the
@@ -3316,6 +3358,8 @@ Friend Sub ConfigureComponent( _
             mWidth = 200: mHeight = 60
         Case KIND_DATE
             mWidth = 130: mHeight = 24
+        Case KIND_TABLE
+            mWidth = 420: mHeight = 200
         Case KIND_TABS
             mWidth = 360: mHeight = 32
             mValue = 1
@@ -3741,6 +3785,212 @@ Public Function DateFormat(ByVal formatPattern As String) As ReDimUI
     Touch
     Set DateFormat = Me
 End Function
+
+' The header of each column, which also sets how many columns the table
+' has; rows already held keep their cells in the columns that remain.
+Public Function Columns(ParamArray heads() As Variant) As ReDimUI
+    Dim colNo As Long
+
+    RequireTable "Columns"
+    ResizeTableColumns UBound(heads) - LBound(heads) + 1
+    For colNo = 1 To mTableCols
+        mTableHeads(colNo) = CStr(heads(LBound(heads) + colNo - 1))
+    Next colNo
+    TableChanged
+    Set Columns = Me
+End Function
+
+' Appends a row, one value per column in order; missing values leave
+' their cells empty and extra ones are dropped. A table with no columns
+' yet takes one per value.
+Public Function AddRow(ParamArray rowCells() As Variant) As ReDimUI
+    Dim colNo As Long
+    Dim valueTotal As Long
+
+    RequireTable "AddRow"
+    valueTotal = UBound(rowCells) - LBound(rowCells) + 1
+    If mTableCols = 0 Then ResizeTableColumns valueTotal
+    If mTableCols = 0 Then
+        Set AddRow = Me
+        Exit Function
+    End If
+    EnsureTableRoom mTableRows + 1
+    mTableRows = mTableRows + 1
+    For colNo = 1 To mTableCols
+        If colNo <= valueTotal Then
+            mTableCells(colNo, mTableRows) = rowCells(LBound(rowCells) + colNo - 1)
+        Else
+            mTableCells(colNo, mTableRows) = Empty
+        End If
+    Next colNo
+    TableChanged
+    Set AddRow = Me
+End Function
+
+' Replaces the rows from a Range or a two-dimensional array. With
+' firstRowHeads the first row names the columns; without it, a table
+' that already has as many columns keeps their headers.
+Public Function TableFrom( _
+    ByVal tableSource As Variant, _
+    Optional ByVal firstRowHeads As Boolean = True _
+) As ReDimUI
+    Dim grid As Variant
+    Dim rowLow As Long
+    Dim colLow As Long
+    Dim sourceRows As Long
+    Dim sourceCols As Long
+    Dim rowNo As Long
+    Dim colNo As Long
+    Dim skipRows As Long
+    Dim rankFailed As Boolean
+
+    RequireTable "TableFrom"
+    If IsObject(tableSource) Then
+        If Not TypeOf tableSource Is Range Then rankFailed = True
+    ElseIf Not IsArrayValue(tableSource) Then
+        rankFailed = True
+    End If
+    If Not rankFailed Then
+        If IsObject(tableSource) Then
+            If tableSource.Cells.CountLarge = 1 Then
+                ReDim grid(1 To 1, 1 To 1)
+                grid(1, 1) = tableSource.Value
+            Else
+                grid = tableSource.Value
+            End If
+        Else
+            grid = tableSource
+        End If
+        On Error Resume Next
+        colLow = LBound(grid, 2)
+        rankFailed = (Err.Number <> 0)
+        On Error GoTo 0
+    End If
+    If rankFailed Then
+        RaiseError ERROR_INVALID_ARGUMENT, "TableFrom", _
+            "TableFrom takes a Range or a two-dimensional array."
+    End If
+    rowLow = LBound(grid, 1)
+    sourceRows = UBound(grid, 1) - rowLow + 1
+    sourceCols = UBound(grid, 2) - colLow + 1
+    If firstRowHeads Then skipRows = 1
+    If firstRowHeads Or sourceCols <> mTableCols Then
+        ResizeTableColumns sourceCols
+        For colNo = 1 To sourceCols
+            If firstRowHeads Then
+                mTableHeads(colNo) = TableCellText(0, grid(rowLow, colLow + colNo - 1))
+            Else
+                mTableHeads(colNo) = "Column " & colNo
+            End If
+        Next colNo
+    End If
+    mTableRows = 0
+    If sourceRows - skipRows > 0 Then
+        EnsureTableRoom sourceRows - skipRows
+        For rowNo = 1 + skipRows To sourceRows
+            mTableRows = mTableRows + 1
+            For colNo = 1 To sourceCols
+                mTableCells(colNo, mTableRows) = grid(rowLow + rowNo - 1, colLow + colNo - 1)
+            Next colNo
+        Next rowNo
+    End If
+    mValue = 0
+    mTableOffset = 0
+    TableChanged
+    Set TableFrom = Me
+End Function
+
+' Drops every row and the selection; the columns stay.
+Public Function ClearRows() As ReDimUI
+    RequireTable "ClearRows"
+    mTableRows = 0
+    mValue = 0
+    mTableOffset = 0
+    TableChanged
+    Set ClearRows = Me
+End Function
+
+' Column widths in points, in column order; 0 or a column left out
+' shares the width left over by the length of its content.
+Public Function ColumnWidths(ParamArray columnPoints() As Variant) As ReDimUI
+    Dim colNo As Long
+
+    RequireTable "ColumnWidths"
+    For colNo = 1 To mTableCols
+        mColumnPoints(colNo) = 0
+        If colNo <= UBound(columnPoints) - LBound(columnPoints) + 1 Then
+            mColumnPoints(colNo) = CDbl(columnPoints(LBound(columnPoints) + colNo - 1))
+        End If
+    Next colNo
+    mColumnLayoutKey = vbNullString
+    Touch
+    Set ColumnWidths = Me
+End Function
+
+' How a column shows its values, as a Format$ pattern such as "#,##0.00"
+' or "yyyy-mm-dd"; sorting still compares the values themselves.
+Public Function ColumnFormat( _
+    ByVal columnNumber As Long, _
+    ByVal formatPattern As String _
+) As ReDimUI
+    RequireTable "ColumnFormat"
+    If columnNumber >= 1 And columnNumber <= mTableCols Then
+        mColumnFormats(columnNumber) = formatPattern
+        mColumnLayoutKey = vbNullString
+        Touch
+    End If
+    Set ColumnFormat = Me
+End Function
+
+' Sorts the rows by a column, as a click on its header does, without
+' firing anything; 0 goes back to the order the rows came in.
+Public Function SortBy( _
+    ByVal columnNumber As Long, _
+    Optional ByVal sortDescending As Boolean = False _
+) As ReDimUI
+    RequireTable "SortBy"
+    If columnNumber < 0 Or columnNumber > mTableCols Then columnNumber = 0
+    mSortColumn = columnNumber
+    mSortDescending = sortDescending And columnNumber > 0
+    mTableOrderCurrent = False
+    mTableOffset = 0
+    Touch
+    Set SortBy = Me
+End Function
+
+Public Property Get RowCount() As Long
+    RequireTable "RowCount"
+    RowCount = mTableRows
+End Property
+
+' A cell's value by its row as the rows came in, whatever the sort.
+Public Property Get CellValue(ByVal rowNumber As Long, ByVal columnNumber As Long) As Variant
+    RequireTable "CellValue"
+    If rowNumber < 1 Or rowNumber > mTableRows _
+        Or columnNumber < 1 Or columnNumber > mTableCols Then
+        RaiseError ERROR_INVALID_ARGUMENT, "CellValue", "No such cell."
+    End If
+    CellValue = mTableCells(columnNumber, rowNumber)
+End Property
+
+' The column the rows are sorted by, 0 for the order they came in.
+Public Property Get SortColumn() As Long
+    RequireTable "SortColumn"
+    SortColumn = mSortColumn
+End Property
+
+Public Property Get SortedDescending() As Boolean
+    RequireTable "SortedDescending"
+    SortedDescending = mSortDescending
+End Property
+
+Private Sub RequireTable(ByVal memberName As String)
+    RequireRole ROLE_COMPONENT, memberName
+    If mKind <> KIND_TABLE Then
+        RaiseError ERROR_INVALID_OPERATION, memberName, _
+            memberName & " applies to Table only."
+    End If
+End Sub
 
 Private Sub RequireDatePicker(ByVal memberName As String)
     RequireRole ROLE_COMPONENT, memberName
@@ -5474,9 +5724,9 @@ Friend Function CanClick() As Boolean
     If Not mVisible Or Not mEnabled Or mBusy Then Exit Function
     ' A float field and a transfer list take every click, so the second
     ' of a double click reaches them: it selects a field's word or moves
-    ' a transfer row across. An open calendar takes quick clicks on its
-    ' month arrows.
-    If Not IsFloatField() And mKind <> KIND_TRANSFER _
+    ' a transfer row across. A table's second click on a header flips the
+    ' sort, and an open calendar takes quick clicks on its month arrows.
+    If Not IsFloatField() And mKind <> KIND_TRANSFER And mKind <> KIND_TABLE _
         And Not (mKind = KIND_DATE And mSelectOpen) Then
         If GetTickCount64() - mLastClickMs < CLICK_DEBOUNCE_MS Then Exit Function
     End If
@@ -5637,6 +5887,8 @@ Friend Sub RunClickBehavior()
             Exit Sub
         Case KIND_DATE
             If Not ClickCalendar(hostApp, ReDimUI.SenderPart) Then Exit Sub
+        Case KIND_TABLE
+            If Not ClickTable(hostApp, ReDimUI.SenderPart) Then Exit Sub
         Case KIND_TABS
             Dim tabPicked As Long
             If Left$(ReDimUI.SenderPart, 2) = "tb" _
@@ -5876,6 +6128,16 @@ Private Function AccessibleDescription() As String
             described = "Image"
         Case KIND_SKELETON
             described = "Loading"
+        Case KIND_TABLE
+            described = "Table, " & mTableRows & IIf(mTableRows = 1, " row", " rows")
+            If mSortColumn > 0 Then
+                described = described & ", sorted by " & mTableHeads(mSortColumn) & _
+                    IIf(mSortDescending, ", descending", ", ascending")
+            End If
+            If CLng(mValue) >= 1 And CLng(mValue) <= mTableRows Then
+                described = described & ", " & _
+                    TableCellText(1, mTableCells(1, CLng(mValue))) & " selected"
+            End If
         Case KIND_DATE
             If mValue <> 0 Then
                 described = "Date picker, " & FormatDateTime(CDate(mValue), vbLongDate)
@@ -6254,7 +6516,7 @@ Private Sub ApplyStyle(ByVal mainShape As Shape, ByVal themeValue As ReDimUI)
                 mainShape.Line.Visible = msoFalse
                 mAppliedFill = resolvedFill
             End If
-        Case KIND_CARD, KIND_TOAST
+        Case KIND_CARD, KIND_TOAST, KIND_TABLE
             If Not mAppliedValid Or mAppliedFill <> ResolveSurfaceFill(themeValue) Then
                 mainShape.Fill.Visible = msoTrue
                 mainShape.Fill.ForeColor.RGB = ResolveSurfaceFill(themeValue)
@@ -6774,7 +7036,7 @@ Private Sub ApplyText(ByVal mainShape As Shape, ByVal themeValue As ReDimUI)
     Dim textChanged As Boolean
 
     If mKind = KIND_SPINNER Or mKind = KIND_TOGGLE Or mKind = KIND_OVERLAY _
-        Or mKind = KIND_IMAGE Or mKind = KIND_SKELETON _
+        Or mKind = KIND_IMAGE Or mKind = KIND_SKELETON Or mKind = KIND_TABLE _
         Or IsCompositeDrawnKind() Then Exit Sub
     If (mKind = KIND_INPUT Or mKind = KIND_COMBO) And Not IsFloatField() Then
         Exit Sub
@@ -6928,6 +7190,8 @@ Private Sub HandleControlKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
             HandleTabsKey hostApp, keyText
         Case KIND_DATE
             HandleDateKey hostApp, keyText
+        Case KIND_TABLE
+            HandleTableKey hostApp, keyText
         Case KIND_STEPPER
             HandleStepperKey hostApp, keyText
         Case KIND_SLIDEBAR
@@ -8042,6 +8306,8 @@ Private Sub ApplyKindExtras( _
         Case KIND_DATE
             ApplyListCaret hostSheet, themeValue, 14
             SyncCalendar hostSheet, themeValue
+        Case KIND_TABLE
+            ApplyTable hostSheet, themeValue
         Case KIND_STEPPER
             ApplyStepper mainShape, hostSheet, themeValue
         Case KIND_SLIDEBAR
@@ -8295,6 +8561,9 @@ Friend Sub ForgetPartSignatures()
     Erase mAppliedRowStates
     Erase mAppliedLeftRowStates
     Erase mAppliedRightRowStates
+    Erase mAppliedTableRowStates
+    Erase mAppliedTableHeadStates
+    mAppliedTableFootSig = "?"
 End Sub
 
 ' Box at the left edge, check glyph inside it when checked, caption filling
@@ -8475,6 +8744,787 @@ Private Sub ApplyTabs( _
         On Error GoTo 0
     Next idx
     mAppliedOptionCount = tabTotal
+End Sub
+
+' Sets the column count, keeping the cells, headers, formats, and widths
+' of the columns that remain.
+Private Sub ResizeTableColumns(ByVal columnTotal As Long)
+    Dim keptCells() As Variant
+    Dim rowNo As Long
+    Dim colNo As Long
+
+    If columnTotal < 0 Then columnTotal = 0
+    If columnTotal = mTableCols Then Exit Sub
+    If columnTotal = 0 Then
+        mTableCols = 0
+        mTableRows = 0
+        Erase mTableCells
+        Exit Sub
+    End If
+    If mTableRows > 0 Then
+        ReDim keptCells(1 To columnTotal, 1 To mTableRows)
+        For rowNo = 1 To mTableRows
+            For colNo = 1 To columnTotal
+                If colNo <= mTableCols Then keptCells(colNo, rowNo) = mTableCells(colNo, rowNo)
+            Next colNo
+        Next rowNo
+        mTableCells = keptCells
+    Else
+        ReDim mTableCells(1 To columnTotal, 1 To 4)
+    End If
+    If mTableCols = 0 Then
+        ReDim mTableHeads(1 To columnTotal)
+        ReDim mColumnFormats(1 To columnTotal)
+        ReDim mColumnPoints(1 To columnTotal)
+    Else
+        ReDim Preserve mTableHeads(1 To columnTotal)
+        ReDim Preserve mColumnFormats(1 To columnTotal)
+        ReDim Preserve mColumnPoints(1 To columnTotal)
+    End If
+    mTableCols = columnTotal
+    If mSortColumn > mTableCols Then mSortColumn = 0
+End Sub
+
+' Room for at least rowsWanted rows, doubling so appends stay cheap.
+Private Sub EnsureTableRoom(ByVal rowsWanted As Long)
+    Dim rowsHeld As Long
+
+    rowsHeld = UBound(mTableCells, 2)
+    If rowsHeld >= rowsWanted Then Exit Sub
+    Do While rowsHeld < rowsWanted
+        rowsHeld = rowsHeld * 2
+    Loop
+    ReDim Preserve mTableCells(1 To mTableCols, 1 To rowsHeld)
+End Sub
+
+' After the data changed: the order, the layout, and the numeric columns
+' are read again, and a selection past the rows goes.
+Private Sub TableChanged()
+    mTableVersion = mTableVersion + 1
+    mTableOrderCurrent = False
+    mColumnLayoutKey = vbNullString
+    If CLng(mValue) > mTableRows Then mValue = 0
+    Touch
+End Sub
+
+' The rows in the order they show: as they came in, or stably sorted by
+' the sort column so rows with equal cells keep their order.
+Private Sub EnsureTableOrder()
+    Dim rowNo As Long
+    Dim scratch() As Long
+
+    If mTableOrderCurrent Then Exit Sub
+    mTableOrderCurrent = True
+    If mTableRows = 0 Then Exit Sub
+    ReDim mTableOrder(1 To mTableRows)
+    For rowNo = 1 To mTableRows
+        mTableOrder(rowNo) = rowNo
+    Next rowNo
+    If mSortColumn = 0 Or mTableRows < 2 Then Exit Sub
+    ReDim scratch(1 To mTableRows)
+    MergeTableRows 1, mTableRows, scratch
+End Sub
+
+Private Sub MergeTableRows(ByVal lowAt As Long, ByVal highAt As Long, ByRef scratch() As Long)
+    Dim midAt As Long
+    Dim leftAt As Long
+    Dim rightAt As Long
+    Dim outAt As Long
+
+    If highAt <= lowAt Then Exit Sub
+    midAt = (lowAt + highAt) \ 2
+    MergeTableRows lowAt, midAt, scratch
+    MergeTableRows midAt + 1, highAt, scratch
+    leftAt = lowAt
+    rightAt = midAt + 1
+    outAt = lowAt
+    Do While leftAt <= midAt And rightAt <= highAt
+        If CompareTableRows(mTableOrder(rightAt), mTableOrder(leftAt)) < 0 Then
+            scratch(outAt) = mTableOrder(rightAt)
+            rightAt = rightAt + 1
+        Else
+            scratch(outAt) = mTableOrder(leftAt)
+            leftAt = leftAt + 1
+        End If
+        outAt = outAt + 1
+    Loop
+    Do While leftAt <= midAt
+        scratch(outAt) = mTableOrder(leftAt)
+        leftAt = leftAt + 1
+        outAt = outAt + 1
+    Loop
+    Do While rightAt <= highAt
+        scratch(outAt) = mTableOrder(rightAt)
+        rightAt = rightAt + 1
+        outAt = outAt + 1
+    Loop
+    For outAt = lowAt To highAt
+        mTableOrder(outAt) = scratch(outAt)
+    Next outAt
+End Sub
+
+' Orders two rows by the sort column: numbers and dates by value, before
+' text, text without case, and empty cells last whichever the direction.
+Private Function CompareTableRows(ByVal rowA As Long, ByVal rowB As Long) As Long
+    Dim cellA As Variant
+    Dim cellB As Variant
+    Dim blankA As Boolean
+    Dim blankB As Boolean
+
+    cellA = mTableCells(mSortColumn, rowA)
+    cellB = mTableCells(mSortColumn, rowB)
+    blankA = IsBlankCell(cellA)
+    blankB = IsBlankCell(cellB)
+    If blankA Or blankB Then
+        If blankA And Not blankB Then CompareTableRows = 1
+        If blankB And Not blankA Then CompareTableRows = -1
+        Exit Function
+    End If
+    If IsNumberCell(cellA) And IsNumberCell(cellB) Then
+        If CDbl(cellA) < CDbl(cellB) Then
+            CompareTableRows = -1
+        ElseIf CDbl(cellA) > CDbl(cellB) Then
+            CompareTableRows = 1
+        End If
+    ElseIf IsNumberCell(cellA) Then
+        CompareTableRows = -1
+    ElseIf IsNumberCell(cellB) Then
+        CompareTableRows = 1
+    Else
+        CompareTableRows = StrComp(TableCellText(0, cellA), TableCellText(0, cellB), _
+            vbTextCompare)
+    End If
+    If mSortDescending Then CompareTableRows = -CompareTableRows
+End Function
+
+Private Function IsBlankCell(ByVal cellEntry As Variant) As Boolean
+    If IsEmpty(cellEntry) Or IsNull(cellEntry) Then
+        IsBlankCell = True
+    ElseIf VarType(cellEntry) = vbString Then
+        IsBlankCell = (LenB(cellEntry) = 0)
+    End If
+End Function
+
+Private Function IsNumberCell(ByVal cellEntry As Variant) As Boolean
+    Select Case VarType(cellEntry)
+        Case vbInteger, vbLong, vbSingle, vbDouble, vbCurrency, vbDecimal, _
+            vbDate, vbByte, vbLongLong
+            IsNumberCell = True
+    End Select
+End Function
+
+' A cell as the table shows it: through its column's Format$ pattern
+' when it has one (column 0 for none), and Excel's own words for an
+' error value.
+Private Function TableCellText(ByVal colNo As Long, ByVal cellEntry As Variant) As String
+    If IsError(cellEntry) Then
+        TableCellText = ErrorCellText(cellEntry)
+    ElseIf IsEmpty(cellEntry) Or IsNull(cellEntry) Then
+        Exit Function
+    ElseIf colNo >= 1 And colNo <= mTableCols Then
+        If LenB(mColumnFormats(colNo)) > 0 Then
+            TableCellText = Format$(cellEntry, mColumnFormats(colNo))
+        Else
+            TableCellText = CStr(cellEntry)
+        End If
+    Else
+        TableCellText = CStr(cellEntry)
+    End If
+End Function
+
+Private Function ErrorCellText(ByVal cellEntry As Variant) As String
+    If cellEntry = CVErr(xlErrNA) Then
+        ErrorCellText = "#N/A"
+    ElseIf cellEntry = CVErr(xlErrDiv0) Then
+        ErrorCellText = "#DIV/0!"
+    ElseIf cellEntry = CVErr(xlErrValue) Then
+        ErrorCellText = "#VALUE!"
+    ElseIf cellEntry = CVErr(xlErrRef) Then
+        ErrorCellText = "#REF!"
+    ElseIf cellEntry = CVErr(xlErrName) Then
+        ErrorCellText = "#NAME?"
+    ElseIf cellEntry = CVErr(xlErrNum) Then
+        ErrorCellText = "#NUM!"
+    ElseIf cellEntry = CVErr(xlErrNull) Then
+        ErrorCellText = "#NULL!"
+    Else
+        ErrorCellText = "#ERROR"
+    End If
+End Function
+
+' Column edges: asked widths first, then the width left over shared by
+' the other columns in proportion to their longest text among the
+' header and the first 200 rows. A column holds numbers when every
+' filled cell is a number or a date; its cells and header align right.
+Private Sub LayoutTableColumns(ByVal textSize As Double)
+    Dim layoutKey As String
+    Dim colNo As Long
+    Dim rowNo As Long
+    Dim weights() As Double
+    Dim weightSum As Double
+    Dim fixedSum As Double
+    Dim spareWidth As Double
+    Dim edgeAt As Double
+    Dim longest As Long
+    Dim cellEntry As Variant
+
+    layoutKey = CStr(mTableVersion) & ":" & CStr(mWidth) & ":" & CStr(textSize)
+    For colNo = 1 To mTableCols
+        layoutKey = layoutKey & ":" & CStr(mColumnPoints(colNo)) & "/" & mColumnFormats(colNo)
+    Next colNo
+    If layoutKey = mColumnLayoutKey Then Exit Sub
+    mColumnLayoutKey = layoutKey
+    If mTableCols = 0 Then Exit Sub
+    ReDim mColumnEdges(1 To mTableCols)
+    ReDim mColumnNumeric(1 To mTableCols)
+    ReDim weights(1 To mTableCols)
+    For colNo = 1 To mTableCols
+        mColumnNumeric(colNo) = (mTableRows > 0)
+        For rowNo = 1 To mTableRows
+            cellEntry = mTableCells(colNo, rowNo)
+            If Not IsBlankCell(cellEntry) And Not IsNumberCell(cellEntry) Then
+                mColumnNumeric(colNo) = False
+                Exit For
+            End If
+        Next rowNo
+        If mColumnPoints(colNo) > 0 Then
+            fixedSum = fixedSum + mColumnPoints(colNo)
+        Else
+            longest = Len(mTableHeads(colNo)) + 2
+            For rowNo = 1 To mTableRows
+                If rowNo > 200 Then Exit For
+                If Len(TableCellText(colNo, mTableCells(colNo, rowNo))) > longest Then
+                    longest = Len(TableCellText(colNo, mTableCells(colNo, rowNo)))
+                End If
+            Next rowNo
+            If longest < 4 Then longest = 4
+            If longest > 40 Then longest = 40
+            weights(colNo) = longest
+            weightSum = weightSum + longest
+        End If
+    Next colNo
+    spareWidth = mWidth - 2 - fixedSum
+    If spareWidth < 0 Then spareWidth = 0
+    For colNo = 1 To mTableCols
+        If mColumnPoints(colNo) > 0 Then
+            edgeAt = edgeAt + mColumnPoints(colNo)
+        ElseIf weightSum > 0 Then
+            edgeAt = edgeAt + spareWidth * weights(colNo) / weightSum
+        End If
+        mColumnEdges(colNo) = edgeAt
+    Next colNo
+End Sub
+
+Private Function ColumnLeftEdge(ByVal colNo As Long) As Double
+    If colNo > 1 Then ColumnLeftEdge = mColumnEdges(colNo - 1)
+End Function
+
+' A cell's text cut to its column with an ellipsis when it would run
+' into the next.
+Private Function FitCellText( _
+    ByVal cellWords As String, _
+    ByVal cellSpan As Double, _
+    ByVal textSize As Double _
+) As String
+    Dim fitChars As Long
+
+    fitChars = Int((cellSpan - 2 * TABLE_CELL_PAD) / (textSize * 0.55))
+    If Len(cellWords) > fitChars And fitChars >= 2 Then
+        FitCellText = Left$(cellWords, fitChars - 1) & ChrW(8230)
+    ElseIf Len(cellWords) > fitChars Then
+        FitCellText = vbNullString
+    Else
+        FitCellText = cellWords
+    End If
+End Function
+
+' A table: header cells over its columns, a sort arrow on the sorted
+' one; rows windowed to its height, each one shape whose tab stops place
+' the columns; and a footer that pages when the rows need more room.
+' The selected row fills with the accent. Parts are rewritten only when
+' their own look changed.
+Private Sub ApplyTable(ByVal hostSheet As Worksheet, ByVal themeValue As ReDimUI)
+    Dim textSize As Double
+    Dim rowPitch As Double
+    Dim slotTotal As Long
+    Dim colNo As Long
+    Dim slotNo As Long
+    Dim displayNo As Long
+    Dim sourceRow As Long
+    Dim headWords As String
+    Dim rowWords As String
+    Dim layoutKey As String
+    Dim rowFill As Long
+    Dim rowInk As Long
+    Dim headFill As Long
+    Dim headInk As Long
+
+    textSize = mFontSize
+    If textSize <= 0 Then textSize = themeValue.BaseFontSize
+    rowPitch = textSize + 11
+    EnsureTableOrder
+    LayoutTableColumns textSize
+    slotTotal = Int((mHeight - 2 - rowPitch) / rowPitch)
+    If slotTotal < 1 Then slotTotal = 1
+    mTableFooterOn = (mTableRows > slotTotal)
+    If mTableFooterOn Then
+        slotTotal = Int((mHeight - 2 - 2 * rowPitch) / rowPitch)
+        If slotTotal < 1 Then slotTotal = 1
+    End If
+    If mTableOffset > mTableRows - slotTotal Then mTableOffset = mTableRows - slotTotal
+    If mTableOffset < 0 Then mTableOffset = 0
+    mTableRowPitch = rowPitch
+    mTableSlots = slotTotal
+    headInk = ResolveDrawnInk(themeValue)
+    If mTableCols > 0 Then EnsureRowStates mAppliedTableHeadStates, mTableCols
+    For colNo = 1 To mTableCols
+        headWords = mTableHeads(colNo)
+        If colNo = mSortColumn Then
+            headWords = headWords & " " & IIf(mSortDescending, ChrW(9660), ChrW(9650))
+        End If
+        headWords = FitCellText(headWords, mColumnEdges(colNo) - ColumnLeftEdge(colNo), _
+            textSize)
+        headFill = PointerTint(themeValue.MutedColor, themeValue.OnSurfaceColor, _
+            "th" & colNo)
+        SyncTableCell hostSheet, themeValue, mAppliedTableHeadStates(colNo), "th" & colNo, _
+            mLeft + 1 + ColumnLeftEdge(colNo), mTop + 1, _
+            mColumnEdges(colNo) - ColumnLeftEdge(colNo), rowPitch, headWords, _
+            mColumnNumeric(colNo), headFill, headInk, True, textSize
+    Next colNo
+    For colNo = mTableCols + 1 To mAppliedTableColsDrawn
+        On Error Resume Next
+        hostSheet.Shapes(ShapeName & PART_SEPARATOR & "th" & colNo).Delete
+        On Error GoTo 0
+    Next colNo
+    mAppliedTableColsDrawn = mTableCols
+    layoutKey = mColumnLayoutKey & ":" & CStr(mLeft) & ":" & CStr(mTop)
+    EnsureRowStates mAppliedTableRowStates, slotTotal
+    For slotNo = 1 To slotTotal
+        displayNo = mTableOffset + slotNo
+        If displayNo <= mTableRows Then
+            sourceRow = mTableOrder(displayNo)
+            rowWords = TableRowWords(sourceRow, textSize)
+            If sourceRow = CLng(mValue) Then
+                rowFill = themeValue.PrimaryColor
+                rowInk = themeValue.OnPrimaryColor
+            Else
+                rowFill = PointerTint(themeValue.SurfaceColor, themeValue.OnSurfaceColor, _
+                    "tr" & slotNo)
+                If rowFill = themeValue.SurfaceColor Then rowFill = -1
+                rowInk = ResolveDrawnInk(themeValue)
+            End If
+        ElseIf displayNo = 1 Then
+            rowWords = vbTab & "No rows"
+            rowFill = -1
+            rowInk = themeValue.OnMutedColor
+        Else
+            rowWords = vbNullString
+        End If
+        SyncTableRow hostSheet, themeValue, slotNo, layoutKey, rowWords, rowFill, _
+            rowInk, rowPitch, textSize, (displayNo = 1 And mTableRows = 0)
+    Next slotNo
+    For slotNo = slotTotal + 1 To mAppliedTableSlotsDrawn
+        On Error Resume Next
+        hostSheet.Shapes(ShapeName & PART_SEPARATOR & "tr" & slotNo).Delete
+        On Error GoTo 0
+    Next slotNo
+    mAppliedTableSlotsDrawn = slotTotal
+    SyncTableFooter hostSheet, themeValue, rowPitch, textSize
+End Sub
+
+' One row's cells joined for its shape: each cell after a tab, cut to
+' its column, so the row's tab stops place them.
+Private Function TableRowWords(ByVal sourceRow As Long, ByVal textSize As Double) As String
+    Dim colNo As Long
+
+    For colNo = 1 To mTableCols
+        TableRowWords = TableRowWords & vbTab & FitCellText( _
+            TableCellText(colNo, mTableCells(colNo, sourceRow)), _
+            mColumnEdges(colNo) - ColumnLeftEdge(colNo), textSize)
+    Next colNo
+End Function
+
+' A header cell: its own shape so a click knows the column.
+Private Sub SyncTableCell( _
+    ByVal hostSheet As Worksheet, _
+    ByVal themeValue As ReDimUI, _
+    ByRef appliedKey As String, _
+    ByVal partName As String, _
+    ByVal partLeft As Double, _
+    ByVal partTop As Double, _
+    ByVal partWidth As Double, _
+    ByVal partHeight As Double, _
+    ByVal partWords As String, _
+    ByVal alignRight As Boolean, _
+    ByVal fillRgb As Long, _
+    ByVal inkRgb As Long, _
+    ByVal wordsBold As Boolean, _
+    ByVal textSize As Double _
+)
+    Dim partKey As String
+    Dim partShape As Shape
+
+    partKey = PartsState(themeValue) & ":" & CStr(partLeft) & ":" & CStr(partWidth) & _
+        ":" & CStr(partHeight) & ":" & partWords & ":" & CStr(alignRight) & ":" & _
+        CStr(fillRgb) & ":" & CStr(inkRgb) & ":" & CStr(textSize)
+    If appliedKey = partKey Then Exit Sub
+    appliedKey = partKey
+    Set partShape = EnsurePartShape(hostSheet, partName, msoShapeRectangle)
+    partShape.Left = partLeft
+    partShape.Top = partTop
+    partShape.Width = partWidth
+    partShape.Height = partHeight
+    partShape.Fill.Visible = msoTrue
+    partShape.Fill.ForeColor.RGB = fillRgb
+    partShape.Line.Visible = msoFalse
+    With partShape.TextFrame2
+        .MarginLeft = TABLE_CELL_PAD
+        .MarginRight = TABLE_CELL_PAD
+        .MarginTop = 0
+        .MarginBottom = 0
+        .VerticalAnchor = msoAnchorMiddle
+        .WordWrap = msoFalse
+        .TextRange.Text = partWords
+        If alignRight Then
+            .TextRange.ParagraphFormat.Alignment = msoAlignRight
+        Else
+            .TextRange.ParagraphFormat.Alignment = msoAlignLeft
+        End If
+        With .TextRange.Font
+            .Name = themeValue.FontName
+            .Size = textSize
+            .Bold = BoolToMso(wordsBold)
+            .Fill.ForeColor.RGB = inkRgb
+        End With
+    End With
+    partShape.Visible = BoolToMso(mVisible)
+    partShape.OnAction = mAppliedOnAction
+End Sub
+
+' A row slot: one shape across the table with a thin rule; its tab stops
+' change only when the columns do. An empty words string removes it.
+Private Sub SyncTableRow( _
+    ByVal hostSheet As Worksheet, _
+    ByVal themeValue As ReDimUI, _
+    ByVal slotNo As Long, _
+    ByVal layoutKey As String, _
+    ByVal rowWords As String, _
+    ByVal fillRgb As Long, _
+    ByVal inkRgb As Long, _
+    ByVal rowPitch As Double, _
+    ByVal textSize As Double, _
+    ByVal emptyNote As Boolean _
+)
+    Dim partKey As String
+    Dim priorKey As String
+    Dim rowShape As Shape
+    Dim colNo As Long
+
+    priorKey = mAppliedTableRowStates(slotNo)
+    If LenB(rowWords) = 0 Then
+        If LenB(priorKey) > 0 Then
+            mAppliedTableRowStates(slotNo) = vbNullString
+            On Error Resume Next
+            hostSheet.Shapes(ShapeName & PART_SEPARATOR & "tr" & slotNo).Delete
+            On Error GoTo 0
+        End If
+        Exit Sub
+    End If
+    partKey = layoutKey & Chr$(1) & PartsState(themeValue) & ":" & rowWords & ":" & _
+        CStr(fillRgb) & ":" & CStr(inkRgb) & ":" & CStr(emptyNote)
+    If priorKey = partKey Then Exit Sub
+    mAppliedTableRowStates(slotNo) = partKey
+    Set rowShape = EnsurePartShape(hostSheet, "tr" & slotNo, msoShapeRectangle)
+    rowShape.Left = mLeft + 1
+    rowShape.Top = mTop + 1 + slotNo * rowPitch
+    rowShape.Width = mWidth - 2
+    rowShape.Height = rowPitch
+    rowShape.Fill.Visible = BoolToMso(fillRgb >= 0)
+    If fillRgb >= 0 Then rowShape.Fill.ForeColor.RGB = fillRgb
+    rowShape.Line.Visible = msoTrue
+    rowShape.Line.ForeColor.RGB = themeValue.BorderColor
+    rowShape.Line.Weight = 0.5
+    With rowShape.TextFrame2
+        .MarginLeft = 0
+        .MarginRight = 0
+        .MarginTop = 0
+        .MarginBottom = 0
+        .VerticalAnchor = msoAnchorMiddle
+        .WordWrap = msoFalse
+        .TextRange.Text = rowWords
+        .TextRange.ParagraphFormat.Alignment = msoAlignLeft
+        If Split(priorKey & Chr$(1), Chr$(1))(0) <> layoutKey Then
+            With .TextRange.ParagraphFormat.TabStops
+                Do While .Count > 0
+                    .Item(1).Clear
+                Loop
+                If emptyNote Then
+                    .Add msoTabStopLeft, TABLE_CELL_PAD
+                Else
+                    For colNo = 1 To mTableCols
+                        If mColumnNumeric(colNo) Then
+                            .Add msoTabStopRight, mColumnEdges(colNo) - TABLE_CELL_PAD
+                        Else
+                            .Add msoTabStopLeft, ColumnLeftEdge(colNo) + TABLE_CELL_PAD
+                        End If
+                    Next colNo
+                End If
+            End With
+        End If
+        With .TextRange.Font
+            .Name = themeValue.FontName
+            .Size = textSize
+            .Bold = msoFalse
+            .Fill.ForeColor.RGB = inkRgb
+        End With
+    End With
+    rowShape.Visible = BoolToMso(mVisible)
+    rowShape.OnAction = mAppliedOnAction
+End Sub
+
+' The footer while the rows outgrow the table: which rows show of how
+' many, and arrows that page, muted at the ends.
+Private Sub SyncTableFooter( _
+    ByVal hostSheet As Worksheet, _
+    ByVal themeValue As ReDimUI, _
+    ByVal rowPitch As Double, _
+    ByVal textSize As Double _
+)
+    Dim footKey As String
+    Dim footTop As Double
+    Dim lastShown As Long
+    Dim labelShape As Shape
+
+    If mTableFooterOn Then
+        lastShown = mTableOffset + mTableSlots
+        If lastShown > mTableRows Then lastShown = mTableRows
+        footKey = PartsState(themeValue) & ":" & CStr(mTableOffset) & ":" & _
+            CStr(lastShown) & ":" & CStr(mTableRows) & ":" & PointerKey()
+    End If
+    If footKey = mAppliedTableFootSig Then Exit Sub
+    mAppliedTableFootSig = footKey
+    If LenB(footKey) = 0 Then
+        On Error Resume Next
+        hostSheet.Shapes(ShapeName & PART_SEPARATOR & "tf").Delete
+        hostSheet.Shapes(ShapeName & PART_SEPARATOR & "tp").Delete
+        hostSheet.Shapes(ShapeName & PART_SEPARATOR & "tn").Delete
+        On Error GoTo 0
+        Exit Sub
+    End If
+    footTop = mTop + mHeight - 1 - rowPitch
+    Set labelShape = EnsurePartShape(hostSheet, "tf", msoShapeRectangle)
+    labelShape.Left = mLeft + 1
+    labelShape.Top = footTop
+    labelShape.Width = mWidth - 2 - 2 * PAGER_TARGET - 8
+    labelShape.Height = rowPitch
+    labelShape.Fill.Visible = msoFalse
+    labelShape.Line.Visible = msoFalse
+    With labelShape.TextFrame2
+        .MarginLeft = TABLE_CELL_PAD
+        .MarginRight = 0
+        .MarginTop = 0
+        .MarginBottom = 0
+        .VerticalAnchor = msoAnchorMiddle
+        .WordWrap = msoFalse
+        .TextRange.Text = CStr(mTableOffset + 1) & "-" & CStr(lastShown) & _
+            " of " & CStr(mTableRows)
+        .TextRange.ParagraphFormat.Alignment = msoAlignLeft
+        With .TextRange.Font
+            .Name = themeValue.FontName
+            .Size = textSize - 1
+            .Bold = msoFalse
+            .Fill.ForeColor.RGB = themeValue.OnMutedColor
+        End With
+    End With
+    labelShape.Visible = BoolToMso(mVisible)
+    labelShape.OnAction = mAppliedOnAction
+    SyncTablePager hostSheet, themeValue, "tp", ChrW(9664), _
+        mLeft + mWidth - 2 * PAGER_TARGET - 6, footTop + (rowPitch - PAGER_TARGET) / 2, _
+        mTableOffset > 0, textSize
+    SyncTablePager hostSheet, themeValue, "tn", ChrW(9654), _
+        mLeft + mWidth - PAGER_TARGET - 4, footTop + (rowPitch - PAGER_TARGET) / 2, _
+        lastShown < mTableRows, textSize
+End Sub
+
+Private Sub SyncTablePager( _
+    ByVal hostSheet As Worksheet, _
+    ByVal themeValue As ReDimUI, _
+    ByVal partName As String, _
+    ByVal glyph As String, _
+    ByVal partLeft As Double, _
+    ByVal partTop As Double, _
+    ByVal pagerOn As Boolean, _
+    ByVal textSize As Double _
+)
+    Dim pagerShape As Shape
+    Dim pagerFill As Long
+
+    Set pagerShape = EnsurePartShape(hostSheet, partName, msoShapeRoundedRectangle)
+    pagerShape.Left = partLeft
+    pagerShape.Top = partTop
+    pagerShape.Width = PAGER_TARGET
+    pagerShape.Height = PAGER_TARGET
+    pagerFill = themeValue.SurfaceColor
+    If pagerOn Then
+        pagerFill = PointerTint(themeValue.SurfaceColor, themeValue.OnSurfaceColor, partName)
+    End If
+    pagerShape.Fill.Visible = msoTrue
+    pagerShape.Fill.ForeColor.RGB = pagerFill
+    pagerShape.Line.Visible = msoFalse
+    With pagerShape.TextFrame2
+        .MarginLeft = 0
+        .MarginRight = 0
+        .MarginTop = 0
+        .MarginBottom = 0
+        .VerticalAnchor = msoAnchorMiddle
+        .WordWrap = msoFalse
+        .TextRange.Text = glyph
+        .TextRange.ParagraphFormat.Alignment = msoAlignCenter
+        With .TextRange.Font
+            .Name = themeValue.FontName
+            .Size = textSize - 2
+            If pagerOn And mEnabled Then
+                .Fill.ForeColor.RGB = themeValue.OnSurfaceColor
+            Else
+                .Fill.ForeColor.RGB = themeValue.BorderColor
+            End If
+        End With
+    End With
+    pagerShape.Visible = BoolToMso(mVisible)
+    pagerShape.OnAction = mAppliedOnAction
+End Sub
+
+' The table part under a point, from the last layout: a header cell, a
+' row slot, or a footer arrow.
+Private Function TablePartAt(ByVal pointsX As Double, ByVal pointsY As Double) As String
+    Dim colNo As Long
+    Dim slotNo As Long
+
+    If mTableRowPitch <= 0 Or mTableCols = 0 Then Exit Function
+    If pointsY < mTop + 1 + mTableRowPitch Then
+        For colNo = 1 To mTableCols
+            If pointsX - mLeft - 1 < mColumnEdges(colNo) Then
+                TablePartAt = "th" & colNo
+                Exit Function
+            End If
+        Next colNo
+        Exit Function
+    End If
+    If mTableFooterOn And pointsY >= mTop + mHeight - 1 - mTableRowPitch Then
+        If pointsX >= mLeft + mWidth - PAGER_TARGET - 4 Then
+            TablePartAt = "tn"
+        ElseIf pointsX >= mLeft + mWidth - 2 * PAGER_TARGET - 6 Then
+            TablePartAt = "tp"
+        End If
+        Exit Function
+    End If
+    slotNo = Int((pointsY - mTop - 1) / mTableRowPitch)
+    If slotNo >= 1 And slotNo <= mTableSlots And mTableOffset + slotNo <= mTableRows Then
+        TablePartAt = "tr" & slotNo
+    End If
+End Function
+
+' A header click sorts by its column, ascending first and then flipping;
+' a row click selects its row; the footer arrows page. True when the
+' selection changed, so the handlers run.
+Private Function ClickTable(ByVal hostApp As ReDimUI, ByVal partName As String) As Boolean
+    Dim partNumber As Long
+
+    If Len(partName) > 2 And IsNumeric(Mid$(partName, 3)) Then
+        partNumber = CLng(Mid$(partName, 3))
+    End If
+    Select Case Left$(partName, 2)
+        Case "th"
+            If partNumber < 1 Or partNumber > mTableCols Then Exit Function
+            If mSortColumn = partNumber Then
+                mSortDescending = Not mSortDescending
+            Else
+                mSortColumn = partNumber
+                mSortDescending = False
+            End If
+            mTableOrderCurrent = False
+            mTableOffset = 0
+            Touch
+        Case "tr"
+            If partNumber < 1 Or mTableOffset + partNumber > mTableRows Then Exit Function
+            EnsureTableOrder
+            ClickTable = SelectTableRow(hostApp, mTableOrder(mTableOffset + partNumber))
+        Case Else
+            If partName = "tp" Then
+                PageTable -1
+            ElseIf partName = "tn" Then
+                PageTable 1
+            End If
+    End Select
+End Function
+
+Private Sub PageTable(ByVal pageDirection As Long)
+    Dim offsetBefore As Long
+
+    offsetBefore = mTableOffset
+    mTableOffset = mTableOffset + pageDirection * mTableSlots
+    If mTableOffset > mTableRows - mTableSlots Then mTableOffset = mTableRows - mTableSlots
+    If mTableOffset < 0 Then mTableOffset = 0
+    If mTableOffset <> offsetBefore Then Touch
+End Sub
+
+' Selects a row by its source number: the first cell writes to WritesTo.
+' Re-selecting the selected row changes nothing.
+Private Function SelectTableRow(ByVal hostApp As ReDimUI, ByVal sourceRow As Long) As Boolean
+    If sourceRow < 1 Or sourceRow > mTableRows Then Exit Function
+    If sourceRow = CLng(mValue) Then Exit Function
+    mValue = sourceRow
+    If LenB(mWritesToKey) > 0 Then hostApp.SetState mWritesToKey, mTableCells(1, sourceRow)
+    Touch
+    SelectTableRow = True
+End Function
+
+' Up and Down move the selection a row in the order shown, Page Up and
+' Page Down a page, Home and End to the first and last row; the rows
+' scroll to keep it in view, and each move fires OnChange.
+Private Sub HandleTableKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
+    Dim shownAt As Long
+    Dim aimAt As Long
+    Dim displayNo As Long
+
+    If keyText = "{ENTER}" Then
+        hostApp.ClickDefaultButton
+        Exit Sub
+    End If
+    If mTableRows = 0 Then Exit Sub
+    EnsureTableOrder
+    For displayNo = 1 To mTableRows
+        If mTableOrder(displayNo) = CLng(mValue) Then
+            shownAt = displayNo
+            Exit For
+        End If
+    Next displayNo
+    Select Case keyText
+        Case "{UP}"
+            aimAt = shownAt - 1
+            If shownAt = 0 Then aimAt = 1
+        Case "{DOWN}"
+            aimAt = shownAt + 1
+        Case "{PGUP}"
+            aimAt = shownAt - mTableSlots
+        Case "{PGDN}"
+            aimAt = shownAt + mTableSlots
+        Case "{HOME}"
+            aimAt = 1
+        Case "{END}"
+            aimAt = mTableRows
+        Case Else
+            Exit Sub
+    End Select
+    If aimAt < 1 Then aimAt = 1
+    If aimAt > mTableRows Then aimAt = mTableRows
+    If aimAt <= mTableOffset Then mTableOffset = aimAt - 1
+    If aimAt > mTableOffset + mTableSlots Then mTableOffset = aimAt - mTableSlots
+    If SelectTableRow(hostApp, mTableOrder(aimAt)) Then
+        RunClickHandlers hostApp
+    Else
+        Touch
+    End If
 End Sub
 
 ' A date without its time of day.
@@ -10579,6 +11629,8 @@ Friend Function PartAtPoint(ByVal pointsX As Double, ByVal pointsY As Double) As
             PartAtPoint = TransferPartAt(pointsX, pointsY)
         Case KIND_DATE
             If mSelectOpen Then PartAtPoint = CalendarPartAt(pointsX, pointsY)
+        Case KIND_TABLE
+            PartAtPoint = TablePartAt(pointsX, pointsY)
         Case KIND_TABS
             If itemTotal > 0 And mAppliedOptionCount = itemTotal Then
                 For slot = 1 To itemTotal
@@ -11122,7 +12174,7 @@ Friend Sub SetPointerLook( _
         Select Case mKind
             Case KIND_BUTTON, KIND_TOGGLE, KIND_TICKBOX, KIND_RADIO, _
                 KIND_STEPPER, KIND_SLIDEBAR, KIND_SELECT, KIND_CHECKLIST, _
-                KIND_TRANSFER, KIND_TABS, KIND_DATE
+                KIND_TRANSFER, KIND_TABS, KIND_DATE, KIND_TABLE
             Case KIND_INPUT, KIND_COMBO
                 If Not IsFloatField() Then Exit Sub
             Case Else
@@ -11978,7 +13030,7 @@ Friend Function IsFocusable() As Boolean
     Select Case mKind
         Case KIND_BUTTON, KIND_TOGGLE, KIND_TICKBOX, KIND_RADIO, _
             KIND_STEPPER, KIND_SLIDEBAR, KIND_SELECT, KIND_CHECKLIST, _
-            KIND_TRANSFER, KIND_TABS, KIND_DATE
+            KIND_TRANSFER, KIND_TABS, KIND_DATE, KIND_TABLE
             IsFocusable = True
         Case KIND_INPUT, KIND_COMBO
             IsFocusable = IsFloatField()

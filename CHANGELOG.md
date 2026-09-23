@@ -371,6 +371,14 @@
   fires `OnChange`. `DateRange` limits the days that pick, `PickDate`
   and `PickedDate` set and read the date from code, and the calendar
   closes the way a drop list does.
+- `Table` is a data table: `Columns` and `AddRow`, or `TableFrom` a
+  Range or two-dimensional array. Number columns align right, long
+  cells end in an ellipsis, and `ColumnWidths` and `ColumnFormat` set
+  widths and `Format$` patterns. A header click sorts by its column,
+  ascending and then descending, stably, with empty cells last. A row
+  click selects, writes the row's first cell to `WritesTo`, and fires
+  `OnChange`; the keys move the selection, and rows that outgrow the
+  table page behind a footer.
 
 ## 0.19.2 - 2026-08-02
 
