@@ -554,8 +554,7 @@ Public Function TestNavigation() As String
     transcript = transcript & "|backEmpty=" & CStr(Not ReDimUI.NavigateBack())
 
     ' Non-window apps refuse navigation with a clear error.
-    Dim plain As ReDimUI
-    Set plain = ReDimUI.Mount(EnsureSheetCore("NavTestP"), "navplain")
+    ReDimUI.Mount EnsureSheetCore("NavTestP"), "navplain"
     On Error Resume Next
     Err.Clear
     ReDimUI.Navigate "navplain"

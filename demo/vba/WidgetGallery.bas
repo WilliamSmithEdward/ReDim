@@ -350,14 +350,13 @@ End Sub
 
 Public Sub SimulatedWork()
     Dim ui As ReDimUI
-    Dim ignored As Variant
     Dim startedAt As Double
 
     Set ui = GalleryApp()
     startedAt = Timer
     ui.SetState "lastAction", "async work running"
     ui.SetState "oplog", "op started " & Format$(startedAt, "0.0") & "s"
-    ignored = ROneCOne.Task.Delay(1200).Await
+    ROneCOne.Task.Delay(1200).Await
     ui.SetState "lastAction", "async work finished"
     ui.SetState "oplog", "op ran " & Format$(Timer - startedAt, "0.00") & _
         "s (expected 1.2)"

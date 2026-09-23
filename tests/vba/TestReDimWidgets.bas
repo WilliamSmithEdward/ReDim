@@ -709,8 +709,8 @@ Public Function TestSlideBar() As String
     Set trackShape = host.Shapes("rdm_wid15_vol")
     Set fillShape = host.Shapes("rdm_wid15_vol__fill")
     Set thumbShape = host.Shapes("rdm_wid15_vol__thumb")
-    transcript = "partsExist=" & _
-        CStr(Not fillShape Is Nothing And Not thumbShape Is Nothing)
+    transcript = "partsExist=" & CStr(Not trackShape Is Nothing _
+        And Not fillShape Is Nothing And Not thumbShape Is Nothing)
     transcript = transcript & "|fillFraction=" & _
         CStr(Abs(fillShape.Width - 80) < 0.5)
     transcript = transcript & "|thumbCentered=" & _

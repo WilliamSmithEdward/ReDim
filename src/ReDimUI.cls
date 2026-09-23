@@ -126,14 +126,12 @@ Private Const ERROR_NOT_FOUND As Long = ERROR_BASE + 3
 Private Const CLICK_DEBOUNCE_MS As Long = 150
 Private Const UNMAPPABLE_POINTS As Double = -1E+18
 
-Private Const ROLE_UNSET As Long = 0
 Private Const ROLE_APP As Long = 1
 Private Const ROLE_COMPONENT As Long = 2
 Private Const ROLE_THEME As Long = 3
 Private Const ROLE_ASYNC_OP As Long = 4
 Private Const ROLE_JOB As Long = 5
 
-Private Const KIND_NONE As Long = 0
 Private Const KIND_BUTTON As Long = 1
 Private Const KIND_LABEL As Long = 2
 Private Const KIND_CARD As Long = 3
@@ -477,7 +475,6 @@ Private mLeft As Double
 Private mTop As Double
 Private mWidth As Double
 Private mHeight As Double
-Private mHasRect As Boolean
 Private mText As String
 Private mBusyText As String
 Private mBusyTextGiven As Boolean
@@ -528,7 +525,6 @@ Private mToastHeldMs As LongLong
 Private mPointerEffects As Boolean
 Private mHoverTargetId As String
 Private mHoverTargetPart As String
-Private mHoverSinceMs As LongLong
 Private mHoverPressedShown As Boolean
 Private mPressTargetId As String
 Private mPressTargetPart As String
@@ -944,7 +940,6 @@ Private mAppliedFontSize As Double
 Private mAppliedFontBold As Boolean
 Private mAppliedVisible As Boolean
 Private mAppliedOnAction As String
-Private mAppliedValue As Double
 Private mAppliedChecked As Boolean
 
 ' Async op fields.
@@ -4120,7 +4115,6 @@ Private Sub TickPointer(ByVal nowMs As LongLong, ByVal leftButtonDown As Boolean
         ClearPointerTarget
         mHoverTargetId = hitId
         mHoverTargetPart = hitPart
-        mHoverSinceMs = nowMs
         mHoverPressedShown = pressedNow
         If TryGetComponent(hitId, componentValue) Then
             componentValue.SetPointerLook True, hitPart, pressedNow
@@ -4661,7 +4655,6 @@ End Property
 Public Function At(ByVal rangeAddress As String) As ReDimUI
     RequireRole ROLE_COMPONENT, "At"
     mAnchor = rangeAddress
-    mHasRect = False
     Touch
     Set At = Me
 End Function
@@ -4680,7 +4673,6 @@ Public Function AtRect( _
     mWidth = widthPoints
     mHeight = heightPoints
     mGrowAdded = 0
-    mHasRect = True
     If mKind = KIND_STACK Then
         mStackAutoWidth = (widthPoints <= 0)
         MarkStackStale
@@ -6869,7 +6861,6 @@ Friend Sub ConfigureToast( _
         End If
     End If
     If ReDimUI.MotionReduced Then mSlideRemaining = 0
-    mHasRect = True
     mVisible = True
 End Sub
 
@@ -7673,18 +7664,20 @@ End Sub
 ' property and Set ownerApp = OwnerApp would self-assign Nothing.
 Friend Sub RunClickBehavior()
     Dim hostApp As ReDimUI
+    Dim clickedPart As String
 
     ' The click Excel delivers for the release of a held press that
     ' already repeated.
     If GetTickCount64() < mHoldSuppressUntilMs Then Exit Sub
     Set hostApp = OwnerApp
+    clickedPart = ReDimUI.SenderPart
     Select Case mKind
         Case KIND_TOGGLE
             mChecked = Not mChecked
             If LenB(mWritesToKey) > 0 Then hostApp.SetState mWritesToKey, mChecked
             Touch
         Case KIND_INPUT
-            If ReDimUI.SenderPart = "cx" Then
+            If clickedPart = "cx" Then
                 ClearFieldText hostApp
             ElseIf IsFloatField() Then
                 ClickField hostApp
@@ -7696,28 +7689,28 @@ Friend Sub RunClickBehavior()
             End If
             Exit Sub
         Case KIND_COMBO
-            If ReDimUI.SenderPart = "cx" Then
+            If clickedPart = "cx" Then
                 ClearFieldText hostApp
                 Exit Sub
-            ElseIf ReDimUI.SenderPart = "optn" Then
+            ElseIf clickedPart = "optn" Then
                 ' The empty row is a message, not an option.
                 Exit Sub
-            ElseIf ReDimUI.SenderPart = "optu" Or ReDimUI.SenderPart = "optd" Then
-                PageDropList (ReDimUI.SenderPart = "optd")
+            ElseIf clickedPart = "optu" Or clickedPart = "optd" Then
+                PageDropList (clickedPart = "optd")
                 Exit Sub
-            ElseIf Left$(ReDimUI.SenderPart, 3) = "opt" _
-                And IsNumeric(Mid$(ReDimUI.SenderPart, 4)) Then
+            ElseIf Left$(clickedPart, 3) = "opt" _
+                And IsNumeric(Mid$(clickedPart, 4)) Then
                 ' Clicked window rows map through the scroll offset to
                 ' their absolute match index. A pick that leaves the value
                 ' as it was runs no handlers.
                 If Not PickComboItem(hostApp, _
-                    mListOffset + CLng(Mid$(ReDimUI.SenderPart, 4))) Then
+                    mListOffset + CLng(Mid$(clickedPart, 4))) Then
                     Exit Sub
                 End If
             ElseIf IsFloatField() Then
                 ' The caret glyph toggles the list; the face takes the
                 ' caret like any field.
-                If ReDimUI.SenderPart = "caret" _
+                If clickedPart = "caret" _
                     And ReDimUI.IsComponentFocused(hostApp.AppId, mComponentId) Then
                     ToggleDropList hostApp.Sheet
                 Else
@@ -7732,15 +7725,15 @@ Friend Sub RunClickBehavior()
                 Exit Sub
             End If
         Case KIND_SELECT
-            If ReDimUI.SenderPart = "optn" Then
+            If clickedPart = "optn" Then
                 Exit Sub
-            ElseIf ReDimUI.SenderPart = "optu" Or ReDimUI.SenderPart = "optd" Then
-                PageDropList (ReDimUI.SenderPart = "optd")
+            ElseIf clickedPart = "optu" Or clickedPart = "optd" Then
+                PageDropList (clickedPart = "optd")
                 Exit Sub
-            ElseIf Left$(ReDimUI.SenderPart, 3) = "opt" _
-                And IsNumeric(Mid$(ReDimUI.SenderPart, 4)) Then
+            ElseIf Left$(clickedPart, 3) = "opt" _
+                And IsNumeric(Mid$(clickedPart, 4)) Then
                 Dim pickedItem As Long
-                pickedItem = ListItemAtRow(CLng(Mid$(ReDimUI.SenderPart, 4)))
+                pickedItem = ListItemAtRow(CLng(Mid$(clickedPart, 4)))
                 If Not ItemPickable(pickedItem) Then Exit Sub
                 ' Re-picking the selection only closes the list: nothing
                 ' changed, so nothing is written and no handler runs.
@@ -7759,7 +7752,7 @@ Friend Sub RunClickBehavior()
             ' through so OnChange fires once per toggle, bulk included.
             Dim checkPart As String
             Dim checkRow As Long
-            checkPart = ReDimUI.SenderPart
+            checkPart = clickedPart
             If checkPart = "mb" Or checkPart = "mt" Then
                 checkRow = 0
             ElseIf LenB(checkPart) = 0 Then
@@ -7773,7 +7766,7 @@ Friend Sub RunClickBehavior()
         Case KIND_TRANSFER
             Dim transferPart As String
             Dim transferRow As Long
-            transferPart = ReDimUI.SenderPart
+            transferPart = clickedPart
             EnsureTransferCollections
             If transferPart = "alu" Or transferPart = "ald" _
                 Or transferPart = "clu" Or transferPart = "cld" Then
@@ -7817,31 +7810,31 @@ Friend Sub RunClickBehavior()
             End If
             Exit Sub
         Case KIND_DATE
-            If Not ClickCalendar(hostApp, ReDimUI.SenderPart) Then Exit Sub
+            If Not ClickCalendar(hostApp, clickedPart) Then Exit Sub
         Case KIND_TABLE
-            If Not ClickTable(hostApp, ReDimUI.SenderPart) Then Exit Sub
+            If Not ClickTable(hostApp, clickedPart) Then Exit Sub
         Case KIND_EXPANDER
             ToggleExpander hostApp
         Case KIND_TABS
             Dim tabPicked As Long
-            If Left$(ReDimUI.SenderPart, 2) = "tb" _
-                And IsNumeric(Mid$(ReDimUI.SenderPart, 3)) Then
-                tabPicked = CLng(Mid$(ReDimUI.SenderPart, 3))
+            If Left$(clickedPart, 2) = "tb" _
+                And IsNumeric(Mid$(clickedPart, 3)) Then
+                tabPicked = CLng(Mid$(clickedPart, 3))
             End If
             If Not SelectTab(hostApp, tabPicked) Then Exit Sub
         Case KIND_RADIO
             Dim rowNumber As Long
-            If LenB(ReDimUI.SenderPart) = 0 Then
+            If LenB(clickedPart) = 0 Then
                 rowNumber = 1
-            ElseIf IsNumeric(Mid$(ReDimUI.SenderPart, 2)) Then
-                rowNumber = CLng(Mid$(ReDimUI.SenderPart, 2))
+            ElseIf IsNumeric(Mid$(clickedPart, 2)) Then
+                rowNumber = CLng(Mid$(clickedPart, 2))
             End If
             If Not SelectRadioRow(hostApp, rowNumber) Then Exit Sub
         Case KIND_STEPPER
             Dim stepped As Double
-            If ReDimUI.SenderPart = "minus" Then
+            If clickedPart = "minus" Then
                 stepped = mValue - mSliderStep
-            ElseIf ReDimUI.SenderPart = "plus" Then
+            ElseIf clickedPart = "plus" Then
                 stepped = mValue + mSliderStep
             Else
                 Exit Sub
@@ -7864,7 +7857,7 @@ Friend Sub RunClickBehavior()
             ' button runs its handler and the card runs OnClick; the close
             ' button runs nothing. Handler errors reach the app's handler.
             BeginToastExit
-            Select Case ReDimUI.SenderPart
+            Select Case clickedPart
                 Case "ta"
                     If LenB(mToastActionProc) > 0 Then Application.Run mToastActionProc
                 Case "tx"
@@ -10657,7 +10650,6 @@ Private Sub ApplyKindExtras( _
                 & "|" & CStr(mWidth) & "|" & CStr(mHeight)
             If Not mAppliedValid Or mAppliedProgressSig <> progressSig Then
                 ApplyProgressFill hostSheet, themeValue
-                mAppliedValue = mValue
                 mAppliedProgressSig = progressSig
             End If
         Case KIND_INPUT
@@ -13489,7 +13481,6 @@ Private Sub ApplyRadioGroup( _
         DropPart hostSheet, "t" & idx
     Next idx
     mAppliedOptionCount = rowTotal
-    mAppliedValue = mValue
 End Sub
 
 ' One box-and-caption row per item, any number checked, plus an optional
@@ -13835,7 +13826,6 @@ Private Sub ApplyStepper( _
         themeValue.BaseFontSize + 2, themeValue
     plusButton.Visible = BoolToMso(mVisible)
     plusButton.OnAction = mAppliedOnAction
-    mAppliedValue = mValue
 End Sub
 
 Private Sub ApplyToggleKnob( _
@@ -14857,7 +14847,6 @@ Private Sub ApplySlideBar( _
     thumb.OnAction = mAppliedOnAction
     SyncSlideBubble hostSheet, themeValue, bubbleOn, _
         thumb.Left + thumbSize / 2
-    mAppliedValue = mValue
 End Sub
 
 ' The value in a bubble over the thumb while a drag or keyboard focus

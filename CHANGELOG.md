@@ -76,6 +76,12 @@
   moves that cap. `MinWidth` and `MaxWidth` let the card fit its words
   between them, 240 until set. Toasts stack by their heights, and the
   corner radius holds at 8 points however tall a card grows.
+- The runtime no longer declares what it never reads: the constants
+  `ROLE_UNSET` and `KIND_NONE` and the fields `mHasRect`,
+  `mHoverSinceMs`, and `mAppliedValue`, which code inspections listed
+  as unused. A click reads its part once instead of at every branch,
+  and the Widget Gallery awaits its simulated work as a statement
+  rather than into a variable it never reads.
 
 ## 1.0.0 - 2026-09-23
 
