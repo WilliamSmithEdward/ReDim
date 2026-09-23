@@ -711,6 +711,20 @@ def test_accessibility(run_widgets):
     assert facts["knobOnAccent"] == "True"
 
 
+def test_shortcuts(run_widgets):
+    facts = parse_transcript(run_widgets("TestShortcuts"))
+    assert facts["bound"] == "True", "shortcuts must bind while their sheet is in front"
+    assert facts["clicks"] == "1/save", "a shortcut must click its control, sender and all"
+    assert facts["skipsDisabled"] == "2/new", (
+        "a disabled control must pass the key to the next that declares it"
+    )
+    assert facts["alt"] == "True", "the alternative text must name the shortcut"
+    assert facts["tip"] == "Saves the form (Ctrl+S)"
+    assert facts["refusesTypingKey"] == "True", "a key a field types must be refused"
+    assert facts["leaveReleases"] == "True", "leaving the sheet must release the binding"
+    assert facts["returnBinds"] == "True"
+
+
 def test_toast_size(run_widgets):
     facts = parse_transcript(run_widgets("TestToastSize"))
     assert facts["shortSize"] == "240x40", "a short toast keeps its 240 by 40 card"

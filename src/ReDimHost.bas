@@ -227,6 +227,18 @@ Public Sub RdxReleaseKeys()
     gKeysBound = False
 End Sub
 
+' Target for a control's Shortcut, bound only while an app sheet that
+' declares it is in front. Never raises.
+Public Sub RdxShortcut(ByVal keyCode As String)
+    On Error Resume Next
+    Err.Clear
+    ReDimUI.DispatchShortcut keyCode
+    If Err.Number <> 0 Then
+        Err.Clear
+        ReDimUI.NoteTickFault
+    End If
+End Sub
+
 ' Alt+letter target for access keys, bound only while an app sheet with
 ' access keys is in front. Never raises.
 Public Sub RdxAccessKey(ByVal keyLetter As String)

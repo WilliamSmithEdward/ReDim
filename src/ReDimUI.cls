@@ -363,6 +363,8 @@ Private mFocusHandoff As Boolean
 Private mForcePressEdge As Boolean
 ' The Alt+letter chords bound for the active sheet's access keys.
 Private mBoundAccessKeys As String
+' The shortcut codes bound now, each followed by Chr$(1).
+Private mBoundShortcuts As String
 ' Test seam: a fixed pointer position, in sheet points, that stands in
 ' for the cursor until cleared.
 Private mPointerOverridden As Boolean
@@ -919,6 +921,8 @@ Private mAppliedKeyCursorSig As String
 ' AccessKey's letter or digit (lower case) and the one last underlined.
 Private mAccessKey As String
 Private mAppliedAccessKey As String
+' The keyboard shortcut that clicks the control, as an OnKey code.
+Private mShortcut As String
 ' Clearable: a float field shows a clear button while it holds text.
 Private mClearable As Boolean
 Private mAppliedClearSig As String
@@ -1323,7 +1327,106 @@ Friend Sub RefreshAccessKeys()
     Next idx
     On Error GoTo 0
     mBoundAccessKeys = wantedKeys
+    RefreshShortcuts
 End Sub
+
+' Binds each shortcut the active sheet's apps declare and releases the
+' rest, as access keys are; a released key goes back to Excel.
+Private Sub RefreshShortcuts()
+    Dim appValue As ReDimUI
+    Dim wantedCodes As String
+    Dim listedCodes() As String
+    Dim idx As Long
+
+    On Error Resume Next
+    For Each appValue In mApps
+        If appValue.Sheet Is ActiveSheet Then
+            listedCodes = Split(appValue.ShortcutCodes, Chr$(1))
+            For idx = 0 To UBound(listedCodes)
+                If LenB(listedCodes(idx)) > 0 Then
+                    If Not CodeListHas(wantedCodes, listedCodes(idx)) Then
+                        wantedCodes = CodeListAdd(wantedCodes, listedCodes(idx))
+                    End If
+                End If
+            Next idx
+        End If
+    Next appValue
+    listedCodes = Split(mBoundShortcuts, Chr$(1))
+    For idx = 0 To UBound(listedCodes)
+        If LenB(listedCodes(idx)) > 0 Then
+            If Not CodeListHas(wantedCodes, listedCodes(idx)) Then
+                Application.OnKey listedCodes(idx)
+            End If
+        End If
+    Next idx
+    listedCodes = Split(wantedCodes, Chr$(1))
+    For idx = 0 To UBound(listedCodes)
+        If LenB(listedCodes(idx)) > 0 Then
+            If Not CodeListHas(mBoundShortcuts, listedCodes(idx)) Then
+                BindShortcut listedCodes(idx)
+            End If
+        End If
+    Next idx
+    On Error GoTo 0
+    mBoundShortcuts = wantedCodes
+End Sub
+
+' A focused field's release gives its keys back to Excel, and a shortcut
+' can share one (Ctrl+A, say, which the field took for select-all); the
+' bound shortcuts take their keys again.
+Private Sub RebindShortcuts()
+    Dim listedCodes() As String
+    Dim idx As Long
+
+    If LenB(mBoundShortcuts) = 0 Then Exit Sub
+    listedCodes = Split(mBoundShortcuts, Chr$(1))
+    On Error Resume Next
+    For idx = 0 To UBound(listedCodes)
+        If LenB(listedCodes(idx)) > 0 Then BindShortcut listedCodes(idx)
+    Next idx
+    On Error GoTo 0
+End Sub
+
+Private Sub BindShortcut(ByVal keyCode As String)
+    Application.OnKey keyCode, "'RdxShortcut """ & keyCode & """'"
+End Sub
+
+' Lists of shortcut codes: each code closed in Chr$(1) marks, so "{F5}"
+' is not found inside "+{F5}", compared without regard to case.
+Private Function CodeListHas(ByVal codeList As String, ByVal keyCode As String) As Boolean
+    CodeListHas = (InStr(1, codeList, Chr$(1) & keyCode & Chr$(1), vbTextCompare) > 0)
+End Function
+
+Private Function CodeListAdd(ByVal codeList As String, ByVal keyCode As String) As String
+    If LenB(codeList) = 0 Then codeList = Chr$(1)
+    CodeListAdd = codeList & keyCode & Chr$(1)
+End Function
+
+' A shortcut: the first app on the active sheet with a control declaring
+' it clicks that control.
+Friend Sub DispatchShortcut(ByVal keyCode As String)
+    Dim appValue As ReDimUI
+
+    If Not IsFactory(Me) Then
+        ReDimUI.DispatchShortcut keyCode
+        Exit Sub
+    End If
+    EnsureFactory
+    For Each appValue In mApps
+        If appValue.Sheet Is ActiveSheet Then
+            If appValue.ActivateShortcut(keyCode) Then Exit Sub
+        End If
+    Next appValue
+End Sub
+
+' Test seam: the shortcut codes bound now, in their Chr$(1)-marked list.
+Friend Property Get BoundShortcuts() As String
+    If Not IsFactory(Me) Then
+        BoundShortcuts = ReDimUI.BoundShortcuts
+        Exit Property
+    End If
+    BoundShortcuts = mBoundShortcuts
+End Property
 
 ' Alt plus a letter: the first app on the active sheet with a control
 ' declaring it clicks that control.
@@ -1371,7 +1474,10 @@ Friend Sub ClearKeyboardFocus()
     End If
     mFocusAppId = vbNullString
     mFocusComponentId = vbNullString
-    If Not mFocusHandoff Then RdxReleaseKeys
+    If Not mFocusHandoff Then
+        RdxReleaseKeys
+        RebindShortcuts
+    End If
 End Sub
 
 ' Test seam: consumed by the first TickApp that polls after it is set.
@@ -4881,6 +4987,101 @@ Friend Property Get AccessKeyLetter() As String
     AccessKeyLetter = mAccessKey
 End Property
 
+' A keyboard shortcut that clicks the control while its sheet is in
+' front, as an Application.OnKey code: "^s" for Ctrl+S, "^+e" for
+' Ctrl+Shift+E, "{F5}" for F5. It needs Ctrl or Alt, or is a function key,
+' so it never takes a key a focused field types; "" removes it. The
+' control's tooltip and alternative text name it.
+Public Function Shortcut(ByVal keyCode As String) As ReDimUI
+    RequireRole ROLE_COMPONENT, "Shortcut"
+    If LenB(keyCode) > 0 And Not ShortcutCodeValid(keyCode) Then
+        RaiseError ERROR_INVALID_ARGUMENT, "Shortcut", "Shortcut takes an Application.OnKey " & _
+            "code with Ctrl or Alt, such as ""^s"", or a function key, such as ""{F5}""."
+    End If
+    mShortcut = keyCode
+    If LenB(keyCode) > 0 Then OwnerApp.NoteTooltips
+    Touch
+    ReDimUI.RefreshAccessKeys
+    Set Shortcut = Me
+End Function
+
+Friend Property Get ShortcutCode() As String
+    ShortcutCode = mShortcut
+End Property
+
+' Ctrl or Alt with one key or a braced key name, or a bare function key.
+' A quote or an apostrophe would break the OnKey procedure string.
+Private Function ShortcutCodeValid(ByVal keyCode As String) As Boolean
+    Dim pos As Long
+    Dim modifiers As String
+    Dim keyPart As String
+
+    If InStr(keyCode, """") > 0 Or InStr(keyCode, "'") > 0 Then Exit Function
+    pos = 1
+    Do While pos <= Len(keyCode)
+        If InStr("^%+", Mid$(keyCode, pos, 1)) = 0 Then Exit Do
+        modifiers = modifiers & Mid$(keyCode, pos, 1)
+        pos = pos + 1
+    Loop
+    keyPart = Mid$(keyCode, pos)
+    If LenB(keyPart) = 0 Then Exit Function
+    If Len(keyPart) > 1 And Not (Left$(keyPart, 1) = "{" And Right$(keyPart, 1) = "}") Then
+        Exit Function
+    End If
+    If InStr(modifiers, "^") > 0 Or InStr(modifiers, "%") > 0 Then
+        ShortcutCodeValid = True
+    ElseIf UCase$(keyPart) Like "{F#}" Or UCase$(keyPart) Like "{F##}" Then
+        ShortcutCodeValid = True
+    End If
+End Function
+
+' A shortcut's OnKey code as people read it: "^+s" is Ctrl+Shift+S, "{F5}"
+' is F5, "%{DEL}" is Alt+Del.
+Private Function ShortcutLabel(ByVal keyCode As String) As String
+    Dim pos As Long
+    Dim modifiers As String
+    Dim keyPart As String
+
+    pos = 1
+    Do While pos <= Len(keyCode)
+        If InStr("^%+", Mid$(keyCode, pos, 1)) = 0 Then Exit Do
+        modifiers = modifiers & Mid$(keyCode, pos, 1)
+        pos = pos + 1
+    Loop
+    keyPart = Mid$(keyCode, pos)
+    If Len(keyPart) > 2 And Left$(keyPart, 1) = "{" And Right$(keyPart, 1) = "}" Then
+        keyPart = Mid$(keyPart, 2, Len(keyPart) - 2)
+        Select Case UCase$(keyPart)
+            Case "DEL", "DELETE"
+                keyPart = "Del"
+            Case "BS", "BACKSPACE"
+                keyPart = "Backspace"
+            Case "ESC", "ESCAPE"
+                keyPart = "Esc"
+            Case "INSERT", "INS"
+                keyPart = "Ins"
+            Case "PGUP"
+                keyPart = "PgUp"
+            Case "PGDN"
+                keyPart = "PgDn"
+            Case Else
+                If UCase$(keyPart) Like "F#" Or UCase$(keyPart) Like "F##" Or Len(keyPart) = 1 Then
+                    keyPart = UCase$(keyPart)
+                Else
+                    keyPart = UCase$(Left$(keyPart, 1)) & LCase$(Mid$(keyPart, 2))
+                End If
+        End Select
+    ElseIf keyPart = "~" Then
+        keyPart = "Enter"
+    Else
+        keyPart = UCase$(keyPart)
+    End If
+    If InStr(modifiers, "^") > 0 Then ShortcutLabel = "Ctrl+"
+    If InStr(modifiers, "%") > 0 Then ShortcutLabel = ShortcutLabel & "Alt+"
+    If InStr(modifiers, "+") > 0 Then ShortcutLabel = ShortcutLabel & "Shift+"
+    ShortcutLabel = ShortcutLabel & keyPart
+End Function
+
 ' Shows a float TextInput's characters as dots, as a password box does.
 ' Copying and cutting take nothing; the text still reads through
 ' InputValue and writes to WritesTo.
@@ -7085,6 +7286,45 @@ Friend Function AccessKeyLetters() As String
     Next componentValue
 End Function
 
+' The shortcut codes this app's controls declare, in a Chr$(1)-marked list.
+Friend Function ShortcutCodes() As String
+    Dim componentValue As ReDimUI
+    Dim keyCode As String
+
+    For Each componentValue In mComponents
+        keyCode = componentValue.ShortcutCode
+        If LenB(keyCode) > 0 Then
+            If Not CodeListHas(ShortcutCodes, keyCode) Then
+                ShortcutCodes = CodeListAdd(ShortcutCodes, keyCode)
+            End If
+        End If
+    Next componentValue
+End Function
+
+' Clicks the first control in creation order that declares the shortcut
+' and can take a click; while a modal is up, only its buttons count.
+Friend Function ActivateShortcut(ByVal keyCode As String) As Boolean
+    Dim orderedId As Variant
+    Dim componentValue As ReDimUI
+    Dim trapped As Boolean
+
+    RequireRole ROLE_APP, "ActivateShortcut"
+    trapped = ModalUp()
+    For Each orderedId In mComponentOrder
+        If TryGetComponent(CStr(orderedId), componentValue) Then
+            If StrComp(componentValue.ShortcutCode, keyCode, vbTextCompare) = 0 Then
+                If componentValue.IsFocusable Then
+                    If Not trapped Or Left$(componentValue.ComponentId, 4) = "mdl_" Then
+                        ReDimUI.DispatchShape componentValue.ShapeName
+                        ActivateShortcut = True
+                        Exit Function
+                    End If
+                End If
+            End If
+        End If
+    Next orderedId
+End Function
+
 ' Clicks the first control in creation order that declares the key and
 ' can take a click; while a modal is up, only its buttons count.
 Friend Function ActivateAccessKey(ByVal keyLetter As String) As Boolean
@@ -7915,6 +8155,9 @@ Private Function AccessibleDescription() As String
     End If
     If LenB(mAccessKey) > 0 And LenB(described) > 0 Then
         described = described & ", Alt+" & UCase$(mAccessKey)
+    End If
+    If LenB(mShortcut) > 0 And LenB(described) > 0 Then
+        described = described & ", " & ShortcutLabel(mShortcut)
     End If
     ' The tooltip is read with the control: the reason while disabled.
     If LenB(described) > 0 Then
@@ -15090,7 +15333,15 @@ Friend Function DrawTooltip( _
     If Not mEnabled And LenB(mDisabledReason) > 0 Then
         tipText = mDisabledReason
     Else
+        ' A shortcut shows with the tip, or as the tip, as Office does.
         tipText = mTooltip
+        If LenB(mShortcut) > 0 Then
+            If LenB(tipText) > 0 Then
+                tipText = tipText & " (" & ShortcutLabel(mShortcut) & ")"
+            Else
+                tipText = ShortcutLabel(mShortcut)
+            End If
+        End If
     End If
     If LenB(tipText) = 0 Then Exit Function
     Set hostApp = OwnerApp

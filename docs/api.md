@@ -164,8 +164,9 @@ All fluent, all return the component:
   whichever side changes.
 - Behavior: `OnClick "Module.Proc"`, `OnClickAsync "Module.Proc"`, `OnChange "Module.Proc"`.
 - Keyboard: `TabIndex(n)` orders Tab, `Focus` gives the control keyboard focus,
-  `AccessKey(letter)` binds Alt+letter for a button or tick box, and `Clearable` gives a
-  float TextInput or ComboBox a clear button (see
+  `AccessKey(letter)` binds Alt+letter for a button or tick box, `Shortcut(keyCode)` binds
+  a keyboard shortcut such as `"^s"` for Ctrl+S that clicks the control, and `Clearable`
+  gives a float TextInput or ComboBox a clear button (see
   [Keyboard focus for every control](#keyboard-focus-for-every-control)).
 - Text fields (float `TextInput` and `ComboBox`): `Placeholder(hint)`, `OnInput(proc)` with
   `DebounceMs(ms)`, `Numeric`, `MaxLength(n)`, `Required`, `ErrorText(message)`, and
@@ -743,6 +744,18 @@ keep the keys.
   chords are bound with `Application.OnKey` only while such a sheet is active, and while
   bound they take that Alt+letter from Excel, so pick letters your users do not need for
   the ribbon. An ampersand in the text stays literal.
+- Shortcuts: `Shortcut "^s"` clicks the control on Ctrl+S while its sheet is in front,
+  exactly as a mouse click does: the same handler, the control as `ReDimUI.Sender`, and
+  nothing while it is disabled, busy, or hidden, when the next control declaring the key
+  takes it instead; while a modal is up, only its buttons do. The code is an
+  `Application.OnKey` code with Ctrl (`^`) or Alt (`%`), Shift (`+`) optional, such as
+  `"^+e"` for Ctrl+Shift+E, or a function key such as `"{F5}"`; a key a focused field
+  types is refused, and `""` removes the shortcut. A focused field keeps its own editing
+  chords (Ctrl+A, Ctrl+C, and the rest) while it has the keys, and the shortcut takes its
+  key back when the field lets go. The tooltip shows the shortcut, as "Saves the form
+  (Ctrl+S)" or alone, and the alternative text ends with it. Like access keys, shortcuts
+  bind only while their sheet is active and take the key from Excel while bound; a key
+  also bound with the app's `HotKey` goes to whichever bound it last.
 
 | Control | Keys |
 |---|---|

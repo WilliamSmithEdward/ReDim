@@ -57,6 +57,14 @@
   pointer rested on the toast (as it does for any click) the rest held
   the countdown and undid the dismissal, so the close button seemed to
   do nothing. The close button now runs no handler.
+- `Shortcut "^s"` gives a control a keyboard shortcut: the key clicks it
+  exactly as a mouse click does, while its sheet is in front. It needs
+  Ctrl or Alt, or is a function key, so it never takes a key a field
+  types; the tooltip and alternative text name it ("Saves the form
+  (Ctrl+S)"). A disabled or hidden control passes the key to the next
+  that declares it. A field that took a shortcut's key for editing
+  gives it back when it lets go. `ReDimHost.bas` gains `RdxShortcut`,
+  so import both files again.
 - `OnClick` on a toast runs when the card itself is clicked, with the
   toast as `ReDimUI.Sender`, before the toast goes.
 - `ActionBorder rgb` colors a toast's action button border, the theme's

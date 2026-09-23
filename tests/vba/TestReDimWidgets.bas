@@ -17,6 +17,8 @@ Private gCommandCount As Long
 Private gLastCommand As String
 Private gToastClicks As Long
 Private gToastSender As String
+Private gSenderCount As Long
+Private gLastSender As String
 
 Private Function NewCanvas() As Worksheet
     Set NewCanvas = ActiveWorkbook.Worksheets.Add
@@ -28,6 +30,12 @@ End Sub
 
 Public Sub RecordConfirm()
     gConfirmRan = gConfirmRan + 1
+End Sub
+
+' Any control's click handler: counts the clicks and names the sender.
+Public Sub RecordSender()
+    gSenderCount = gSenderCount + 1
+    gLastSender = ReDimUI.SenderId
 End Sub
 
 ' A toast's click handler: the sender is the toast.
@@ -2394,6 +2402,69 @@ Public Function TestToastConventions() As String
     ReDimUI.ReduceMotion
     ReDimUI.AutoPump True
     TestToastConventions = transcript
+End Function
+
+' Shortcuts: a control's Shortcut binds while its sheet is in front and
+' clicks the control as a mouse click does, sender and all; a disabled
+' control passes the key to the next that declares it; the tooltip and
+' the alternative text name the shortcut; a key a field types is
+' refused; and leaving the sheet releases the binding.
+Public Function TestShortcuts() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim transcript As String
+    Dim refused As Boolean
+
+    gSenderCount = 0
+    gLastSender = vbNullString
+    ReDimUI.AutoPump False
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "wid73")
+    app.Button("save").AtRect(24, 24, 100, 30).Text("Save").Tooltip("Saves the form") _
+        .Shortcut("^s").OnClick "TestReDimWidgets.RecordSender"
+    app.Button("old").AtRect(24, 70, 100, 30).Text("Old").Enabled(False).Shortcut("{F7}") _
+        .OnClick "TestReDimWidgets.RecordSender"
+    app.Button("new").AtRect(24, 110, 100, 30).Text("New").Shortcut("{F7}") _
+        .OnClick "TestReDimWidgets.RecordSender"
+    app.Render
+    host.Activate
+    ReDimUI.RefreshAccessKeys
+    transcript = "bound=" & CStr(InStr(ReDimUI.BoundShortcuts, Chr$(1) & "^s" & Chr$(1)) > 0 _
+        And InStr(ReDimUI.BoundShortcuts, Chr$(1) & "{F7}" & Chr$(1)) > 0)
+    RdxShortcut "^s"
+    transcript = transcript & "|clicks=" & gSenderCount & "/" & gLastSender
+    RdxShortcut "{F7}"
+    transcript = transcript & "|skipsDisabled=" & gSenderCount & "/" & gLastSender
+    transcript = transcript & "|alt=" & _
+        CStr(InStr(host.Shapes("rdm_wid73_save").AlternativeText, "Ctrl+S") > 0)
+
+    ReDimUI.OverridePointer 74, 39
+    ReDimUI.PumpOnce
+    Sleep GetDoubleClickTime() + 60
+    ReDimUI.PumpOnce
+    transcript = transcript & "|tip=" & _
+        host.Shapes("rdm_wid73_save__tt").TextFrame2.TextRange.Text
+    ReDimUI.OverridePointer 600, 400
+    ReDimUI.PumpOnce
+    ReDimUI.ClearPointerOverride
+
+    On Error Resume Next
+    app.Button("save").Shortcut "s"
+    refused = (Err.Number <> 0)
+    Err.Clear
+    On Error GoTo 0
+    transcript = transcript & "|refusesTypingKey=" & CStr(refused _
+        And InStr(ReDimUI.BoundShortcuts, Chr$(1) & "^s" & Chr$(1)) > 0)
+
+    NewCanvas
+    ReDimUI.RefreshAccessKeys
+    transcript = transcript & "|leaveReleases=" & CStr(LenB(ReDimUI.BoundShortcuts) = 0)
+    host.Activate
+    ReDimUI.RefreshAccessKeys
+    transcript = transcript & "|returnBinds=" & _
+        CStr(InStr(ReDimUI.BoundShortcuts, Chr$(1) & "^s" & Chr$(1)) > 0)
+    ReDimUI.AutoPump True
+    TestShortcuts = transcript
 End Function
 
 ' Toast size: a toast keeps 240 points across unless MinWidth and MaxWidth
