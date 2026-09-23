@@ -90,10 +90,11 @@ user keeps working in the workbook.
 
 ## Installation
 
-1. Import `ROneCOne.cls` (from the ROneCOne release, 1.9.1 or later) into your macro-enabled
-   workbook.
-2. Import `ReDimUI.cls` from the
-   [latest release](https://github.com/WilliamSmithEdward/ReDim/releases).
+1. Import `ROneCOne.cls` from the
+   [latest release](https://github.com/WilliamSmithEdward/ReDim/releases) into your
+   macro-enabled workbook. Each ReDim release attaches the ROneCOne version it was tested
+   against. A workbook that already has ROneCOne 1.9.1 or later can keep its copy.
+2. Import `ReDimUI.cls` from the same release.
 3. Import `ReDimHost.bas` from the same release.
 
 Three imports, no references, no registration. Windows x64 Microsoft 365 Excel, the same target
