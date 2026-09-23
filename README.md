@@ -42,9 +42,11 @@ user keeps working in the workbook.
   RadioGroup, Stepper, SlideBar (press-drag), SelectBox, ComboBox (editable, filtering live
   as you type), TransferList (dual listbox with move buttons), CheckList (checkbox list
   with a tri-state select-all header), DatePicker (month calendar), Table (sortable,
-  paged), Tabs (with panels of controls), Skeleton (loading placeholder), Badge, Image
-  (embedded picture fills), TextInput with captions, hints, and validation, Toast, and a
-  shapes-based modal overlay with Confirm, plus 71 Windows icons for buttons and labels -
+  paged, filtered as you type, copied and exported), Tabs (with panels of controls),
+  Expander, MenuButton, Sparkline, Skeleton (loading placeholder), Badge, Image
+  (embedded picture fills), TextInput with captions, hints, validation, and password
+  masking, Toast, and a shapes-based modal overlay with Confirm, plus 71 Windows icons
+  for buttons and labels -
   every control drawn from shapes and fully themed, with light, dark, and high-contrast
   presets and a theme that follows Windows dark mode and accent color, no native form
   controls anywhere, no cells required (text fields float free of the grid via a keyboard
@@ -56,13 +58,15 @@ user keeps working in the workbook.
   word moves, the clipboard, and undo. Opt-in hover and press looks, tooltips,
   hold-to-repeat, and drag gestures come from the pump watching the pointer. Every
   control carries alternative text for screen readers, a high-contrast theme passes WCAG
-  AA, and motion follows the Windows animation setting.
+  AA, and motion follows the Windows animation setting. `ValidateAll` checks a whole
+  form before a save, and `SetUIText` translates every word ReDim draws or announces.
 - **Stateful.** Each app owns a key-value store. `BindText`, `BindValue`, `BindVisible`, and
   `BindEnabled` re-render only what changed. `OnStateChanged` registers workbook procedures as
   state listeners. `WritesTo` flows control values back into state. The store is deliberately
-  in-memory and session-scoped: persistence belongs to the host application, which can read
-  the store, save it wherever fits (ROneCOne's JSON serializer is on board), and reseed on
-  build with `SetStateDefault`, which never clobbers a value already in play.
+  in-memory and session-scoped: persistence belongs to the host application, which can walk
+  the store with `StateKeys`, save it wherever fits (ROneCOne's JSON serializer is on
+  board), and reseed on build with `SetStateDefault`, which never clobbers a value already
+  in play.
 - **Composable layout.** Anchor to ranges with `At`, to points with `AtRect`, or to other
   components with `Below` and `RightOf`, or let a `Stack` flow controls down or across,
   closing the gap when one hides and making room for an `Expander` as it opens. Render

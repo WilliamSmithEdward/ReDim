@@ -38,8 +38,9 @@ ui.Async("refresh").Start
 `RunsProc "Module.Proc"` wraps a workbook procedure instead of a task. `WithCancellation` gives
 the op a ROneCOne token source: `ui.CancelAsync "refresh"` cancels, `Token` exposes the token
 for task factories such as `ROneCOne.Task.Delay(5000, op.Token)`. Disabled controls show busy
-state (buttons swap to `BusyText`); everything restores on any terminal state. `AsyncError(opId)`
-returns the failure message after a fault.
+state (buttons swap to `BusyText`); everything restores on any terminal state. `OnCancel` names
+the handler a cancel runs, as `OnDone` and `OnFail` name theirs. `AsyncError(opId)` returns the
+failure message after a fault.
 
 `btn.OnClickAsync "Module.Proc"` is the one-line form: a per-button op that disables the button,
 runs the procedure, and restores it. Clicks while busy are ignored.
@@ -62,7 +63,7 @@ interval, the right shape for game loops and animations, and the pace can change
 ui.Job("loop").Steps("Game.Frame").PacedMs 150
 ```
 
-`CancelJob` requests a stop; the job's cancel handler runs on the next tick. Step errors finish
+`CancelJob` requests a stop; the job's `JobOnCancel` handler runs on the next tick. Step errors finish
 the job through its fail handler and the app error sink instead of surfacing a dialog.
 
 ## Rails

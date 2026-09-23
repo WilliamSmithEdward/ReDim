@@ -159,6 +159,7 @@ Private Const KIND_TABLE As Long = 25
 Private Const KIND_BADGE As Long = 26
 Private Const KIND_STACK As Long = 27
 Private Const KIND_EXPANDER As Long = 28
+Private Const KIND_SPARKLINE As Long = 29
 
 ' Option rows a SelectBox or ComboBox drop list draws at once unless
 ' ListRows says otherwise; longer lists window behind pager rows.
@@ -194,9 +195,75 @@ Private Const CAL_DEPTH As Double = 184
 ' Table cells keep this many points clear at each side of their text.
 Private Const TABLE_CELL_PAD As Double = 6
 
+' The dot on a sparkline's last value, in points; the line keeps half
+' of it clear at every edge so the dot stays inside the rectangle.
+Private Const SPARK_DOT As Double = 5
+
+' A gliding knob or tab bar keeps this share of its distance per 50 ms,
+' so a glide across a switch settles in about 200 ms at any frame rate.
+Private Const GLIDE_DECAY As Double = 0.4
+
 ' Sentinel for "the source could not be loaded"; contains characters no
 ' real path can, so it never collides with one.
 Private Const IMAGE_MISSING As String = "?missing?"
+
+' The words ReDim draws or announces on its own, by index. SetUIText
+' replaces them by name; UITextDefinition holds each name and default.
+Private Const UI_NO_ROWS As Long = 1
+Private Const UI_NO_ROWS_MATCH As Long = 2
+Private Const UI_NO_ITEMS As Long = 3
+Private Const UI_NO_MATCHES As Long = 4
+Private Const UI_ROW_RANGE As Long = 5
+Private Const UI_ROW_RANGE_EMPTY As Long = 6
+Private Const UI_FILTER_NOTE As Long = 7
+Private Const UI_SELECT_ALL As Long = 8
+Private Const UI_SELECT_ALL_FILTERED As Long = 9
+Private Const UI_AVAILABLE As Long = 10
+Private Const UI_SELECTED As Long = 11
+Private Const UI_PANEL_FILTERED As Long = 12
+Private Const UI_MORE_ITEMS As Long = 13
+Private Const UI_TYPE_COMMAND As Long = 14
+Private Const UI_WORKING As Long = 15
+Private Const UI_REQUIRED As Long = 16
+Private Const UI_OK As Long = 17
+Private Const UI_CANCEL As Long = 18
+Private Const UI_COLUMN As Long = 19
+Private Const UI_IMAGE_NOT_FOUND As Long = 20
+Private Const UI_ALT_BUTTON As Long = 21
+Private Const UI_ALT_BUSY As Long = 22
+Private Const UI_ALT_PROGRESS As Long = 23
+Private Const UI_ALT_SPINNER As Long = 24
+Private Const UI_ALT_SWITCH_ON As Long = 25
+Private Const UI_ALT_SWITCH_OFF As Long = 26
+Private Const UI_ALT_EDIT_FIELD As Long = 27
+Private Const UI_ALT_MASKED As Long = 28
+Private Const UI_ALT_COMBO_BOX As Long = 29
+Private Const UI_ALT_MENU_BUTTON As Long = 30
+Private Const UI_ALT_DROP_DOWN As Long = 31
+Private Const UI_ALT_CHECKED As Long = 32
+Private Const UI_ALT_NOT_CHECKED As Long = 33
+Private Const UI_ALT_RADIO_GROUP As Long = 34
+Private Const UI_ALT_ITEM_SELECTED As Long = 35
+Private Const UI_ALT_STEPPER As Long = 36
+Private Const UI_ALT_SLIDER As Long = 37
+Private Const UI_ALT_TRANSFER_LIST As Long = 38
+Private Const UI_ALT_CHECK_LIST As Long = 39
+Private Const UI_ALT_IMAGE As Long = 40
+Private Const UI_ALT_LOADING As Long = 41
+Private Const UI_ALT_EXPANDED As Long = 42
+Private Const UI_ALT_COLLAPSED As Long = 43
+Private Const UI_ALT_TABLE As Long = 44
+Private Const UI_ALT_TABLE_ONE_ROW As Long = 45
+Private Const UI_ALT_SORTED_ASCENDING As Long = 46
+Private Const UI_ALT_SORTED_DESCENDING As Long = 47
+Private Const UI_ALT_SHOWN As Long = 48
+Private Const UI_ALT_DATE_PICKER As Long = 49
+Private Const UI_ALT_TABS As Long = 50
+Private Const UI_ALT_TAB_SELECTED As Long = 51
+Private Const UI_ALT_UNAVAILABLE As Long = 52
+Private Const UI_ALT_SPARKLINE As Long = 53
+Private Const UI_ALT_SPARKLINE_EMPTY As Long = 54
+Private Const UI_TEXT_COUNT As Long = 54
 
 Private Const VARIANT_PRIMARY As Long = 0
 Private Const VARIANT_SECONDARY As Long = 1
@@ -250,6 +317,10 @@ Private mFramePointerY As Double
 Private mCaretBlinkMs As Long
 ' Motion preference: follow Windows (0), reduced (1), or full (2).
 Private mMotionChoice As Long
+' The UI text table: each entry's name and the words it holds now.
+Private mUITextNames() As String
+Private mUIWords() As String
+Private mUIWordsReady As Boolean
 ' Guarded-swallow observability: every silently trapped tick or key
 ' dispatch fault counts here, so tests can prove a run was clean.
 Private mTickFaults As Long
@@ -274,6 +345,9 @@ Private mComponentOrder As Collection
 Private mTickables As Collection
 Private mTickablesStale As Boolean
 Private mStateValues As Collection
+' The state keys in the order they were first set; a Collection keeps
+' no key list of its own.
+Private mStateKeys As Collection
 Private mStateHandlers As Collection
 Private mDirtyIds As Collection
 Private mBatchDepth As Long
@@ -329,6 +403,7 @@ Private mHeight As Double
 Private mHasRect As Boolean
 Private mText As String
 Private mBusyText As String
+Private mBusyTextGiven As Boolean
 Private mStyleVariant As Long
 ' Set once a variant builder ran; a toast reads its tone only then.
 Private mVariantChosen As Boolean
@@ -617,6 +692,22 @@ Private mTableEmptyText As String
 Private mRowOpenProc As String
 ' A float TextInput that shows dots for its characters.
 Private mMasked As Boolean
+' A part gliding to its place, a switch's knob or a tab strip's bar: the
+' part, where it is headed, and how far it still is from there, which
+' the frames close. The state and tab it last glided from.
+Private mGlidePart As String
+Private mGlideTargetLeft As Double
+Private mGlideTargetWidth As Double
+Private mGlideGapLeft As Double
+Private mGlideGapWidth As Double
+Private mAppliedGlideBase As String
+Private mAppliedIndicatorTab As Long
+' A sparkline's numbers, a count of their changes, and the state its
+' line and dot were drawn for.
+Private mSparkValues() As Double
+Private mSparkCount As Long
+Private mSparkVersion As Long
+Private mAppliedSparkSig As String
 ' An icon before the control's text: its name, its character, and the
 ' character the text was last styled with.
 Private mIconName As String
@@ -1479,6 +1570,231 @@ Public Property Get MotionReduced() As Boolean
     End Select
 End Property
 
+' Replaces words ReDim draws or announces on its own, such as "No rows"
+' or ", button" for screen readers, for an app in another language;
+' UITextKeys names them. "{0}", "{1}", and on in the words take the
+' numbers and names of the moment. Controls take new words as they
+' repaint, and Render repaints an app at once.
+Public Sub SetUIText(ByVal textKey As String, ByVal wordsText As String)
+    Dim textIndex As Long
+
+    If Not IsFactory(Me) Then
+        ReDimUI.SetUIText textKey, wordsText
+        Exit Sub
+    End If
+    textIndex = UITextIndex(textKey, "SetUIText")
+    mUIWords(textIndex) = wordsText
+End Sub
+
+' The words a UI text key holds now.
+Public Property Get UIText(ByVal textKey As String) As String
+    If Not IsFactory(Me) Then
+        UIText = ReDimUI.UIText(textKey)
+        Exit Property
+    End If
+    UIText = mUIWords(UITextIndex(textKey, "UIText"))
+End Property
+
+' Every UI text key, in order, for a translation table.
+Public Property Get UITextKeys() As Variant
+    If Not IsFactory(Me) Then
+        UITextKeys = ReDimUI.UITextKeys
+        Exit Property
+    End If
+    EnsureUIWords
+    UITextKeys = mUITextNames
+End Property
+
+' Puts every UI text back to its English default.
+Public Sub ResetUIText()
+    If Not IsFactory(Me) Then
+        ReDimUI.ResetUIText
+        Exit Sub
+    End If
+    mUIWordsReady = False
+    EnsureUIWords
+End Sub
+
+Friend Function UIWords(ByVal textIndex As Long) As String
+    If Not mUIWordsReady Then EnsureUIWords
+    UIWords = mUIWords(textIndex)
+End Function
+
+Private Sub EnsureUIWords()
+    Dim textIndex As Long
+    Dim definedAs As String
+    Dim splitAt As Long
+
+    If mUIWordsReady Then Exit Sub
+    ReDim mUITextNames(1 To UI_TEXT_COUNT)
+    ReDim mUIWords(1 To UI_TEXT_COUNT)
+    For textIndex = 1 To UI_TEXT_COUNT
+        definedAs = UITextDefinition(textIndex)
+        splitAt = InStr(definedAs, "=")
+        mUITextNames(textIndex) = Left$(definedAs, splitAt - 1)
+        mUIWords(textIndex) = Mid$(definedAs, splitAt + 1)
+    Next textIndex
+    mUIWordsReady = True
+End Sub
+
+' A UI text key's index, in any case; raises for a name that is none.
+Private Function UITextIndex(ByVal textKey As String, ByVal memberName As String) As Long
+    Dim textIndex As Long
+
+    EnsureUIWords
+    For textIndex = 1 To UI_TEXT_COUNT
+        If StrComp(mUITextNames(textIndex), textKey, vbTextCompare) = 0 Then
+            UITextIndex = textIndex
+            Exit Function
+        End If
+    Next textIndex
+    RaiseError ERROR_INVALID_ARGUMENT, memberName, _
+        "No UI text is named '" & textKey & "'; UITextKeys lists the names."
+End Function
+
+' Each UI text's name and English default, split at the first "=".
+Private Function UITextDefinition(ByVal textIndex As Long) As String
+    Select Case textIndex
+        Case UI_NO_ROWS
+            UITextDefinition = "NoRows=No rows"
+        Case UI_NO_ROWS_MATCH
+            UITextDefinition = "NoRowsMatch=No rows match"
+        Case UI_NO_ITEMS
+            UITextDefinition = "NoItems=No items"
+        Case UI_NO_MATCHES
+            UITextDefinition = "NoMatches=No matches"
+        Case UI_ROW_RANGE
+            UITextDefinition = "RowRange={0}-{1} of {2}"
+        Case UI_ROW_RANGE_EMPTY
+            UITextDefinition = "RowRangeEmpty=0 of 0"
+        Case UI_FILTER_NOTE
+            UITextDefinition = "FilterNote=Filter ""{0}"": {1}"
+        Case UI_SELECT_ALL
+            UITextDefinition = "SelectAll=Select all ({0}/{1})"
+        Case UI_SELECT_ALL_FILTERED
+            UITextDefinition = "SelectAllFiltered=Select all ""{0}"" ({1}/{2})"
+        Case UI_AVAILABLE
+            UITextDefinition = "Available=Available"
+        Case UI_SELECTED
+            UITextDefinition = "Selected=Selected"
+        Case UI_PANEL_FILTERED
+            UITextDefinition = "PanelFiltered={0} ""{1}"" ({2} of {3})"
+        Case UI_MORE_ITEMS
+            UITextDefinition = "MoreItems={0} more"
+        Case UI_TYPE_COMMAND
+            UITextDefinition = "TypeCommand=Type a command"
+        Case UI_WORKING
+            UITextDefinition = "Working=Working..."
+        Case UI_REQUIRED
+            UITextDefinition = "Required=Required"
+        Case UI_OK
+            UITextDefinition = "OK=OK"
+        Case UI_CANCEL
+            UITextDefinition = "Cancel=Cancel"
+        Case UI_COLUMN
+            UITextDefinition = "Column=Column {0}"
+        Case UI_IMAGE_NOT_FOUND
+            UITextDefinition = "ImageNotFound=(image not found)"
+        Case UI_ALT_BUTTON
+            UITextDefinition = "AltButton={0}, button"
+        Case UI_ALT_BUSY
+            UITextDefinition = "AltBusy=busy"
+        Case UI_ALT_PROGRESS
+            UITextDefinition = "AltProgress=Progress, {0} percent"
+        Case UI_ALT_SPINNER
+            UITextDefinition = "AltSpinner=Busy"
+        Case UI_ALT_SWITCH_ON
+            UITextDefinition = "AltSwitchOn=Switch, on"
+        Case UI_ALT_SWITCH_OFF
+            UITextDefinition = "AltSwitchOff=Switch, off"
+        Case UI_ALT_EDIT_FIELD
+            UITextDefinition = "AltEditField=Edit field"
+        Case UI_ALT_MASKED
+            UITextDefinition = "AltMasked=masked"
+        Case UI_ALT_COMBO_BOX
+            UITextDefinition = "AltComboBox=Combo box"
+        Case UI_ALT_MENU_BUTTON
+            UITextDefinition = "AltMenuButton={0}, menu button"
+        Case UI_ALT_DROP_DOWN
+            UITextDefinition = "AltDropDown=Drop-down, {0}"
+        Case UI_ALT_CHECKED
+            UITextDefinition = "AltChecked={0}, checkbox, checked"
+        Case UI_ALT_NOT_CHECKED
+            UITextDefinition = "AltNotChecked={0}, checkbox, not checked"
+        Case UI_ALT_RADIO_GROUP
+            UITextDefinition = "AltRadioGroup=Radio group"
+        Case UI_ALT_ITEM_SELECTED
+            UITextDefinition = "AltItemSelected={0} selected"
+        Case UI_ALT_STEPPER
+            UITextDefinition = "AltStepper=Stepper, {0}"
+        Case UI_ALT_SLIDER
+            UITextDefinition = "AltSlider=Slider, {0}"
+        Case UI_ALT_TRANSFER_LIST
+            UITextDefinition = "AltTransferList=Transfer list"
+        Case UI_ALT_CHECK_LIST
+            UITextDefinition = "AltCheckList=Checklist, {0} of {1} checked"
+        Case UI_ALT_IMAGE
+            UITextDefinition = "AltImage=Image"
+        Case UI_ALT_LOADING
+            UITextDefinition = "AltLoading=Loading"
+        Case UI_ALT_EXPANDED
+            UITextDefinition = "AltExpanded={0}, expander, expanded"
+        Case UI_ALT_COLLAPSED
+            UITextDefinition = "AltCollapsed={0}, expander, collapsed"
+        Case UI_ALT_TABLE
+            UITextDefinition = "AltTable=Table, {0} rows"
+        Case UI_ALT_TABLE_ONE_ROW
+            UITextDefinition = "AltTableOneRow=Table, 1 row"
+        Case UI_ALT_SORTED_ASCENDING
+            UITextDefinition = "AltSortedAscending=sorted by {0}, ascending"
+        Case UI_ALT_SORTED_DESCENDING
+            UITextDefinition = "AltSortedDescending=sorted by {0}, descending"
+        Case UI_ALT_SHOWN
+            UITextDefinition = "AltShown={0} shown"
+        Case UI_ALT_DATE_PICKER
+            UITextDefinition = "AltDatePicker=Date picker, {0}"
+        Case UI_ALT_TABS
+            UITextDefinition = "AltTabs=Tabs"
+        Case UI_ALT_TAB_SELECTED
+            UITextDefinition = "AltTabSelected={0} selected, tab {1} of {2}"
+        Case UI_ALT_UNAVAILABLE
+            UITextDefinition = "AltUnavailable=unavailable"
+        Case UI_ALT_SPARKLINE
+            UITextDefinition = "AltSparkline=Trend, {0} values, low {1}, high {2}, last {3}"
+        Case UI_ALT_SPARKLINE_EMPTY
+            UITextDefinition = "AltSparklineEmpty=Trend, no values"
+    End Select
+End Function
+
+' The UI text at textIndex with each "{n}" in it replaced by the nth
+' fill, counting from 0. One pass, so braces a fill brings stay as they
+' are.
+Private Function Phrase(ByVal textIndex As Long, ParamArray fillIns() As Variant) As String
+    Dim phraseText As String
+    Dim scanFrom As Long
+    Dim openAt As Long
+    Dim closeAt As Long
+    Dim fillToken As String
+
+    phraseText = ReDimUI.UIWords(textIndex)
+    scanFrom = 1
+    Do
+        openAt = InStr(scanFrom, phraseText, "{")
+        If openAt = 0 Then Exit Do
+        closeAt = InStr(openAt, phraseText, "}")
+        If closeAt = 0 Then Exit Do
+        fillToken = Mid$(phraseText, openAt + 1, closeAt - openAt - 1)
+        Phrase = Phrase & Mid$(phraseText, scanFrom, openAt - scanFrom)
+        If fillToken Like "#" And CLng(Val(fillToken)) <= UBound(fillIns) Then
+            Phrase = Phrase & CStr(fillIns(CLng(Val(fillToken))))
+        Else
+            Phrase = Phrase & Mid$(phraseText, openAt, closeAt - openAt + 1)
+        End If
+        scanFrom = closeAt + 1
+    Loop
+    Phrase = Phrase & Mid$(phraseText, scanFrom)
+End Function
+
 ' Deterministic tests turn the wall-clock timer off and drive PumpOnce
 ' themselves. Production leaves it on.
 Public Sub AutoPump(ByVal pumpOn As Boolean)
@@ -2124,6 +2440,7 @@ Friend Sub ConfigureApp(ByVal targetAppId As String, ByVal hostSheet As Workshee
     Set mComponents = New Collection
     Set mComponentOrder = New Collection
     Set mStateValues = New Collection
+    Set mStateKeys = New Collection
     Set mStateHandlers = New Collection
     Set mDirtyIds = New Collection
     Set mAsyncOps = New Collection
@@ -2240,6 +2557,12 @@ End Function
 ' unless a variant says otherwise; it widens to its text.
 Public Function Badge(ByVal targetComponentId As String) As ReDimUI
     Set Badge = GetOrCreateComponent(targetComponentId, KIND_BADGE)
+End Function
+
+' A small trend line through a series of numbers, with a dot on the
+' last, in the primary color unless a variant says otherwise.
+Public Function Sparkline(ByVal targetComponentId As String) As ReDimUI
+    Set Sparkline = GetOrCreateComponent(targetComponentId, KIND_SPARKLINE)
 End Function
 
 ' A layout container: controls that join it with InStack flow down it in
@@ -2428,14 +2751,16 @@ Private Function NextToastSlot() As Long
 End Function
 
 ' Shapes-only modal: a click-swallowing dim overlay plus a centered card
-' with OK and optional Cancel buttons. No UserForms.
+' with OK and optional Cancel buttons. No UserForms. The buttons read
+' the OK and Cancel UI texts unless given words; "" for cancelText
+' leaves Cancel out.
 Public Sub Confirm( _
     ByVal titleText As String, _
     ByVal messageText As String, _
     Optional ByVal okProc As String, _
     Optional ByVal cancelProc As String, _
-    Optional ByVal okText As String = "OK", _
-    Optional ByVal cancelText As String = "Cancel" _
+    Optional ByVal okText As Variant, _
+    Optional ByVal cancelText As Variant _
 )
     Dim viewLeft As Double
     Dim viewTop As Double
@@ -2443,8 +2768,20 @@ Public Sub Confirm( _
     Dim viewHeight As Double
     Dim cardLeft As Double
     Dim cardTop As Double
+    Dim okWords As String
+    Dim cancelWords As String
 
     RequireRole ROLE_APP, "Confirm"
+    If IsMissing(okText) Then
+        okWords = Phrase(UI_OK)
+    Else
+        okWords = CStr(okText)
+    End If
+    If IsMissing(cancelText) Then
+        cancelWords = Phrase(UI_CANCEL)
+    Else
+        cancelWords = CStr(cancelText)
+    End If
     ResolveViewport viewLeft, viewTop, viewWidth, viewHeight
     cardLeft = viewLeft + (viewWidth - 340) / 2
     cardTop = viewTop + (viewHeight - 150) / 2
@@ -2457,11 +2794,11 @@ Public Sub Confirm( _
     Card("mdl_card").AtRect(cardLeft, cardTop, 340, 150) _
         .Text(titleText & vbLf & vbLf & messageText).Visible True
     Button("mdl_ok").AtRect(cardLeft + 340 - 200, cardTop + 150 - 44, 90, 30) _
-        .Text(okText).Primary.Visible True
+        .Text(okWords).Primary.Visible True
     Button("mdl_ok").OnClick okProc
     Component("mdl_ok").MarkCloseModalOnClick
     Button("mdl_cancel").AtRect(cardLeft + 340 - 102, cardTop + 150 - 44, 90, 30) _
-        .Text(cancelText).Secondary.Visible(LenB(cancelText) > 0)
+        .Text(cancelWords).Secondary.Visible(LenB(cancelWords) > 0)
     Button("mdl_cancel").OnClick cancelProc
     Component("mdl_cancel").MarkCloseModalOnClick
     EndUpdate
@@ -2568,8 +2905,6 @@ Public Function PrepareCanvas( _
     Set PrepareCanvas = Me
 End Function
 
-' Components placed Below or RightOf one that changed size follow it, and
-' the ones placed against those follow in turn.
 ' The tab whose panel a Tabs control shows: 0 while the control is
 ' hidden or has no tabs, so its panels hide with it; -1 when the app
 ' has no Tabs control by that id, which gates nothing.
@@ -2651,7 +2986,7 @@ Public Sub OpenCommandPalette()
     Card(PALETTE_CARD_ID).AtRect(cardLeft, cardTop, cardWidth, 48).Text("").Visible True
     Set paletteField = ComboBox(PALETTE_FIELD_ID)
     paletteField.AtRect(cardLeft + 12, cardTop + 12, cardWidth - 24, 24) _
-        .Placeholder("Type a command").RestrictToItems.Visible True
+        .Placeholder(Phrase(UI_TYPE_COMMAND)).RestrictToItems.Visible True
     paletteField.ItemsFrom entryTexts
     paletteField.InputValue = vbNullString
     paletteField.OnChange "ReDimHost.RdxPalettePick"
@@ -2825,6 +3160,8 @@ Friend Sub ReflowStackNow(ByVal stackId As String)
     End If
 End Sub
 
+' Components placed Below or RightOf one that changed size follow it, and
+' the ones placed against those follow in turn.
 Friend Sub ReapplyDependents(ByVal anchorId As String)
     Dim componentValue As ReDimUI
 
@@ -2933,7 +3270,10 @@ End Property
 ' ---------------------------------------------------------------
 
 Public Sub SetState(ByVal stateKey As String, ByVal stateValue As Variant)
+    Dim known As Variant
+
     RequireRole ROLE_APP, "SetState"
+    If Not TryGetItem(mStateValues, stateKey, known) Then mStateKeys.Add stateKey
     ReplaceItem mStateValues, stateKey, stateValue
     MarkBoundComponentsDirty stateKey
     InvokeStateHandlers stateKey
@@ -2980,8 +3320,27 @@ Public Property Get HasState(ByVal stateKey As String) As Boolean
     HasState = TryGetItem(mStateValues, stateKey, stored)
 End Property
 
+' Every state key in the order it was first set, as an array from 0;
+' an empty store gives an empty array. With State, enough to save the
+' whole store wherever the host keeps it.
+Public Property Get StateKeys() As Variant
+    Dim keyList() As String
+    Dim keyAt As Long
+
+    RequireRole ROLE_APP, "StateKeys"
+    If mStateKeys.Count = 0 Then
+        StateKeys = Array()
+        Exit Property
+    End If
+    ReDim keyList(0 To mStateKeys.Count - 1)
+    For keyAt = 1 To mStateKeys.Count
+        keyList(keyAt - 1) = mStateKeys.Item(keyAt)
+    Next keyAt
+    StateKeys = keyList
+End Property
+
 ' The state store is deliberately in-memory only. Durability is the host
-' application's concern: read the store with State/StateOrDefault and save
+' application's concern: walk the store with StateKeys and State and save
 ' wherever fits (a hidden sheet, workbook names, a file), then reseed on
 ' build with SetStateDefault. ROneCOne.Json serializes and parses if JSON
 ' is the format of choice.
@@ -4014,7 +4373,6 @@ Friend Sub ConfigureComponent( _
     mFillColor = -1
     mTextColor = -1
     mFontSize = 0
-    mBusyText = "Working..."
     Select Case kindCode
         Case KIND_BUTTON
             mWidth = 96: mHeight = 32
@@ -4064,6 +4422,8 @@ Friend Sub ConfigureComponent( _
             mWidth = 420: mHeight = 200
         Case KIND_BADGE
             mWidth = 0: mHeight = 18
+        Case KIND_SPARKLINE
+            mWidth = 120: mHeight = 32
         Case KIND_STACK
             mWidth = 300: mHeight = 0
             mStackGap = 8
@@ -4095,7 +4455,8 @@ End Property
 Friend Property Get IsTickable() As Boolean
     Select Case mKind
         Case KIND_SPINNER, KIND_TOAST, KIND_SLIDEBAR, KIND_INPUT, KIND_COMBO, _
-            KIND_SELECT, KIND_STEPPER, KIND_TRANSFER, KIND_SKELETON
+            KIND_SELECT, KIND_STEPPER, KIND_TRANSFER, KIND_SKELETON, _
+            KIND_TOGGLE, KIND_TABS
             IsTickable = True
     End Select
 End Property
@@ -4189,9 +4550,12 @@ Public Function Text(ByVal displayText As String) As ReDimUI
     Set Text = Me
 End Function
 
+' What a busy button shows, the Working UI text unless given; ""
+' keeps the button's own text.
 Public Function BusyText(ByVal displayText As String) As ReDimUI
     RequireRole ROLE_COMPONENT, "BusyText"
     mBusyText = displayText
+    mBusyTextGiven = True
     Set BusyText = Me
 End Function
 
@@ -4441,10 +4805,11 @@ End Function
 
 ' Marks the control required: an asterisk after its caption, in the
 ' danger color. A float TextInput or ComboBox committed empty shows
-' emptyMessage as its validation message.
+' emptyMessage as its validation message, the Required UI text unless
+' given.
 Public Function Required( _
     Optional ByVal requiredOn As Boolean = True, _
-    Optional ByVal emptyMessage As String = "Required" _
+    Optional ByVal emptyMessage As String _
 ) As ReDimUI
     RequireRole ROLE_COMPONENT, "Required"
     mRequired = requiredOn
@@ -4611,7 +4976,7 @@ Public Function TableFrom( _
             If firstRowHeads Then
                 mTableHeads(colNo) = TableCellText(0, grid(rowLow, colLow + colNo - 1))
             Else
-                mTableHeads(colNo) = "Column " & colNo
+                mTableHeads(colNo) = Phrase(UI_COLUMN, colNo)
             End If
         Next colNo
     End If
@@ -5372,6 +5737,36 @@ Public Function CheckedFrom(ByVal itemSource As Variant) As ReDimUI
     End If
     Touch
     Set CheckedFrom = Me
+End Function
+
+' The numbers a Sparkline plots, in order, from an array, a Collection,
+' a Range (row by row), or a ROneCOne sequence; blanks and text are
+' left out.
+Public Function ValuesFrom(ByVal valueSource As Variant) As ReDimUI
+    Dim gathered As Collection
+    Dim entry As Variant
+    Dim kept As Long
+
+    RequireRole ROLE_COMPONENT, "ValuesFrom"
+    If mKind <> KIND_SPARKLINE Then
+        RaiseError ERROR_INVALID_OPERATION, "ValuesFrom", _
+            "ValuesFrom applies to Sparkline only."
+    End If
+    Set gathered = ReadItemSource(valueSource, "ValuesFrom")
+    Erase mSparkValues
+    If gathered.Count > 0 Then
+        ReDim mSparkValues(1 To gathered.Count)
+        For Each entry In gathered
+            If IsNumeric(entry) Then
+                kept = kept + 1
+                mSparkValues(kept) = CDbl(entry)
+            End If
+        Next entry
+    End If
+    mSparkCount = kept
+    mSparkVersion = mSparkVersion + 1
+    Touch
+    Set ValuesFrom = Me
 End Function
 
 ' Reads an item source into a fresh Collection of strings. Accepts a 1D
@@ -6346,8 +6741,9 @@ End Function
 
 ' The controls Tab visits: positive TabIndex values first, ascending,
 ' then the rest in creation order. While a modal is up only its buttons
-' take part, which keeps focus inside the dialog.
-Private Function TabOrder() As Collection
+' take part, which keeps focus inside the dialog. With checkedFields the
+' same order holds the fields ValidateAll checks instead.
+Private Function TabOrder(Optional ByVal checkedFields As Boolean = False) As Collection
     Dim leading As Collection
     Dim trailing As Collection
     Dim orderedId As Variant
@@ -6356,28 +6752,35 @@ Private Function TabOrder() As Collection
     Dim idx As Long
     Dim trapped As Boolean
     Dim inserted As Boolean
+    Dim taking As Boolean
 
     Set leading = New Collection
     Set trailing = New Collection
     trapped = ModalUp()
     For Each orderedId In mComponentOrder
         If TryGetComponent(CStr(orderedId), componentValue) Then
-            If componentValue.IsTabStop Then
-                If Not trapped Or Left$(componentValue.ComponentId, 4) = "mdl_" Then
-                    If componentValue.TabPosition > 0 Then
-                        inserted = False
-                        For idx = 1 To leading.Count
-                            Set placed = leading.Item(idx)
-                            If placed.TabPosition > componentValue.TabPosition Then
-                                leading.Add componentValue, Before:=idx
-                                inserted = True
-                                Exit For
-                            End If
-                        Next idx
-                        If Not inserted Then leading.Add componentValue
-                    Else
-                        trailing.Add componentValue
-                    End If
+            If checkedFields Then
+                taking = componentValue.TakesChecks(Me)
+            Else
+                taking = componentValue.IsTabStop
+                If taking And trapped Then
+                    taking = (Left$(componentValue.ComponentId, 4) = "mdl_")
+                End If
+            End If
+            If taking Then
+                If componentValue.TabPosition > 0 Then
+                    inserted = False
+                    For idx = 1 To leading.Count
+                        Set placed = leading.Item(idx)
+                        If placed.TabPosition > componentValue.TabPosition Then
+                            leading.Add componentValue, Before:=idx
+                            inserted = True
+                            Exit For
+                        End If
+                    Next idx
+                    If Not inserted Then leading.Add componentValue
+                Else
+                    trailing.Add componentValue
                 End If
             End If
         End If
@@ -6425,6 +6828,39 @@ Public Function FocusFirst() As ReDimUI
     RequireRole ROLE_APP, "FocusFirst"
     MoveFocusFrom vbNullString, True
     Set FocusFirst = Me
+End Function
+
+' Checks the app's fields the way a commit does, Required first and
+' then Validates: every enabled float field that takes a check and
+' shows, or would once the Tabs and Expander panels it sits on show.
+' Each that fails shows its message and rechecks as it is edited, and
+' the first in Tab order gets focus, its panels shown first. True when
+' every field passes.
+Public Function ValidateAll() As Boolean
+    Dim checkedFields As Collection
+    Dim checkedField As ReDimUI
+    Dim firstFailed As ReDimUI
+    Dim idx As Long
+
+    RequireRole ROLE_APP, "ValidateAll"
+    ValidateAll = True
+    Set checkedFields = TabOrder(True)
+    If checkedFields.Count = 0 Then Exit Function
+    BeginUpdate
+    For idx = 1 To checkedFields.Count
+        Set checkedField = checkedFields.Item(idx)
+        If Not checkedField.PassesChecks(Me) Then
+            ValidateAll = False
+            If firstFailed Is Nothing Then Set firstFailed = checkedField
+        End If
+    Next idx
+    If Not firstFailed Is Nothing Then
+        firstFailed.RevealPanels Me
+    End If
+    EndUpdate
+    If Not firstFailed Is Nothing Then
+        firstFailed.Focus
+    End If
 End Function
 
 ' The button Enter clicks when focus is on a text field or on a control
@@ -7174,85 +7610,106 @@ Private Function AccessibleDescription() As String
     Select Case mKind
         Case KIND_BUTTON
             If LenB(mText) = 0 And Len(mIconName) > 1 Then
-                described = mIconName & ", button"
+                described = Phrase(UI_ALT_BUTTON, mIconName)
             Else
-                described = mText & ", button"
+                described = Phrase(UI_ALT_BUTTON, mText)
             End If
-            If mBusy Then described = described & ", busy"
+            If mBusy Then described = described & ", " & Phrase(UI_ALT_BUSY)
         Case KIND_PROGRESS
-            described = "Progress, " & CStr(CLng(mValue / 5) * 5) & " percent"
+            described = Phrase(UI_ALT_PROGRESS, CLng(mValue / 5) * 5)
         Case KIND_SPINNER
-            described = "Busy"
+            described = Phrase(UI_ALT_SPINNER)
         Case KIND_TOGGLE
-            described = "Switch, " & IIf(mChecked, "on", "off")
+            If mChecked Then
+                described = Phrase(UI_ALT_SWITCH_ON)
+            Else
+                described = Phrase(UI_ALT_SWITCH_OFF)
+            End If
         Case KIND_INPUT
-            described = "Edit field"
-            If mMasked Then described = described & ", masked"
+            described = Phrase(UI_ALT_EDIT_FIELD)
+            If mMasked Then described = described & ", " & Phrase(UI_ALT_MASKED)
             If LenB(mPlaceholder) > 0 Then described = described & ", " & mPlaceholder
         Case KIND_COMBO
-            described = "Combo box"
+            described = Phrase(UI_ALT_COMBO_BOX)
             If LenB(mPlaceholder) > 0 Then described = described & ", " & mPlaceholder
         Case KIND_SELECT
             If mIsMenu Then
-                described = mText & ", menu button"
+                described = Phrase(UI_ALT_MENU_BUTTON, mText)
             ElseIf CLng(mValue) >= 1 And CLng(mValue) <= ItemCount Then
-                described = "Drop-down, " & ItemAt(CLng(mValue))
+                described = Phrase(UI_ALT_DROP_DOWN, ItemAt(CLng(mValue)))
             Else
-                described = "Drop-down, " & mText
+                described = Phrase(UI_ALT_DROP_DOWN, mText)
             End If
         Case KIND_TICKBOX
-            described = mText & ", checkbox, " & _
-                IIf(mChecked, "checked", "not checked")
+            If mChecked Then
+                described = Phrase(UI_ALT_CHECKED, mText)
+            Else
+                described = Phrase(UI_ALT_NOT_CHECKED, mText)
+            End If
         Case KIND_RADIO
-            described = "Radio group"
+            described = Phrase(UI_ALT_RADIO_GROUP)
             If CLng(mValue) >= 1 And CLng(mValue) <= ItemCount Then
-                described = described & ", " & ItemAt(CLng(mValue)) & " selected"
+                described = described & ", " & Phrase(UI_ALT_ITEM_SELECTED, ItemAt(CLng(mValue)))
             End If
         Case KIND_STEPPER
-            described = "Stepper, " & CStr(mValue)
+            described = Phrase(UI_ALT_STEPPER, mValue)
         Case KIND_SLIDEBAR
-            described = "Slider, " & CStr(mValue)
+            described = Phrase(UI_ALT_SLIDER, mValue)
         Case KIND_TRANSFER
-            described = "Transfer list"
+            described = Phrase(UI_ALT_TRANSFER_LIST)
         Case KIND_CHECKLIST
             EnsureCheckedSet
-            described = "Checklist, " & CStr(mCheckedSet.Count) & " of " & _
-                CStr(ItemCount) & " checked"
+            described = Phrase(UI_ALT_CHECK_LIST, mCheckedSet.Count, ItemCount)
         Case KIND_IMAGE
-            described = "Image"
+            described = Phrase(UI_ALT_IMAGE)
         Case KIND_SKELETON
-            described = "Loading"
+            described = Phrase(UI_ALT_LOADING)
+        Case KIND_SPARKLINE
+            described = SparklineSummary()
         Case KIND_EXPANDER
-            described = mText & ", expander, " & IIf(mChecked, "expanded", "collapsed")
+            If mChecked Then
+                described = Phrase(UI_ALT_EXPANDED, mText)
+            Else
+                described = Phrase(UI_ALT_COLLAPSED, mText)
+            End If
         Case KIND_TABLE
-            described = "Table, " & mTableRows & IIf(mTableRows = 1, " row", " rows")
+            If mTableRows = 1 Then
+                described = Phrase(UI_ALT_TABLE_ONE_ROW)
+            Else
+                described = Phrase(UI_ALT_TABLE, mTableRows)
+            End If
             If mSortColumn > 0 Then
-                described = described & ", sorted by " & mTableHeads(mSortColumn) & _
-                    IIf(mSortDescending, ", descending", ", ascending")
+                If mSortDescending Then
+                    described = described & ", " & _
+                        Phrase(UI_ALT_SORTED_DESCENDING, mTableHeads(mSortColumn))
+                Else
+                    described = described & ", " & _
+                        Phrase(UI_ALT_SORTED_ASCENDING, mTableHeads(mSortColumn))
+                End If
             End If
             If LenB(mTableFilter) > 0 Then
                 EnsureTableShown
-                described = described & ", " & mTableShownCount & " shown"
+                described = described & ", " & Phrase(UI_ALT_SHOWN, mTableShownCount)
             End If
             If CLng(mValue) >= 1 And CLng(mValue) <= mTableRows Then
-                described = described & ", " & _
-                    TableCellText(1, mTableCells(1, CLng(mValue))) & " selected"
+                described = described & ", " & Phrase(UI_ALT_ITEM_SELECTED, _
+                    TableCellText(1, mTableCells(1, CLng(mValue))))
             End If
         Case KIND_DATE
             If mValue <> 0 Then
-                described = "Date picker, " & FormatDateTime(CDate(mValue), vbLongDate)
+                described = Phrase(UI_ALT_DATE_PICKER, FormatDateTime(CDate(mValue), vbLongDate))
             Else
-                described = "Date picker, " & mText
+                described = Phrase(UI_ALT_DATE_PICKER, mText)
             End If
         Case KIND_TABS
-            described = "Tabs"
+            described = Phrase(UI_ALT_TABS)
             If ShownTab() >= 1 Then
-                described = described & ", " & ItemAt(ShownTab()) & _
-                    " selected, tab " & ShownTab() & " of " & ItemCount
+                described = described & ", " & _
+                    Phrase(UI_ALT_TAB_SELECTED, ItemAt(ShownTab()), ShownTab(), ItemCount)
             End If
     End Select
     If Not mEnabled And LenB(described) > 0 Then
-        described = described & ", unavailable"
+        described = described & ", " & Phrase(UI_ALT_UNAVAILABLE)
     End If
     If LenB(mAccessKey) > 0 And LenB(described) > 0 Then
         described = described & ", Alt+" & UCase$(mAccessKey)
@@ -7644,7 +8101,7 @@ Private Sub ApplyStyle(ByVal mainShape As Shape, ByVal themeValue As ReDimUI)
     If IsCompositeDrawnKind() Then Exit Sub
     resolvedFill = ResolveFill(themeValue)
     Select Case mKind
-        Case KIND_LABEL
+        Case KIND_LABEL, KIND_SPARKLINE
             If Not mAppliedValid Then
                 mainShape.Fill.Visible = msoFalse
                 mainShape.Line.Visible = msoFalse
@@ -7865,7 +8322,7 @@ Private Sub ApplyImageFill(ByVal mainShape As Shape, ByVal themeValue As ReDimUI
     mainShape.Line.Visible = msoTrue
     mainShape.Line.ForeColor.RGB = themeValue.BorderColor
     mainShape.Line.Weight = 1
-    StyleGlyphText mainShape, "(image not found)", themeValue.OnMutedColor, _
+    StyleGlyphText mainShape, Phrase(UI_IMAGE_NOT_FOUND), themeValue.OnMutedColor, _
         themeValue.BaseFontSize - 2, themeValue
     mAppliedImageSource = IMAGE_MISSING
 End Sub
@@ -7948,9 +8405,18 @@ Private Function ResolveTextColor(ByVal themeValue As ReDimUI) As Long
 End Function
 
 Friend Function ResolveText(ByVal hostApp As ReDimUI) As String
-    If mBusy And mKind = KIND_BUTTON And LenB(mBusyText) > 0 Then
-        ResolveText = mBusyText
-        Exit Function
+    Dim busyWords As String
+
+    If mBusy And mKind = KIND_BUTTON Then
+        If mBusyTextGiven Then
+            busyWords = mBusyText
+        Else
+            busyWords = Phrase(UI_WORKING)
+        End If
+        If LenB(busyWords) > 0 Then
+            ResolveText = busyWords
+            Exit Function
+        End If
     End If
     If mKind = KIND_SELECT Then
         ResolveText = ItemAt(CLng(mValue))
@@ -8223,7 +8689,8 @@ Private Sub ApplyText(ByVal mainShape As Shape, ByVal themeValue As ReDimUI)
 
     If mKind = KIND_SPINNER Or mKind = KIND_TOGGLE Or mKind = KIND_OVERLAY _
         Or mKind = KIND_IMAGE Or mKind = KIND_SKELETON Or mKind = KIND_TABLE _
-        Or mKind = KIND_STACK Or IsCompositeDrawnKind() Then Exit Sub
+        Or mKind = KIND_STACK Or mKind = KIND_SPARKLINE _
+        Or IsCompositeDrawnKind() Then Exit Sub
     If (mKind = KIND_INPUT Or mKind = KIND_COMBO) And Not IsFloatField() Then
         Exit Sub
     End If
@@ -9420,8 +9887,6 @@ Private Sub FireInput(ByVal hostApp As ReDimUI)
     ReDimUI.RunHandlerAs hostApp, Me, mInputProc
 End Sub
 
-' Runs Validates' check on the text. A check that fails to run counts
-' as a pass and goes to the app's error handler.
 ' The message a float field shows: its validation's, else the one set
 ' from outside.
 Private Function ShownError() As String
@@ -9432,12 +9897,90 @@ Private Function ShownError() As String
     End If
 End Function
 
+' ValidateAll's fields: an enabled float field with Required or
+' Validates that shows, or would once its panels show.
+Friend Function TakesChecks(ByVal hostApp As ReDimUI) As Boolean
+    If Not IsFloatField() Or Not mEnabled Then Exit Function
+    If Not mRequired And LenB(mValidateProc) = 0 Then Exit Function
+    TakesChecks = Revealable(hostApp)
+End Function
+
+' Runs the commit's check on the text the field holds and shows the
+' outcome. True when it passes.
+Friend Function PassesChecks(ByVal hostApp As ReDimUI) As Boolean
+    RunValidation hostApp
+    Touch
+    PassesChecks = (LenB(mValidationError) = 0)
+End Function
+
+' Whether the control shows, or would once each Tabs or Expander panel
+' it sits on shows: False when it, or a stack or panel control holding
+' it, is hidden in its own right.
+Friend Function Revealable(ByVal hostApp As ReDimUI) As Boolean
+    Dim holderValue As ReDimUI
+
+    If Not mTabShut Then
+        Revealable = mVisible
+        Exit Function
+    End If
+    If Not mVisibleBeforeTab Then Exit Function
+    If LenB(mStackId) > 0 Then
+        Set holderValue = hostApp.PeekComponent(mStackId)
+        If Not holderValue Is Nothing Then
+            If Not holderValue.Revealable(hostApp) Then Exit Function
+        End If
+    End If
+    If LenB(mTabOwnerId) > 0 Then
+        Set holderValue = hostApp.PeekComponent(mTabOwnerId)
+        If Not holderValue Is Nothing Then
+            If Not holderValue.Revealable(hostApp) Then Exit Function
+        End If
+    End If
+    Revealable = True
+End Function
+
+' Shows the panels the control sits on, outermost first: a Tabs control
+' turns to its tab and an Expander opens, each writing its WritesTo
+' state and firing nothing, as from code.
+Friend Sub RevealPanels(ByVal hostApp As ReDimUI)
+    Dim holderValue As ReDimUI
+
+    If LenB(mStackId) > 0 Then
+        Set holderValue = hostApp.PeekComponent(mStackId)
+        If Not holderValue Is Nothing Then
+            holderValue.RevealPanels hostApp
+        End If
+    End If
+    If LenB(mTabOwnerId) = 0 Then Exit Sub
+    Set holderValue = hostApp.PeekComponent(mTabOwnerId)
+    If holderValue Is Nothing Then Exit Sub
+    holderValue.RevealPanels hostApp
+    holderValue.ShowPanel hostApp, mTabNumber
+End Sub
+
+Friend Sub ShowPanel(ByVal hostApp As ReDimUI, ByVal tabNumber As Long)
+    If mKind = KIND_TABS Then
+        SelectTab hostApp, tabNumber
+    ElseIf mKind = KIND_EXPANDER Then
+        If mChecked Then Exit Sub
+        mChecked = True
+        If LenB(mWritesToKey) > 0 Then hostApp.SetState mWritesToKey, True
+        Touch
+    End If
+End Sub
+
+' Runs Validates' check on the text. A check that fails to run counts
+' as a pass and goes to the app's error handler.
 Private Sub RunValidation(ByVal hostApp As ReDimUI)
     Dim verdict As Variant
 
     ' Required speaks first: an empty text never reaches the check.
     If mRequired And LenB(Trim$(mText)) = 0 Then
-        mValidationError = mRequiredMessage
+        If LenB(mRequiredMessage) > 0 Then
+            mValidationError = mRequiredMessage
+        Else
+            mValidationError = Phrase(UI_REQUIRED)
+        End If
         mValidationLive = True
         Exit Sub
     End If
@@ -9629,7 +10172,99 @@ Private Sub ApplyKindExtras( _
             ApplyToastParts mainShape, hostSheet, themeValue
         Case KIND_SKELETON
             ApplySkeletonBars hostSheet, themeValue
+        Case KIND_SPARKLINE
+            ApplySparkline hostSheet, themeValue
     End Select
+End Sub
+
+' What a screen reader hears for a sparkline: how many values, the low
+' and the high, and the last.
+Private Function SparklineSummary() As String
+    Dim lowValue As Double
+    Dim highValue As Double
+
+    If mSparkCount = 0 Then
+        SparklineSummary = Phrase(UI_ALT_SPARKLINE_EMPTY)
+        Exit Function
+    End If
+    SparkRange lowValue, highValue
+    SparklineSummary = Phrase(UI_ALT_SPARKLINE, mSparkCount, lowValue, highValue, _
+        mSparkValues(mSparkCount))
+End Function
+
+' The lowest and highest of a sparkline's values; it has at least one.
+Private Sub SparkRange(ByRef lowValue As Double, ByRef highValue As Double)
+    Dim pointNo As Long
+
+    lowValue = mSparkValues(1)
+    highValue = mSparkValues(1)
+    For pointNo = 2 To mSparkCount
+        If mSparkValues(pointNo) < lowValue Then lowValue = mSparkValues(pointNo)
+        If mSparkValues(pointNo) > highValue Then highValue = mSparkValues(pointNo)
+    Next pointNo
+End Sub
+
+' A sparkline's line, one polyline through its values scaled to its
+' height, and a dot on the last value, drawn again only when the values,
+' the place, the color, or the visibility changed. Equal values run
+' along the middle; one value is a dot alone.
+Private Sub ApplySparkline(ByVal hostSheet As Worksheet, ByVal themeValue As ReDimUI)
+    Dim inkRgb As Long
+    Dim sparkKey As String
+    Dim lowValue As Double
+    Dim highValue As Double
+    Dim pointNo As Long
+    Dim coords() As Single
+    Dim lineShape As Shape
+    Dim dotShape As Shape
+
+    inkRgb = ResolveFill(themeValue)
+    sparkKey = PartsState(themeValue) & ":" & CStr(mSparkVersion) & ":" & CStr(inkRgb)
+    If sparkKey = mAppliedSparkSig Then Exit Sub
+    mAppliedSparkSig = sparkKey
+    On Error Resume Next
+    hostSheet.Shapes(ShapeName & PART_SEPARATOR & "sl").Delete
+    If mSparkCount = 0 Then hostSheet.Shapes(ShapeName & PART_SEPARATOR & "sd").Delete
+    On Error GoTo 0
+    If mSparkCount = 0 Then Exit Sub
+    SparkRange lowValue, highValue
+    ReDim coords(1 To mSparkCount, 1 To 2)
+    For pointNo = 1 To mSparkCount
+        If mSparkCount = 1 Then
+            coords(pointNo, 1) = mLeft + mWidth / 2
+        Else
+            coords(pointNo, 1) = mLeft + SPARK_DOT / 2 + _
+                (mWidth - SPARK_DOT) * (pointNo - 1) / (mSparkCount - 1)
+        End If
+        If highValue > lowValue Then
+            coords(pointNo, 2) = mTop + SPARK_DOT / 2 + (mHeight - SPARK_DOT) * _
+                (highValue - mSparkValues(pointNo)) / (highValue - lowValue)
+        Else
+            coords(pointNo, 2) = mTop + mHeight / 2
+        End If
+    Next pointNo
+    If mSparkCount > 1 Then
+        Set lineShape = hostSheet.Shapes.AddPolyline(coords)
+        lineShape.Name = ShapeName & PART_SEPARATOR & "sl"
+        lineShape.Placement = xlFreeFloating
+        lineShape.Fill.Visible = msoFalse
+        lineShape.Line.Visible = msoTrue
+        lineShape.Line.ForeColor.RGB = inkRgb
+        lineShape.Line.Weight = 1.5
+        lineShape.OnAction = mAppliedOnAction
+        lineShape.Visible = BoolToMso(mVisible)
+    End If
+    Set dotShape = EnsurePartShape(hostSheet, "sd", msoShapeOval)
+    dotShape.Left = coords(mSparkCount, 1) - SPARK_DOT / 2
+    dotShape.Top = coords(mSparkCount, 2) - SPARK_DOT / 2
+    dotShape.Width = SPARK_DOT
+    dotShape.Height = SPARK_DOT
+    dotShape.Fill.Visible = msoTrue
+    dotShape.Fill.ForeColor.RGB = inkRgb
+    dotShape.OnAction = mAppliedOnAction
+    dotShape.Visible = BoolToMso(mVisible)
+    ' The line was made after the dot, so the dot comes back on top.
+    If mSparkCount > 1 Then dotShape.ZOrder msoBringToFront
 End Sub
 
 ' A toast's tone from its variant: none unless a variant builder ran;
@@ -9872,6 +10507,9 @@ Friend Sub ForgetPartSignatures()
     Erase mAppliedTableRowStates
     Erase mAppliedTableHeadStates
     mAppliedTableFootSig = "?"
+    mAppliedSparkSig = vbNullString
+    mGlidePart = vbNullString
+    mAppliedIndicatorTab = 0
 End Sub
 
 ' Box at the left edge, check glyph inside it when checked, caption filling
@@ -9951,6 +10589,9 @@ Private Sub ApplyTabs( _
     Dim tabFill As Long
     Dim tabWords As String
     Dim fitChars As Long
+    Dim barMade As Boolean
+    Dim barWidth As Double
+    Dim glideBase As String
 
     tabTotal = ItemCount
     tabNow = ShownTab()
@@ -10024,11 +10665,18 @@ Private Sub ApplyTabs( _
         mTabRights(idx) = tabLeft - mLeft
     Next idx
     If tabNow >= 1 Then
-        Set accentBar = EnsurePartShape(hostSheet, "ti", msoShapeRoundedRectangle)
-        accentBar.Width = tabWidths(tabNow) - 16
-        If accentBar.Width < 8 Then accentBar.Width = 8
-        accentBar.Left = mLeft + mTabRights(tabNow) - tabWidths(tabNow) _
-            + (tabWidths(tabNow) - accentBar.Width) / 2
+        Set accentBar = EnsurePartShape(hostSheet, "ti", msoShapeRoundedRectangle, barMade)
+        barWidth = tabWidths(tabNow) - 16
+        If barWidth < 8 Then barWidth = 8
+        ' Another tab shown on a strip drawn in place already glides the
+        ' bar over to it.
+        glideBase = PartsState(themeValue) & ":" & CStr(mItemsVersion)
+        PlaceGliding accentBar, "ti", _
+            mLeft + mTabRights(tabNow) - tabWidths(tabNow) + (tabWidths(tabNow) - barWidth) / 2, _
+            barWidth, Not barMade And mAppliedValid And mAppliedIndicatorTab >= 1 _
+            And mAppliedIndicatorTab <> tabNow And glideBase = mAppliedGlideBase
+        mAppliedGlideBase = glideBase
+        mAppliedIndicatorTab = tabNow
         accentBar.Top = mTop + mHeight - 3
         accentBar.Height = 3
         accentBar.Fill.Visible = msoTrue
@@ -10044,6 +10692,8 @@ Private Sub ApplyTabs( _
         On Error Resume Next
         hostSheet.Shapes(ShapeName & PART_SEPARATOR & "ti").Delete
         On Error GoTo 0
+        If mGlidePart = "ti" Then mGlidePart = vbNullString
+        mAppliedIndicatorTab = 0
     End If
     ' Tabs past the count are leftovers of a longer strip.
     For idx = tabTotal + 1 To mAppliedOptionCount
@@ -10553,11 +11203,11 @@ Private Sub ApplyTable(ByVal hostSheet As Worksheet, ByVal themeValue As ReDimUI
             End If
         ElseIf displayNo = 1 Then
             If mTableRows > 0 Then
-                rowWords = vbTab & "No rows match"
+                rowWords = vbTab & Phrase(UI_NO_ROWS_MATCH)
             ElseIf LenB(mTableEmptyText) > 0 Then
                 rowWords = vbTab & mTableEmptyText
             Else
-                rowWords = vbTab & "No rows"
+                rowWords = vbTab & Phrase(UI_NO_ROWS)
             End If
             rowFill = -1
             rowInk = themeValue.OnMutedColor
@@ -10757,13 +11407,15 @@ Private Sub SyncTableFooter( _
     Dim footTop As Double
     Dim lastShown As Long
     Dim labelShape As Shape
+    Dim footWords As String
 
     If mTableFooterOn Then
         lastShown = mTableOffset + mTableSlots
         If lastShown > mTableShownCount Then lastShown = mTableShownCount
+        footWords = FooterWords(lastShown)
         footKey = PartsState(themeValue) & ":" & CStr(mTableOffset) & ":" & _
             CStr(lastShown) & ":" & CStr(mTableShownCount) & ":" & PointerKey() & _
-            Chr$(1) & mTableFilter
+            Chr$(1) & footWords
     End If
     If footKey = mAppliedTableFootSig Then Exit Sub
     mAppliedTableFootSig = footKey
@@ -10790,7 +11442,7 @@ Private Sub SyncTableFooter( _
         .MarginBottom = 0
         .VerticalAnchor = msoAnchorMiddle
         .WordWrap = msoFalse
-        .TextRange.Text = FooterWords(lastShown)
+        .TextRange.Text = footWords
         .TextRange.ParagraphFormat.Alignment = msoAlignLeft
         With .TextRange.Font
             .Name = themeValue.FontName
@@ -10813,13 +11465,12 @@ End Sub
 ' shown reads "0 of 0".
 Private Function FooterWords(ByVal lastShown As Long) As String
     If mTableShownCount = 0 Then
-        FooterWords = "0 of 0"
+        FooterWords = Phrase(UI_ROW_RANGE_EMPTY)
     Else
-        FooterWords = CStr(mTableOffset + 1) & "-" & CStr(lastShown) & _
-            " of " & CStr(mTableShownCount)
+        FooterWords = Phrase(UI_ROW_RANGE, mTableOffset + 1, lastShown, mTableShownCount)
     End If
     If LenB(mTableFilter) > 0 Then
-        FooterWords = "Filter """ & mTableFilter & """: " & FooterWords
+        FooterWords = Phrase(UI_FILTER_NOTE, mTableFilter, FooterWords)
     End If
 End Function
 
@@ -12017,8 +12668,13 @@ Private Sub ApplyCheckListParts( _
     If boxSize < 10 Then boxSize = 10
 
     If mSelectAllRow Then
+        If LenB(mFilterCheck) = 0 Then
+            headerText = Phrase(UI_SELECT_ALL, checkedTotal, shownTotal)
+        Else
+            headerText = Phrase(UI_SELECT_ALL_FILTERED, mFilterCheck, checkedTotal, shownTotal)
+        End If
         headerKey = CStr(checkedTotal) & "/" & CStr(shownTotal) & _
-            IIf(PointerOn("row0"), "h", vbNullString) & Chr$(1) & mFilterCheck
+            IIf(PointerOn("row0"), "h", vbNullString) & Chr$(1) & headerText
         priorKey = mAppliedCheckHeaderSig
         If headerKey <> priorKey Then
             mAppliedCheckHeaderSig = headerKey
@@ -12026,12 +12682,6 @@ Private Sub ApplyCheckListParts( _
                 hostSheet, "mb", msoShapeRoundedRectangle, boxCreated)
             Set captionShape = EnsurePartShape( _
                 hostSheet, "mt", msoShapeRectangle, captionCreated)
-            If LenB(mFilterCheck) = 0 Then
-                headerText = "Select all (" & checkedTotal & "/" & shownTotal & ")"
-            Else
-                headerText = "Select all """ & mFilterCheck & """ (" & _
-                    checkedTotal & "/" & shownTotal & ")"
-            End If
             If LenB(priorKey) > 0 And Not (boxCreated Or captionCreated) Then
                 StyleCheckBoxState box, boxSize, themeValue, _
                     (checkedTotal = shownTotal And shownTotal > 0), (checkedTotal > 0), _
@@ -12293,19 +12943,27 @@ Private Sub ApplyToggleKnob( _
 )
     Dim knob As Shape
     Dim knobSize As Double
+    Dim targetLeft As Double
+    Dim glideBase As String
+    Dim knobMade As Boolean
 
     If ExtrasCurrent(PartsState(themeValue) & ":" & CStr(mChecked)) Then Exit Sub
-    Set knob = EnsurePartShape(hostSheet, "knob", msoShapeOval)
+    Set knob = EnsurePartShape(hostSheet, "knob", msoShapeOval, knobMade)
     knobSize = mHeight - 4
     If knobSize < 4 Then knobSize = 4
-    knob.Width = knobSize
     knob.Height = knobSize
     knob.Top = mTop + 2
     If mChecked Then
-        knob.Left = mLeft + mWidth - knobSize - 2
+        targetLeft = mLeft + mWidth - knobSize - 2
     Else
-        knob.Left = mLeft + 2
+        targetLeft = mLeft + 2
     End If
+    ' A flip of a switch drawn in place already glides the knob across.
+    glideBase = PartsState(themeValue)
+    PlaceGliding knob, "knob", targetLeft, knobSize, _
+        Not knobMade And mAppliedValid And mAppliedChecked <> mChecked _
+        And glideBase = mAppliedGlideBase
+    mAppliedGlideBase = glideBase
     knob.Fill.Visible = msoTrue
     ' On, the knob takes the ink that reads on the accent track, the way
     ' Windows draws it: white on the light theme's green, dark on the
@@ -12317,6 +12975,65 @@ Private Sub ApplyToggleKnob( _
     End If
     knob.Visible = BoolToMso(mVisible)
     knob.OnAction = mAppliedOnAction
+End Sub
+
+' Puts a part at its target left and width, or, when it may glide and
+' motion is on, leaves it where it is drawn and lets the frames close
+' the distance. A part already gliding to this target keeps gliding; a
+' new target takes it on from wherever it has got to.
+Private Sub PlaceGliding( _
+    ByVal partShape As Shape, _
+    ByVal partName As String, _
+    ByVal targetLeft As Double, _
+    ByVal targetWidth As Double, _
+    ByVal glides As Boolean _
+)
+    Dim leftGap As Double
+    Dim widthGap As Double
+    Dim alreadyGliding As Boolean
+
+    alreadyGliding = (mGlidePart = partName)
+    If alreadyGliding Then
+        If Abs(mGlideTargetLeft - targetLeft) < 0.01 _
+            And Abs(mGlideTargetWidth - targetWidth) < 0.01 Then Exit Sub
+    End If
+    If (glides Or alreadyGliding) And Not ReDimUI.MotionReduced Then
+        leftGap = partShape.Left - targetLeft
+        widthGap = partShape.Width - targetWidth
+    End If
+    If Abs(leftGap) < 0.75 And Abs(widthGap) < 0.75 Then
+        partShape.Left = targetLeft
+        partShape.Width = targetWidth
+        If mGlidePart = partName Then mGlidePart = vbNullString
+        Exit Sub
+    End If
+    mGlidePart = partName
+    mGlideTargetLeft = targetLeft
+    mGlideTargetWidth = targetWidth
+    mGlideGapLeft = leftGap
+    mGlideGapWidth = widthGap
+    ReDimUI.RequestPump
+End Sub
+
+' One frame of a glide: the distance shrinks by the time passed, the part
+' moves, and under three quarters of a point it lands.
+Private Sub TickGlide(ByVal hostSheet As Worksheet, ByVal elapsedMs As Long)
+    Dim keepShare As Double
+    Dim partName As String
+
+    partName = mGlidePart
+    keepShare = GLIDE_DECAY ^ (elapsedMs / 50#)
+    mGlideGapLeft = mGlideGapLeft * keepShare
+    mGlideGapWidth = mGlideGapWidth * keepShare
+    If Abs(mGlideGapLeft) < 0.75 Then mGlideGapLeft = 0
+    If Abs(mGlideGapWidth) < 0.75 Then mGlideGapWidth = 0
+    ' Landed: cleared before the write, so a part gone missing cannot
+    ' keep the frames coming.
+    If mGlideGapLeft = 0 And mGlideGapWidth = 0 Then mGlidePart = vbNullString
+    With hostSheet.Shapes(ShapeName & PART_SEPARATOR & partName)
+        .Left = mGlideTargetLeft + mGlideGapLeft
+        .Width = mGlideTargetWidth + mGlideGapWidth
+    End With
 End Sub
 
 Private Sub ApplyProgressFill( _
@@ -12820,16 +13537,17 @@ Private Function TransferHeaderText(ByVal panelIndex As Long) As String
     Dim captionText As String
 
     If panelIndex = 0 Then
-        captionText = IIf(LenB(mCaptionLeft) > 0, mCaptionLeft, "Available")
+        captionText = mCaptionLeft
+        If LenB(captionText) = 0 Then captionText = Phrase(UI_AVAILABLE)
     Else
-        captionText = IIf(LenB(mCaptionRight) > 0, mCaptionRight, "Selected")
+        captionText = mCaptionRight
+        If LenB(captionText) = 0 Then captionText = Phrase(UI_SELECTED)
     End If
     If LenB(PanelFilter(panelIndex)) = 0 Then
         TransferHeaderText = captionText & " (" & TransferPanelCount(panelIndex) & ")"
     Else
-        TransferHeaderText = captionText & " """ & PanelFilter(panelIndex) & _
-            """ (" & TransferShownCount(panelIndex) & " of " & _
-            TransferPanelCount(panelIndex) & ")"
+        TransferHeaderText = Phrase(UI_PANEL_FILTERED, captionText, PanelFilter(panelIndex), _
+            TransferShownCount(panelIndex), TransferPanelCount(panelIndex))
     End If
 End Function
 
@@ -14631,9 +15349,9 @@ Private Sub SyncEmptyRow( _
 
     If showIt Then
         If mKind = KIND_COMBO Then
-            emptyRowWords = "No matches"
+            emptyRowWords = Phrase(UI_NO_MATCHES)
         Else
-            emptyRowWords = "No items"
+            emptyRowWords = Phrase(UI_NO_ITEMS)
         End If
         emptyKey = PartsState(themeValue) & ":" & CStr(rowTop) & ":" & _
             CStr(rowPitch) & ":" & CStr(resolvedSize) & ":" & emptyRowWords
@@ -14882,10 +15600,12 @@ Private Sub SyncListPager( _
     Dim pagerShape As Shape
     Dim pagerKey As String
     Dim firstDraw As Boolean
+    Dim pagerWords As String
 
     If beyondCount > 0 Then
+        pagerWords = arrowGlyph & " " & Phrase(UI_MORE_ITEMS, beyondCount)
         pagerKey = PartsState(themeValue) & ":" & CStr(rowTop) & ":" & _
-            CStr(beyondCount) & ":" & CStr(resolvedSize)
+            pagerWords & ":" & CStr(resolvedSize)
         If pagerKey = appliedKey Then Exit Sub
         firstDraw = (LenB(appliedKey) = 0 Or appliedKey = "?")
         appliedKey = pagerKey
@@ -14900,8 +15620,7 @@ Private Sub SyncListPager( _
         pagerShape.Line.Visible = msoTrue
         pagerShape.Line.ForeColor.RGB = themeValue.BorderColor
         pagerShape.Line.Weight = 1
-        StyleGlyphText pagerShape, arrowGlyph & " " & _
-            CStr(beyondCount) & " more", themeValue.OnSurfaceColor, _
+        StyleGlyphText pagerShape, pagerWords, themeValue.OnSurfaceColor, _
             resolvedSize - 1, themeValue
         pagerShape.Visible = msoTrue
         pagerShape.OnAction = mAppliedOnAction
@@ -15986,6 +16705,7 @@ Friend Function NeedsAnimation() As Boolean
     NeedsAnimation = (mKind = KIND_SPINNER And mVisible) _
         Or (mKind = KIND_SKELETON And mVisible And Not ReDimUI.MotionReduced) _
         Or (mKind = KIND_TOAST And (mSlideRemaining > 0 Or mToastExiting)) _
+        Or LenB(mGlidePart) > 0 _
         Or (IsFloatField() And _
             ReDimUI.IsComponentFocused(mOwnerAppId, mComponentId))
 End Function
@@ -16000,6 +16720,8 @@ Friend Sub TickAnimation(ByVal hostSheet As Worksheet, ByVal elapsedMs As Long)
     If Not NeedsAnimation() Then Exit Sub
     On Error Resume Next
     Select Case mKind
+        Case KIND_TOGGLE, KIND_TABS
+            If LenB(mGlidePart) > 0 Then TickGlide hostSheet, elapsedMs
         Case KIND_SKELETON
             ' The pulse repaints only when its step changes.
             mPulseMs = mPulseMs + elapsedMs

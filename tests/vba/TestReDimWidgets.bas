@@ -86,7 +86,10 @@ Public Function TestToggle() As String
     Dim knob As Shape
     Dim transcript As String
     Dim leftBefore As Double
+    Dim frameNo As Long
 
+    ' The knob glides over pump frames, driven here by hand.
+    ReDimUI.AutoPump False
     Set host = NewCanvas()
     gChangeCount = 0
     Set app = ReDimUI.Mount(host, "wid2")
@@ -106,6 +109,9 @@ Public Function TestToggle() As String
     transcript = transcript & "|onFillPrimary=" & _
         CStr(host.Shapes("rdm_wid2_tgl").Fill.ForeColor.RGB = _
             app.Theme.PrimaryColor)
+    For frameNo = 1 To 10
+        ReDimUI.PumpOnce
+    Next frameNo
     transcript = transcript & "|knobMoved=" & CStr(knob.Left > leftBefore)
     transcript = transcript & "|checkedProp=" & _
         CStr(app.Toggle("tgl").IsChecked)
@@ -114,6 +120,7 @@ Public Function TestToggle() As String
     ReDimUI.DispatchShape "rdm_wid2_tgl__knob"
     transcript = transcript & "|knobClickTogglesOff=" & _
         CStr(app.State("darkMode") = False)
+    ReDimUI.AutoPump True
     TestToggle = transcript
 End Function
 
@@ -4453,4 +4460,246 @@ Public Function TestMasked() As String
     RdxReleaseKeys
     ReDimUI.AutoPump True
     TestMasked = transcript
+End Function
+
+' ValidateAll checks every enabled float field with Required or
+' Validates the way a commit does, the ones on a tab not shown included,
+' skips hidden and disabled fields, and focuses the first that fails in
+' Tab order, turning its Tabs control to its tab first.
+Public Function TestValidateAll() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim transcript As String
+
+    ReDimUI.AutoPump False
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "wid65")
+    app.Tabs("tabs").AtRect(24, 24, 300, 30).Items("Name", "Contact").WritesTo "tabNow"
+    app.TextInput("name").AtRect(24, 80, 200, 22).OnTab("tabs", 1).Text "Ada"
+    app.TextInput("email").AtRect(24, 80, 200, 22).OnTab("tabs", 2).Required
+    app.TextInput("mail2").AtRect(24, 130, 200, 22).OnTab("tabs", 2) _
+        .Validates "TestReDimWidgets.CheckEmail"
+    app.TextInput("gone").AtRect(260, 80, 160, 22).Required.Visible False
+    app.TextInput("off").AtRect(260, 130, 160, 22).Required.Enabled False
+    app.Render
+
+    transcript = "first=" & CStr(app.ValidateAll) & "/" & app.Tabs("tabs").CurrentValue & _
+        "/" & app.State("tabNow") & "/" & CStr(ReDimUI.IsComponentFocused("wid65", "email"))
+    transcript = transcript & "|messages=" & app.TextInput("email").ValidationError & "," & _
+        app.TextInput("mail2").ValidationError & "," & app.TextInput("gone").ValidationError & _
+        "," & app.TextInput("off").ValidationError & "," & _
+        CStr(host.Shapes("rdm_wid65_email").Visible = msoTrue)
+    TypeText "ada@example.com"
+    transcript = transcript & "|second=" & CStr(app.ValidateAll) & "/" & _
+        CStr(ReDimUI.IsComponentFocused("wid65", "mail2")) & "/" & _
+        app.TextInput("email").ValidationError
+    TypeText "ada@home"
+    transcript = transcript & "|third=" & CStr(app.ValidateAll) & "/" & _
+        app.TextInput("mail2").ValidationError
+    RdxReleaseKeys
+    ReDimUI.AutoPump True
+    TestValidateAll = transcript
+End Function
+
+' SetUIText replaces the words ReDim draws and announces on its own: a
+' table's empty row and footer, a check list's select-all row, a
+' required field's message, the Confirm buttons, and the descriptions
+' screen readers get. Keys match in any case, a fill's own braces stay
+' as typed, an unknown key raises, and ResetUIText restores English.
+Public Function TestUIText() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim transcript As String
+    Dim keyNames As Variant
+    Dim rowNo As Long
+
+    ReDimUI.AutoPump False
+    ReDimUI.SetUIText "NoRows", "Keine Zeilen"
+    ReDimUI.SetUIText "rowrange", "{0}-{1} von {2}"
+    ReDimUI.SetUIText "FilterNote", "Filter ""{0}"": {1}"
+    ReDimUI.SetUIText "SelectAll", "Alle ({0}/{1})"
+    ReDimUI.SetUIText "Required", "Pflichtfeld"
+    ReDimUI.SetUIText "OK", "Ja"
+    ReDimUI.SetUIText "AltButton", "Knopf {0}"
+    ReDimUI.SetUIText "AltSwitchOn", "Schalter, an"
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "wid66")
+    app.Table("empty").AtRect(24, 24, 200, 60).Columns "Name"
+    app.Table("many").AtRect(24, 100, 200, 120).Columns "Word"
+    For rowNo = 1 To 6
+        app.Table("many").AddRow "w" & rowNo
+    Next rowNo
+    app.CheckList("pick").AtRect(260, 24, 160, 90).Items "A", "B"
+    app.TextInput("need").AtRect(260, 150, 160, 22).Required
+    app.Button("go").AtRect(260, 200, 100, 30).Text "Go"
+    app.Toggle("sw").AtRect(260, 250, 60, 24).Checked True
+    app.Render
+
+    transcript = "emptyRow=" & Trim$(Replace( _
+        host.Shapes("rdm_wid66_empty__tr1").TextFrame2.TextRange.Text, vbTab, " "))
+    transcript = transcript & "|footer=" & _
+        host.Shapes("rdm_wid66_many__tf").TextFrame2.TextRange.Text
+    app.Table("many").FilterRows "{1}"
+    transcript = transcript & "|braces=" & _
+        host.Shapes("rdm_wid66_many__tf").TextFrame2.TextRange.Text
+    transcript = transcript & "|selectAll=" & _
+        host.Shapes("rdm_wid66_pick__mt").TextFrame2.TextRange.Text
+    ReDimUI.DispatchShape "rdm_wid66_need"
+    RdxKeyChar "{ENTER}"
+    transcript = transcript & "|required=" & app.TextInput("need").ValidationError
+    transcript = transcript & "|alt=" & host.Shapes("rdm_wid66_go").AlternativeText & "/" & _
+        host.Shapes("rdm_wid66_sw").AlternativeText
+    transcript = transcript & "|readBack=" & ReDimUI.UIText("ROWRANGE")
+    keyNames = ReDimUI.UITextKeys
+    transcript = transcript & "|keys=" & (UBound(keyNames) - LBound(keyNames) + 1) & "/" & _
+        keyNames(LBound(keyNames))
+    On Error Resume Next
+    ReDimUI.SetUIText "NoSuchText", "x"
+    transcript = transcript & "|unknownRaises=" & CStr(Err.Number <> 0)
+    Err.Clear
+    On Error GoTo 0
+    app.Confirm "Title", "Message"
+    transcript = transcript & "|confirm=" & _
+        host.Shapes("rdm_wid66_mdl_ok").TextFrame2.TextRange.Text & "/" & _
+        host.Shapes("rdm_wid66_mdl_cancel").TextFrame2.TextRange.Text
+    app.CloseModal
+    ReDimUI.ResetUIText
+    app.Render
+    transcript = transcript & "|reset=" & Trim$(Replace( _
+        host.Shapes("rdm_wid66_empty__tr1").TextFrame2.TextRange.Text, vbTab, " ")) & "/" & _
+        host.Shapes("rdm_wid66_go").AlternativeText
+    RdxReleaseKeys
+    ReDimUI.AutoPump True
+    TestUIText = transcript
+End Function
+
+' A sparkline draws one polyline through its values, scaled to its
+' rectangle less half a dot at each edge, with a dot on the last value.
+' Blanks and text are left out, equal values run along the middle, one
+' value is a dot alone, and screen readers hear a summary.
+Public Function TestSparkline() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim transcript As String
+    Dim lineShape As Shape
+    Dim dotShape As Shape
+
+    ReDimUI.AutoPump False
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "wid67")
+    host.Range("J1").Value = 1
+    host.Range("J3").Value = 3
+    app.Sparkline("trend").AtRect(24, 24, 125, 45) _
+        .ValuesFrom Array(3, 5, "n/a", 4, Empty, 8, 6)
+    app.Sparkline("flat").AtRect(24, 100, 100, 30).Danger.ValuesFrom Array(2, 2, 2)
+    app.Sparkline("cells").AtRect(24, 150, 100, 30).ValuesFrom host.Range("J1:J3")
+    app.Sparkline("none").AtRect 24, 200, 100, 30
+    app.Render
+
+    Set lineShape = host.Shapes("rdm_wid67_trend__sl")
+    Set dotShape = host.Shapes("rdm_wid67_trend__sd")
+    transcript = "nodes=" & lineShape.Nodes.Count
+    transcript = transcript & "|lineBox=" & Round(lineShape.Left, 1) & "," & _
+        Round(lineShape.Top, 1) & "," & Round(lineShape.Width, 1) & "," & _
+        Round(lineShape.Height, 1)
+    transcript = transcript & "|dotCenter=" & Round(dotShape.Left + dotShape.Width / 2, 1) & _
+        "," & Round(dotShape.Top + dotShape.Height / 2, 1)
+    transcript = transcript & "|ink=" & CStr(lineShape.Line.ForeColor.RGB = app.Theme.PrimaryColor _
+        And dotShape.Fill.ForeColor.RGB = app.Theme.PrimaryColor And _
+        lineShape.Fill.Visible = msoFalse)
+    transcript = transcript & "|flat=" & Round(host.Shapes("rdm_wid67_flat__sl").Height, 1) & _
+        "/" & CStr(host.Shapes("rdm_wid67_flat__sl").Line.ForeColor.RGB = app.Theme.DangerColor)
+    transcript = transcript & "|alt=" & host.Shapes("rdm_wid67_trend").AlternativeText & ";" & _
+        host.Shapes("rdm_wid67_cells").AlternativeText & ";" & _
+        host.Shapes("rdm_wid67_none").AlternativeText
+    transcript = transcript & "|emptyParts=" & CStr(ShapeExists(host, "rdm_wid67_none__sl") _
+        Or ShapeExists(host, "rdm_wid67_none__sd"))
+
+    app.Sparkline("trend").ValuesFrom Array(7)
+    transcript = transcript & "|single=" & CStr(ShapeExists(host, "rdm_wid67_trend__sl")) & _
+        "/" & Round(host.Shapes("rdm_wid67_trend__sd").Left + 2.5, 1)
+    app.Sparkline("trend").Visible False
+    transcript = transcript & "|hidden=" & _
+        CStr(host.Shapes("rdm_wid67_trend__sd").Visible = msoFalse)
+    app.Sparkline("trend").Remove
+    transcript = transcript & "|removed=" & CStr(ShapeExists(host, "rdm_wid67_trend__sd"))
+    ReDimUI.AutoPump True
+    TestSparkline = transcript
+End Function
+
+' A flip of a switch drawn in place glides its knob across over the
+' pump's frames instead of jumping, and a tab strip's bar glides to the
+' tab shown; with motion reduced both land at once.
+Public Function TestGlide() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim transcript As String
+    Dim knob As Shape
+    Dim bar As Shape
+    Dim tabThree As Shape
+    Dim startLeft As Double
+    Dim frameNo As Long
+
+    ReDimUI.AutoPump False
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "wid68")
+    app.Toggle("sw").AtRect 24, 24, 44, 22
+    app.Tabs("tabs").AtRect(24, 70, 300, 30).Items "One", "Two", "Three"
+    app.Render
+
+    Set knob = host.Shapes("rdm_wid68_sw__knob")
+    startLeft = knob.Left
+    ReDimUI.DispatchShape "rdm_wid68_sw"
+    transcript = "start=" & Round(startLeft, 2) & "/" & CStr(Abs(knob.Left - startLeft) < 0.01)
+    ReDimUI.PumpOnce
+    transcript = transcript & "|moving=" & CStr(knob.Left > startLeft + 1 And knob.Left < 47)
+    For frameNo = 1 To 10
+        ReDimUI.PumpOnce
+    Next frameNo
+    transcript = transcript & "|lands=" & Round(knob.Left, 2)
+
+    Set bar = host.Shapes("rdm_wid68_tabs__ti")
+    Set tabThree = host.Shapes("rdm_wid68_tabs__tb3")
+    startLeft = bar.Left
+    ReDimUI.DispatchShape "rdm_wid68_tabs__tb3"
+    transcript = transcript & "|barStays=" & CStr(Abs(bar.Left - startLeft) < 0.01)
+    For frameNo = 1 To 12
+        ReDimUI.PumpOnce
+    Next frameNo
+    transcript = transcript & "|barLands=" & CStr(bar.Left > tabThree.Left _
+        And bar.Left + bar.Width < tabThree.Left + tabThree.Width)
+    transcript = transcript & "|settled=" & CStr(Not ReDimUI.App("wid68").HasAppWork)
+
+    ReDimUI.ReduceMotion True
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid68_sw"
+    transcript = transcript & "|reducedJumps=" & Round(knob.Left, 2)
+    ReDimUI.ReduceMotion
+    ReDimUI.AutoPump True
+    TestGlide = transcript
+End Function
+
+' StateKeys lists every state key once, in the order it was first set,
+' whether code or a control's WritesTo set it; an empty store lists none.
+Public Function TestStateKeys() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim transcript As String
+    Dim keyList As Variant
+
+    ReDimUI.AutoPump False
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "wid69")
+    keyList = app.StateKeys
+    transcript = "empty=" & (UBound(keyList) - LBound(keyList) + 1)
+    app.SetState "user", "ada"
+    app.SetState "count", 1
+    app.SetState "user", "grace"
+    app.Toggle("dark").AtRect(24, 24, 44, 22).WritesTo "darkMode"
+    app.Render
+    ReDimUI.DispatchShape "rdm_wid69_dark"
+    keyList = app.StateKeys
+    transcript = transcript & "|keys=" & Join(keyList, ",") & "|from=" & LBound(keyList)
+    ReDimUI.AutoPump True
+    TestStateKeys = transcript
 End Function

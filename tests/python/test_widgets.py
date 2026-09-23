@@ -1266,3 +1266,66 @@ def test_masked(run_widgets):
     assert facts["committed"] == "s3cret/s3cret"
     assert facts["restFace"] == "True"
     assert facts["alt"] == "Edit field, masked", "the description names the mask, never the text"
+
+
+def test_validate_all(run_widgets):
+    facts = parse_transcript(run_widgets("TestValidateAll"))
+    assert facts["first"] == "False/2/Contact/True", (
+        "the first failure's tab turns and the field takes focus"
+    )
+    assert facts["messages"] == "Required,Needs an @,,,True", (
+        "every failure shows; hidden and disabled fields are skipped"
+    )
+    assert facts["second"] == "False/True/", "focus moves on to the next failure"
+    assert facts["third"] == "True/"
+
+
+def test_ui_text(run_widgets):
+    facts = parse_transcript(run_widgets("TestUIText"))
+    assert facts["emptyRow"] == "Keine Zeilen"
+    assert facts["footer"] == "1-3 von 6"
+    assert facts["braces"] == 'Filter "{1}": 0 of 0', "a fill's braces are not filled again"
+    assert facts["selectAll"] == "Alle (0/2)"
+    assert facts["required"] == "Pflichtfeld"
+    assert facts["alt"] == "Knopf Go/Schalter, an"
+    assert facts["readBack"] == "{0}-{1} von {2}", "keys match in any case"
+    assert facts["keys"] == "54/NoRows"
+    assert facts["unknownRaises"] == "True"
+    assert facts["confirm"] == "Ja/Cancel"
+    assert facts["reset"] == "No rows/Go, button", "ResetUIText restores English and Render repaints"
+
+
+def test_sparkline(run_widgets):
+    facts = parse_transcript(run_widgets("TestSparkline"))
+    assert facts["nodes"] == "5", "text and blanks are left out of the line"
+    assert facts["lineBox"] == "26.5,26.5,120,40", "the line fills the rectangle less half a dot"
+    assert facts["dotCenter"] == "146.5,42.5", "the dot sits on the last value"
+    assert facts["ink"] == "True"
+    assert facts["flat"] == "0/True", "equal values run flat, in the variant's color"
+    assert facts["alt"] == (
+        "Trend, 5 values, low 3, high 8, last 6;"
+        "Trend, 2 values, low 1, high 3, last 3;"
+        "Trend, no values"
+    )
+    assert facts["emptyParts"] == "False"
+    assert facts["single"] == "False/86.5", "one value is a dot alone, centered"
+    assert facts["hidden"] == "True"
+    assert facts["removed"] == "False"
+
+
+def test_glide(run_widgets):
+    facts = parse_transcript(run_widgets("TestGlide"))
+    assert facts["start"] == "26/True", "a flip leaves the knob where it is drawn"
+    assert facts["moving"] == "True", "one frame carries it part of the way"
+    assert facts["lands"] == "48"
+    assert facts["barStays"] == "True"
+    assert facts["barLands"] == "True", "the bar glides under the tab shown"
+    assert facts["settled"] == "True", "a landed glide leaves the pump nothing to do"
+    assert facts["reducedJumps"] == "26", "with motion reduced the knob lands at once"
+
+
+def test_state_keys(run_widgets):
+    facts = parse_transcript(run_widgets("TestStateKeys"))
+    assert facts["empty"] == "0"
+    assert facts["keys"] == "user,count,darkMode", "each key once, in first-set order"
+    assert facts["from"] == "0"

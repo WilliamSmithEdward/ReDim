@@ -20,7 +20,14 @@ only the members of its role and raises a clear error otherwise.
 | `ReDimUI.ThemeSystem` | The Windows look: `ThemeDark` while Windows apps use dark mode and `ThemeLight` otherwise, with the Windows accent color as the primary. The accent moves toward black on the light theme, or white on the dark one, until it clears 3:1 against the surface and 4.5:1 under its ink. Pair it with `ui.FollowSystemTheme` to keep up with changes. |
 | `ReDimUI.IconGlyph(name)` / `IconNames` / `IconFont` | The character that draws a named icon, for text of your own; the list of names (see [Icons](#icons)); and the Windows icon font they draw in, Segoe Fluent Icons where Windows 11 installed it and Segoe MDL2 Assets otherwise. |
 | `theme.ContrastReport` / `ReDimUI.ContrastRatio(foreRgb, backRgb)` | The report lists every color pairing the controls draw with its WCAG ratio, what it needs (4.5:1 for text, 3:1 for edges and the accent), and pass or fail; `ContrastRatio` computes one pair. |
-| `ReDimUI.ReduceMotion motionOff` / `ReDimUI.MotionReduced` | Reduced motion follows the Windows "Show animations" setting; `True` or `False` overrides it and no argument follows Windows again. Reduced, toasts appear, move, and leave without sliding or fading. |
+| `ReDimUI.ReduceMotion motionOff` / `ReDimUI.MotionReduced` | Reduced motion follows the Windows "Show animations" setting; `True` or `False` overrides it and no argument follows Windows again. Reduced, toasts appear, move, and leave without sliding or fading, and knobs and tab bars land without gliding. |
+| `ReDimUI.Version` | The runtime's version, such as `"1.0.0"`. |
+| `ReDimUI.SetUIText key, words` / `UIText(key)` / `UITextKeys` / `ResetUIText` | The words ReDim draws and announces on its own, for an app in another language (see [UI text](#ui-text)). |
+
+A theme answers its tokens, for shapes of your own that should match the controls:
+`PrimaryColor`, `OnPrimaryColor`, `SurfaceColor`, `OnSurfaceColor`, `MutedColor`,
+`OnMutedColor`, `SuccessColor`, `DangerColor`, `WarningColor`, `BorderColor`, `CanvasColor`,
+`FontName`, and `BaseFontSize`, as in `ui.Theme.PrimaryColor`.
 
 App ids use letters and digits only. Component ids may add single underscores.
 
@@ -50,25 +57,31 @@ demo is the working reference.
 Component factories, get-or-create by id: `Button`, `Label`, `Card`, `Spinner`, `ProgressBar`,
 `Skeleton`, `Toggle`, `TickBox`, `RadioGroup`, `Stepper`, `SlideBar`, `SelectBox`, `ComboBox`,
 `TransferList`, `CheckList`, `TextInput`, `DatePicker`, `Image`, `Tabs`, `Table`, `Badge`,
-`Expander`, `MenuButton`, and the `Stack` layout container (see [Layout](#layout)). Every
+`Expander`, `MenuButton`, `Sparkline`, and the `Stack` layout container (see
+[Layout](#layout)). Every
 control is drawn from shapes and fully themed; there are no native form controls in the
 framework. Also:
 
 | Member | Purpose |
 |---|---|
 | `SetState key, value` / `State(key)` / `StateOrDefault(key, fallback)` / `HasState(key)` | The store. |
+| `StateKeys` | Every key in the store once, in the order it was first set, as an array from 0, whether code or a control's `WritesTo` set it. |
 | `SetStateDefault key, value` | Sets only when the key has no value; the right form for initial values. |
-| (persistence) | The state store is deliberately in-memory and session-scoped; ReDim ships no persistence. Durability belongs to the host application: read the store with `State`/`StateOrDefault`, save wherever fits (a hidden sheet, workbook names, a file), and reseed on build with `SetStateDefault`, which never clobbers a value already in play. `ROneCOne.Json.Serialize`/`Deserialize` are available if JSON is the format of choice. |
+| (persistence) | The state store is deliberately in-memory and session-scoped; ReDim ships no persistence. Durability belongs to the host application: walk the store with `StateKeys` and `State`, save wherever fits (a hidden sheet, workbook names, a file), and reseed on build with `SetStateDefault`, which never clobbers a value already in play. `ROneCOne.Json.Serialize`/`Deserialize` are available if JSON is the format of choice. |
 | `HotKey keyCode, "Module.Proc"` / `ClearHotKeys` | Application.OnKey with cleanup on Unmount and Shutdown. |
 | `OnStateChanged key, "Module.Proc"` | Zero-argument listener runs after the key changes. |
 | `BeginUpdate` / `EndUpdate` | Batch several changes into one flush. |
 | `Render` | Mark everything dirty and paint. Call once after building the UI. |
+| `FlushDirty` | Paint the components changed since the last paint, now. A change outside `BeginUpdate` paints on its own, so code rarely needs it. |
+| `AppId` / `Sheet` / `Theme` / `Component(id)` / `ComponentCount` | Readers: the app's id, its worksheet, its theme, a component by id (raises when there is none), and how many it holds. |
+| `IsWindow` / `IsSurfaceProtected` | Whether `AsWindow` registered the app, and whether `ProtectSurface` is on. |
 | `SetTheme theme` | Restyle every component, and repaint the canvas background if `PrepareCanvas` painted one. |
 | `PrepareCanvas` | Paint the sheet background and hide gridlines. |
 | `Toast messageText, ttlMs` | Transient card on a rail beside the content, clamped into the visible viewport, with a close button. Without `ttlMs` it stays long enough to read: three seconds plus 60 ms a character, from four seconds to twelve. `Primary`, `Success`, `Warning`, or `Danger` on the returned toast gives it an info, success, warning, or error tone, an icon and a matching edge; `.Action "Undo", "Module.Proc"` adds a button that dismisses the toast and runs the handler, and keeps the toast four seconds longer. A toast under the pointer stops counting down and keeps at least a second once the pointer leaves. Toasts slide up on entrance, and when one leaves the survivors slide up to fill its slot; modal chrome never shifts the rail. |
 | `ToastTray rangeAddress` | Pins the tray's top-left to a range, exactly and unclamped. |
-| `Confirm titleText, messageText, okProc, cancelProc, okText, cancelText` | Shapes-based modal. It takes keyboard focus: Enter confirms, Esc cancels, and Tab stays among its buttons. |
+| `Confirm titleText, messageText, okProc, cancelProc, okText, cancelText` | Shapes-based modal. It takes keyboard focus: Enter confirms, Esc cancels, and Tab stays among its buttons. The buttons read the `OK` and `Cancel` [UI text](#ui-text) unless given words; `cancelText:=""` leaves Cancel out. |
 | `FocusFirst` / `DefaultButton componentId` | Keyboard focus to the first control in Tab order; the button Enter clicks from controls that do not use Enter themselves. |
+| `ValidateAll` | Checks the form before a save: every enabled float field with `Required` or `Validates`, the way a commit does, whether it shows or sits on a Tabs or Expander panel not shown. Hidden and disabled fields are skipped. Each field that fails shows its message, and the first in Tab order takes focus, its tab turned to or its expander opened first. True when every field passes (see [Field rules](#field-rules)). |
 | `PointerEffects effectsOn` | Hover and press looks for the app's controls, and an open list whose highlight follows the pointer (see [Pointer](#pointer)). Off by default. |
 | `AddCommand commandWords, handlerProc, iconName` | Adds an entry to the app's command palette: its text, the Public procedure it runs, and an optional icon. Inside the handler, `ReDimUI.SenderApp.LastCommand` names the entry. On a `MenuButton` the same builder adds a menu row. |
 | `CommandPalette paletteKey` / `OpenCommandPalette` | Turns on the command palette and binds its key, Ctrl+Shift+P unless another OnKey code is given (`""` binds none); `OpenCommandPalette` opens it from code (see [Command palette](#command-palette)). |
@@ -90,7 +103,8 @@ All fluent, all return the component:
   `RightOf(otherId, gap)` place relative to another component with `Sized(w, h)` for
   dimensions. Circular relative chains raise a clear error. `InStack(stackId)` hands the
   position to a `Stack` (see [Layout](#layout)).
-- Content: `Text`, `FontSize`, `Bold`, `BusyText`.
+- Content: `Text`, `FontSize`, `Bold`, `BusyText` (what a busy button shows, the
+  `Working` [UI text](#ui-text) unless given; `BusyText ""` keeps the button's text).
 - Style: `Primary`, `Secondary`, `Success`, `Warning`, `Danger`, `Fill(color)`,
   `TextColor(color)`. `Warning` is amber, dark on light surfaces and bright on dark ones
   (`theme.WarningColor`).
@@ -154,9 +168,9 @@ All fluent, all return the component:
   for a ComboBox.
 - Adornments (any control): `Caption(text)` puts a label in small text above the control,
   and `Hint(text)` helper text in muted ink below it (see [Field rules](#field-rules)).
-- Reads: `CurrentValue`, `CurrentText`, `IsChecked`, `IsEnabled`, `IsVisible`, `IsBusy`, `InputValue`
-  (TextInput and ComboBox; reads the float buffer or the backing cell, and assigning it
-  writes without firing change events).
+- Reads: `ComponentId`, `CurrentValue`, `CurrentText`, `IsChecked`, `IsEnabled`,
+  `IsVisible`, `IsBusy`, `InputValue` (TextInput and ComboBox; reads the float buffer or
+  the backing cell, and assigning it writes without firing change events).
 - `Remove` deletes the component and its shapes.
 
 Handlers are zero-argument public procedures referenced as `"Module.Proc"`. Inside a handler,
@@ -286,7 +300,8 @@ dependencies:
   a missing source renders a themed placeholder, but an already-embedded picture is kept
   even after its source file goes away.
 - `Toggle`: the pill switch for booleans. Switched on, the knob takes the theme's
-  `OnPrimary` ink, as Windows draws it, so it stays visible on every accent track.
+  `OnPrimary` ink, as Windows draws it, so it stays visible on every accent track. A flip,
+  by click, key, or bound state, glides the knob across in about 200 ms.
 - `MenuButton`: a button that drops a menu of commands. `AddCommand "Export",
   "Module.Export", "Download"` adds a row with its text, the Public procedure it runs, and
   an optional icon, which shows in the row's gutter. `AddGroup` labels a section, and
@@ -308,6 +323,19 @@ dependencies:
   `Danger`, `Secondary`), and widens to its text: the rectangle's left and top place it,
   its height sets the pill's, and its width is a minimum, so `AtRect(24, 24, 0, 18)`
   fits the text exactly.
+- `Sparkline`: a small trend line. `ValuesFrom` takes its numbers, in order, from an
+  array, a Collection, a Range (row by row), or a ROneCOne sequence, leaving out blanks
+  and text. The line runs from the rectangle's left to its right with its lowest value at
+  the bottom and its highest at the top, and a dot marks the last value; equal values run
+  along the middle, and one value is a dot alone. It takes the primary color unless a
+  variant says otherwise, and screen readers hear a summary: "Trend, 12 values, low 380,
+  high 820, last 820".
+
+```vba
+ui.Sparkline("spend").AtRect(120, 10, 120, 30).ValuesFrom Range("Spend!B2:B13")
+ui.Sparkline("errors").AtRect(120, 50, 120, 30).Danger.ValuesFrom Array(2, 8, 3, 12, 4)
+```
+
 - `Skeleton`: a loading placeholder in the muted color. On its own it is one rounded
   block; `SkeletonLines 3` draws the bars of three text lines instead, the last at 60
   percent of the width. It pulses toward the surface color and back every 1.4 seconds,
@@ -316,7 +344,8 @@ dependencies:
 - `Tabs`: a tab strip, one tab per item from `Items`, `ItemsFrom`, and the item APIs.
   Each tab is as wide as its text; when the texts need more than the strip's width the
   tabs share it equally and a text that does not fit ends in an ellipsis. The tab shown
-  is bold over an accent bar, the first by default; `Value(n)` shows tab n and
+  is bold over an accent bar that glides to the tab shown, the first by default;
+  `Value(n)` shows tab n and
   `CurrentValue` reads it. A click, or Left and Right (wrapping) and Home and End while
   it has the keys, shows a tab, writes its text to `WritesTo` (its value, when it has
   one), and fires `OnChange`. A programmatic `Value` writes and fires nothing.
@@ -504,15 +533,26 @@ Builders for float `TextInput` and `ComboBox` fields:
   when focus arrived. A cell-backed combo's cell is Excel's to restrict, with data
   validation.
 - `Required` marks the field: an empty commit, or one of only spaces, shows "Required"
-  as its validation message, the same way `Validates` shows one, and the check function
-  never sees the empty text. `Required emptyMessage:="Enter an email"` words it;
-  `Required False` lifts it.
+  (the `Required` [UI text](#ui-text)) as its validation message, the same way
+  `Validates` shows one, and the check function never sees the empty text.
+  `Required emptyMessage:="Enter an email"` words it; `Required False` lifts it.
 - `ErrorText "That name is taken"` shows an error from outside the field, a server's
   answer for one, with the same danger border and message line. It stays until
   `ErrorText ""` clears it. A validation message shows in its place while there is one.
 - `Masked` shows a float TextInput's characters as dots, focused or not, as a password
   box does. Copy and cut take nothing from it, while `InputValue` and `WritesTo` keep
   the text. `Masked False` lifts it.
+
+A save button checks the whole form at once with `ui.ValidateAll`, which runs every field's
+`Required` and `Validates` check, shows each message, and puts focus on the first field
+that failed, turning to its tab first:
+
+```vba
+Public Sub SaveClicked()
+    If Not ReDimUI.SenderApp.ValidateAll Then Exit Sub
+    ' every field passed: save
+End Sub
+```
 
 Any control, not only a field, takes the two adornments. `Caption "Email"` sets a label in
 text a point smaller than the control's, above its rectangle, so leave room for it there;
@@ -723,11 +763,63 @@ keep the keys.
   `theme.ContrastReport` checks any theme, a custom one included. The light and dark
   presets keep their look, and their reports show one shortfall each: the field edge
   (`Border` on `Surface`) reaches 1.32:1 and 2.01:1 against the 3:1 non-text minimum.
-- Motion: toasts stop sliding and fading, and a `Skeleton` stops pulsing, when Windows
-  animations are off or `ReduceMotion True` is set. The spinner keeps turning; it is
-  status, not decoration.
+- Motion: toasts stop sliding and fading, a switch's knob and a tab strip's bar land
+  without gliding, and a `Skeleton` stops pulsing, when Windows animations are off or
+  `ReduceMotion True` is set. The spinner keeps turning; it is status, not decoration.
 - Targets: transfer paging arrows and the toast close button are 18 points square, the
   WCAG 2.5.8 minimum of 24 pixels at 96 DPI.
+
+## UI text
+
+ReDim draws and announces a few words of its own, such as a table's "No rows" or the
+", button" a screen reader hears. `ReDimUI.SetUIText key, words` replaces one for an app in
+another language; `ReDimUI.UIText(key)` reads it, `ReDimUI.UITextKeys` lists every key
+for a translation table, and `ReDimUI.ResetUIText` restores English. Keys match in any
+case, and an unknown key raises. `{0}`, `{1}`, and on stand for the numbers and names of
+the moment, in the order the table gives, and may move within the words. Set the words
+before building; a control already drawn takes new ones as it repaints, and `Render`
+repaints an app at once. Month and weekday names come from Windows already.
+
+```vba
+ReDimUI.SetUIText "NoRows", "Keine Zeilen"
+ReDimUI.SetUIText "RowRange", "{0}-{1} von {2}"
+ReDimUI.SetUIText "AltButton", "{0}, Schaltflaeche"
+```
+
+| Key | English | Key | English |
+|---|---|---|---|
+| `NoRows` | No rows | `AltButton` | {0}, button |
+| `NoRowsMatch` | No rows match | `AltBusy` | busy |
+| `NoItems` | No items | `AltProgress` | Progress, {0} percent |
+| `NoMatches` | No matches | `AltSpinner` | Busy |
+| `RowRange` | {0}-{1} of {2} | `AltSwitchOn` / `AltSwitchOff` | Switch, on / Switch, off |
+| `RowRangeEmpty` | 0 of 0 | `AltEditField` | Edit field |
+| `FilterNote` | Filter "{0}": {1} | `AltMasked` | masked |
+| `SelectAll` | Select all ({0}/{1}) | `AltComboBox` | Combo box |
+| `SelectAllFiltered` | Select all "{0}" ({1}/{2}) | `AltMenuButton` | {0}, menu button |
+| `Available` | Available | `AltDropDown` | Drop-down, {0} |
+| `Selected` | Selected | `AltChecked` / `AltNotChecked` | {0}, checkbox, checked / not checked |
+| `PanelFiltered` | {0} "{1}" ({2} of {3}) | `AltRadioGroup` | Radio group |
+| `MoreItems` | {0} more | `AltItemSelected` | {0} selected |
+| `TypeCommand` | Type a command | `AltStepper` / `AltSlider` | Stepper, {0} / Slider, {0} |
+| `Working` | Working... | `AltTransferList` | Transfer list |
+| `Required` | Required | `AltCheckList` | Checklist, {0} of {1} checked |
+| `OK` | OK | `AltImage` / `AltLoading` | Image / Loading |
+| `Cancel` | Cancel | `AltExpanded` / `AltCollapsed` | {0}, expander, expanded / collapsed |
+| `Column` | Column {0} | `AltTable` / `AltTableOneRow` | Table, {0} rows / Table, 1 row |
+| `ImageNotFound` | (image not found) | `AltSortedAscending` / `AltSortedDescending` | sorted by {0}, ascending / descending |
+| | | `AltShown` | {0} shown |
+| | | `AltDatePicker` | Date picker, {0} |
+| | | `AltTabs` / `AltTabSelected` | Tabs / {0} selected, tab {1} of {2} |
+| | | `AltUnavailable` | unavailable |
+| | | `AltSparkline` | Trend, {0} values, low {1}, high {2}, last {3} |
+| | | `AltSparklineEmpty` | Trend, no values |
+
+`Working` is what a busy button shows unless `BusyText` words it, `Required` is the message
+unless `Required` is given one, and `OK` and `Cancel` label `Confirm`'s buttons unless it is
+given words. `FilterNote` wraps a table's `RowRange` while a filter holds, `SelectAll` heads
+a check list, `Available`, `Selected`, and `PanelFiltered` head a transfer list's panels,
+`MoreItems` is a drop list's pager row, and `TypeCommand` is the command palette's hint.
 
 ## Shapes are framework-owned
 

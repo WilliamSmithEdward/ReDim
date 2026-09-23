@@ -39,8 +39,9 @@ Every control is drawn from shapes; native form controls went in 0.5.0. Composit
 the look each part was last drawn with and rewrite only the parts whose look changed, and a part
 whose place and font held rewrites only its text, fill, and ink. [api.md](api.md) describes the
 widget set: buttons, labels, cards, progress bars, spinners, skeletons, toggles, tick boxes,
-radio groups, steppers, sliders, selects, combos, transfer lists, check lists, text fields,
-date pickers, images, tab strips, tables, toasts, and the modal overlay.
+radio groups, steppers, sliders, selects, menu buttons, combos, transfer lists, check lists,
+text fields, date pickers, images, tab strips, expanders, tables, badges, sparklines, toasts,
+and the modal overlay.
 
 ## State
 
@@ -65,7 +66,8 @@ calling the dispatcher with an explicit shape name.
 The pump is a `SetTimer` callback (a 16 ms frame by default) plus a public `PumpOnce` for
 deterministic tests. Each tick, inside a reentrancy guard with errors swallowed:
 
-1. Advance animations: spinner rotation, toast slides, a skeleton's pulse, caret blinks
+1. Advance animations: spinner rotation, toast slides, knob and tab-bar glides, a skeleton's
+   pulse, caret blinks
 2. Expire toasts
 3. Watch what Shape macros cannot see: the pointer for hover looks, tooltips, hold-to-repeat,
    and drags, and presses or selection moves that close an open list or end a field's focus

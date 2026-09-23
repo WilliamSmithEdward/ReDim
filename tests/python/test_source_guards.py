@@ -13,6 +13,16 @@ from pathlib import Path
 from vba_sources import RELEASE_SOURCES, release_header
 
 REDIMUI = Path(__file__).resolve().parents[2] / "src" / "ReDimUI.cls"
+GUIDES = [
+    Path(__file__).resolve().parents[2] / "docs" / name for name in ("api.md", "async.md")
+]
+
+PUBLIC_MEMBER = re.compile(
+    r"^Public\s+(?:Function|Sub|Property\s+(?:Get|Let|Set))\s+([A-Za-z_]\w*)", re.M
+)
+# A fenced example or an inline span; the fence comes first so its
+# backticks never pair up as spans.
+CODE_SPAN = re.compile(r"```.*?```|`[^`\n]*`", re.DOTALL)
 
 # A bare IsArray call, not IsArrayValue: "IsArray" followed by optional
 # whitespace and an open paren. "IsArrayValue(" has "Value" after IsArray,
@@ -36,6 +46,20 @@ def test_isarray_appears_once_inside_the_guard():
     assert len(ISARRAY_CALL.findall(guard.group(0))) == 1, (
         "the one IsArray call must live inside the IsArrayValue guard, "
         "which short-circuits on IsObject before testing"
+    )
+
+
+def test_every_public_member_is_documented():
+    """A Public member of ReDimUI is API; the guides name each one in code,
+    inline or in an example, so a new member cannot ship undocumented."""
+    members = set(PUBLIC_MEMBER.findall(REDIMUI.read_text(encoding="utf-8")))
+    documented = set()
+    for guide in GUIDES:
+        for span in CODE_SPAN.findall(guide.read_text(encoding="utf-8")):
+            documented.update(re.findall(r"[A-Za-z_]\w*", span))
+    missing = sorted(members - documented)
+    assert not missing, (
+        "Public members the guides never name in a code span: " + ", ".join(missing)
     )
 
 

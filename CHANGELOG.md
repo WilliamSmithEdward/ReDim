@@ -445,6 +445,31 @@
 - `Masked` turns a float `TextInput` into a password box: dots on the
   face, nothing for copy or cut, and "Edit field, masked" for screen
   readers, while `InputValue` and `WritesTo` keep the text.
+- `ui.ValidateAll` checks a form before a save: every enabled float
+  field's `Required` and `Validates`, run as a commit runs them, on the
+  panel shown or not. Each failure shows its message, the first in Tab
+  order takes focus with its tab turned to or its expander opened, and
+  the result says whether everything passed.
+- `ReDimUI.SetUIText` translates the words ReDim draws or announces on
+  its own: empty rows, footers, list headers, the palette's hint, the
+  default busy, required, OK, and Cancel texts, and every screen-reader
+  description. Fifty-four keys, listed by `UITextKeys`, take `{0}`-style
+  fills in any order, and `ResetUIText` restores English.
+- A switch's knob glides across when it flips, and a tab strip's bar
+  glides to the tab shown, settling in about 200 ms at any frame rate.
+  Both land at once under reduced motion, and a glide caught mid-way by
+  another change carries on from where it is.
+- `Sparkline` draws a small trend line through numbers from an array, a
+  Collection, a Range, or a ROneCOne sequence, with a dot on the last
+  value, in its variant's color, and a spoken summary of the count, low,
+  high, and last value. It redraws only when its values, place, or color
+  change.
+- `ui.StateKeys` lists the state store's keys in the order first set,
+  so a host can save the whole store without keeping its own list.
+- A guard test fails when a public member ships without a mention in
+  the guides, and the members it found undocumented now have one: the
+  theme tokens, the app readers, `FlushDirty`, `ReDimUI.Version`,
+  `OnCancel`, and `JobOnCancel`.
 
 ## 0.19.2 - 2026-08-02
 
