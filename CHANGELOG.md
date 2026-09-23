@@ -79,9 +79,9 @@
 - The runtime no longer declares what it never reads: the constants
   `ROLE_UNSET` and `KIND_NONE` and the fields `mHasRect`,
   `mHoverSinceMs`, and `mAppliedValue`, which code inspections listed
-  as unused. A click reads its part once instead of at every branch,
-  and the Widget Gallery awaits its simulated work as a statement
-  rather than into a variable it never reads.
+  as unused. A click reads its part once instead of at every branch.
+  The Widget Gallery and the pump and timer tests await their delays as
+  statements rather than into a variable they never read.
 
 ## 1.0.0 - 2026-09-23
 

@@ -101,11 +101,10 @@ End Function
 ' Proves the timer fires while VBA pumps messages, all inside one call so the
 ' TIMERPROC address cannot go stale between automation round trips.
 Public Function PumpProofSingleCall() As String
-    Dim ignored As Variant
     Dim ticks As Long
 
     StartPump 50
-    ignored = ROneCOne.Task.Delay(600).Await
+    ROneCOne.Task.Delay(600).Await
     ticks = gTickCount
     StopPump
     PumpProofSingleCall = ticks & "|" & gPumpErrors
@@ -113,12 +112,10 @@ End Function
 
 ' Proves the pump advances a registered task with no Await on that task.
 Public Function TaskPumpProofSingleCall() As String
-    Dim ignored As Variant
-
     Set gTask = ROneCOne.Task.Delay(300)
     gTaskDoneTick = 0
     StartPump 50
-    ignored = ROneCOne.Task.Delay(900).Await
+    ROneCOne.Task.Delay(900).Await
     StopPump
     TaskPumpProofSingleCall = gTask.Status & "|" & gTaskDoneTick & "|" & _
         gTickCount & "|" & gPumpErrors

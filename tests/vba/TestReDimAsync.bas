@@ -367,7 +367,6 @@ End Function
 Public Function TestRealTimerEndToEnd() As String
     Dim app As ReDimUI
     Dim host As Worksheet
-    Dim ignored As Variant
     Dim transcript As String
 
     Set host = NewCanvas()
@@ -387,7 +386,7 @@ Public Function TestRealTimerEndToEnd() As String
     ReDimUI.PinPumpCursor False
     transcript = transcript & "|unpinsOnRequest=" & _
         CStr(Application.Cursor = xlDefault)
-    ignored = ROneCOne.Task.Delay(700).Await
+    ROneCOne.Task.Delay(700).Await
     transcript = transcript & "|statusNoManualPump=" & app.State("est")
     transcript = transcript & "|autoDisarmed=" & CStr(Not RdxPumpArmed())
     RdxStopPump
