@@ -1,5 +1,40 @@
 # Changelog
 
+## 1.0.1 - 2026-09-23
+
+- A DatePicker's calendar opened by a click now closes on a press off
+  it or a move of the grid selection, as every drop list does. Only a
+  picker holding keyboard focus closed that way, and a click never
+  gives a picker focus, so a calendar opened with the mouse stayed open
+  until another control was clicked. `TestListDismiss` now opens one by
+  a click and dismisses it both ways.
+- The calendar opens in about a fifth of the time: 13 ms instead of 73
+  in the bench, 4 instead of 12 to pick a day and close, and 1.5
+  instead of 6 to turn a month. A session's first opening, which also
+  pays for loading the code, takes 65 ms instead of 110. The calendar
+  drew a shape per day, 47 shapes in all. A week is now one line of
+  text with a center tab stop over each day column, and the date held,
+  today, the key cursor, and the day under the pointer each get one
+  mark shape, 14 shapes in all. The digits now sit exactly under the
+  weekday initials, which already used tab stops. A click on a week
+  picks the day under the pointer.
+- Drop lists open faster. A list draws its first row in full and
+  copies it (`Shape.Duplicate`) for the others, since a copy carries the
+  size, border, margins, gutter tab stop, font, and click. A SelectBox
+  over 2,000 items opens in 5.7 ms instead of 14.5, a ComboBox in 7.9
+  instead of 16, and a three-command MenuButton in 3.5 instead of 5.5.
+  Drawing-object protection refuses a copy even under
+  `UserInterfaceOnly`, so on a surface `ProtectSurface` protected, the
+  protection lifts for each copy and returns as it was, selection rule
+  included, about a tenth of a millisecond each time. A sheet its host
+  protected draws every row in full, as before.
+- Opening or closing a drop list or calendar now runs with screen
+  updating off, so Excel paints the list once instead of part by part.
+  Before, only a flush that repainted several controls did.
+- A part deleted when a list or calendar closes is known to be gone,
+  so drawing it at the next opening skips a lookup that could only
+  miss.
+
 ## 1.0.0 - 2026-09-23
 
 - ReDim no longer recases the host project's identifiers. VBA keeps

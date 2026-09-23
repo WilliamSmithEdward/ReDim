@@ -71,8 +71,8 @@ the job through its fail handler and the app error sink instead of surfacing a d
 - The timer callback body is one guarded call. Errors never escape into Excel; ten consecutive
   faults kill the timer.
 - Renders that happen inside a tick never toggle `Application.ScreenUpdating`: flipping it at
-  pump frequency redraws scroll bars and blips the cursor. Batched flushes outside ticks still
-  use it.
+  pump frequency redraws scroll bars and blips the cursor. Flushes outside ticks still use it
+  when they repaint several controls, or open or close a drop list or calendar.
 - Cursor pinning is opt-in (`ReDimUI.PinPumpCursor True`). Pinning suppresses Excel's
   busy-cursor flip during each tick, but it also overrides context cursors, hiding the hover
   hand on interactive shapes while work runs. Since ticks became lean the strobe is

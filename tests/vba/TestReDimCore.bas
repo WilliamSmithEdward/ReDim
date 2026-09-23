@@ -399,10 +399,13 @@ Public Function TestProtectSurface() As String
 
     Set host = NewCanvas()
     gClickCount = 0
+    ReDimUI.AutoPump False
     Set app = ReDimUI.Mount(host, "core13")
     app.Button("btn").At("B2:C3").Text("Go").OnClick "TestReDimCore.CoreStateHandler"
     app.Label("out").At("B5:E5").BindText "msg"
     app.TextInput("name").At("C7").WritesTo "who"
+    app.SelectBox("pick").AtRect(300, 20, 120, 22).Items "A", "B", "C", "D", "E", "F"
+    app.DatePicker("due").AtRect 450, 20, 140, 22
     app.SetState "msg", "before"
     app.Render
     app.ProtectSurface
@@ -428,6 +431,20 @@ Public Function TestProtectSurface() As String
     Set toastValue = app.Toast("under protection", 60000)
     transcript = transcript & "|toastCreates=" & _
         CStr(Not toastValue Is Nothing)
+    ' A drop list and a calendar open under protection: their rows and
+    ' weeks copy with the protection lifted for a moment, and it comes
+    ' back as it was, selection rule included.
+    ReDimUI.DispatchShape "rdm_core13_pick"
+    transcript = transcript & "|protectedListOpens=" & CStr( _
+        ShapeExistsCore(host, "rdm_core13_pick__opt6") And host.ProtectDrawingObjects _
+        And host.ProtectContents And host.ProtectionMode _
+        And host.EnableSelection = xlUnlockedCells)
+    ReDimUI.DispatchShape "rdm_core13_due"
+    transcript = transcript & "|protectedCalendarOpens=" & CStr( _
+        ShapeExistsCore(host, "rdm_core13_due__cr6") And host.ProtectDrawingObjects _
+        And host.ProtectContents And host.ProtectionMode _
+        And host.EnableSelection = xlUnlockedCells)
+    ReDimUI.DispatchShape "rdm_core13_due"
 
     app.ProtectSurface False
     transcript = transcript & "|unprotects=" & CStr(Not host.ProtectContents)
@@ -441,6 +458,7 @@ Public Function TestProtectSurface() As String
     app.Unmount True
     transcript = transcript & "|unmountUnprotects=" & _
         CStr(Not host.ProtectContents)
+    ReDimUI.AutoPump True
     TestProtectSurface = transcript
 End Function
 

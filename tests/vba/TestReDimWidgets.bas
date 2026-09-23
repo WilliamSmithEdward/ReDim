@@ -2005,6 +2005,8 @@ End Function
 ' Drop lists dismiss the native way: another list opening, a click on
 ' another control, a press off the face and rows, or a moved grid
 ' selection closes an open list; a press on its own rows keeps it open.
+' A date picker's calendar, opened by a click and so without keyboard
+' focus, closes the same ways.
 Public Function TestListDismiss() As String
     Dim app As ReDimUI
     Dim host As Worksheet
@@ -2018,6 +2020,7 @@ Public Function TestListDismiss() As String
     app.SelectBox("one").AtRect(24, 24, 140, 22).Items "Red", "Green", "Blue"
     app.SelectBox("two").AtRect(200, 24, 140, 22).Items "North", "South"
     app.Button("go").AtRect(24, 200, 80, 26).Text "Go"
+    app.DatePicker("when").AtRect 380, 24, 150, 24
     app.Render
 
     ReDimUI.DispatchShape "rdm_wid29_one"
@@ -2054,6 +2057,31 @@ Public Function TestListDismiss() As String
     ReDimUI.PumpOnce
     transcript = transcript & "|selectionMoveCloses=" & _
         CStr(Not ShapeExists(host, "rdm_wid29_one__opt1"))
+
+    ' The calendar spans 380 to 574 points across and 50 to 234 down.
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid29_when"
+    ReDimUI.OverridePointer 450, 150
+    ReDimUI.ForcePressEdge
+    ReDimUI.PumpOnce
+    transcript = transcript & "|datePressOnKeeps=" & _
+        CStr(ShapeExists(host, "rdm_wid29_when__cb"))
+    ReDimUI.OverridePointer 420, 300
+    ReDimUI.ForcePressEdge
+    ReDimUI.PumpOnce
+    transcript = transcript & "|datePressOffCloses=" & _
+        CStr(Not ShapeExists(host, "rdm_wid29_when__cb"))
+    ReDimUI.ClearPointerOverride
+    Sleep 200
+    host.Range("A1").Select
+    ReDimUI.DispatchShape "rdm_wid29_when"
+    ReDimUI.PumpOnce
+    transcript = transcript & "|dateSelectionHeldKeeps=" & _
+        CStr(ShapeExists(host, "rdm_wid29_when__cb"))
+    host.Range("D5").Select
+    ReDimUI.PumpOnce
+    transcript = transcript & "|dateSelectionMoveCloses=" & _
+        CStr(Not ShapeExists(host, "rdm_wid29_when__cb"))
     ReDimUI.AutoPump True
     TestListDismiss = transcript
 End Function
@@ -3810,24 +3838,32 @@ Public Function TestDatePicker() As String
         CStr(Not app.HasState("dueState") And gChangeCount = 0)
 
     ReDimUI.DispatchShape "rdm_wid54_due"
-    transcript = transcript & "|opens=" & CStr(ShapeExists(host, "rdm_wid54_due__cd42") _
+    transcript = transcript & "|opens=" & CStr(ShapeExists(host, "rdm_wid54_due__cr6") _
         And host.Shapes("rdm_wid54_due__ch").TextFrame2.TextRange.Text _
             = Format$(DateSerial(2026, 9, 1), "mmmm yyyy"))
+    ' The 22nd reads in the accent's ink over the accent fill on its cell.
     firstCell = Weekday(DateSerial(2026, 9, 1), vbUseSystemDayOfWeek)
-    With host.Shapes("rdm_wid54_due__cd" & (firstCell + 21))
-        transcript = transcript & "|dateFilled=" & CStr(.TextFrame2.TextRange.Text = "22" _
-            And .Fill.Visible = msoTrue And .Fill.ForeColor.RGB = app.Theme.PrimaryColor)
-    End With
+    transcript = transcript & "|dateFilled=" & CStr( _
+        CalendarDayWords(host, "rdm_wid54_due", firstCell + 21) = "22" _
+        And CalendarDayInk(host, "rdm_wid54_due", firstCell + 21) = app.Theme.OnPrimaryColor _
+        And CalendarMarkOn(host, "rdm_wid54_due", "cs", firstCell + 21) _
+        And host.Shapes("rdm_wid54_due__cs").Fill.ForeColor.RGB = app.Theme.PrimaryColor)
     ReDimUI.DispatchShape "rdm_wid54_due__cd" & (firstCell + 2)
     transcript = transcript & "|outOfRangeKeeps=" & _
-        CStr(ShapeExists(host, "rdm_wid54_due__cd1") And gChangeCount = 0)
+        CStr(ShapeExists(host, "rdm_wid54_due__cr1") And gChangeCount = 0)
+    ' A week or a mark deleted by hand comes back with the next repaint.
+    host.Shapes("rdm_wid54_due__cr3").Delete
+    host.Shapes("rdm_wid54_due__cs").Delete
     ReDimUI.DispatchShape "rdm_wid54_due__cn"
     transcript = transcript & "|nextMonth=" & CStr( _
         host.Shapes("rdm_wid54_due__ch").TextFrame2.TextRange.Text _
             = Format$(DateSerial(2026, 10, 1), "mmmm yyyy"))
+    transcript = transcript & "|partsReturn=" & CStr(ShapeExists(host, "rdm_wid54_due__cs") _
+        And UBound(Split(host.Shapes("rdm_wid54_due__cr3").TextFrame2.TextRange.Text, _
+            vbTab)) = 7)
     firstCell = Weekday(DateSerial(2026, 10, 1), vbUseSystemDayOfWeek)
     ReDimUI.DispatchShape "rdm_wid54_due__cd" & (firstCell + 14)
-    transcript = transcript & "|dayPicks=" & CStr(Not ShapeExists(host, "rdm_wid54_due__cd1") _
+    transcript = transcript & "|dayPicks=" & CStr(Not ShapeExists(host, "rdm_wid54_due__cr1") _
         And VarType(app.State("dueState")) = vbDate _
         And gChangeCount = 1)
     transcript = transcript & "|written=" & Format$(app.State("dueState"), "yyyy-mm-dd")
@@ -3836,7 +3872,7 @@ Public Function TestDatePicker() As String
 
     app.DatePicker("due").Focus
     RdxKeyChar "{ALTDOWN}"
-    transcript = transcript & "|keyOpens=" & CStr(ShapeExists(host, "rdm_wid54_due__cd1"))
+    transcript = transcript & "|keyOpens=" & CStr(ShapeExists(host, "rdm_wid54_due__cr1"))
     RdxKeyChar "{RIGHT}"
     RdxKeyChar "{DOWN}"
     RdxKeyChar "{PGDN}"
@@ -3845,7 +3881,7 @@ Public Function TestDatePicker() As String
         "/" & gChangeCount
     RdxKeyChar "{ALTDOWN}"
     RdxKeyChar "{ESC}"
-    transcript = transcript & "|escCloses=" & CStr(Not ShapeExists(host, "rdm_wid54_due__cd1"))
+    transcript = transcript & "|escCloses=" & CStr(Not ShapeExists(host, "rdm_wid54_due__cr1"))
     RdxReleaseKeys
 
     Sleep 200
@@ -3853,22 +3889,64 @@ Public Function TestDatePicker() As String
     ReDimUI.OverridePointer 124, 150
     ReDimUI.ForcePressEdge
     ReDimUI.PumpOnce
-    transcript = transcript & "|pressOnKeeps=" & CStr(ShapeExists(host, "rdm_wid54_due__cd1"))
+    transcript = transcript & "|pressOnKeeps=" & CStr(ShapeExists(host, "rdm_wid54_due__cr1"))
     app.PointerEffects
-    ReDimUI.OverridePointer host.Shapes("rdm_wid54_due__cd10").Left + 12, _
-        host.Shapes("rdm_wid54_due__cd10").Top + 10
+    ReDimUI.OverridePointer host.Shapes("rdm_wid54_due__cr2").Left + 2 * 26 + 13, _
+        host.Shapes("rdm_wid54_due__cr2").Top + 10
     ReDimUI.PumpOnce
     transcript = transcript & "|hoverTints=" & CStr( _
-        host.Shapes("rdm_wid54_due__cd10").Fill.Visible = msoTrue _
-        And host.Shapes("rdm_wid54_due__cd11").Fill.Visible = msoFalse)
+        CalendarMarkOn(host, "rdm_wid54_due", "cv", 10) _
+        And host.Shapes("rdm_wid54_due__cv").Fill.Visible = msoTrue)
     app.PointerEffects False
     ReDimUI.OverridePointer 420, 300
     ReDimUI.ForcePressEdge
     ReDimUI.PumpOnce
-    transcript = transcript & "|pressOffCloses=" & CStr(Not ShapeExists(host, "rdm_wid54_due__cd1"))
+    transcript = transcript & "|pressOffCloses=" & CStr(Not ShapeExists(host, "rdm_wid54_due__cr1"))
     ReDimUI.ClearPointerOverride
     ReDimUI.AutoPump True
     TestDatePicker = transcript
+End Function
+
+' A calendar grid cell (1 to 42) as its week's line shows it: the digits,
+' and their ink.
+Private Function CalendarDayWords(ByVal host As Worksheet, ByVal pickerName As String, _
+    ByVal cellNo As Long) As String
+    Dim dayFields() As String
+
+    dayFields = Split(host.Shapes(pickerName & "__cr" & ((cellNo - 1) \ 7 + 1)) _
+        .TextFrame2.TextRange.Text, vbTab)
+    CalendarDayWords = dayFields((cellNo - 1) Mod 7 + 1)
+End Function
+
+Private Function CalendarDayInk(ByVal host As Worksheet, ByVal pickerName As String, _
+    ByVal cellNo As Long) As Long
+    Dim dayFields() As String
+    Dim fieldNo As Long
+    Dim startAt As Long
+
+    With host.Shapes(pickerName & "__cr" & ((cellNo - 1) \ 7 + 1)).TextFrame2.TextRange
+        dayFields = Split(.Text, vbTab)
+        startAt = 1
+        For fieldNo = 0 To (cellNo - 1) Mod 7
+            startAt = startAt + Len(dayFields(fieldNo)) + 1
+        Next fieldNo
+        CalendarDayInk = .Characters(startAt, Len(dayFields((cellNo - 1) Mod 7 + 1))) _
+            .Font.Fill.ForeColor.RGB
+    End With
+End Function
+
+' True when a day mark shows on a grid cell: visible, over the cell's
+' column in the cell's week.
+Private Function CalendarMarkOn(ByVal host As Worksheet, ByVal pickerName As String, _
+    ByVal markName As String, ByVal cellNo As Long) As Boolean
+    Dim weekShape As Shape
+
+    Set weekShape = host.Shapes(pickerName & "__cr" & ((cellNo - 1) \ 7 + 1))
+    With host.Shapes(pickerName & "__" & markName)
+        CalendarMarkOn = (.Visible = msoTrue) _
+            And (Abs(.Left - (weekShape.Left + ((cellNo - 1) Mod 7) * 26 + 1)) < 0.5) _
+            And (Abs(.Top - weekShape.Top) < 0.5)
+    End With
 End Function
 
 ' Table: headers over the columns, a number column aligned right, rows in
@@ -4384,22 +4462,19 @@ Public Function TestTableData() As String
 
     app.Table("orders").FilterRows "an"
     RdxKeyChar "{COPY}"
-    DoEvents
-    host.Paste host.Range("J1")
+    PasteWhenReady host, host.Range("J1")
     transcript = transcript & "|copied=" & host.Range("J1").Value & "," & _
         host.Range("J2").Value & "," & host.Range("K2").Value & "," & _
         CStr(VarType(host.Range("L2").Value) = vbDate) & "," & CStr(IsEmpty(host.Range("J3").Value))
     app.Table("orders").FilterRows ""
     RdxKeyChar "{DOWN}"
     RdxKeyChar "{COPY}"
-    DoEvents
-    host.Paste host.Range("J5")
+    PasteWhenReady host, host.Range("J5")
     transcript = transcript & "|copiedRow=" & host.Range("J6").Value & "," & _
         CStr(IsEmpty(host.Range("J7").Value))
     app.Table("orders").FilterRows "an"
     RdxKeyChar "{COPY}"
-    DoEvents
-    host.Paste host.Range("J9")
+    PasteWhenReady host, host.Range("J9")
     transcript = transcript & "|hiddenPick=" & host.Range("J10").Value
     RdxKeyChar "{ENTER}"
     transcript = transcript & "/" & gCommandCount
@@ -4429,6 +4504,27 @@ Public Function TestTableData() As String
     ReDimUI.AutoPump True
     TestTableData = transcript
 End Function
+
+' Pastes the clipboard once Excel can see what was just copied: a Win32
+' clipboard write reaches Worksheet.Paste only after Excel processes the
+' change, and another program can hold the clipboard for a moment, so the
+' paste retries for up to a second before it raises the real error.
+Private Sub PasteWhenReady(ByVal host As Worksheet, ByVal pasteAt As Range)
+    Dim attemptNo As Long
+
+    For attemptNo = 1 To 40
+        DoEvents
+        On Error Resume Next
+        host.Paste pasteAt
+        If Err.Number = 0 Then
+            On Error GoTo 0
+            Exit Sub
+        End If
+        On Error GoTo 0
+        Sleep 25
+    Next attemptNo
+    host.Paste pasteAt
+End Sub
 
 ' Masked fields: the face shows a dot for each character, focused or not,
 ' while InputValue and WritesTo keep the text; copy and cut take nothing.

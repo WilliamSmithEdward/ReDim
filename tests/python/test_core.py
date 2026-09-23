@@ -165,6 +165,12 @@ def test_protect_surface(run_core):
     assert facts["renderWorks"] == "True", (
         "UserInterfaceOnly must leave framework writes free"
     )
+    assert facts["protectedListOpens"] == "True", (
+        "a drop list must open on a protected surface and leave it protected as it was"
+    )
+    assert facts["protectedCalendarOpens"] == "True", (
+        "a calendar must open on a protected surface and leave it protected as it was"
+    )
     assert facts["dispatchWorks"] == "True"
     assert facts["toastCreates"] == "True"
     assert facts["unprotects"] == "True"

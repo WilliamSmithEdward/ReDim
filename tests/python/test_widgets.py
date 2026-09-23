@@ -640,6 +640,16 @@ def test_list_dismiss(run_widgets):
     assert facts["selectionMoveCloses"] == "True", (
         "moving the grid selection must close an open list"
     )
+    assert facts["datePressOnKeeps"] == "True", (
+        "a press on an open calendar must keep it open"
+    )
+    assert facts["datePressOffCloses"] == "True", (
+        "a calendar opened by a click must close on a press off it"
+    )
+    assert facts["dateSelectionHeldKeeps"] == "True"
+    assert facts["dateSelectionMoveCloses"] == "True", (
+        "moving the grid selection must close an open calendar"
+    )
 
 
 def test_list_conventions(run_widgets):
@@ -1114,6 +1124,9 @@ def test_date_picker(run_widgets):
     assert facts["dateFilled"] == "True"
     assert facts["outOfRangeKeeps"] == "True", "a day outside DateRange must not pick"
     assert facts["nextMonth"] == "True"
+    assert facts["partsReturn"] == "True", (
+        "a week or mark deleted by hand must come back with the next repaint"
+    )
     assert facts["dayPicks"] == "True", (
         "a day must write a Date, fire OnChange once, and close the calendar"
     )

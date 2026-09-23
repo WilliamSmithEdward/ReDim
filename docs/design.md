@@ -27,17 +27,25 @@ reason under its one-file invariant and anticipated an external host loop. ReDim
 
 Retained mode. A component is a `ReDimUI` instance holding desired props (text, geometry, colors,
 visible, enabled, value) plus the id of its worksheet shape(s). Rendering diffs desired props
-against last-applied props and touches only changed shape members inside a `ScreenUpdating` batch.
+against last-applied props and touches only changed shape members. A flush that repaints several
+components, or opens or closes a drop list or calendar, runs with `ScreenUpdating` off, so Excel
+paints the result once instead of part by part.
 
 Shape naming: `rdm_<appId>_<componentId>` for a component's main shape, and
 `rdm_<appId>_<componentId>__<part>` for the parts of composite widgets, such as a toggle's knob,
-a list's rows, or a calendar's days. `Mount` is idempotent: an existing shape with a matching
+a list's rows, or a calendar's weeks. `Mount` is idempotent: an existing shape with a matching
 name is adopted, so re-running setup code never duplicates shapes and app code can be re-entered
 safely after a crash.
 
 Every control is drawn from shapes; native form controls went in 0.5.0. Composite widgets keep
 the look each part was last drawn with and rewrite only the parts whose look changed, and a part
-whose place and font held rewrites only its text, fill, and ink. [api.md](api.md) describes the
+whose place and font held rewrites only its text, fill, and ink. Creating a shape and writing its
+look costs more than anything else a draw does, so parts are few and made cheaply. A list that
+opens draws its first row in full and copies it (`Shape.Duplicate`) for the rest, since a copy
+carries the size, border, margins, tab stops, font, and click. A calendar draws a week as one
+line of text whose center tab stops sit over the day columns: six week lines and a mark shape
+each for the date held, today, the key cursor, and the day under the pointer, where it once
+drew a shape per day. Clicks on a week resolve to a day by the pointer's position. [api.md](api.md) describes the
 widget set: buttons, labels, cards, progress bars, spinners, skeletons, toggles, tick boxes,
 radio groups, steppers, sliders, selects, menu buttons, combos, transfer lists, check lists,
 text fields, date pickers, images, tab strips, expanders, tables, badges, sparklines, toasts,

@@ -191,6 +191,14 @@ Private Const CAL_HEAD_H As Double = 24
 Private Const CAL_WEEK_H As Double = 16
 Private Const CAL_WIDTH As Double = 194
 Private Const CAL_DEPTH As Double = 184
+' Calendar state slots after the card, header, arrows, and weekdays (1-5):
+' the day marks, then one per week.
+Private Const CAL_SLOT_HELD As Long = 6
+Private Const CAL_SLOT_HOVER As Long = 7
+Private Const CAL_SLOT_TODAY As Long = 8
+Private Const CAL_SLOT_CURSOR As Long = 9
+Private Const CAL_SLOT_WEEK1 As Long = 10
+Private Const CAL_SLOTS As Long = 15
 
 ' Table cells keep this many points clear at each side of their text.
 Private Const TABLE_CELL_PAD As Double = 6
@@ -3437,9 +3445,17 @@ Public Sub FlushDirty()
     RequireRole ROLE_APP, "FlushDirty"
     If mDirtyIds.Count = 0 Then Exit Sub
     priorScreenUpdating = Application.ScreenUpdating
-    If mDirtyIds.Count > 1 And Not ReDimUI.InPumpTick Then
-        Application.ScreenUpdating = False
-        toggledScreen = True
+    ' Several controls, or one list or calendar opening or closing (a dozen
+    ' parts drawn or deleted at once), paint once at the end rather than
+    ' part by part. A single control's usual repaint, such as a keystroke's,
+    ' keeps the screen on, since the toggle redraws the scroll bars.
+    If Not ReDimUI.InPumpTick Then
+        If mDirtyIds.Count > 1 Then
+            toggledScreen = True
+        ElseIf TryGetComponent(CStr(mDirtyIds.Item(1)), componentValue) Then
+            toggledScreen = componentValue.DrawsManyParts
+        End If
+        If toggledScreen Then Application.ScreenUpdating = False
     End If
     On Error GoTo RestoreScreen
     For Each dirtyId In mDirtyIds
@@ -3705,6 +3721,22 @@ Public Property Get IsSurfaceProtected() As Boolean
     RequireRole ROLE_APP, "IsSurfaceProtected"
     IsSurfaceProtected = mSurfaceProtected
 End Property
+
+' Drawing-object protection refuses Shape.Duplicate even under
+' UserInterfaceOnly. A surface ReDim protected lifts for a copy's moment,
+' about a tenth of a millisecond with the protection put back as
+' ProtectSurface set it (the selection rule survives). True when lifted.
+Friend Function LiftSurfaceProtection() As Boolean
+    If Not mSurfaceProtected Then Exit Function
+    On Error Resume Next
+    mSheet.Unprotect
+    LiftSurfaceProtection = (Err.Number = 0)
+    On Error GoTo 0
+End Function
+
+Friend Sub RestoreSurfaceProtection()
+    mSheet.Protect DrawingObjects:=True, Contents:=True, UserInterfaceOnly:=True
+End Sub
 
 ' Application.OnKey with lifecycle management: registered keys are released
 ' on Unmount and Shutdown so no binding outlives its app.
@@ -4412,6 +4444,9 @@ Friend Property Get IsTickable() As Boolean
         Case KIND_TOGGLE, KIND_TABS
             ' Only while a knob or a tab bar glides.
             IsTickable = (LenB(mGlidePart) > 0)
+        Case KIND_DATE
+            ' Only while the calendar is open, for its click-away watch.
+            IsTickable = mSelectOpen
     End Select
 End Property
 
@@ -6657,6 +6692,14 @@ Friend Sub NoteShapeDrawn(ByVal drawnName As String)
     mDrawnShapes.Add True, drawnName
 End Sub
 
+' A shape of this app's that was just deleted is surely absent again.
+Friend Sub NoteShapeDropped(ByVal drawnName As String)
+    Dim drawnMark As Variant
+
+    If Not mSurfaceFresh Then Exit Sub
+    If TryGetItem(mDrawnShapes, drawnName, drawnMark) Then mDrawnShapes.Remove drawnName
+End Sub
+
 ' Whether any shape on the sheet has a name starting with namePrefix.
 Private Function SheetHoldsPrefix(ByVal hostSheet As Worksheet, ByVal namePrefix As String) As Boolean
     Dim candidateShape As Shape
@@ -8105,15 +8148,57 @@ Private Function EnsurePartShape( _
     Set EnsurePartShape = partShape
 End Function
 
-' Deletes a part that may exist. One this app never drew on a sheet that
-' held none of its shapes cannot, and looking for it would cost a miss.
-Private Sub DropPart(ByVal hostSheet As Worksheet, ByVal partName As String)
+' A new part made as a copy of a part already drawn in the look it needs:
+' the copy carries the size, fill, border, margins, tab stops, font, and
+' click, for a fraction of writing them. Nothing when a shape by that name
+' exists, so the caller draws that one in full, or when the copy fails. A
+' sheet protected by its host refuses copies, and its parts draw in full.
+Private Function CopyPartShape( _
+    ByVal hostSheet As Worksheet, _
+    ByVal templateShape As Shape, _
+    ByVal partName As String _
+) As Shape
+    Dim partShape As Shape
     Dim partShapeName As String
+    Dim hostApp As ReDimUI
+    Dim protectionLifted As Boolean
 
     partShapeName = ShapeName & PART_SEPARATOR & partName
-    If OwnerApp.ShapeSurelyAbsent(partShapeName) Then Exit Sub
+    Set hostApp = OwnerApp
+    If Not hostApp.ShapeSurelyAbsent(partShapeName) Then
+        On Error Resume Next
+        Set partShape = hostSheet.Shapes(partShapeName)
+        On Error GoTo 0
+        If Not partShape Is Nothing Then Exit Function
+    End If
+    If hostSheet.ProtectDrawingObjects Then
+        protectionLifted = hostApp.LiftSurfaceProtection()
+        If Not protectionLifted Then Exit Function
+    End If
+    On Error Resume Next
+    Set partShape = templateShape.Duplicate
+    On Error GoTo 0
+    If protectionLifted Then hostApp.RestoreSurfaceProtection
+    If partShape Is Nothing Then Exit Function
+    partShape.Name = partShapeName
+    hostApp.NoteShapeDrawn partShapeName
+    Set CopyPartShape = partShape
+End Function
+
+' Deletes a part that may exist. One this app never drew on a sheet that
+' held none of its shapes cannot, and looking for it would cost a miss.
+' A part deleted here is surely absent again, so a list or calendar that
+' opens anew draws its parts without a lookup that could only miss.
+Private Sub DropPart(ByVal hostSheet As Worksheet, ByVal partName As String)
+    Dim partShapeName As String
+    Dim hostApp As ReDimUI
+
+    partShapeName = ShapeName & PART_SEPARATOR & partName
+    Set hostApp = OwnerApp
+    If hostApp.ShapeSurelyAbsent(partShapeName) Then Exit Sub
     On Error Resume Next
     hostSheet.Shapes(partShapeName).Delete
+    If Err.Number = 0 Then hostApp.NoteShapeDropped partShapeName
     On Error GoTo 0
 End Sub
 
@@ -12048,6 +12133,12 @@ End Sub
 ' arrow turns the month, and a day picks it. True when the date changed,
 ' so the handlers run.
 Private Function ClickCalendar(ByVal hostApp As ReDimUI, ByVal partName As String) As Boolean
+    ' The week rows, the day marks, and the card lie over the days; the
+    ' pointer says which day a click on them meant.
+    If IsCalendarCover(partName) Then
+        partName = CalendarPartUnderPointer()
+        If LenB(partName) = 0 Then Exit Function
+    End If
     Select Case partName
         Case vbNullString, "caret"
             If mSelectOpen Then
@@ -12159,24 +12250,47 @@ Private Function CalendarPartAt(ByVal pointsX As Double, ByVal pointsY As Double
     CalendarPartAt = "cd" & (Int(gridY / CAL_CELL_H) * 7 + Int(gridX / CAL_CELL_W) + 1)
 End Function
 
+' True for a calendar part that lies over the days rather than naming
+' one: the card, the weekday line, a week, or a day mark.
+Private Function IsCalendarCover(ByVal partName As String) As Boolean
+    Select Case partName
+        Case "cb", "cw", "cs", "cv", "ct", "cc", "cr1", "cr2", "cr3", "cr4", "cr5", "cr6"
+            IsCalendarCover = True
+    End Select
+End Function
+
+' The calendar part under the pointer: an arrow, a day, or nothing.
+Private Function CalendarPartUnderPointer() As String
+    Dim pointsX As Double
+    Dim pointsY As Double
+
+    If Not mSelectOpen Then Exit Function
+    If Not PointerPoints(pointsX, pointsY) Then Exit Function
+    CalendarPartUnderPointer = CalendarPartAt(pointsX, pointsY)
+End Function
+
 ' The open calendar: a card under the face (over it when there is no room
-' below) with the month between its arrows, the weekday initials, and
-' six weeks of days. The date held fills with the accent, today wears an
-' accent ring, the day the keys reached a dashed one while the picker has
-' the keys, and days of other months or outside DateRange read muted.
-' Each part is rewritten only when its own look changed.
+' below) with the month between its arrows, the weekday initials, and six
+' weeks of days. A week is one line of text with a center tab stop over
+' each column, where a shape per day cost the opening 36 more creations,
+' and the second to sixth weeks start as copies of the first. Marks sit on
+' single days: fills behind the weeks for the date held and the day under
+' the pointer, rings over them for today and, while the picker has the
+' keys, a dashed one for the day the keys reached. Days of other months or
+' outside DateRange read muted, the held date's digits take the accent's
+' ink, and today's are bold. Each part is rewritten only when its own look
+' changed.
 Private Sub SyncCalendar(ByVal hostSheet As Worksheet, ByVal themeValue As ReDimUI)
     Dim cardTop As Double
+    Dim gridTop As Double
     Dim textSize As Double
     Dim gridStart As Date
-    Dim cellNo As Long
-    Dim cellDay As Date
-    Dim cellLeft As Double
-    Dim cellTop As Double
-    Dim cellFill As Long
-    Dim cellInk As Long
-    Dim cellRing As Long
-    Dim cursorShown As Boolean
+    Dim heldCell As Long
+    Dim todayCell As Long
+    Dim cursorCell As Long
+    Dim hoverCell As Long
+    Dim hoverFill As Long
+    Dim weekNo As Long
     Dim partShape As Shape
 
     If Not (mSelectOpen And mVisible) Then
@@ -12187,14 +12301,14 @@ Private Sub SyncCalendar(ByVal hostSheet As Worksheet, ByVal themeValue As ReDim
             Set partShape = hostSheet.Shapes(ShapeName & PART_SEPARATOR & "cb")
             On Error GoTo 0
             If Not partShape Is Nothing Then
-                EnsureRowStates mAppliedRowStates, 53
+                EnsureRowStates mAppliedRowStates, CAL_SLOTS
                 mAppliedRowStates(1) = "?"
             End If
         End If
         DeleteCalendarParts hostSheet
         Exit Sub
     End If
-    EnsureRowStates mAppliedRowStates, 53
+    EnsureRowStates mAppliedRowStates, CAL_SLOTS
     textSize = mFontSize
     If textSize <= 0 Then textSize = themeValue.BaseFontSize
     cardTop = CalendarTop()
@@ -12226,35 +12340,276 @@ Private Sub SyncCalendar(ByVal hostSheet As Worksheet, ByVal themeValue As ReDim
         cardTop + CAL_PAD, CAL_CELL_W, CAL_HEAD_H, ChrW(9654), _
         PartFill("cn", themeValue), themeValue.OnMutedColor, -1, False, textSize - 2
     gridStart = CalendarGridStart()
+    gridTop = cardTop + CAL_PAD + CAL_HEAD_H + CAL_WEEK_H
+    If mValue <> 0 Then heldCell = CalendarCellOf(CDate(mValue), gridStart)
+    todayCell = CalendarCellOf(Date, gridStart)
+    If ReDimUI.IsComponentFocused(mOwnerAppId, mComponentId) Then
+        cursorCell = CalendarCellOf(mCalendarCursor, gridStart)
+    End If
+    If Left$(mHoveredPart, 2) = "cd" Then
+        hoverFill = PartFill(mHoveredPart, themeValue)
+        If hoverFill >= 0 Then hoverCell = CLng(Val(Mid$(mHoveredPart, 3)))
+        If hoverCell = heldCell Then hoverCell = 0
+    End If
+    ' The fills go down before the weeks, so the digits draw over them.
+    SyncCalendarMark hostSheet, themeValue, CAL_SLOT_HELD, "cs", heldCell, gridTop, _
+        themeValue.PrimaryColor, -1, False, True
+    SyncCalendarMark hostSheet, themeValue, CAL_SLOT_HOVER, "cv", hoverCell, gridTop, _
+        hoverFill, -1, False, True
     SyncCalendarWeekdays hostSheet, themeValue, cardTop, gridStart, textSize
-    cursorShown = ReDimUI.IsComponentFocused(mOwnerAppId, mComponentId)
-    For cellNo = 1 To 42
-        cellDay = gridStart + cellNo - 1
-        cellLeft = mLeft + CAL_PAD + ((cellNo - 1) Mod 7) * CAL_CELL_W
-        cellTop = cardTop + CAL_PAD + CAL_HEAD_H + CAL_WEEK_H + _
-            ((cellNo - 1) \ 7) * CAL_CELL_H
-        cellRing = -1
-        If CDbl(cellDay) = mValue Then
-            cellFill = themeValue.PrimaryColor
-            cellInk = themeValue.OnPrimaryColor
-        Else
-            cellFill = PartFill("cd" & cellNo, themeValue)
-            If Month(cellDay) = Month(mCalendarMonth) And DayInRange(cellDay) Then
-                cellInk = themeValue.OnSurfaceColor
-            Else
-                cellInk = themeValue.OnMutedColor
-            End If
-            If cellDay = Date Then cellRing = themeValue.PrimaryColor
-        End If
-        If cursorShown And cellDay = mCalendarCursor Then
-            cellRing = themeValue.OnSurfaceColor
-        End If
-        SyncCalendarPart hostSheet, themeValue, 11 + cellNo, "cd" & cellNo, _
-            cellLeft + 1, cellTop + 1, CAL_CELL_W - 2, CAL_CELL_H - 2, _
-            CStr(Day(cellDay)), cellFill, cellInk, cellRing, _
-            (cellDay = Date), textSize - 1, (cursorShown And cellDay = mCalendarCursor)
-    Next cellNo
+    For weekNo = 1 To 6
+        SyncCalendarWeek hostSheet, themeValue, weekNo, gridStart, gridTop, textSize - 1, _
+            heldCell, todayCell
+    Next weekNo
+    ' The rings go over the weeks, clear of the digits. The cursor's ring
+    ' stands in for today's, and the held date takes no today ring.
+    If todayCell = heldCell Or todayCell = cursorCell Then todayCell = 0
+    SyncCalendarMark hostSheet, themeValue, CAL_SLOT_TODAY, "ct", todayCell, gridTop, _
+        -1, themeValue.PrimaryColor, False, False
+    SyncCalendarMark hostSheet, themeValue, CAL_SLOT_CURSOR, "cc", cursorCell, gridTop, _
+        -1, themeValue.OnSurfaceColor, True, False
 End Sub
+
+' The grid cell, 1 to 42, that shows a day; 0 when the six weeks miss it.
+Private Function CalendarCellOf(ByVal shownDay As Date, ByVal gridStart As Date) As Long
+    Dim dayIndex As Long
+
+    dayIndex = CLng(DayOnly(shownDay) - gridStart)
+    If dayIndex >= 0 And dayIndex < 42 Then CalendarCellOf = dayIndex + 1
+End Function
+
+' A mark on one day cell: a fill behind the weeks or a ring over them,
+' hidden for cell 0. A fill is drawn with the calendar even while hidden,
+' so the weeks stack over it; a ring waits for a day that needs one.
+Private Sub SyncCalendarMark( _
+    ByVal hostSheet As Worksheet, _
+    ByVal themeValue As ReDimUI, _
+    ByVal stateSlot As Long, _
+    ByVal partName As String, _
+    ByVal cellNo As Long, _
+    ByVal gridTop As Double, _
+    ByVal fillRgb As Long, _
+    ByVal ringRgb As Long, _
+    ByVal ringDashed As Boolean, _
+    ByVal behindWeeks As Boolean _
+)
+    Dim lookKey As String
+    Dim placeKey As String
+    Dim priorParts() As String
+    Dim markShape As Shape
+    Dim markMade As Boolean
+
+    If cellNo = 0 Then
+        Select Case mAppliedRowStates(stateSlot)
+            Case "-"
+                Exit Sub
+            Case vbNullString
+                If Not behindWeeks Then Exit Sub
+        End Select
+        Set markShape = EnsureCalendarMark(hostSheet, partName, markMade)
+        markShape.Visible = msoFalse
+        mAppliedRowStates(stateSlot) = "-"
+        Exit Sub
+    End If
+    lookKey = CStr(ObjPtr(themeValue)) & ":" & CStr(fillRgb) & ":" & CStr(ringRgb) & ":" & _
+        CStr(ringDashed) & ":" & mAppliedOnAction
+    placeKey = CStr(cellNo) & ":" & CStr(mLeft) & ":" & CStr(gridTop)
+    If mAppliedRowStates(stateSlot) = lookKey & Chr$(3) & placeKey Then Exit Sub
+    priorParts = Split(mAppliedRowStates(stateSlot) & Chr$(3), Chr$(3))
+    Set markShape = EnsureCalendarMark(hostSheet, partName, markMade)
+    If priorParts(0) = "-" Then markShape.Visible = msoTrue
+    mAppliedRowStates(stateSlot) = lookKey & Chr$(3) & placeKey
+    markShape.Left = mLeft + CAL_PAD + ((cellNo - 1) Mod 7) * CAL_CELL_W + 1
+    markShape.Top = gridTop + ((cellNo - 1) \ 7) * CAL_CELL_H + 1
+    If priorParts(0) = lookKey And Not markMade Then Exit Sub
+    markShape.Fill.Visible = BoolToMso(fillRgb >= 0)
+    If fillRgb >= 0 Then markShape.Fill.ForeColor.RGB = fillRgb
+    ApplyCalendarRing markShape, ringRgb, ringDashed
+    markShape.OnAction = mAppliedOnAction
+End Sub
+
+' A day mark's shape: found, or made at a day cell's size.
+Private Function EnsureCalendarMark( _
+    ByVal hostSheet As Worksheet, _
+    ByVal partName As String, _
+    ByRef markMade As Boolean _
+) As Shape
+    Dim markShape As Shape
+
+    Set markShape = EnsurePartShape(hostSheet, partName, msoShapeRoundedRectangle, markMade)
+    If markMade Then
+        On Error Resume Next
+        markShape.Adjustments(1) = 0.3
+        On Error GoTo 0
+        markShape.Width = CAL_CELL_W - 2
+        markShape.Height = CAL_CELL_H - 2
+    End If
+    Set EnsureCalendarMark = markShape
+End Function
+
+' One week of days on one line: a tab before each day's number. A week
+' rewrites its words and runs only when they changed: the plain ink
+' first, then the muted runs, the held date's ink, and today's bold.
+Private Sub SyncCalendarWeek( _
+    ByVal hostSheet As Worksheet, _
+    ByVal themeValue As ReDimUI, _
+    ByVal weekNo As Long, _
+    ByVal gridStart As Date, _
+    ByVal gridTop As Double, _
+    ByVal textSize As Double, _
+    ByVal heldCell As Long, _
+    ByVal todayCell As Long _
+)
+    Dim weekWords As String
+    Dim dayStarts(1 To 7) As Long
+    Dim dayEnds(1 To 7) As Long
+    Dim mutedDays As String
+    Dim columnNo As Long
+    Dim runFrom As Long
+    Dim cellDay As Date
+    Dim heldColumn As Long
+    Dim todayColumn As Long
+    Dim frameKey As String
+    Dim lookKey As String
+    Dim stateSlot As Long
+    Dim weekShape As Shape
+    Dim weekMade As Boolean
+
+    For columnNo = 1 To 7
+        cellDay = gridStart + (weekNo - 1) * 7 + columnNo - 1
+        weekWords = weekWords & vbTab
+        dayStarts(columnNo) = Len(weekWords) + 1
+        weekWords = weekWords & CStr(Day(cellDay))
+        dayEnds(columnNo) = Len(weekWords)
+        If Month(cellDay) = Month(mCalendarMonth) And DayInRange(cellDay) Then
+            mutedDays = mutedDays & "0"
+        Else
+            mutedDays = mutedDays & "1"
+        End If
+    Next columnNo
+    If heldCell > 0 Then
+        If (heldCell - 1) \ 7 + 1 = weekNo Then heldColumn = (heldCell - 1) Mod 7 + 1
+    End If
+    If todayCell > 0 Then
+        If (todayCell - 1) \ 7 + 1 = weekNo Then todayColumn = (todayCell - 1) Mod 7 + 1
+    End If
+    stateSlot = CAL_SLOT_WEEK1 + weekNo - 1
+    frameKey = CStr(ObjPtr(themeValue)) & ":" & CStr(mLeft) & ":" & CStr(gridTop) & ":" & _
+        CStr(textSize) & ":" & mAppliedOnAction
+    lookKey = weekWords & Chr$(2) & mutedDays & Chr$(2) & CStr(heldColumn) & Chr$(2) & _
+        CStr(todayColumn) & Chr$(2) & CStr(themeValue.OnSurfaceColor) & ":" & _
+        CStr(themeValue.OnMutedColor) & ":" & CStr(themeValue.OnPrimaryColor)
+    If mAppliedRowStates(stateSlot) = frameKey & Chr$(3) & lookKey Then Exit Sub
+    If Left$(mAppliedRowStates(stateSlot), Len(frameKey) + 1) = frameKey & Chr$(3) Then
+        Set weekShape = EnsurePartShape(hostSheet, "cr" & weekNo, msoShapeRectangle, weekMade)
+    End If
+    If weekShape Is Nothing Or weekMade Then
+        Set weekShape = PlaceCalendarWeek(hostSheet, themeValue, weekNo, gridTop, textSize, _
+            frameKey)
+    End If
+    mAppliedRowStates(stateSlot) = frameKey & Chr$(3) & lookKey
+    With weekShape.TextFrame2.TextRange
+        .Text = weekWords
+        .Font.Fill.ForeColor.RGB = themeValue.OnSurfaceColor
+        .Font.Bold = msoFalse
+        columnNo = 1
+        Do While columnNo <= 7
+            If Mid$(mutedDays, columnNo, 1) = "1" Then
+                runFrom = columnNo
+                Do While columnNo < 7
+                    If Mid$(mutedDays, columnNo + 1, 1) <> "1" Then Exit Do
+                    columnNo = columnNo + 1
+                Loop
+                .Characters(dayStarts(runFrom), dayEnds(columnNo) - dayStarts(runFrom) + 1) _
+                    .Font.Fill.ForeColor.RGB = themeValue.OnMutedColor
+            End If
+            columnNo = columnNo + 1
+        Loop
+        If heldColumn > 0 Then
+            .Characters(dayStarts(heldColumn), dayEnds(heldColumn) - dayStarts(heldColumn) + 1) _
+                .Font.Fill.ForeColor.RGB = themeValue.OnPrimaryColor
+        End If
+        If todayColumn > 0 Then
+            .Characters(dayStarts(todayColumn), _
+                dayEnds(todayColumn) - dayStarts(todayColumn) + 1).Font.Bold = msoTrue
+        End If
+    End With
+End Sub
+
+' Places a week's line. A fresh week after the first copies the first,
+' placed just before it in the same frame: the copy carries the margins,
+' tab stops, font, and click, and costs a fraction of drawing them.
+Private Function PlaceCalendarWeek( _
+    ByVal hostSheet As Worksheet, _
+    ByVal themeValue As ReDimUI, _
+    ByVal weekNo As Long, _
+    ByVal gridTop As Double, _
+    ByVal textSize As Double, _
+    ByVal frameKey As String _
+) As Shape
+    Dim weekShape As Shape
+    Dim columnNo As Long
+
+    If weekNo > 1 And LenB(mAppliedRowStates(CAL_SLOT_WEEK1 + weekNo - 1)) = 0 Then
+        If Left$(mAppliedRowStates(CAL_SLOT_WEEK1), Len(frameKey) + 1) = frameKey & Chr$(3) Then
+            Set weekShape = CopyPartShape(hostSheet, _
+                hostSheet.Shapes(ShapeName & PART_SEPARATOR & "cr1"), "cr" & weekNo)
+            If Not weekShape Is Nothing Then
+                weekShape.Left = mLeft + CAL_PAD
+                weekShape.Top = gridTop + (weekNo - 1) * CAL_CELL_H + 1
+                Set PlaceCalendarWeek = weekShape
+                Exit Function
+            End If
+        End If
+    End If
+    Set weekShape = EnsurePartShape(hostSheet, "cr" & weekNo, msoShapeRectangle)
+    weekShape.Left = mLeft + CAL_PAD
+    weekShape.Top = gridTop + (weekNo - 1) * CAL_CELL_H + 1
+    weekShape.Width = 7 * CAL_CELL_W
+    weekShape.Height = CAL_CELL_H - 2
+    weekShape.Fill.Visible = msoFalse
+    With weekShape.TextFrame2
+        .MarginLeft = 0
+        .MarginRight = 0
+        .MarginTop = 0
+        .MarginBottom = 0
+        .VerticalAnchor = msoAnchorMiddle
+        .WordWrap = msoFalse
+        With .TextRange.ParagraphFormat
+            .Alignment = msoAlignLeft
+            With .TabStops
+                Do While .Count > 0
+                    .Item(1).Clear
+                Loop
+                For columnNo = 1 To 7
+                    .Add msoTabStopCenter, (columnNo - 0.5) * CAL_CELL_W
+                Next columnNo
+            End With
+        End With
+        With .TextRange.Font
+            .Name = themeValue.FontName
+            .Size = textSize
+        End With
+    End With
+    weekShape.OnAction = mAppliedOnAction
+    Set PlaceCalendarWeek = weekShape
+End Function
+
+' The part a calendar state slot records, for the teardown.
+Private Function CalendarSlotPart(ByVal stateSlot As Long) As String
+    Select Case stateSlot
+        Case CAL_SLOT_HELD
+            CalendarSlotPart = "cs"
+        Case CAL_SLOT_HOVER
+            CalendarSlotPart = "cv"
+        Case CAL_SLOT_TODAY
+            CalendarSlotPart = "ct"
+        Case CAL_SLOT_CURSOR
+            CalendarSlotPart = "cc"
+        Case Else
+            CalendarSlotPart = "cr" & (stateSlot - CAL_SLOT_WEEK1 + 1)
+    End Select
+End Function
 
 ' The weekday initials: one shape whose center tab stops sit over the
 ' day columns, where seven shapes cost the opening six more creations.
@@ -12319,10 +12674,10 @@ Private Function PartFill(ByVal partName As String, ByVal themeValue As ReDimUI)
     If PartFill = themeValue.SurfaceColor Then PartFill = -1
 End Function
 
-' One calendar part: a rounded cell with centered text, written only
-' when its look differs from what its slot recorded. A part whose place,
-' size, and font held rewrites only the words, fill, ink, and ring that
-' changed, as the days do when the month turns.
+' One calendar header part, the month or an arrow: a rounded cell with
+' centered text, written only when its look differs from what its slot
+' recorded. A part whose place, size, and font held rewrites only the
+' words, fill, ink, and ring that changed, as the month does when it turns.
 Private Sub SyncCalendarPart( _
     ByVal hostSheet As Worksheet, _
     ByVal themeValue As ReDimUI, _
@@ -12420,24 +12775,37 @@ Private Sub ApplyCalendarRing( _
     End If
 End Sub
 
-' A closed calendar leaves no shapes behind.
+' A closed calendar leaves no shapes behind. A close drops the parts its
+' slots say were drawn; the sweep of a calendar an earlier session left
+' open drops every name, and the day cells releases before 1.0.1 drew.
 Private Sub DeleteCalendarParts(ByVal hostSheet As Worksheet)
     Dim partNo As Long
     Dim partHeld As Boolean
+    Dim sweeping As Boolean
 
     On Error Resume Next
     partHeld = (LenB(mAppliedRowStates(1)) > 0)
+    sweeping = (mAppliedRowStates(1) = "?")
     On Error GoTo 0
     If Not partHeld Then Exit Sub
+    ' The picker stops ticking with its calendar closed.
+    OwnerApp.TickablesChanged
     On Error Resume Next
     DropPart hostSheet, "cb"
     DropPart hostSheet, "ch"
     DropPart hostSheet, "cp"
     DropPart hostSheet, "cn"
     DropPart hostSheet, "cw"
-    For partNo = 1 To 42
-        DropPart hostSheet, "cd" & partNo
+    For partNo = CAL_SLOT_HELD To CAL_SLOTS
+        If sweeping Or LenB(mAppliedRowStates(partNo)) > 0 Then
+            DropPart hostSheet, CalendarSlotPart(partNo)
+        End If
     Next partNo
+    If sweeping Then
+        For partNo = 1 To 42
+            DropPart hostSheet, "cd" & partNo
+        Next partNo
+    End If
     On Error GoTo 0
     Erase mAppliedRowStates
 End Sub
@@ -15095,7 +15463,8 @@ End Sub
 ' in the muted fill. Each window row keeps the state it was last drawn
 ' with, so an arrow key that moves the highlight rewrites two rows, not
 ' the window; a row whose frame held rewrites only its fill, text, and
-' ink, and a row is brought to the front only when first drawn.
+' ink, and a row is brought to the front only when first drawn. A list
+' that opens draws its first row and copies it for the rest.
 Private Sub SyncDropList( _
     ByVal hostSheet As Worksheet, _
     ByVal themeValue As ReDimUI _
@@ -15123,6 +15492,8 @@ Private Sub SyncDropList( _
     Dim boldLength As Long
     Dim priorKey As String
     Dim partCreated As Boolean
+    Dim rowCopied As Boolean
+    Dim styledRow As Shape
     Dim listSig As String
     Dim showEmpty As Boolean
     Dim listTopAt As Double
@@ -15228,14 +15599,27 @@ Private Sub SyncDropList( _
         priorKey = mAppliedRowStates(idx)
         If rowKey <> priorKey Then
             mAppliedRowStates(idx) = rowKey
-            Set optionShape = EnsurePartShape( _
-                hostSheet, "opt" & idx, msoShapeRectangle, partCreated)
+            ' A fresh row copies one drawn this pass, then takes only its
+            ' own place, fill, words, and ink, as a row whose frame held does.
+            Set optionShape = Nothing
+            partCreated = False
+            If LenB(priorKey) = 0 And Not styledRow Is Nothing Then
+                Set optionShape = CopyPartShape(hostSheet, styledRow, "opt" & idx)
+            End If
+            rowCopied = Not optionShape Is Nothing
+            If rowCopied Then
+                optionShape.Left = mLeft
+                optionShape.Top = rowTop
+            Else
+                Set optionShape = EnsurePartShape( _
+                    hostSheet, "opt" & idx, msoShapeRectangle, partCreated)
+            End If
             If Not partCreated And Left$(priorKey, Len(rowLook) + 1) _
                 = rowLook & Chr$(2) Then
                 ' Same row, the match moved: only its letters change.
                 MoveRowBold optionShape, Mid$(priorKey, Len(rowLook) + 2), _
                     boldAt, boldLength
-            ElseIf KeyFrame(priorKey) = rowFrame And Not partCreated Then
+            ElseIf rowCopied Or (KeyFrame(priorKey) = rowFrame And Not partCreated) Then
                 ' Same frame: only the fill, the text, and the ink move.
                 ' A group header's bold first letter would spread over
                 ' the text written after it, so grouped lists reset it.
@@ -15288,6 +15672,7 @@ Private Sub SyncDropList( _
                 optionShape.OnAction = mAppliedOnAction
                 If LenB(priorKey) = 0 Then optionShape.ZOrder msoBringToFront
             End If
+            Set styledRow = optionShape
         End If
     Next idx
     EnsureRowStates mAppliedRowStates, mAppliedOptionCount
@@ -16489,6 +16874,23 @@ Friend Sub TickListWatch( _
     If PressedOffUntilRelease(pressEdge, buttonDown) Then CloseDropList
 End Sub
 
+' True when the next apply draws or deletes a whole drop list or calendar:
+' its open state changed since it was last drawn.
+Friend Property Get DrawsManyParts() As Boolean
+    Dim calendarDrawn As Boolean
+
+    Select Case mKind
+        Case KIND_SELECT, KIND_COMBO
+            DrawsManyParts = (mSelectOpen <> _
+                (mAppliedOptionCount > 0 Or LenB(mAppliedEmptyRowSig) > 0))
+        Case KIND_DATE
+            On Error Resume Next
+            calendarDrawn = (LenB(mAppliedRowStates(1)) > 0)
+            On Error GoTo 0
+            DrawsManyParts = (mSelectOpen <> calendarDrawn)
+    End Select
+End Property
+
 ' Closes an open list without picking anything.
 Friend Sub CloseDropList()
     If Not mSelectOpen Then Exit Sub
@@ -16499,12 +16901,14 @@ End Sub
 
 ' Every path that opens the list: the app's other lists close, the list
 ' picks its side, the watch starts over, and the pump runs so the watch
-' sees presses elsewhere.
+' sees presses elsewhere. A date picker ticks only while its calendar is
+' open, so it joins the app's ticking controls here.
 Private Sub NoteListOpened()
     mListSelAtOpen = vbNullString
     mOffPressPending = False
     mListFlipped = ListOpensUpward()
     OwnerApp.CloseListsExcept mComponentId
+    If mKind = KIND_DATE Then OwnerApp.TickablesChanged
     ReDimUI.RequestPump
 End Sub
 
