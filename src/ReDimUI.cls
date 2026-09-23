@@ -69,6 +69,7 @@ Private Declare PtrSafe Function SystemParametersInfo Lib "user32" _
     ByVal profileFlags As Long) As Long
 Private Declare PtrSafe Function OpenClipboard Lib "user32" ( _
     ByVal ownerWindow As LongPtr) As Long
+Private Declare PtrSafe Sub Sleep Lib "kernel32" (ByVal pauseMs As Long)
 Private Declare PtrSafe Function CloseClipboard Lib "user32" () As Long
 Private Declare PtrSafe Function EmptyClipboard Lib "user32" () As Long
 Private Declare PtrSafe Function IsClipboardFormatAvailable Lib "user32" ( _
@@ -96,6 +97,8 @@ Private Const LOGPIXELSY As Long = 90
 Private Const VK_LEFT_BUTTON As Long = 1
 Private Const VK_RIGHT_BUTTON As Long = 2
 Private Const SPI_GETCLIENTAREAANIMATION As Long = &H1042
+Private Const SPI_GETKEYBOARDDELAY As Long = &H16
+Private Const SPI_GETKEYBOARDSPEED As Long = &HA
 Private Const CF_UNICODETEXT As Long = 13
 Private Const GMEM_MOVEABLE_ZEROED As Long = &H42
 
@@ -148,6 +151,14 @@ Private Const LIST_GUTTER As Double = 14
 ' 24 pixels at 96 DPI: the WCAG 2.5.8 minimum target size.
 Private Const PAGER_TARGET As Double = 18
 
+' Transfer list layout, in points: the header over each panel, the move
+' buttons between the panels and the gap around them, and a row.
+Private Const TRANSFER_HEADER_H As Double = 18
+Private Const TRANSFER_BUTTON_W As Double = 26
+Private Const TRANSFER_BUTTON_H As Double = 22
+Private Const TRANSFER_GAP As Double = 6
+Private Const TRANSFER_ROW_H As Double = 20
+
 ' Sentinel for "the source could not be loaded"; contains characters no
 ' real path can, so it never collides with one.
 Private Const IMAGE_MISSING As String = "?missing?"
@@ -193,6 +204,12 @@ Private mBoundAccessKeys As String
 Private mPointerOverridden As Boolean
 Private mPointerX As Double
 Private mPointerY As Double
+' The override's left button, and the pointer as read once per pump
+' frame: 0 not read yet this frame, 1 read, 2 unmappable.
+Private mPointerButtonHeld As Boolean
+Private mFramePointerState As Long
+Private mFramePointerX As Double
+Private mFramePointerY As Double
 ' The caret blink interval Windows reported when a field last took
 ' focus; 0 when the user turned blinking off.
 Private mCaretBlinkMs As Long
@@ -289,6 +306,64 @@ Private mToastActionProc As String
 Private mSlideRemaining As Double
 Private mToastExiting As Boolean
 Private mExitRemaining As Double
+' The countdown a toast keeps while the pointer rests on it; 0 when free.
+Private mToastHeldMs As LongLong
+' Pointer effects, per app: whether hover and press looks draw, the
+' control and part under the pointer and when the pointer got there,
+' the press look shown, where the left button went down, and the last
+' pointer position, which tells a moving pointer from a resting one.
+Private mPointerEffects As Boolean
+Private mHoverTargetId As String
+Private mHoverTargetPart As String
+Private mHoverSinceMs As LongLong
+Private mHoverPressedShown As Boolean
+Private mPressTargetId As String
+Private mPressTargetPart As String
+Private mHoverPrevDown As Boolean
+Private mHoverPointX As Double
+Private mHoverPointY As Double
+' A control's own pointer look: hovered, the part hovered, and pressed;
+' and the transfer button or arrow tinted for it.
+Private mHovered As Boolean
+Private mHoveredPart As String
+Private mHoverPressed As Boolean
+Private mAppliedPartTint As String
+' Tooltips: a control's note for a resting pointer and its note while
+' disabled; per app, whether any control has one, the control the
+' tooltip delay runs for and since when, the control showing one, and
+' whether a press put tooltips away until the pointer leaves.
+Private mTooltip As String
+Private mDisabledReason As String
+Private mHasTooltips As Boolean
+Private mTipTargetId As String
+Private mTipSinceMs As LongLong
+Private mTipShownId As String
+Private mTipSuppressed As Boolean
+' Hold-to-repeat, per app: the control and part a held press repeats,
+' when the next repeat is due, how many ran, and the button last frame;
+' per control, the value a hold started from and the release click it
+' swallows.
+Private mHoldId As String
+Private mHoldPart As String
+Private mHoldNextMs As LongLong
+Private mHoldRepeats As Long
+Private mHoldPrevDown As Boolean
+Private mHoldValueAtStart As Double
+Private mHoldSuppressUntilMs As LongLong
+' Transfer gestures: the last row click, which tells a double click; a
+' press-drag from a row, its panel (0 left, 1 right) and item, what it
+' became (1 a range selection, 2 a drag onto the other panel), and the
+' button last frame; and the panel drawn as the drop target (1 left,
+' 2 right, 0 none).
+Private mLastRowClickMs As LongLong
+Private mLastRowClickPart As String
+Private mRowDragOn As Boolean
+Private mRowDragPanel As Long
+Private mRowDragFrom As Long
+Private mRowDragMode As Long
+Private mRowDragPrevDown As Boolean
+Private mDropPanel As Long
+Private mAppliedDropPanel As Long
 Private mItems As Collection
 ' Transfer list: the right-hand (chosen) side and its selections. mItems
 ' carries the left-hand (available) side, so the item APIs work unchanged.
@@ -425,6 +500,8 @@ Private mSlideTracking As Boolean
 Private mSlidePrevButtonDown As Boolean
 Private mSlideValueAtEngage As Double
 Private mSlideSuppressUntilMs As LongLong
+' Whether the slider's value bubble is drawn.
+Private mAppliedBubble As Boolean
 Private mFieldTextAtFocus As String
 Private mFieldSelAtFocus As String
 ' The grid selection an open list's watch compares against; empty until
@@ -560,12 +637,17 @@ Private Sub mExcelApp_WorkbookBeforeClose(ByVal Wb As Workbook, Cancel As Boolea
 End Sub
 
 ' Access-key chords follow the sheet in front.
+' A sheet coming back to the front re-arms the pump for the watches that
+' need it there: a slider's press watch, pointer effects. The pump stops
+' itself while no app has work, and leaving the sheet takes theirs.
 Private Sub mExcelApp_SheetActivate(ByVal Sh As Object)
     RefreshAccessKeys
+    If HasPendingWork() Then RequestPump
 End Sub
 
 Private Sub mExcelApp_WorkbookActivate(ByVal Wb As Workbook)
     RefreshAccessKeys
+    If HasPendingWork() Then RequestPump
 End Sub
 
 Private Function FindApp(ByVal targetAppId As String) As ReDimUI
@@ -641,6 +723,10 @@ Friend Sub DispatchShape(ByVal clickedName As String)
     End If
     If Not TryGetObject(mApps, targetAppId, appValue) Then Exit Sub
     If Not appValue.TryGetComponent(targetComponentId, componentValue) Then Exit Sub
+    If targetPart = "tt" Then
+        appValue.DismissTooltip
+        Exit Sub
+    End If
     ' A click anywhere else closes an open list, even a click the target
     ' then ignores.
     appValue.CloseListsExcept targetComponentId
@@ -905,16 +991,23 @@ Friend Function ConsumeForcedPressEdge() As Boolean
     mForcePressEdge = False
 End Function
 
-' Test seam: pointer-driven behavior (outside presses, slider drags) reads
-' this sheet position instead of the cursor until ClearPointerOverride.
-Friend Sub OverridePointer(ByVal pointsX As Double, ByVal pointsY As Double)
+' Test seam: pointer-driven behavior (outside presses, drags, holds, and
+' hover) reads this sheet position, with buttonDown as the left button,
+' instead of the cursor and the mouse until ClearPointerOverride.
+Friend Sub OverridePointer( _
+    ByVal pointsX As Double, _
+    ByVal pointsY As Double, _
+    Optional ByVal buttonDown As Boolean = False _
+)
     If Not IsFactory(Me) Then
-        ReDimUI.OverridePointer pointsX, pointsY
+        ReDimUI.OverridePointer pointsX, pointsY, buttonDown
         Exit Sub
     End If
     mPointerOverridden = True
     mPointerX = pointsX
     mPointerY = pointsY
+    mPointerButtonHeld = buttonDown
+    mFramePointerState = 0
 End Sub
 
 Friend Sub ClearPointerOverride()
@@ -923,7 +1016,56 @@ Friend Sub ClearPointerOverride()
         Exit Sub
     End If
     mPointerOverridden = False
+    mPointerButtonHeld = False
+    mFramePointerState = 0
 End Sub
+
+' The left button, and whether either button is down, from the override
+' while one is set.
+Friend Sub ReadButtons(ByRef leftDown As Boolean, ByRef eitherDown As Boolean)
+    If Not IsFactory(Me) Then
+        ReDimUI.ReadButtons leftDown, eitherDown
+        Exit Sub
+    End If
+    If mPointerOverridden Then
+        leftDown = mPointerButtonHeld
+        eitherDown = leftDown
+    Else
+        leftDown = (GetAsyncKeyState(VK_LEFT_BUTTON) < 0)
+        eitherDown = leftDown Or (GetAsyncKeyState(VK_RIGHT_BUTTON) < 0)
+    End If
+End Sub
+
+' The pointer in sheet points, read at most once per pump frame and
+' shared by every watch that asks for it. False when it cannot be mapped.
+Friend Function FramePointer(ByRef pointsX As Double, ByRef pointsY As Double) As Boolean
+    Dim screenPoint As RdxScreenPoint
+
+    If Not IsFactory(Me) Then
+        FramePointer = ReDimUI.FramePointer(pointsX, pointsY)
+        Exit Function
+    End If
+    If mFramePointerState = 0 Then
+        mFramePointerState = 2
+        If mPointerOverridden Then
+            mFramePointerX = mPointerX
+            mFramePointerY = mPointerY
+            mFramePointerState = 1
+        ElseIf GetCursorPos(screenPoint) <> 0 Then
+            mFramePointerX = ScreenXToSheetPoints(screenPoint.pixelX)
+            mFramePointerY = ScreenYToSheetPoints(screenPoint.pixelY)
+            If mFramePointerX <> UNMAPPABLE_POINTS _
+                And mFramePointerY <> UNMAPPABLE_POINTS Then
+                mFramePointerState = 1
+            End If
+        End If
+    End If
+    If mFramePointerState = 1 Then
+        pointsX = mFramePointerX
+        pointsY = mFramePointerY
+        FramePointer = True
+    End If
+End Function
 
 Friend Function PointerOverride( _
     ByRef pointsX As Double, _
@@ -1041,6 +1183,7 @@ Friend Sub TickAll(Optional ByVal forceWork As Boolean = False)
         End If
     End If
     mLastTickPreciseMs = nowPreciseMs
+    mFramePointerState = 0
     ' Renders inside a tick skip the ScreenUpdating toggle: flipping it at
     ' pump frequency redraws scroll bars and blips the cursor.
     mInPumpTick = True
@@ -2189,6 +2332,17 @@ Public Property Get Theme() As ReDimUI
     Set Theme = mTheme
 End Property
 
+' Hover and press looks for the app's controls, and an open list whose
+' highlight follows the pointer. Off by default: while on, the pump reads
+' the pointer every frame the app's sheet is in front.
+Public Function PointerEffects(Optional ByVal effectsOn As Boolean = True) As ReDimUI
+    RequireRole ROLE_APP, "PointerEffects"
+    mPointerEffects = effectsOn
+    If Not effectsOn Then ClearPointerTarget
+    If mRendered And HasAppWork() Then ReDimUI.RequestPump
+    Set PointerEffects = Me
+End Function
+
 ' Registers this app as a window: its sheet participates in Navigate and
 ' NavigateBack, shown alone among registered windows like a form.
 Public Function AsWindow() As ReDimUI
@@ -2512,16 +2666,14 @@ Private Sub TickComponentsSection( _
     On Error GoTo Fault
     ' Sliders drag with the left button only; the field blur watch treats
     ' a press of either button as clicking away.
-    leftButtonDown = (GetAsyncKeyState(VK_LEFT_BUTTON) < 0)
-    anyButtonDown = leftButtonDown _
-        Or (GetAsyncKeyState(VK_RIGHT_BUTTON) < 0)
+    ReDimUI.ReadButtons leftButtonDown, anyButtonDown
     pressEdge = (anyButtonDown And Not mFieldPrevButtonDown)
     mFieldPrevButtonDown = anyButtonDown
     If ReDimUI.ConsumeForcedPressEdge() Then pressEdge = True
     Set expiredIds = New Collection
     For Each componentValue In Tickables()
         componentValue.TickAnimation mSheet, elapsedMs
-        componentValue.TickSlideDrag Me, leftButtonDown
+        componentValue.TickPressDrag Me, leftButtonDown
         componentValue.TickListWatch pressEdge, runWork
         If runWork Then
             If componentValue.IsExpiredToast(nowMs) Then
@@ -2532,6 +2684,8 @@ Private Sub TickComponentsSection( _
             expiredIds.Add componentValue.ComponentId
         End If
     Next componentValue
+    TickPointer nowMs, leftButtonDown
+    TickHold nowMs, leftButtonDown
     ' The control holding keyboard focus, tickable or not, watches for a
     ' press elsewhere or a moved selection.
     If ReDimUI.IsComponentFocused(mAppId, ReDimUI.FocusedComponentId) Then
@@ -2548,6 +2702,242 @@ Private Sub TickComponentsSection( _
     Exit Sub
 Fault:
     ReDimUI.NoteTickFault
+End Sub
+
+' True while the app reads the pointer every frame: pointer effects on
+' or a control with a tooltip, with its sheet in front.
+Private Function NeedsPointerWatch() As Boolean
+    If Not (mPointerEffects Or mHasTooltips) Then Exit Function
+    NeedsPointerWatch = AppSheetInFront()
+End Function
+
+' The control under the pointer takes the hover look, and the press look
+' while the left button that went down on it stays down; an open list
+' under a moving pointer moves its highlight to the row there.
+Private Sub TickPointer(ByVal nowMs As LongLong, ByVal leftButtonDown As Boolean)
+    Dim pointsX As Double
+    Dim pointsY As Double
+    Dim hitId As String
+    Dim hitPart As String
+    Dim pressedNow As Boolean
+    Dim pointerMoved As Boolean
+    Dim componentValue As ReDimUI
+
+    If Not NeedsPointerWatch() Then
+        If LenB(mHoverTargetId) > 0 Then ClearPointerTarget
+        If LenB(mTipShownId) > 0 Then HideTooltip
+        mTipTargetId = vbNullString
+        Exit Sub
+    End If
+    If ReDimUI.FramePointer(pointsX, pointsY) Then
+        HitTestPoint pointsX, pointsY, hitId, hitPart
+        pointerMoved = (pointsX <> mHoverPointX Or pointsY <> mHoverPointY)
+        mHoverPointX = pointsX
+        mHoverPointY = pointsY
+    End If
+    If leftButtonDown And Not mHoverPrevDown Then
+        mPressTargetId = hitId
+        mPressTargetPart = hitPart
+    ElseIf Not leftButtonDown Then
+        mPressTargetId = vbNullString
+        mPressTargetPart = vbNullString
+    End If
+    mHoverPrevDown = leftButtonDown
+    pressedNow = leftButtonDown And LenB(hitId) > 0 _
+        And hitId = mPressTargetId And hitPart = mPressTargetPart
+    If hitId <> mHoverTargetId Or hitPart <> mHoverTargetPart Then
+        ClearPointerTarget
+        mHoverTargetId = hitId
+        mHoverTargetPart = hitPart
+        mHoverSinceMs = nowMs
+        mHoverPressedShown = pressedNow
+        If TryGetComponent(hitId, componentValue) Then
+            componentValue.SetPointerLook True, hitPart, pressedNow
+        End If
+    ElseIf pressedNow <> mHoverPressedShown Then
+        mHoverPressedShown = pressedNow
+        If TryGetComponent(hitId, componentValue) Then
+            componentValue.SetPointerLook True, hitPart, pressedNow
+        End If
+    End If
+    If pointerMoved And LenB(hitId) > 0 Then
+        If TryGetComponent(hitId, componentValue) Then
+            componentValue.FollowListPointer hitPart
+        End If
+    End If
+    TickTooltip nowMs, hitId, leftButtonDown, pointsX, pointsY
+End Sub
+
+' A tooltip shows once the pointer has rested on its control for the
+' Windows tooltip delay, the double-click time. It goes when the
+' pointer leaves or a button goes down, and after a press it stays away
+' until the pointer leaves the control.
+Private Sub TickTooltip( _
+    ByVal nowMs As LongLong, _
+    ByVal hitId As String, _
+    ByVal leftButtonDown As Boolean, _
+    ByVal pointsX As Double, _
+    ByVal pointsY As Double _
+)
+    Dim componentValue As ReDimUI
+
+    If hitId <> mTipTargetId Then
+        HideTooltip
+        mTipTargetId = hitId
+        mTipSinceMs = nowMs
+        mTipSuppressed = False
+    End If
+    If leftButtonDown Then
+        HideTooltip
+        mTipSuppressed = True
+        Exit Sub
+    End If
+    If mTipSuppressed Or LenB(hitId) = 0 Or LenB(mTipShownId) > 0 Then Exit Sub
+    If nowMs - mTipSinceMs < GetDoubleClickTime() Then Exit Sub
+    If Not TryGetComponent(hitId, componentValue) Then Exit Sub
+    If componentValue.DrawTooltip(pointsX, pointsY) Then mTipShownId = hitId
+End Sub
+
+Private Sub HideTooltip()
+    Dim componentValue As ReDimUI
+
+    If LenB(mTipShownId) = 0 Then Exit Sub
+    If TryGetComponent(mTipShownId, componentValue) Then
+        componentValue.ClearTooltipPart
+    End If
+    mTipShownId = vbNullString
+End Sub
+
+' A click on a tooltip puts it away, as a press anywhere does.
+Friend Sub DismissTooltip()
+    HideTooltip
+    mTipSuppressed = True
+End Sub
+
+' A control got a tooltip: the pointer watch starts, and a rendered app
+' arms the pump for it.
+Friend Sub NoteTooltips()
+    mHasTooltips = True
+    If mRendered And HasAppWork() Then ReDimUI.RequestPump
+End Sub
+
+' Hold-to-repeat: a press held on a stepper's minus or plus, a drop
+' list's pager, or a transfer panel's paging arrow repeats its action
+' after the Windows keyboard repeat delay, at the keyboard repeat rate,
+' while the pointer stays on the part. The release then fires OnChange
+' once and swallows the click Excel delivers for it.
+Private Sub TickHold(ByVal nowMs As LongLong, ByVal leftButtonDown As Boolean)
+    Dim pointsX As Double
+    Dim pointsY As Double
+    Dim hitId As String
+    Dim hitPart As String
+    Dim componentValue As ReDimUI
+
+    If leftButtonDown And Not mHoldPrevDown Then
+        mHoldId = vbNullString
+        If AppSheetInFront() Then
+            If ReDimUI.FramePointer(pointsX, pointsY) Then
+                HitTestPoint pointsX, pointsY, hitId, hitPart
+            End If
+            If TryGetComponent(hitId, componentValue) Then
+                If componentValue.RepeatsPart(hitPart) Then
+                    mHoldId = hitId
+                    mHoldPart = hitPart
+                    mHoldNextMs = nowMs + HoldDelayMs()
+                    mHoldRepeats = 0
+                    componentValue.BeginHold
+                End If
+            End If
+        End If
+    ElseIf leftButtonDown And LenB(mHoldId) > 0 Then
+        If nowMs >= mHoldNextMs Then
+            If ReDimUI.FramePointer(pointsX, pointsY) Then
+                HitTestPoint pointsX, pointsY, hitId, hitPart
+            End If
+            If hitId = mHoldId And hitPart = mHoldPart Then
+                If TryGetComponent(mHoldId, componentValue) Then
+                    componentValue.RepeatPart Me, mHoldPart
+                    mHoldRepeats = mHoldRepeats + 1
+                End If
+            End If
+            mHoldNextMs = nowMs + HoldRepeatMs()
+        End If
+    ElseIf Not leftButtonDown And LenB(mHoldId) > 0 Then
+        If TryGetComponent(mHoldId, componentValue) Then
+            componentValue.EndHold Me, mHoldRepeats > 0
+        End If
+        mHoldId = vbNullString
+    End If
+    mHoldPrevDown = leftButtonDown
+End Sub
+
+' The Windows keyboard repeat delay, 250 to 1000 ms, and the interval
+' of its repeat rate, from about 400 ms down to 33 ms.
+Private Function HoldDelayMs() As Long
+    Dim delayCode As Long
+
+    delayCode = 1
+    If SystemParametersInfo(SPI_GETKEYBOARDDELAY, 0, delayCode, 0) = 0 Then
+        delayCode = 1
+    End If
+    If delayCode < 0 Or delayCode > 3 Then delayCode = 1
+    HoldDelayMs = (delayCode + 1) * 250
+End Function
+
+Private Function HoldRepeatMs() As Long
+    Dim speedCode As Long
+
+    speedCode = 31
+    If SystemParametersInfo(SPI_GETKEYBOARDSPEED, 0, speedCode, 0) = 0 Then
+        speedCode = 31
+    End If
+    If speedCode < 0 Or speedCode > 31 Then speedCode = 31
+    HoldRepeatMs = CLng(1000 / (2.5 + speedCode * 27.5 / 31))
+End Function
+
+' The control under the pointer loses its look, as when the pointer
+' leaves it or the watch stops.
+Private Sub ClearPointerTarget()
+    Dim componentValue As ReDimUI
+
+    If LenB(mHoverTargetId) > 0 Then
+        If TryGetComponent(mHoverTargetId, componentValue) Then
+            componentValue.SetPointerLook False, vbNullString, False
+        End If
+    End If
+    mHoverTargetId = vbNullString
+    mHoverTargetPart = vbNullString
+    mHoverPressedShown = False
+End Sub
+
+' The control under a sheet point and its part there. An open list
+' draws over everything, so it answers first; then the last control
+' created that covers the point, since later shapes draw on top.
+Private Sub HitTestPoint( _
+    ByVal pointsX As Double, _
+    ByVal pointsY As Double, _
+    ByRef hitId As String, _
+    ByRef hitPart As String _
+)
+    Dim componentValue As ReDimUI
+    Dim topValue As ReDimUI
+
+    For Each componentValue In mComponents
+        If componentValue.ListHoldsPoint(pointsX, pointsY) Then
+            Set topValue = componentValue
+            Exit For
+        End If
+    Next componentValue
+    If topValue Is Nothing Then
+        For Each componentValue In mComponents
+            If componentValue.CoversPoint(pointsX, pointsY) Then
+                Set topValue = componentValue
+            End If
+        Next componentValue
+    End If
+    If topValue Is Nothing Then Exit Sub
+    hitId = topValue.ComponentId
+    hitPart = topValue.PartAtPoint(pointsX, pointsY)
 End Sub
 
 ' After any toast leaves, survivors renumber to slots 1..N in their current
@@ -2603,6 +2993,10 @@ Friend Function HasAppWork() As Boolean
             Exit Function
         End If
     Next jobValue
+    If NeedsPointerWatch() Then
+        HasAppWork = True
+        Exit Function
+    End If
     ' Keyboard focus keeps the frames coming for its click-away watch.
     If ReDimUI.IsComponentFocused(mAppId, ReDimUI.FocusedComponentId) Then
         HasAppWork = True
@@ -2629,7 +3023,19 @@ Friend Function HasAppWork() As Boolean
             HasAppWork = True
             Exit Function
         End If
+        If componentValue.NeedsPressWatch Then
+            If AppSheetInFront() Then
+                HasAppWork = True
+                Exit Function
+            End If
+        End If
     Next componentValue
+End Function
+
+Private Function AppSheetInFront() As Boolean
+    On Error Resume Next
+    AppSheetInFront = (mSheet Is ActiveSheet)
+    On Error GoTo 0
 End Function
 
 ' ---------------------------------------------------------------
@@ -2792,7 +3198,7 @@ End Property
 Friend Property Get IsTickable() As Boolean
     Select Case mKind
         Case KIND_SPINNER, KIND_TOAST, KIND_SLIDEBAR, KIND_INPUT, KIND_COMBO, _
-            KIND_SELECT
+            KIND_SELECT, KIND_STEPPER, KIND_TRANSFER
             IsTickable = True
     End Select
 End Property
@@ -3163,6 +3569,26 @@ Public Function AltText(ByVal altDescription As String) As ReDimUI
     mAltText = altDescription
     Touch
     Set AltText = Me
+End Function
+
+' A short note that shows once the pointer rests on the control for the
+' Windows tooltip delay, and that screen readers read with the control.
+Public Function Tooltip(ByVal tipText As String) As ReDimUI
+    RequireRole ROLE_COMPONENT, "Tooltip"
+    mTooltip = tipText
+    If LenB(tipText) > 0 Then OwnerApp.NoteTooltips
+    Touch
+    Set Tooltip = Me
+End Function
+
+' The tooltip while the control is disabled: why it is, and what
+' enables it.
+Public Function DisabledReason(ByVal reasonText As String) As ReDimUI
+    RequireRole ROLE_COMPONENT, "DisabledReason"
+    mDisabledReason = reasonText
+    If LenB(reasonText) > 0 Then OwnerApp.NoteTooltips
+    Touch
+    Set DisabledReason = Me
 End Function
 
 Public Function Value(ByVal newNumber As Double) As ReDimUI
@@ -3860,10 +4286,37 @@ Friend Sub ReslotToast(ByVal newSlot As Long)
     ReDimUI.RequestPump
 End Sub
 
+' A toast under the pointer holds its countdown before the check.
 Friend Function IsExpiredToast(ByVal nowMs As LongLong) As Boolean
     If mKind <> KIND_TOAST Then Exit Function
+    HoldToastUnderPointer nowMs
     IsExpiredToast = (nowMs >= mExpiresAtMs)
 End Function
+
+' A toast under the pointer stops counting down, and keeps at least a
+' second once the pointer leaves, so it can be read and acted on.
+Private Sub HoldToastUnderPointer(ByVal nowMs As LongLong)
+    Dim pointsX As Double
+    Dim pointsY As Double
+
+    If mKind <> KIND_TOAST Or mToastExiting Then Exit Sub
+    If Not SheetInFront(OwnerApp) Then
+        mToastHeldMs = 0
+        Exit Sub
+    End If
+    If ReDimUI.FramePointer(pointsX, pointsY) Then
+        If pointsX >= mLeft And pointsX <= mLeft + mWidth _
+            And pointsY >= mTop And pointsY <= mTop + mHeight Then
+            If mToastHeldMs = 0 Then
+                mToastHeldMs = mExpiresAtMs - nowMs
+                If mToastHeldMs < 1000 Then mToastHeldMs = 1000
+            End If
+            mExpiresAtMs = nowMs + mToastHeldMs
+            Exit Sub
+        End If
+    End If
+    mToastHeldMs = 0
+End Sub
 
 ' Test seam: milliseconds until the toast expires.
 Friend Property Get ToastRemainingMs() As Long
@@ -4163,9 +4616,9 @@ End Sub
 Private Function TransferRowCapacity() As Long
     Dim panelH As Double
 
-    panelH = mHeight - 18
+    panelH = mHeight - TRANSFER_HEADER_H
     If panelH < 30 Then panelH = 30
-    TransferRowCapacity = Int((panelH - 6) / 20)
+    TransferRowCapacity = Int((panelH - 6) / TRANSFER_ROW_H)
     If TransferRowCapacity < 1 Then TransferRowCapacity = 1
 End Function
 
@@ -4363,9 +4816,10 @@ End Sub
 
 Friend Function CanClick() As Boolean
     If Not mVisible Or Not mEnabled Or mBusy Then Exit Function
-    ' A float field takes every click, so the second of a double click
-    ' reaches it; a click there only moves the caret.
-    If Not IsFloatField() Then
+    ' A float field and a transfer list take every click, so the second
+    ' of a double click reaches them: it selects a field's word or moves
+    ' a transfer row across.
+    If Not IsFloatField() And mKind <> KIND_TRANSFER Then
         If GetTickCount64() - mLastClickMs < CLICK_DEBOUNCE_MS Then Exit Function
     End If
     CanClick = True
@@ -4381,6 +4835,9 @@ End Sub
 Friend Sub RunClickBehavior()
     Dim hostApp As ReDimUI
 
+    ' The click Excel delivers for the release of a held press that
+    ' already repeated.
+    If GetTickCount64() < mHoldSuppressUntilMs Then Exit Sub
     Set hostApp = OwnerApp
     Select Case mKind
         Case KIND_TOGGLE
@@ -4479,37 +4936,31 @@ Friend Sub RunClickBehavior()
             Dim transferRow As Long
             transferPart = ReDimUI.SenderPart
             EnsureTransferCollections
-            Dim transferPage As Long
-            transferPage = TransferRowCapacity() - 1
-            If transferPage < 1 Then transferPage = 1
-            If transferPart = "alu" Then
-                mLeftOffset = mLeftOffset - transferPage
-                If mLeftOffset < 0 Then mLeftOffset = 0
-                Touch
-            ElseIf transferPart = "ald" Then
-                mLeftOffset = mLeftOffset + transferPage
-                Touch
-            ElseIf transferPart = "clu" Then
-                mRightOffset = mRightOffset - transferPage
-                If mRightOffset < 0 Then mRightOffset = 0
-                Touch
-            ElseIf transferPart = "cld" Then
-                mRightOffset = mRightOffset + transferPage
-                Touch
+            If transferPart = "alu" Or transferPart = "ald" _
+                Or transferPart = "clu" Or transferPart = "cld" Then
+                PageTransferPanel transferPart
             ElseIf Left$(transferPart, 2) = "al" Then
                 If IsNumeric(Mid$(transferPart, 3)) Then
                     ' Window rows map through the scroll offset.
                     transferRow = mLeftOffset + CLng(Mid$(transferPart, 3))
-                    TransferSelectionToggle mSelLeft, transferRow
-                    PlaceKeyCursor 0, transferRow
-                    Touch
+                    If RowDoubleClicked(transferPart) Then
+                        MoveTransferRow hostApp, True, transferRow
+                    Else
+                        TransferSelectionToggle mSelLeft, transferRow
+                        PlaceKeyCursor 0, transferRow
+                        Touch
+                    End If
                 End If
             ElseIf Left$(transferPart, 2) = "cl" Then
                 If IsNumeric(Mid$(transferPart, 3)) Then
                     transferRow = mRightOffset + CLng(Mid$(transferPart, 3))
-                    TransferSelectionToggle mSelRight, transferRow
-                    PlaceKeyCursor 1, transferRow
-                    Touch
+                    If RowDoubleClicked(transferPart) Then
+                        MoveTransferRow hostApp, False, transferRow
+                    Else
+                        TransferSelectionToggle mSelRight, transferRow
+                        PlaceKeyCursor 1, transferRow
+                        Touch
+                    End If
                 End If
             ElseIf transferPart = "mvr" Then
                 TransferSelected hostApp, True
@@ -4753,6 +5204,14 @@ Private Function AccessibleDescription() As String
     End If
     If LenB(mAccessKey) > 0 And LenB(described) > 0 Then
         described = described & ", Alt+" & UCase$(mAccessKey)
+    End If
+    ' The tooltip is read with the control: the reason while disabled.
+    If LenB(described) > 0 Then
+        If Not mEnabled And LenB(mDisabledReason) > 0 Then
+            described = described & ", " & mDisabledReason
+        ElseIf LenB(mTooltip) > 0 Then
+            described = described & ", " & mTooltip
+        End If
     End If
     AccessibleDescription = described
 End Function
@@ -5101,11 +5560,13 @@ Private Sub ApplyStyle(ByVal mainShape As Shape, ByVal themeValue As ReDimUI)
                 mAppliedFill = themeValue.MutedColor
             End If
         Case KIND_TOGGLE
-            If Not mAppliedValid Or mAppliedFill <> ResolveToggleFill(themeValue) Then
+            resolvedFill = PointerTint(ResolveToggleFill(themeValue), _
+                IIf(mChecked, themeValue.OnPrimaryColor, themeValue.OnSurfaceColor))
+            If Not mAppliedValid Or mAppliedFill <> resolvedFill Then
                 mainShape.Fill.Visible = msoTrue
-                mainShape.Fill.ForeColor.RGB = ResolveToggleFill(themeValue)
+                mainShape.Fill.ForeColor.RGB = resolvedFill
                 mainShape.Line.Visible = msoFalse
-                mAppliedFill = ResolveToggleFill(themeValue)
+                mAppliedFill = resolvedFill
             End If
         Case KIND_IMAGE
             ApplyImageFill mainShape, themeValue
@@ -5126,12 +5587,14 @@ Private Sub ApplyStyle(ByVal mainShape As Shape, ByVal themeValue As ReDimUI)
                 Dim errorOn As Boolean
                 ringOn = ReDimUI.IsComponentFocused(mOwnerAppId, mComponentId)
                 errorOn = LenB(mValidationError) > 0
+                resolvedFill = PointerTint(ResolveSurfaceFill(themeValue), _
+                    themeValue.OnSurfaceColor)
                 If Not mAppliedValid _
-                    Or mAppliedFill <> ResolveSurfaceFill(themeValue) _
+                    Or mAppliedFill <> resolvedFill _
                     Or mAppliedFocusRing <> ringOn _
                     Or mAppliedErrorBorder <> errorOn Then
                     mainShape.Fill.Visible = msoTrue
-                    mainShape.Fill.ForeColor.RGB = ResolveSurfaceFill(themeValue)
+                    mainShape.Fill.ForeColor.RGB = resolvedFill
                     mainShape.Line.Visible = msoTrue
                     mAppliedErrorBorder = errorOn
                     If errorOn Then
@@ -5144,7 +5607,7 @@ Private Sub ApplyStyle(ByVal mainShape As Shape, ByVal themeValue As ReDimUI)
                         mainShape.Line.ForeColor.RGB = themeValue.BorderColor
                         mainShape.Line.Weight = 1
                     End If
-                    mAppliedFill = ResolveSurfaceFill(themeValue)
+                    mAppliedFill = resolvedFill
                     mAppliedFocusRing = ringOn
                 End If
             ElseIf Not mAppliedValid Or mAppliedFill <> themeValue.BorderColor Then
@@ -5155,13 +5618,15 @@ Private Sub ApplyStyle(ByVal mainShape As Shape, ByVal themeValue As ReDimUI)
                 mAppliedFill = themeValue.BorderColor
             End If
         Case KIND_SELECT
-            If Not mAppliedValid Or mAppliedFill <> ResolveSurfaceFill(themeValue) Then
+            resolvedFill = PointerTint(ResolveSurfaceFill(themeValue), _
+                themeValue.OnSurfaceColor)
+            If Not mAppliedValid Or mAppliedFill <> resolvedFill Then
                 mainShape.Fill.Visible = msoTrue
-                mainShape.Fill.ForeColor.RGB = ResolveSurfaceFill(themeValue)
+                mainShape.Fill.ForeColor.RGB = resolvedFill
                 mainShape.Line.Visible = msoTrue
                 mainShape.Line.ForeColor.RGB = themeValue.BorderColor
                 mainShape.Line.Weight = 1
-                mAppliedFill = ResolveSurfaceFill(themeValue)
+                mAppliedFill = resolvedFill
             End If
         Case KIND_OVERLAY
             If Not mAppliedValid Then
@@ -5171,6 +5636,7 @@ Private Sub ApplyStyle(ByVal mainShape As Shape, ByVal themeValue As ReDimUI)
                 mainShape.Line.Visible = msoFalse
             End If
         Case Else
+            resolvedFill = PointerTint(resolvedFill, ResolveTextColor(themeValue))
             If Not mAppliedValid Or mAppliedFill <> resolvedFill Then
                 mainShape.Fill.Visible = msoTrue
                 mainShape.Fill.ForeColor.RGB = resolvedFill
@@ -6863,7 +7329,7 @@ Private Sub ApplyTickBox( _
     Dim boxSize As Double
 
     If ExtrasCurrent(PartsState(themeValue) & ":" & CStr(mChecked) & _
-        ":" & mText & ":" & mAccessKey) Then Exit Sub
+        ":" & mText & ":" & mAccessKey & ":" & PointerKey()) Then Exit Sub
     boxSize = mHeight - 2
     If boxSize > 16 Then boxSize = 16
     If boxSize < 10 Then boxSize = 10
@@ -6874,12 +7340,14 @@ Private Sub ApplyTickBox( _
     mainShape.Visible = BoolToMso(mVisible)
     mainShape.Fill.Visible = msoTrue
     If mChecked And mEnabled Then
-        mainShape.Fill.ForeColor.RGB = ResolveFill(themeValue)
+        mainShape.Fill.ForeColor.RGB = PointerTint(ResolveFill(themeValue), _
+            themeValue.OnPrimaryColor)
         mainShape.Line.Visible = msoFalse
     Else
         mainShape.Fill.ForeColor.RGB = themeValue.SurfaceColor
         mainShape.Line.Visible = msoTrue
-        mainShape.Line.ForeColor.RGB = themeValue.BorderColor
+        mainShape.Line.ForeColor.RGB = _
+            IIf(PointerOn(), themeValue.PrimaryColor, themeValue.BorderColor)
         mainShape.Line.Weight = 1.25
     End If
     If mChecked Then
@@ -6925,7 +7393,7 @@ Private Sub ApplyRadioGroup( _
     rowTotal = mItems.Count
     If rowTotal = 0 Then Exit Sub
     If ExtrasCurrent(PartsState(themeValue) & ":" & CStr(mValue) & _
-        JoinedSig(mItems)) Then Exit Sub
+        ":" & PointerKey() & JoinedSig(mItems)) Then Exit Sub
     rowPitch = mHeight / rowTotal
     circleSize = rowPitch - 6
     If circleSize > 14 Then circleSize = 14
@@ -6948,6 +7416,9 @@ Private Sub ApplyRadioGroup( _
         If isPicked And mEnabled Then
             ring.Line.ForeColor.RGB = ResolveFill(themeValue)
             ring.Line.Weight = 1.5
+        ElseIf PointerOn("row" & idx) Then
+            ring.Line.ForeColor.RGB = themeValue.PrimaryColor
+            ring.Line.Weight = 1.25
         Else
             ring.Line.ForeColor.RGB = themeValue.BorderColor
             ring.Line.Weight = 1.25
@@ -7048,7 +7519,8 @@ Private Sub ApplyCheckListParts( _
     If boxSize < 10 Then boxSize = 10
 
     If mSelectAllRow Then
-        headerKey = CStr(checkedTotal) & "/" & CStr(rowTotal)
+        headerKey = CStr(checkedTotal) & "/" & CStr(rowTotal) & _
+            IIf(PointerOn("row0"), "h", vbNullString)
         priorKey = mAppliedCheckHeaderSig
         If headerKey <> priorKey Then
             mAppliedCheckHeaderSig = headerKey
@@ -7059,14 +7531,14 @@ Private Sub ApplyCheckListParts( _
             headerText = "Select all (" & checkedTotal & "/" & rowTotal & ")"
             If LenB(priorKey) > 0 And Not (boxCreated Or captionCreated) Then
                 StyleCheckBoxState box, boxSize, themeValue, _
-                    (checkedTotal = rowTotal), (checkedTotal > 0)
+                    (checkedTotal = rowTotal), (checkedTotal > 0), PointerOn("row0")
                 captionShape.TextFrame2.TextRange.Text = headerText
             Else
                 On Error Resume Next
                 box.Adjustments(1) = 0.2
                 On Error GoTo 0
                 StyleCheckBoxFace box, boxSize, mTop, rowPitch, themeValue, _
-                    (checkedTotal = rowTotal), (checkedTotal > 0)
+                    (checkedTotal = rowTotal), (checkedTotal > 0), PointerOn("row0")
                 captionShape.Left = mLeft + boxSize + 8
                 captionShape.Top = mTop
                 captionShape.Width = mWidth - boxSize - 8
@@ -7084,7 +7556,10 @@ Private Sub ApplyCheckListParts( _
     End If
 
     For idx = 1 To rowTotal
-        rowKey = IIf(checkedFlags(idx), "1", "0") & ItemAt(idx)
+        ' The first character carries the box state: checked adds 1 and
+        ' the pointer adds 2.
+        rowKey = CStr(IIf(checkedFlags(idx), 1, 0) + _
+            IIf(PointerOn("row" & idx), 2, 0)) & ItemAt(idx)
         priorKey = mAppliedRowStates(idx)
         If rowKey <> priorKey Then
             mAppliedRowStates(idx) = rowKey
@@ -7103,7 +7578,7 @@ Private Sub ApplyCheckListParts( _
                 ' caption text, whichever moved.
                 If Left$(priorKey, 1) <> Left$(rowKey, 1) Then
                     StyleCheckBoxState box, boxSize, themeValue, _
-                        checkedFlags(idx), checkedFlags(idx)
+                        checkedFlags(idx), checkedFlags(idx), PointerOn("row" & idx)
                 End If
                 If Mid$(priorKey, 2) <> Mid$(rowKey, 2) Then
                     captionShape.TextFrame2.TextRange.Text = ItemAt(idx)
@@ -7115,7 +7590,7 @@ Private Sub ApplyCheckListParts( _
                     On Error GoTo 0
                 End If
                 StyleCheckBoxFace box, boxSize, rowTop, rowPitch, themeValue, _
-                    checkedFlags(idx), checkedFlags(idx)
+                    checkedFlags(idx), checkedFlags(idx), PointerOn("row" & idx)
                 captionShape.Left = mLeft + boxSize + 8
                 captionShape.Top = rowTop
                 captionShape.Width = mWidth - boxSize - 8
@@ -7152,17 +7627,10 @@ Private Sub StyleCheckBoxState( _
     ByVal boxSize As Double, _
     ByVal themeValue As ReDimUI, _
     ByVal fullState As Boolean, _
-    ByVal partialState As Boolean _
+    ByVal partialState As Boolean, _
+    Optional ByVal pointerHere As Boolean = False _
 )
-    If partialState And mEnabled Then
-        box.Fill.ForeColor.RGB = ResolveFill(themeValue)
-        box.Line.Visible = msoFalse
-    Else
-        box.Fill.ForeColor.RGB = themeValue.SurfaceColor
-        box.Line.Visible = msoTrue
-        box.Line.ForeColor.RGB = themeValue.BorderColor
-        box.Line.Weight = 1.25
-    End If
+    StyleCheckBoxEdge box, themeValue, partialState, pointerHere
     With box.TextFrame2.TextRange
         If fullState Then
             .Text = ChrW(10003)
@@ -7190,22 +7658,15 @@ Private Sub StyleCheckBoxFace( _
     ByVal rowPitch As Double, _
     ByVal themeValue As ReDimUI, _
     ByVal fullState As Boolean, _
-    ByVal partialState As Boolean _
+    ByVal partialState As Boolean, _
+    Optional ByVal pointerHere As Boolean = False _
 )
     box.Left = mLeft
     box.Top = rowTop + (rowPitch - boxSize) / 2
     box.Width = boxSize
     box.Height = boxSize
     box.Fill.Visible = msoTrue
-    If partialState And mEnabled Then
-        box.Fill.ForeColor.RGB = ResolveFill(themeValue)
-        box.Line.Visible = msoFalse
-    Else
-        box.Fill.ForeColor.RGB = themeValue.SurfaceColor
-        box.Line.Visible = msoTrue
-        box.Line.ForeColor.RGB = themeValue.BorderColor
-        box.Line.Weight = 1.25
-    End If
+    StyleCheckBoxEdge box, themeValue, partialState, pointerHere
     If fullState Then
         StyleGlyphText box, ChrW(10003), _
             IIf(mEnabled, themeValue.OnPrimaryColor, themeValue.OnMutedColor), _
@@ -7222,6 +7683,31 @@ Private Sub StyleCheckBoxFace( _
     box.OnAction = mAppliedOnAction
 End Sub
 
+' A check box's fill and edge: the accent when checked or mixed, else
+' the surface with a border, which takes the accent under the pointer.
+Private Sub StyleCheckBoxEdge( _
+    ByVal box As Shape, _
+    ByVal themeValue As ReDimUI, _
+    ByVal filledState As Boolean, _
+    ByVal pointerHere As Boolean _
+)
+    If filledState And mEnabled Then
+        If pointerHere Then
+            box.Fill.ForeColor.RGB = BlendRgb(ResolveFill(themeValue), _
+                themeValue.OnPrimaryColor, 0.08)
+        Else
+            box.Fill.ForeColor.RGB = ResolveFill(themeValue)
+        End If
+        box.Line.Visible = msoFalse
+    Else
+        box.Fill.ForeColor.RGB = themeValue.SurfaceColor
+        box.Line.Visible = msoTrue
+        box.Line.ForeColor.RGB = _
+            IIf(pointerHere, themeValue.PrimaryColor, themeValue.BorderColor)
+        box.Line.Weight = 1.25
+    End If
+End Sub
+
 ' Minus and plus squares around a bordered value face.
 Private Sub ApplyStepper( _
     ByVal mainShape As Shape, _
@@ -7232,7 +7718,8 @@ Private Sub ApplyStepper( _
     Dim plusButton As Shape
     Dim buttonSize As Double
 
-    If ExtrasCurrent(PartsState(themeValue) & ":" & CStr(mValue)) Then Exit Sub
+    If ExtrasCurrent(PartsState(themeValue) & ":" & CStr(mValue) & _
+        ":" & PointerKey()) Then Exit Sub
     buttonSize = mHeight
     mainShape.Left = mLeft + buttonSize + 4
     mainShape.Top = mTop
@@ -7253,7 +7740,8 @@ Private Sub ApplyStepper( _
     minusButton.Width = buttonSize
     minusButton.Height = buttonSize
     minusButton.Fill.Visible = msoTrue
-    minusButton.Fill.ForeColor.RGB = themeValue.MutedColor
+    minusButton.Fill.ForeColor.RGB = PointerTint(themeValue.MutedColor, _
+        ResolveDrawnInk(themeValue), "minus")
     minusButton.Line.Visible = msoFalse
     StyleGlyphText minusButton, "-", ResolveDrawnInk(themeValue), _
         themeValue.BaseFontSize + 2, themeValue
@@ -7266,7 +7754,8 @@ Private Sub ApplyStepper( _
     plusButton.Width = buttonSize
     plusButton.Height = buttonSize
     plusButton.Fill.Visible = msoTrue
-    plusButton.Fill.ForeColor.RGB = themeValue.MutedColor
+    plusButton.Fill.ForeColor.RGB = PointerTint(themeValue.MutedColor, _
+        ResolveDrawnInk(themeValue), "plus")
     plusButton.Line.Visible = msoFalse
     StyleGlyphText plusButton, "+", ResolveDrawnInk(themeValue), _
         themeValue.BaseFontSize + 2, themeValue
@@ -7342,10 +7831,6 @@ Private Sub ApplyTransferParts( _
     ByVal hostSheet As Worksheet, _
     ByVal themeValue As ReDimUI _
 )
-    Const HEADER_H As Double = 18
-    Const BTN_W As Double = 26
-    Const BTN_H As Double = 22
-    Const PANEL_GAP As Double = 6
     Dim panelW As Double
     Dim panelH As Double
     Dim panelTop As Double
@@ -7366,13 +7851,7 @@ Private Sub ApplyTransferParts( _
         mRightOffset = mChosenItems.Count - TransferRowCapacity()
     End If
     If mRightOffset < 0 Then mRightOffset = 0
-    panelW = (mWidth - BTN_W - 4 * PANEL_GAP) / 2
-    If panelW < 40 Then panelW = 40
-    panelTop = mTop + HEADER_H
-    panelH = mHeight - HEADER_H
-    If panelH < 30 Then panelH = 30
-    rightX = mLeft + panelW + BTN_W + 4 * PANEL_GAP
-    btnX = mLeft + panelW + 2 * PANEL_GAP
+    TransferLayout panelW, panelTop, panelH, rightX, btnX, btnTop
 
     layoutKey = PartsState(themeValue)
     If Not (mAppliedValid And layoutKey = mAppliedTransferSig) Then
@@ -7404,22 +7883,26 @@ Private Sub ApplyTransferParts( _
         rightPanel.Visible = BoolToMso(mVisible)
         rightPanel.OnAction = mAppliedOnAction
 
-        btnTop = panelTop + (panelH - (4 * BTN_H + 3 * PANEL_GAP)) / 2
-        If btnTop < panelTop Then btnTop = panelTop
         ApplyTransferButton hostSheet, themeValue, "mvr", ">", _
-            btnX, btnTop, BTN_W, BTN_H
+            btnX, btnTop, TRANSFER_BUTTON_W, TRANSFER_BUTTON_H
         ApplyTransferButton hostSheet, themeValue, "mvar", ">>", _
-            btnX, btnTop + (BTN_H + PANEL_GAP), BTN_W, BTN_H
+            btnX, btnTop + (TRANSFER_BUTTON_H + TRANSFER_GAP), _
+            TRANSFER_BUTTON_W, TRANSFER_BUTTON_H
         ApplyTransferButton hostSheet, themeValue, "mvl", "<", _
-            btnX, btnTop + 2 * (BTN_H + PANEL_GAP), BTN_W, BTN_H
+            btnX, btnTop + 2 * (TRANSFER_BUTTON_H + TRANSFER_GAP), _
+            TRANSFER_BUTTON_W, TRANSFER_BUTTON_H
         ApplyTransferButton hostSheet, themeValue, "mval", "<<", _
-            btnX, btnTop + 3 * (BTN_H + PANEL_GAP), BTN_W, BTN_H
+            btnX, btnTop + 3 * (TRANSFER_BUTTON_H + TRANSFER_GAP), _
+            TRANSFER_BUTTON_W, TRANSFER_BUTTON_H
+        mAppliedPartTint = vbNullString
+        mAppliedDropPanel = 0
     End If
+    SyncTransferDropTarget mainShape, hostSheet, themeValue
 
-    ApplyTransferHeader hostSheet, themeValue, "hl", mLeft, panelW, HEADER_H, _
+    ApplyTransferHeader hostSheet, themeValue, "hl", mLeft, panelW, TRANSFER_HEADER_H, _
         IIf(LenB(mCaptionLeft) > 0, mCaptionLeft, "Available") & _
         " (" & mItems.Count & ")", mAppliedHeaderLeftSig
-    ApplyTransferHeader hostSheet, themeValue, "hr", rightX, panelW, HEADER_H, _
+    ApplyTransferHeader hostSheet, themeValue, "hr", rightX, panelW, TRANSFER_HEADER_H, _
         IIf(LenB(mCaptionRight) > 0, mCaptionRight, "Selected") & _
         " (" & mChosenItems.Count & ")", mAppliedHeaderRightSig
     SyncTransferRows hostSheet, themeValue, mItems, "al", _
@@ -7433,6 +7916,7 @@ Private Sub ApplyTransferParts( _
     ApplyTransferScroller hostSheet, themeValue, "clu", "cld", _
         rightX, panelTop, panelW, panelH, mChosenItems.Count, _
         mAppliedScrollRightSig
+    SyncTransferPartTint hostSheet, themeValue
 
     ' The keyboard cursor, while the list holds focus.
     Dim cursorItems As Long
@@ -7540,6 +8024,32 @@ Private Sub ApplyTransferScroller( _
     End If
 End Sub
 
+' The move button or paging arrow under the pointer takes the pointer
+' tint; the one that had it goes back to its plain fill.
+Private Sub SyncTransferPartTint(ByVal hostSheet As Worksheet, ByVal themeValue As ReDimUI)
+    Dim tintKey As String
+    Dim priorPart As String
+
+    Select Case mHoveredPart
+        Case "mvr", "mvar", "mvl", "mval", "alu", "ald", "clu", "cld"
+            If PointerOn(mHoveredPart) Then tintKey = PointerKey()
+    End Select
+    If tintKey = mAppliedPartTint Then Exit Sub
+    On Error Resume Next
+    If LenB(mAppliedPartTint) > 0 Then
+        priorPart = Left$(mAppliedPartTint, Len(mAppliedPartTint) - 1)
+        hostSheet.Shapes(ShapeName & PART_SEPARATOR & priorPart) _
+            .Fill.ForeColor.RGB = themeValue.MutedColor
+    End If
+    If LenB(tintKey) > 0 Then
+        hostSheet.Shapes(ShapeName & PART_SEPARATOR & mHoveredPart) _
+            .Fill.ForeColor.RGB = PointerTint(themeValue.MutedColor, _
+                ResolveDrawnInk(themeValue), mHoveredPart)
+    End If
+    On Error GoTo 0
+    mAppliedPartTint = tintKey
+End Sub
+
 Private Sub ApplyTransferButton( _
     ByVal hostSheet As Worksheet, _
     ByVal themeValue As ReDimUI, _
@@ -7587,7 +8097,6 @@ Private Sub SyncTransferRows( _
     ByRef appliedRows As Long, _
     ByRef rowStates() As String _
 )
-    Const ROW_H As Double = 20
     Dim rowShape As Shape
     Dim idx As Long
     Dim wanted As Long
@@ -7604,13 +8113,13 @@ Private Sub SyncTransferRows( _
     Dim layoutKey As String
 
     wanted = itemsRef.Count - scrollOffset
-    If wanted > Int((panelH - 6) / ROW_H) Then
-        wanted = Int((panelH - 6) / ROW_H)
+    If wanted > Int((panelH - 6) / TRANSFER_ROW_H) Then
+        wanted = Int((panelH - 6) / TRANSFER_ROW_H)
     End If
     If wanted < 0 Then wanted = 0
     If Not mVisible Then wanted = 0
     rowWidth = panelW - 6
-    If itemsRef.Count > Int((panelH - 6) / ROW_H) Then
+    If itemsRef.Count > Int((panelH - 6) / TRANSFER_ROW_H) Then
         ' Leave room for the paging arrows.
         rowWidth = rowWidth - PAGER_TARGET - 2
     End If
@@ -7629,6 +8138,7 @@ Private Sub SyncTransferRows( _
             rowFill = ResolveSurfaceFill(themeValue)
             rowInk = themeValue.OnSurfaceColor
         End If
+        rowFill = PointerTint(rowFill, rowInk, partPrefix & idx)
         rowText = GutterText(rowSelected, CStr(itemsRef.Item(itemIndex)))
         rowKey = layoutKey & Chr$(1) & CStr(rowFill) & ":" & _
             CStr(rowInk) & ":" & rowText
@@ -7646,9 +8156,9 @@ Private Sub SyncTransferRows( _
                 End With
             Else
                 rowShape.Left = panelX + 3
-                rowShape.Top = panelTop + 3 + (idx - 1) * ROW_H
+                rowShape.Top = panelTop + 3 + (idx - 1) * TRANSFER_ROW_H
                 rowShape.Width = rowWidth
-                rowShape.Height = ROW_H
+                rowShape.Height = TRANSFER_ROW_H
                 rowShape.Fill.Visible = msoTrue
                 rowShape.Fill.ForeColor.RGB = rowFill
                 With rowShape.TextFrame2
@@ -7728,10 +8238,14 @@ Private Sub ApplySlideBar( _
     Dim trackTop As Double
     Dim fraction As Double
     Dim thumbSize As Double
+    Dim bubbleOn As Boolean
 
     fraction = SlideFraction()
+    bubbleOn = mVisible And (mSlideTracking Or _
+        ReDimUI.IsComponentFocused(mOwnerAppId, mComponentId))
     If ExtrasCurrent(PartsState(themeValue) & ":" & CStr(fraction) & _
-        ":" & CStr(mSlideTracking)) Then Exit Sub
+        ":" & CStr(mSlideTracking) & ":" & CStr(bubbleOn) & ":" & _
+        PointerKey()) Then Exit Sub
     trackTop = mTop + (mHeight - 6) / 2
     mainShape.Left = mLeft
     mainShape.Top = trackTop
@@ -7773,14 +8287,78 @@ Private Sub ApplySlideBar( _
     If mSlideTracking Then
         thumb.Fill.ForeColor.RGB = ResolveFill(themeValue)
     Else
-        thumb.Fill.ForeColor.RGB = RGB(255, 255, 255)
+        thumb.Fill.ForeColor.RGB = PointerTint(RGB(255, 255, 255), _
+            themeValue.OnSurfaceColor)
     End If
     thumb.Line.Visible = msoTrue
     thumb.Line.ForeColor.RGB = themeValue.BorderColor
     thumb.Line.Weight = 1.25
     thumb.Visible = BoolToMso(mVisible)
     thumb.OnAction = mAppliedOnAction
+    SyncSlideBubble hostSheet, themeValue, bubbleOn, _
+        thumb.Left + thumbSize / 2
     mAppliedValue = mValue
+End Sub
+
+' The value in a bubble over the thumb while a drag or keyboard focus
+' moves it; below the track when there is no room above.
+Private Sub SyncSlideBubble( _
+    ByVal hostSheet As Worksheet, _
+    ByVal themeValue As ReDimUI, _
+    ByVal bubbleOn As Boolean, _
+    ByVal centerX As Double _
+)
+    Dim bubble As Shape
+    Dim bubbleText As String
+    Dim bubbleSize As Double
+    Dim bubbleWidth As Double
+
+    If Not bubbleOn Then
+        If mAppliedBubble Then
+            mAppliedBubble = False
+            On Error Resume Next
+            hostSheet.Shapes(ShapeName & PART_SEPARATOR & "vb").Delete
+            On Error GoTo 0
+        End If
+        Exit Sub
+    End If
+    bubbleText = CStr(mValue)
+    bubbleSize = mFontSize
+    If bubbleSize <= 0 Then bubbleSize = themeValue.BaseFontSize
+    bubbleSize = bubbleSize - 1
+    bubbleWidth = Len(bubbleText) * bubbleSize * 0.62 + 12
+    If bubbleWidth < 24 Then bubbleWidth = 24
+    Set bubble = EnsurePartShape(hostSheet, "vb", msoShapeRoundedRectangle)
+    bubble.Width = bubbleWidth
+    bubble.Height = bubbleSize + 8
+    bubble.Left = centerX - bubbleWidth / 2
+    If mTop - bubble.Height - 4 >= 0 Then
+        bubble.Top = mTop - bubble.Height - 4
+    Else
+        bubble.Top = mTop + mHeight + 4
+    End If
+    bubble.Fill.Visible = msoTrue
+    bubble.Fill.ForeColor.RGB = themeValue.PrimaryColor
+    bubble.Line.Visible = msoFalse
+    With bubble.TextFrame2
+        .MarginLeft = 2
+        .MarginRight = 2
+        .MarginTop = 0
+        .MarginBottom = 0
+        .VerticalAnchor = msoAnchorMiddle
+        .WordWrap = msoFalse
+        .TextRange.Text = bubbleText
+        .TextRange.ParagraphFormat.Alignment = msoAlignCenter
+        With .TextRange.Font
+            .Name = themeValue.FontName
+            .Size = bubbleSize
+            .Bold = msoTrue
+            .Fill.ForeColor.RGB = themeValue.OnPrimaryColor
+        End With
+    End With
+    bubble.Visible = msoTrue
+    bubble.OnAction = mAppliedOnAction
+    mAppliedBubble = True
 End Sub
 
 Private Function SlideFraction() As Double
@@ -7841,9 +8419,15 @@ End Sub
 ' cursor against this slider's rectangle, and run the drag session - value
 ' tracks while the button is held, finalizes on release. One key-state
 ' poll and at most one cursor read per frame; nothing blocks.
-Friend Sub TickSlideDrag(ByVal hostApp As ReDimUI, ByVal buttonDown As Boolean)
+' The press watch each frame: a slider's drag, a transfer list's row
+' drag.
+Friend Sub TickPressDrag(ByVal hostApp As ReDimUI, ByVal buttonDown As Boolean)
     Dim fraction As Double
 
+    If mKind = KIND_TRANSFER Then
+        TickTransferDrag hostApp, buttonDown
+        Exit Sub
+    End If
     If mKind <> KIND_SLIDEBAR Then Exit Sub
     If mSlideTracking Then
         If Not mVisible Or Not mEnabled Then
@@ -7855,7 +8439,9 @@ Friend Sub TickSlideDrag(ByVal hostApp As ReDimUI, ByVal buttonDown As Boolean)
             EndSlideDrag hostApp
         End If
     ElseIf buttonDown And Not mSlidePrevButtonDown Then
-        If mVisible And mEnabled Then
+        ' Sheet points on a sheet behind the active one are not under
+        ' the pointer, whatever their numbers.
+        If mVisible And mEnabled And SheetInFront(hostApp) Then
             ' Floating chrome paints above the track: a press that lands
             ' on an open drop list or a modal overlay belongs to the
             ' chrome, and the geometric track test must not reach
@@ -7870,6 +8456,12 @@ Friend Sub TickSlideDrag(ByVal hostApp As ReDimUI, ByVal buttonDown As Boolean)
     End If
     mSlidePrevButtonDown = buttonDown
 End Sub
+
+Private Function SheetInFront(ByVal hostApp As ReDimUI) As Boolean
+    On Error Resume Next
+    SheetInFront = (hostApp.Sheet Is ActiveSheet)
+    On Error GoTo 0
+End Function
 
 Private Function PressClaimedByChrome(ByVal hostApp As ReDimUI) As Boolean
     Dim pointsX As Double
@@ -7935,6 +8527,660 @@ Friend Function ChromeClaimsPoint( _
     If (mKind = KIND_COMBO Or mKind = KIND_SELECT) And mSelectOpen Then
         ChromeClaimsPoint = ListAreaHolds(pointsX, pointsY)
     End If
+End Function
+
+' True when this control's open drop list holds the point: its face or
+' its rows and pagers.
+Friend Function ListHoldsPoint(ByVal pointsX As Double, ByVal pointsY As Double) As Boolean
+    If Not mVisible Then Exit Function
+    If (mKind = KIND_COMBO Or mKind = KIND_SELECT) And mSelectOpen Then
+        ListHoldsPoint = ListAreaHolds(pointsX, pointsY)
+    End If
+End Function
+
+' True when this visible control's rectangle holds the point.
+Friend Function CoversPoint(ByVal pointsX As Double, ByVal pointsY As Double) As Boolean
+    If Not mVisible Then Exit Function
+    CoversPoint = (pointsX >= mLeft And pointsX <= mLeft + mWidth _
+        And pointsY >= mTop And pointsY <= mTop + mHeight)
+End Function
+
+' The part of this control under a sheet point, as the pointer watches
+' name it: "" for the face; "minus" or "plus" on a stepper; "row" and a
+' number for radio and check-list rows, 0 for select-all; "opt" and a
+' number for an open list's rows, "optu" and "optd" for its pagers; and
+' a transfer list's row, move-button, and paging-arrow parts.
+Friend Function PartAtPoint(ByVal pointsX As Double, ByVal pointsY As Double) As String
+    Dim slot As Long
+    Dim itemTotal As Long
+    Dim headerRows As Long
+
+    If Not mItems Is Nothing Then itemTotal = mItems.Count
+    Select Case mKind
+        Case KIND_STEPPER
+            If pointsX < mLeft + mHeight Then
+                PartAtPoint = "minus"
+            ElseIf pointsX > mLeft + mWidth - mHeight Then
+                PartAtPoint = "plus"
+            End If
+        Case KIND_RADIO
+            If itemTotal > 0 Then
+                slot = Int((pointsY - mTop) / (mHeight / itemTotal)) + 1
+                If slot >= 1 And slot <= itemTotal Then PartAtPoint = "row" & slot
+            End If
+        Case KIND_CHECKLIST
+            If itemTotal > 0 Then
+                If mSelectAllRow Then headerRows = 1
+                slot = Int((pointsY - mTop) / (mHeight / (itemTotal + headerRows))) _
+                    + 1 - headerRows
+                If slot >= 1 - headerRows And slot <= itemTotal Then
+                    PartAtPoint = "row" & slot
+                End If
+            End If
+        Case KIND_SELECT, KIND_COMBO
+            If mSelectOpen Then PartAtPoint = ListPartAt(pointsY)
+        Case KIND_TRANSFER
+            PartAtPoint = TransferPartAt(pointsX, pointsY)
+    End Select
+End Function
+
+' The open list's part at a height: nothing on the face, else a row or
+' a pager.
+Private Function ListPartAt(ByVal pointsY As Double) As String
+    Dim slot As Long
+    Dim rowShift As Long
+    Dim wanted As Long
+    Dim matchTotal As Long
+
+    If pointsY >= mTop And pointsY <= mTop + mHeight Then Exit Function
+    If mListMatches Is Nothing Then Exit Function
+    matchTotal = mListMatches.Count
+    wanted = matchTotal - mListOffset
+    If wanted > mListRows Then wanted = mListRows
+    If mListOffset > 0 Then rowShift = 1
+    If pointsY < ListTop() Then Exit Function
+    slot = Int((pointsY - ListTop()) / DropRowPitch())
+    If rowShift = 1 And slot = 0 Then
+        ListPartAt = "optu"
+    ElseIf slot - rowShift + 1 <= wanted Then
+        ListPartAt = "opt" & (slot - rowShift + 1)
+    ElseIf slot - rowShift = wanted _
+        And matchTotal - mListOffset - wanted > 0 Then
+        ListPartAt = "optd"
+    End If
+End Function
+
+' A transfer list's part at a point: a move button, a panel's paging
+' arrow, or a row, named as the list draws them.
+Private Function TransferPartAt(ByVal pointsX As Double, ByVal pointsY As Double) As String
+    Dim panelW As Double
+    Dim panelTop As Double
+    Dim panelH As Double
+    Dim rightX As Double
+    Dim btnX As Double
+    Dim btnTop As Double
+    Dim slot As Long
+
+    If mItems Is Nothing Or mChosenItems Is Nothing Then Exit Function
+    TransferLayout panelW, panelTop, panelH, rightX, btnX, btnTop
+    If pointsY < panelTop Or pointsY > panelTop + panelH Then Exit Function
+    If pointsX >= btnX And pointsX <= btnX + TRANSFER_BUTTON_W Then
+        slot = Int((pointsY - btnTop) / (TRANSFER_BUTTON_H + TRANSFER_GAP))
+        If slot < 0 Or slot > 3 Then Exit Function
+        If pointsY > btnTop + slot * (TRANSFER_BUTTON_H + TRANSFER_GAP) _
+            + TRANSFER_BUTTON_H Then Exit Function
+        Select Case slot
+            Case 0
+                TransferPartAt = "mvr"
+            Case 1
+                TransferPartAt = "mvar"
+            Case 2
+                TransferPartAt = "mvl"
+            Case Else
+                TransferPartAt = "mval"
+        End Select
+    ElseIf pointsX >= mLeft And pointsX <= mLeft + panelW Then
+        TransferPartAt = TransferPanelPartAt("al", mLeft, panelTop, panelW, _
+            panelH, mItems.Count, mLeftOffset, pointsX, pointsY)
+    ElseIf pointsX >= rightX And pointsX <= rightX + panelW Then
+        TransferPartAt = TransferPanelPartAt("cl", rightX, panelTop, panelW, _
+            panelH, mChosenItems.Count, mRightOffset, pointsX, pointsY)
+    End If
+End Function
+
+' Within one panel: its paging arrows, when the list outgrows it, then
+' its rows. The arrows take the panel's prefix with "u" or "d".
+Private Function TransferPanelPartAt( _
+    ByVal partPrefix As String, _
+    ByVal panelX As Double, _
+    ByVal panelTop As Double, _
+    ByVal panelW As Double, _
+    ByVal panelH As Double, _
+    ByVal itemTotal As Long, _
+    ByVal scrollOffset As Long, _
+    ByVal pointsX As Double, _
+    ByVal pointsY As Double _
+) As String
+    Dim slot As Long
+
+    If itemTotal > TransferRowCapacity() Then
+        If pointsX >= panelX + panelW - PAGER_TARGET - 3 Then
+            If pointsY <= panelTop + 3 + PAGER_TARGET Then
+                TransferPanelPartAt = partPrefix & "u"
+            ElseIf pointsY >= panelTop + panelH - PAGER_TARGET - 3 Then
+                TransferPanelPartAt = partPrefix & "d"
+            End If
+            Exit Function
+        End If
+    End If
+    If pointsY < panelTop + 3 Then Exit Function
+    slot = Int((pointsY - panelTop - 3) / TRANSFER_ROW_H) + 1
+    If slot <= itemTotal - scrollOffset And slot <= TransferRowCapacity() Then
+        TransferPanelPartAt = partPrefix & slot
+    End If
+End Function
+
+' The transfer list's panels and move buttons, in points.
+Private Sub TransferLayout( _
+    ByRef panelW As Double, _
+    ByRef panelTop As Double, _
+    ByRef panelH As Double, _
+    ByRef rightX As Double, _
+    ByRef btnX As Double, _
+    ByRef btnTop As Double _
+)
+    panelW = (mWidth - TRANSFER_BUTTON_W - 4 * TRANSFER_GAP) / 2
+    If panelW < 40 Then panelW = 40
+    panelTop = mTop + TRANSFER_HEADER_H
+    panelH = mHeight - TRANSFER_HEADER_H
+    If panelH < 30 Then panelH = 30
+    rightX = mLeft + panelW + TRANSFER_BUTTON_W + 4 * TRANSFER_GAP
+    btnX = mLeft + panelW + 2 * TRANSFER_GAP
+    btnTop = panelTop + (panelH - (4 * TRANSFER_BUTTON_H + 3 * TRANSFER_GAP)) / 2
+    If btnTop < panelTop Then btnTop = panelTop
+End Sub
+
+' The tooltip under the pointer, in inverse colors: DisabledReason while
+' the control is disabled and has one, else Tooltip. It wraps past 240
+' points and flips above the pointer or left of it to stay in view.
+' False when there is nothing to show.
+Friend Function DrawTooltip(ByVal pointsX As Double, ByVal pointsY As Double) As Boolean
+    Dim tipText As String
+    Dim tipShape As Shape
+    Dim hostApp As ReDimUI
+    Dim themeValue As ReDimUI
+    Dim tipSize As Double
+    Dim tipWidth As Double
+    Dim tipHeight As Double
+    Dim lineTotal As Long
+    Dim tipLeft As Double
+    Dim tipTop As Double
+    Dim viewLeft As Double
+    Dim viewTop As Double
+    Dim viewWidth As Double
+    Dim viewHeight As Double
+
+    If Not mEnabled And LenB(mDisabledReason) > 0 Then
+        tipText = mDisabledReason
+    Else
+        tipText = mTooltip
+    End If
+    If LenB(tipText) = 0 Then Exit Function
+    Set hostApp = OwnerApp
+    Set themeValue = hostApp.Theme
+    tipSize = themeValue.BaseFontSize - 1
+    tipWidth = Len(tipText) * tipSize * 0.55 + 14
+    lineTotal = 1
+    If tipWidth > 240 Then
+        lineTotal = -Int(-(tipWidth - 14) / (240 - 14))
+        tipWidth = 240
+    End If
+    tipHeight = lineTotal * tipSize * 1.3 + 8
+    hostApp.ResolveViewport viewLeft, viewTop, viewWidth, viewHeight
+    tipLeft = pointsX
+    If tipLeft + tipWidth > viewLeft + viewWidth Then
+        tipLeft = viewLeft + viewWidth - tipWidth - 4
+    End If
+    If tipLeft < 0 Then tipLeft = 0
+    tipTop = pointsY + 18
+    If tipTop + tipHeight > viewTop + viewHeight Then
+        tipTop = pointsY - tipHeight - 6
+    End If
+    If tipTop < 0 Then tipTop = 0
+    Set tipShape = EnsurePartShape(hostApp.Sheet, "tt", msoShapeRoundedRectangle)
+    tipShape.Left = tipLeft
+    tipShape.Top = tipTop
+    tipShape.Width = tipWidth
+    tipShape.Height = tipHeight
+    tipShape.Fill.Visible = msoTrue
+    tipShape.Fill.ForeColor.RGB = themeValue.OnSurfaceColor
+    tipShape.Line.Visible = msoFalse
+    With tipShape.TextFrame2
+        .MarginLeft = 7
+        .MarginRight = 7
+        .MarginTop = 3
+        .MarginBottom = 3
+        .VerticalAnchor = msoAnchorMiddle
+        .WordWrap = msoTrue
+        .TextRange.Text = tipText
+        .TextRange.ParagraphFormat.Alignment = msoAlignLeft
+        With .TextRange.Font
+            .Name = themeValue.FontName
+            .Size = tipSize
+            .Bold = msoFalse
+            .Fill.ForeColor.RGB = themeValue.SurfaceColor
+        End With
+    End With
+    tipShape.Visible = msoTrue
+    tipShape.OnAction = mAppliedOnAction
+    tipShape.ZOrder msoBringToFront
+    DrawTooltip = True
+End Function
+
+Friend Sub ClearTooltipPart()
+    On Error Resume Next
+    OwnerApp.Sheet.Shapes(ShapeName & PART_SEPARATOR & "tt").Delete
+    On Error GoTo 0
+End Sub
+
+' True for a visible, enabled stepper or transfer list, whose presses the
+' pump watches while its sheet is in front.
+Friend Function NeedsPressWatch() As Boolean
+    If mKind <> KIND_STEPPER And mKind <> KIND_TRANSFER Then Exit Function
+    NeedsPressWatch = mVisible And mEnabled And Not mBusy
+End Function
+
+' The parts a held press repeats.
+Friend Function RepeatsPart(ByVal partName As String) As Boolean
+    If Not mVisible Or Not mEnabled Or mBusy Then Exit Function
+    Select Case mKind
+        Case KIND_STEPPER
+            RepeatsPart = (partName = "minus" Or partName = "plus")
+        Case KIND_SELECT, KIND_COMBO
+            RepeatsPart = mSelectOpen And (partName = "optu" Or partName = "optd")
+        Case KIND_TRANSFER
+            Select Case partName
+                Case "alu", "ald", "clu", "cld"
+                    RepeatsPart = True
+            End Select
+    End Select
+End Function
+
+Friend Sub BeginHold()
+    mHoldValueAtStart = mValue
+End Sub
+
+' One repeat of a held part: a stepper step, which writes its state but
+' leaves OnChange to the release, or a page of a list.
+Friend Sub RepeatPart(ByVal hostApp As ReDimUI, ByVal partName As String)
+    Select Case partName
+        Case "minus"
+            SetStepperValue hostApp, mValue - mSliderStep
+        Case "plus"
+            SetStepperValue hostApp, mValue + mSliderStep
+        Case "optu", "optd"
+            PageDropList (partName = "optd")
+        Case Else
+            PageTransferPanel partName
+    End Select
+End Sub
+
+' A hold that repeated swallows its release click and, for a stepper
+' that moved, runs OnChange once.
+Friend Sub EndHold(ByVal hostApp As ReDimUI, ByVal repeated As Boolean)
+    If Not repeated Then Exit Sub
+    mHoldSuppressUntilMs = GetTickCount64() + 400
+    If mKind = KIND_STEPPER And mValue <> mHoldValueAtStart Then
+        On Error GoTo HandlerFailed
+        RunClickHandlers hostApp
+    End If
+    Exit Sub
+HandlerFailed:
+    hostApp.ReportAppError "ReDim handler error " & Err.Number & ": " & Err.Description
+End Sub
+
+' The second click on the same row within the Windows double-click time
+' is a double click.
+Private Function RowDoubleClicked(ByVal partName As String) As Boolean
+    Dim nowMs As LongLong
+
+    nowMs = GetTickCount64()
+    If partName = mLastRowClickPart _
+        And nowMs - mLastRowClickMs <= GetDoubleClickTime() Then
+        RowDoubleClicked = True
+        mLastRowClickPart = vbNullString
+    Else
+        mLastRowClickPart = partName
+        mLastRowClickMs = nowMs
+    End If
+End Function
+
+' Moves one row's item across. The panel's other selected rows stay
+' selected, their numbers closing over the moved row.
+Private Sub MoveTransferRow( _
+    ByVal hostApp As ReDimUI, _
+    ByVal rightward As Boolean, _
+    ByVal itemIndex As Long _
+)
+    Dim priorSelection As Collection
+    Dim keptSelection As Collection
+    Dim soleRow As Collection
+    Dim entry As Variant
+
+    EnsureTransferCollections
+    If rightward Then
+        Set priorSelection = mSelLeft
+    Else
+        Set priorSelection = mSelRight
+    End If
+    Set keptSelection = New Collection
+    For Each entry In priorSelection
+        If CLng(entry) < itemIndex Then
+            keptSelection.Add CLng(entry)
+        ElseIf CLng(entry) > itemIndex Then
+            keptSelection.Add CLng(entry) - 1
+        End If
+    Next entry
+    Set soleRow = New Collection
+    soleRow.Add itemIndex
+    If rightward Then
+        Set mSelLeft = soleRow
+    Else
+        Set mSelRight = soleRow
+    End If
+    TransferSelected hostApp, rightward
+    If rightward Then
+        Set mSelLeft = keptSelection
+    Else
+        Set mSelRight = keptSelection
+    End If
+    Touch
+End Sub
+
+' A press on a transfer row, held and moved: along its panel it selects
+' the rows from the pressed one to the one under the pointer; onto the
+' other panel it outlines that panel, and the release there moves the
+' pressed row, or the whole selection when the row is part of it. The
+' release click after either is swallowed.
+Private Sub TickTransferDrag(ByVal hostApp As ReDimUI, ByVal buttonDown As Boolean)
+    Dim pointsX As Double
+    Dim pointsY As Double
+    Dim panelAt As Long
+    Dim rowAt As Long
+    Dim rowSelected As Boolean
+    Dim pointerKnown As Boolean
+
+    If mKind <> KIND_TRANSFER Then Exit Sub
+    If buttonDown Or mRowDragOn Then
+        pointerKnown = ReDimUI.FramePointer(pointsX, pointsY)
+    End If
+    If buttonDown And Not mRowDragPrevDown Then
+        mRowDragOn = False
+        If mVisible And mEnabled And pointerKnown Then
+            If SheetInFront(hostApp) And Not PressClaimedByChrome(hostApp) Then
+                If TransferRowOf(PartAtPoint(pointsX, pointsY), panelAt, rowAt) Then
+                    mRowDragOn = True
+                    mRowDragPanel = panelAt
+                    mRowDragFrom = rowAt
+                    mRowDragMode = 0
+                End If
+            End If
+        End If
+    ElseIf buttonDown And mRowDragOn And pointerKnown Then
+        panelAt = TransferPanelAt(pointsX, pointsY)
+        If panelAt >= 0 And panelAt <> mRowDragPanel Then
+            mRowDragMode = 2
+            SetDropPanel panelAt + 1
+        Else
+            SetDropPanel 0
+            If TransferRowOf(PartAtPoint(pointsX, pointsY), panelAt, rowAt) Then
+                If panelAt = mRowDragPanel And (rowAt <> mRowDragFrom _
+                    Or mRowDragMode = 1) Then
+                    mRowDragMode = 1
+                    SelectTransferRange mRowDragPanel, mRowDragFrom, rowAt
+                End If
+            End If
+        End If
+    ElseIf Not buttonDown And mRowDragOn Then
+        mRowDragOn = False
+        SetDropPanel 0
+        If mRowDragMode = 2 And pointerKnown Then
+            If TransferPanelAt(pointsX, pointsY) = 1 - mRowDragPanel Then
+                If mRowDragPanel = 0 Then
+                    rowSelected = TransferSelectionHas(mSelLeft, mRowDragFrom)
+                Else
+                    rowSelected = TransferSelectionHas(mSelRight, mRowDragFrom)
+                End If
+                If rowSelected Then
+                    TransferSelected hostApp, (mRowDragPanel = 0)
+                Else
+                    MoveTransferRow hostApp, (mRowDragPanel = 0), mRowDragFrom
+                End If
+            End If
+        End If
+        If mRowDragMode <> 0 Then mHoldSuppressUntilMs = GetTickCount64() + 400
+        mRowDragMode = 0
+    End If
+    mRowDragPrevDown = buttonDown
+End Sub
+
+' A row part's panel (0 left, 1 right) and item number.
+Private Function TransferRowOf( _
+    ByVal partName As String, _
+    ByRef panelAt As Long, _
+    ByRef rowAt As Long _
+) As Boolean
+    If Len(partName) < 3 Then Exit Function
+    If Not IsNumeric(Mid$(partName, 3)) Then Exit Function
+    Select Case Left$(partName, 2)
+        Case "al"
+            panelAt = 0
+            rowAt = mLeftOffset + CLng(Mid$(partName, 3))
+        Case "cl"
+            panelAt = 1
+            rowAt = mRightOffset + CLng(Mid$(partName, 3))
+        Case Else
+            Exit Function
+    End Select
+    TransferRowOf = True
+End Function
+
+' The panel under a point, rows and empty space alike: 0 left, 1 right,
+' -1 neither.
+Private Function TransferPanelAt(ByVal pointsX As Double, ByVal pointsY As Double) As Long
+    Dim panelW As Double
+    Dim panelTop As Double
+    Dim panelH As Double
+    Dim rightX As Double
+    Dim btnX As Double
+    Dim btnTop As Double
+
+    TransferPanelAt = -1
+    TransferLayout panelW, panelTop, panelH, rightX, btnX, btnTop
+    If pointsY < panelTop Or pointsY > panelTop + panelH Then Exit Function
+    If pointsX >= mLeft And pointsX <= mLeft + panelW Then
+        TransferPanelAt = 0
+    ElseIf pointsX >= rightX And pointsX <= rightX + panelW Then
+        TransferPanelAt = 1
+    End If
+End Function
+
+' The panel's selection becomes the rows between two, both included.
+Private Sub SelectTransferRange( _
+    ByVal panelIndex As Long, _
+    ByVal fromRow As Long, _
+    ByVal toRow As Long _
+)
+    Dim rangeRows As Collection
+    Dim rowNo As Long
+    Dim stepDirection As Long
+
+    Set rangeRows = New Collection
+    stepDirection = IIf(toRow >= fromRow, 1, -1)
+    For rowNo = fromRow To toRow Step stepDirection
+        rangeRows.Add rowNo
+    Next rowNo
+    If panelIndex = 0 Then
+        Set mSelLeft = rangeRows
+    Else
+        Set mSelRight = rangeRows
+    End If
+    PlaceKeyCursor panelIndex, toRow
+    Touch
+End Sub
+
+Private Sub SetDropPanel(ByVal panelNumber As Long)
+    If mDropPanel = panelNumber Then Exit Sub
+    mDropPanel = panelNumber
+    Touch
+End Sub
+
+' The drop target panel's edge takes the accent, two points wide.
+Private Sub SyncTransferDropTarget( _
+    ByVal mainShape As Shape, _
+    ByVal hostSheet As Worksheet, _
+    ByVal themeValue As ReDimUI _
+)
+    Dim panelShape As Shape
+    Dim panelNumber As Long
+
+    If mDropPanel = mAppliedDropPanel Then Exit Sub
+    On Error Resume Next
+    For panelNumber = 1 To 2
+        If panelNumber = 1 Then
+            Set panelShape = mainShape
+        Else
+            Set panelShape = hostSheet.Shapes(ShapeName & PART_SEPARATOR & "rp")
+        End If
+        If panelNumber = mDropPanel Then
+            panelShape.Line.ForeColor.RGB = themeValue.PrimaryColor
+            panelShape.Line.Weight = 2
+        Else
+            panelShape.Line.ForeColor.RGB = themeValue.BorderColor
+            panelShape.Line.Weight = 1
+        End If
+    Next panelNumber
+    On Error GoTo 0
+    mAppliedDropPanel = mDropPanel
+End Sub
+
+' A transfer panel's paging arrow moves its window a page less a row.
+Private Sub PageTransferPanel(ByVal partName As String)
+    Dim transferPage As Long
+
+    EnsureTransferCollections
+    transferPage = TransferRowCapacity() - 1
+    If transferPage < 1 Then transferPage = 1
+    Select Case partName
+        Case "alu"
+            mLeftOffset = mLeftOffset - transferPage
+            If mLeftOffset < 0 Then mLeftOffset = 0
+        Case "ald"
+            mLeftOffset = mLeftOffset + transferPage
+        Case "clu"
+            mRightOffset = mRightOffset - transferPage
+            If mRightOffset < 0 Then mRightOffset = 0
+        Case "cld"
+            mRightOffset = mRightOffset + transferPage
+        Case Else
+            Exit Sub
+    End Select
+    Touch
+End Sub
+
+' Pointer effects set and clear the look; controls that draw none keep
+' no state and cost no repaint.
+Friend Sub SetPointerLook( _
+    ByVal hoveredOn As Boolean, _
+    ByVal partName As String, _
+    ByVal pressedOn As Boolean _
+)
+    If hoveredOn Then
+        If Not OwnerApp.PointerEffectsOn Then Exit Sub
+        Select Case mKind
+            Case KIND_BUTTON, KIND_TOGGLE, KIND_TICKBOX, KIND_RADIO, _
+                KIND_STEPPER, KIND_SLIDEBAR, KIND_SELECT, KIND_CHECKLIST, _
+                KIND_TRANSFER
+            Case KIND_INPUT, KIND_COMBO
+                If Not IsFloatField() Then Exit Sub
+            Case Else
+                Exit Sub
+        End Select
+    ElseIf Not mHovered Then
+        Exit Sub
+    End If
+    If mHovered = hoveredOn And mHoveredPart = partName _
+        And mHoverPressed = pressedOn Then Exit Sub
+    mHovered = hoveredOn
+    mHoveredPart = partName
+    mHoverPressed = pressedOn
+    Touch
+End Sub
+
+Friend Property Get PointerEffectsOn() As Boolean
+    PointerEffectsOn = mPointerEffects
+End Property
+
+' An open list's highlight follows a moving pointer onto its rows, as a
+' Windows list does; Enter from a combo or a keyboard-focused select then
+' takes that row.
+Friend Sub FollowListPointer(ByVal partName As String)
+    Dim rowNumber As Long
+
+    If Not mSelectOpen Then Exit Sub
+    If Not OwnerApp.PointerEffectsOn Then Exit Sub
+    If Left$(partName, 3) <> "opt" Then Exit Sub
+    If Not IsNumeric(Mid$(partName, 4)) Then Exit Sub
+    rowNumber = CLng(Mid$(partName, 4))
+    If mListOffset + rowNumber = mListHighlight Then Exit Sub
+    mListHighlight = mListOffset + rowNumber
+    Touch
+End Sub
+
+' The pointer look of a fill: under PointerEffects it moves toward its
+' ink, 8 percent while the part is hovered and 16 while it is pressed,
+' the state layers Material Design draws.
+Private Function PointerTint( _
+    ByVal baseColor As Long, _
+    ByVal inkColor As Long, _
+    Optional ByVal partName As String _
+) As Long
+    PointerTint = baseColor
+    If Not mHovered Or mHoveredPart <> partName Then Exit Function
+    If Not mEnabled Or mBusy Then Exit Function
+    If mHoverPressed Then
+        PointerTint = BlendRgb(baseColor, inkColor, 0.16)
+    Else
+        PointerTint = BlendRgb(baseColor, inkColor, 0.08)
+    End If
+End Function
+
+' True when the pointer is on the part, for looks that are not tints.
+Private Function PointerOn(Optional ByVal partName As String) As Boolean
+    PointerOn = mHovered And mHoveredPart = partName And mEnabled And Not mBusy
+End Function
+
+' The pointer look as a signature fragment, for the part caches.
+Private Function PointerKey() As String
+    If mHovered Then PointerKey = mHoveredPart & IIf(mHoverPressed, "!", "?")
+End Function
+
+Private Function BlendRgb( _
+    ByVal fromColor As Long, _
+    ByVal towardColor As Long, _
+    ByVal mixWeight As Double _
+) As Long
+    Dim redPart As Long
+    Dim greenPart As Long
+    Dim bluePart As Long
+
+    redPart = (fromColor And &HFF&) + _
+        ((towardColor And &HFF&) - (fromColor And &HFF&)) * mixWeight
+    greenPart = ((fromColor \ &H100&) And &HFF&) + _
+        (((towardColor \ &H100&) And &HFF&) - ((fromColor \ &H100&) And &HFF&)) * mixWeight
+    bluePart = ((fromColor \ &H10000) And &HFF&) + _
+        (((towardColor \ &H10000) And &HFF&) - ((fromColor \ &H10000) And &HFF&)) * mixWeight
+    BlendRgb = RGB(redPart, greenPart, bluePart)
 End Function
 
 Friend Sub BeginSlideDrag(ByVal hostApp As ReDimUI, ByVal fraction As Double)
@@ -9262,13 +10508,28 @@ Private Function WordStartAfter(ByVal fromPos As Long) As Long
 End Function
 
 ' Unicode text on the clipboard, or "" when it holds none or is busy.
+' The clipboard is shared, and another program can hold it open for a
+' moment: opening retries for about a tenth of a second before a copy,
+' cut, or paste gives up.
+Private Function ClaimClipboard() As Boolean
+    Dim attemptNo As Long
+
+    For attemptNo = 1 To 10
+        If OpenClipboard(0) <> 0 Then
+            ClaimClipboard = True
+            Exit Function
+        End If
+        Sleep 10
+    Next attemptNo
+End Function
+
 Private Function ReadClipboardText() As String
     Dim memoryHandle As LongPtr
     Dim textAddress As LongPtr
     Dim charCount As Long
 
     If IsClipboardFormatAvailable(CF_UNICODETEXT) = 0 Then Exit Function
-    If OpenClipboard(0) = 0 Then Exit Function
+    If Not ClaimClipboard() Then Exit Function
     memoryHandle = GetClipboardData(CF_UNICODETEXT)
     If memoryHandle <> 0 Then
         textAddress = GlobalLock(memoryHandle)
@@ -9290,7 +10551,7 @@ Private Function WriteClipboardText(ByVal copiedText As String) As Boolean
     Dim textAddress As LongPtr
     Dim byteCount As LongPtr
 
-    If OpenClipboard(0) = 0 Then Exit Function
+    If Not ClaimClipboard() Then Exit Function
     EmptyClipboard
     byteCount = (Len(copiedText) + 1) * 2
     memoryHandle = GlobalAlloc(GMEM_MOVEABLE_ZEROED, byteCount)

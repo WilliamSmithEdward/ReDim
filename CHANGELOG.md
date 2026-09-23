@@ -278,6 +278,41 @@
   instead of 0.50 ms, most of it bolding the matches. Focusing a field
   from the grid binds 139 keys instead of 86 and takes 1.4 ms instead
   of 0.9 ms.
+- `ui.PointerEffects` gives an app hover and press looks: the fill under
+  the pointer moves toward its ink, 8 percent on hover and 16 while the
+  press that went down on it is held, and a check box's or radio
+  button's edge takes the accent. An open drop list's highlight follows
+  the pointer as it moves. Off by default, since the pump then reads the
+  pointer every frame the app's sheet is in front.
+- `Tooltip` shows a note once the pointer rests on a control for the
+  Windows tooltip delay, and `DisabledReason` says why a disabled
+  control is disabled. A press puts the tooltip away until the pointer
+  leaves, and screen readers get the note with the control's
+  alternative text.
+- Held presses repeat: a stepper's minus or plus, a drop list's pager,
+  and a transfer panel's paging arrow repeat after the Windows keyboard
+  delay, at the keyboard repeat rate. A held stepper fires `OnChange`
+  once at the release, as a slider drag does.
+- Transfer lists take gestures. A double click on a row moves it
+  across. A press dragged along a panel selects the rows it covers, and
+  dragged onto the other panel it outlines that panel and moves the row,
+  or its whole selection, on release. Clicking a selected row again to
+  deselect it now has to wait out the double-click time.
+- A slider shows its value in a bubble over the thumb while a drag or
+  keyboard focus moves it, and a toast under the pointer stops counting
+  down until the pointer leaves.
+- A visible stepper or transfer list on the active sheet keeps the pump
+  armed for its press watch, as a slider does, at the cost of a
+  key-state poll each frame.
+- A sheet coming back to the front arms the pump again. The pump stops
+  itself once no app has work, and leaving a sheet takes a slider's
+  press watch with it, so a slider on a sheet the user left and came
+  back to took taps but no drags until something else started the pump.
+- A slider's press watch acts only while its sheet is in front. A press
+  on the active sheet could start a drag on a slider in another sheet
+  whose track sat at the same position.
+- Copy, cut, and paste retry briefly when another program holds the
+  clipboard open, instead of doing nothing.
 
 ## 0.19.2 - 2026-08-02
 

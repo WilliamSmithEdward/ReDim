@@ -66,14 +66,27 @@ Public Function SmokeMission() As String
     transcript = transcript & "|launchReEnabled=" & _
         CStr(app.Button("launch").IsEnabled)
 
-    ' Toasts sit on a rail just outside the content's right edge.
+    ' Toasts sit on a rail just outside the content's right edge, or
+    ' inside the visible window when it is too narrow to hold one there.
     Dim toastShape As Shape
     Dim cardShape As Shape
+    Dim railLeft As Double
+    Dim viewLeft As Double
+    Dim viewTop As Double
+    Dim viewWidth As Double
+    Dim viewHeight As Double
     Set cardShape = app.Sheet.Shapes("rdm_mission_card1")
     Set toastShape = app.Sheet.Shapes("rdm_mission_toast_1")
-    transcript = transcript & "|toastOnRail=" & _
-        CStr(Abs(toastShape.Left - _
-            (cardShape.Left + cardShape.Width + 12)) < 1)
+    railLeft = cardShape.Left + cardShape.Width + 12
+    app.ResolveViewport viewLeft, viewTop, viewWidth, viewHeight
+    If railLeft + toastShape.Width + 12 <= viewLeft + viewWidth Then
+        transcript = transcript & "|toastOnRail=" & _
+            CStr(Abs(toastShape.Left - railLeft) < 1)
+    Else
+        transcript = transcript & "|toastOnRail=" & _
+            CStr(toastShape.Left >= viewLeft And _
+                toastShape.Left + toastShape.Width <= viewLeft + viewWidth)
+    End If
     transcript = transcript & "|toastInkOnSurface=" & _
         CStr(toastShape.TextFrame2.TextRange.Font.Fill.ForeColor.RGB = _
             app.Theme.OnSurfaceColor)
@@ -333,7 +346,8 @@ def test_mission_control_smoke(demo_paths):
         assert facts["startReEnabled"] == "True"
         assert facts["launchReEnabled"] == "True"
         assert facts["toastOnRail"] == "True", (
-            "toast must sit on the rail beside the content"
+            "toast must sit on the rail beside the content, or inside a "
+            "window too narrow for the rail"
         )
         assert facts["toastInkOnSurface"] == "True"
         assert facts["surfaceProtected"] == "True", (

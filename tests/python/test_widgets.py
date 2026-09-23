@@ -904,3 +904,89 @@ def test_combo_assists(run_widgets):
     assert facts["restrictCompletes"] == "Blueberry"
     assert facts["restrictSpelling"] == "Apple"
     assert facts["restrictEmpty"] == "True"
+
+
+def test_pointer_basics(run_widgets):
+    facts = parse_transcript(run_widgets("TestPointerBasics"))
+    assert facts["pressDrags"] == "True:50", (
+        "a held button on the track must start a drag through the pump"
+    )
+    assert facts["bubbleShown"] == "50"
+    assert facts["bubbleAbove"] == "True"
+    assert facts["bubbleFollows"] == "80"
+    assert facts["releaseCommits"] == "1:80"
+    assert facts["bubbleGone"] == "True"
+    assert facts["focusBubble"] == "90"
+    assert facts["blurHides"] == "True"
+    assert facts["toastHeld"] == "True", (
+        "a toast under the pointer must stop counting down"
+    )
+    assert facts["toastResumes"] == "True"
+
+
+def test_pointer_effects(run_widgets):
+    facts = parse_transcript(run_widgets("TestPointerEffects"))
+    assert facts["buttonHover"] == "True", "a hovered button must tint"
+    assert facts["buttonPressed"] == "True"
+    assert facts["releaseHover"] == "True"
+    assert facts["crossingNotPressed"] == "True", (
+        "a press that went down elsewhere must not press what it crosses"
+    )
+    assert facts["stepperPart"] == "True"
+    assert facts["buttonCleared"] == "True"
+    assert facts["checkRow"] == "True"
+    assert facts["transferRow"] == "True"
+    assert facts["transferButton"] == "True"
+    assert facts["rowCleared"] == "True"
+    assert facts["listFollows"] == "True", (
+        "an open list's highlight must follow a moving pointer"
+    )
+    assert facts["effectsOff"] == "True"
+    assert facts["rearmed"] == "True", (
+        "a sheet coming back to the front must re-arm the pump"
+    )
+
+
+def test_tooltips(run_widgets):
+    facts = parse_transcript(run_widgets("TestTooltips"))
+    assert facts["altTip"] == "Save, button, Saves the form"
+    assert facts["altReason"] == "Send, button, unavailable, Fill in the address first"
+    assert facts["waits"] == "True", "a tooltip must wait for the pointer to rest"
+    assert facts["tipShows"] == "Saves the form"
+    assert facts["belowPointer"] == "True"
+    assert facts["pressHides"] == "True", (
+        "a press must put the tooltip away until the pointer leaves"
+    )
+    assert facts["reasonShows"] == "Fill in the address first"
+    assert facts["leaveHides"] == "True"
+
+
+def test_hold_repeat(run_widgets):
+    facts = parse_transcript(run_widgets("TestHoldRepeat"))
+    assert facts["noStepAtPress"] == "5"
+    assert facts["firstRepeat"] == "6", (
+        "a held stepper button must step after the keyboard repeat delay"
+    )
+    assert facts["keepsRepeating"] == "7"
+    assert facts["stateLive"] == "7"
+    assert facts["noChangeYet"] == "0"
+    assert facts["releaseChange"] == "1", "the release must fire OnChange once"
+    assert facts["releaseClickSwallowed"] == "7"
+    assert facts["tapSteps"] == "8:2"
+    assert facts["arrowPages"] == "Item 11", (
+        "a held paging arrow must page again and again"
+    )
+
+
+def test_transfer_gestures(run_widgets):
+    facts = parse_transcript(run_widgets("TestTransferGestures"))
+    assert facts["doubleClickMoves"] == "B:C:1", (
+        "a double click must move the row across and fire OnChange once"
+    )
+    assert facts["dropOutlined"] == "True"
+    assert facts["dragMoves"] == "B, A:2"
+    assert facts["outlineCleared"] == "True"
+    assert facts["rangeSelected"] == "True", (
+        "a press dragged along a panel must select the rows it covers"
+    )
+    assert facts["rangeMoves"] == "B, A, C, D, E"

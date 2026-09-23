@@ -6,6 +6,7 @@ Option Explicit
 
 Private Declare PtrSafe Sub Sleep Lib "kernel32" (ByVal milliseconds As Long)
 Private Declare PtrSafe Function GetCaretBlinkTime Lib "user32" () As Long
+Private Declare PtrSafe Function GetDoubleClickTime Lib "user32" () As Long
 
 Private gChangeCount As Long
 Private gConfirmRan As Long
@@ -470,10 +471,12 @@ Public Function TestToastTray() As String
     Set host = NewCanvas()
     ReDimUI.AutoPump False
     Set app = ReDimUI.Mount(host, "wid10")
-    app.Label("info").AtRect(24, 24, 200, 20).Text("Info")
+    app.Label("info").AtRect(24, 24, 60, 20).Text("Info")
     app.Render
 
-    ' Default rail: just outside the content's right edge.
+    ' Default rail: just outside the content's right edge. The content is
+    ' narrow so the rail fits even a small Excel window, which would
+    ' clamp it into view.
     Set labelShape = host.Shapes("rdm_wid10_info")
     expectedRail = labelShape.Left + labelShape.Width + 12
     Set toastValue = app.Toast("rail", 60000)
@@ -611,6 +614,9 @@ Public Function TestStepper() As String
     Dim faceShape As Shape
     Dim transcript As String
 
+    ' A stepper's press watch arms the pump at Render; the pump stays off
+    ' so no timer outlives the harness call.
+    ReDimUI.AutoPump False
     Set host = NewCanvas()
     gChangeCount = 0
     Set app = ReDimUI.Mount(host, "wid14")
@@ -638,6 +644,7 @@ Public Function TestStepper() As String
     ReDimUI.DispatchShape "rdm_wid14_thr__minus"
     transcript = transcript & "|minusValue=" & app.State("threads")
     transcript = transcript & "|changeRan=" & gChangeCount
+    ReDimUI.AutoPump True
     TestStepper = transcript
 End Function
 
@@ -1129,6 +1136,9 @@ Public Function TestTransferList() As String
     Dim host As Worksheet
     Dim transcript As String
 
+    ' A transfer list's press watch arms the pump at Render; the pump
+    ' stays off so no timer outlives the harness call.
+    ReDimUI.AutoPump False
     Set host = NewCanvas()
     gChangeCount = 0
     Set app = ReDimUI.Mount(host, "wid22")
@@ -1171,7 +1181,8 @@ Public Function TestTransferList() As String
             Not RowChecked(host, "rdm_wid22_teams__al1") And _
             RowItem(host, "rdm_wid22_teams__al2") = "Bravo")
     transcript = transcript & "|selectNoChange=" & CStr(gChangeCount = 0)
-    Sleep 200
+    ' Past the double-click time: a second click within it moves the row.
+    Sleep GetDoubleClickTime() + 60
     ReDimUI.DispatchShape "rdm_wid22_teams__al2"
     transcript = transcript & "|toggledOff=" & _
         CStr(host.Shapes("rdm_wid22_teams__al2").Fill.ForeColor.RGB <> _
@@ -1234,6 +1245,7 @@ Public Function TestTransferList() As String
              app.TransferList("teams").ItemTextAt(2) = "Delta" And _
              app.TransferList("teams").ChosenTextAt(1) = "Alpha")
     transcript = transcript & "|changeFinal=" & gChangeCount
+    ReDimUI.AutoPump True
     TestTransferList = transcript
 End Function
 
@@ -2953,4 +2965,360 @@ Public Function TestComboAssists() As String
     RdxReleaseKeys
     ReDimUI.AutoPump True
     TestComboAssists = transcript
+End Function
+
+' The pointer seam drives the pump's press watch: a held button on a
+' slider drags it with the value in a bubble over the thumb, the release
+' fires OnChange once, keyboard focus shows the bubble too, and a toast
+' under the pointer holds its countdown until the pointer leaves.
+Public Function TestPointerBasics() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim toastValue As ReDimUI
+    Dim toastName As String
+    Dim transcript As String
+
+    gChangeCount = 0
+    ReDimUI.AutoPump False
+    ReDimUI.ReduceMotion True
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "wid43")
+    app.SlideBar("vol").AtRect(24, 60, 200, 18).SliderRange(0, 100, 10).Value(20) _
+        .OnChange "TestReDimWidgets.RecordChange"
+    app.Render
+
+    ReDimUI.OverridePointer 124, 69, True
+    ReDimUI.PumpOnce
+    transcript = "pressDrags=" & CStr(app.SlideBar("vol").IsSlideDragging) & _
+        ":" & app.SlideBar("vol").CurrentValue
+    transcript = transcript & "|bubbleShown=" & _
+        host.Shapes("rdm_wid43_vol__vb").TextFrame2.TextRange.Text
+    transcript = transcript & "|bubbleAbove=" & _
+        CStr(host.Shapes("rdm_wid43_vol__vb").Top < 60)
+    ReDimUI.OverridePointer 184, 69, True
+    ReDimUI.PumpOnce
+    transcript = transcript & "|bubbleFollows=" & _
+        host.Shapes("rdm_wid43_vol__vb").TextFrame2.TextRange.Text
+    ReDimUI.OverridePointer 184, 69, False
+    ReDimUI.PumpOnce
+    transcript = transcript & "|releaseCommits=" & CStr(gChangeCount) & ":" & _
+        app.SlideBar("vol").CurrentValue
+    transcript = transcript & "|bubbleGone=" & _
+        CStr(Not ShapeExists(host, "rdm_wid43_vol__vb"))
+
+    app.SlideBar("vol").Focus
+    RdxKeyChar "{RIGHT}"
+    transcript = transcript & "|focusBubble=" & _
+        host.Shapes("rdm_wid43_vol__vb").TextFrame2.TextRange.Text
+    RdxKeyChar "{ESC}"
+    transcript = transcript & "|blurHides=" & _
+        CStr(Not ShapeExists(host, "rdm_wid43_vol__vb"))
+
+    Set toastValue = app.Toast("Hold me.", 300)
+    toastName = "rdm_wid43_" & toastValue.ComponentId
+    With host.Shapes(toastName)
+        ReDimUI.OverridePointer .Left + .Width / 2, .Top + .Height / 2
+    End With
+    Sleep 400
+    ReDimUI.PumpOnce
+    transcript = transcript & "|toastHeld=" & _
+        CStr(ShapeExists(host, toastName) And toastValue.ToastRemainingMs >= 900)
+    ReDimUI.OverridePointer 1, 1
+    Sleep 1100
+    ReDimUI.PumpOnce
+    ReDimUI.PumpOnce
+    transcript = transcript & "|toastResumes=" & CStr(Not ShapeExists(host, toastName))
+
+    ReDimUI.ClearPointerOverride
+    RdxReleaseKeys
+    ReDimUI.ReduceMotion
+    ReDimUI.AutoPump True
+    TestPointerBasics = transcript
+End Function
+
+Private Function FillOf(ByVal host As Worksheet, ByVal shapeName As String) As Long
+    FillOf = host.Shapes(shapeName).Fill.ForeColor.RGB
+End Function
+
+' Pointer effects: the control under the pointer takes a hover tint and a
+' stronger one while the button that went down on it stays down; parts
+' answer for themselves (a stepper's plus, a check-list row's box, a
+' transfer row and move button); an open list's highlight follows a
+' moving pointer; leaving clears the look; and a sheet coming back to the
+' front re-arms the pump the effects need.
+Public Function TestPointerEffects() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim baseFill As Long
+    Dim hoverFill As Long
+    Dim eventsWereOn As Boolean
+    Dim transcript As String
+
+    ReDimUI.AutoPump False
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "wid44")
+    app.PointerEffects
+    app.Button("go").AtRect(24, 24, 100, 30).Text "Go"
+    app.Stepper("qty").AtRect(24, 70, 120, 24).SliderRange(0, 9, 1).Value 3
+    app.CheckList("chk").AtRect(24, 110, 160, 80).Items "A", "B", "C"
+    app.TransferList("tl").AtRect(220, 24, 300, 160).Items "One", "Two", "Three"
+    app.SelectBox("sel").AtRect(24, 220, 140, 22).Items "Red", "Green", "Blue"
+    app.Render
+    baseFill = FillOf(host, "rdm_wid44_go")
+
+    ReDimUI.OverridePointer 74, 39
+    ReDimUI.PumpOnce
+    hoverFill = FillOf(host, "rdm_wid44_go")
+    transcript = "buttonHover=" & CStr(hoverFill <> baseFill)
+    ReDimUI.OverridePointer 74, 39, True
+    ReDimUI.PumpOnce
+    transcript = transcript & "|buttonPressed=" & _
+        CStr(FillOf(host, "rdm_wid44_go") <> hoverFill _
+            And FillOf(host, "rdm_wid44_go") <> baseFill)
+    ReDimUI.OverridePointer 74, 39, False
+    ReDimUI.PumpOnce
+    transcript = transcript & "|releaseHover=" & _
+        CStr(FillOf(host, "rdm_wid44_go") = hoverFill)
+
+    ' A press that went down elsewhere does not press what it crosses.
+    ReDimUI.OverridePointer 600, 300, True
+    ReDimUI.PumpOnce
+    ReDimUI.OverridePointer 74, 39, True
+    ReDimUI.PumpOnce
+    transcript = transcript & "|crossingNotPressed=" & _
+        CStr(FillOf(host, "rdm_wid44_go") = hoverFill)
+    ReDimUI.OverridePointer 74, 39, False
+    ReDimUI.PumpOnce
+
+    ReDimUI.OverridePointer 132, 82
+    ReDimUI.PumpOnce
+    transcript = transcript & "|stepperPart=" & _
+        CStr(FillOf(host, "rdm_wid44_qty__plus") <> FillOf(host, "rdm_wid44_qty__minus"))
+    transcript = transcript & "|buttonCleared=" & _
+        CStr(FillOf(host, "rdm_wid44_go") = baseFill)
+
+    ReDimUI.OverridePointer 30, 160
+    ReDimUI.PumpOnce
+    transcript = transcript & "|checkRow=" & _
+        CStr(host.Shapes("rdm_wid44_chk__b2").Line.ForeColor.RGB = app.Theme.PrimaryColor _
+            And host.Shapes("rdm_wid44_chk").Line.ForeColor.RGB = app.Theme.BorderColor)
+
+    ReDimUI.OverridePointer 230, 75
+    ReDimUI.PumpOnce
+    transcript = transcript & "|transferRow=" & _
+        CStr(FillOf(host, "rdm_wid44_tl__al2") <> FillOf(host, "rdm_wid44_tl__al1"))
+    ReDimUI.OverridePointer 370, 70
+    ReDimUI.PumpOnce
+    transcript = transcript & "|transferButton=" & _
+        CStr(FillOf(host, "rdm_wid44_tl__mvr") <> FillOf(host, "rdm_wid44_tl__mvar"))
+    transcript = transcript & "|rowCleared=" & _
+        CStr(FillOf(host, "rdm_wid44_tl__al2") = FillOf(host, "rdm_wid44_tl__al1"))
+
+    ReDimUI.DispatchShape "rdm_wid44_sel"
+    With host.Shapes("rdm_wid44_sel__opt2")
+        ReDimUI.OverridePointer .Left + 10, .Top + .Height / 2
+    End With
+    ReDimUI.PumpOnce
+    transcript = transcript & "|listFollows=" & _
+        CStr(FillOf(host, "rdm_wid44_sel__opt2") = app.Theme.PrimaryColor)
+    ReDimUI.DispatchShape "rdm_wid44_sel"
+
+    ReDimUI.OverridePointer 74, 39
+    ReDimUI.PumpOnce
+    app.PointerEffects False
+    ReDimUI.PumpOnce
+    transcript = transcript & "|effectsOff=" & _
+        CStr(FillOf(host, "rdm_wid44_go") = baseFill)
+
+    ' Leaving the sheet stops the pump's reason to run; coming back
+    ' re-arms it. The harness may hold EnableEvents off, so the step
+    ' pins it on and restores it.
+    app.PointerEffects True
+    ReDimUI.AutoPump True
+    eventsWereOn = Application.EnableEvents
+    Application.EnableEvents = True
+    ActiveWorkbook.Worksheets.Add
+    RdxStopPump
+    host.Activate
+    transcript = transcript & "|rearmed=" & CStr(RdxPumpArmed())
+    Application.EnableEvents = eventsWereOn
+    ' Tear down with the pump off: a real timer left armed would fire
+    ' between the harness's runs.
+    ReDimUI.AutoPump False
+    RdxStopPump
+    app.PointerEffects False
+    ReDimUI.ClearPointerOverride
+    ReDimUI.AutoPump True
+    TestPointerEffects = transcript
+End Function
+
+' Tooltips: after the pointer rests on a control for the double-click
+' time its tooltip shows below the pointer; a press puts it away until the
+' pointer leaves; a disabled control shows its DisabledReason; leaving
+' hides it; and the alternative text carries both.
+Public Function TestTooltips() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim restMs As Long
+    Dim transcript As String
+
+    ReDimUI.AutoPump False
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "wid45")
+    app.Button("save").AtRect(24, 24, 100, 30).Text("Save").Tooltip "Saves the form"
+    app.Button("send").AtRect(24, 70, 100, 30).Text("Send").Enabled(False) _
+        .DisabledReason "Fill in the address first"
+    app.Render
+    restMs = GetDoubleClickTime() + 60
+
+    transcript = "altTip=" & host.Shapes("rdm_wid45_save").AlternativeText
+    transcript = transcript & "|altReason=" & host.Shapes("rdm_wid45_send").AlternativeText
+    ReDimUI.OverridePointer 74, 39
+    ReDimUI.PumpOnce
+    transcript = transcript & "|waits=" & CStr(Not ShapeExists(host, "rdm_wid45_save__tt"))
+    Sleep restMs
+    ReDimUI.PumpOnce
+    transcript = transcript & "|tipShows=" & _
+        host.Shapes("rdm_wid45_save__tt").TextFrame2.TextRange.Text
+    transcript = transcript & "|belowPointer=" & _
+        CStr(host.Shapes("rdm_wid45_save__tt").Top > 39)
+
+    ReDimUI.OverridePointer 74, 39, True
+    ReDimUI.PumpOnce
+    ReDimUI.OverridePointer 74, 39, False
+    Sleep restMs
+    ReDimUI.PumpOnce
+    transcript = transcript & "|pressHides=" & CStr(Not ShapeExists(host, "rdm_wid45_save__tt"))
+
+    ReDimUI.OverridePointer 74, 85
+    ReDimUI.PumpOnce
+    Sleep restMs
+    ReDimUI.PumpOnce
+    transcript = transcript & "|reasonShows=" & _
+        host.Shapes("rdm_wid45_send__tt").TextFrame2.TextRange.Text
+    ReDimUI.OverridePointer 600, 400
+    ReDimUI.PumpOnce
+    transcript = transcript & "|leaveHides=" & CStr(Not ShapeExists(host, "rdm_wid45_send__tt"))
+    ReDimUI.ClearPointerOverride
+    ReDimUI.AutoPump True
+    TestTooltips = transcript
+End Function
+
+' Hold-to-repeat: a press held on a stepper's plus steps after the
+' keyboard repeat delay and keeps stepping at the repeat rate, writing its
+' state as it goes; the release fires OnChange once and swallows the click
+' Excel delivers for it. A short press repeats nothing, and its click
+' steps once. A held transfer paging arrow pages again and again. The
+' waits cover the slowest Windows settings: a 1000 ms delay, 400 ms rate.
+Public Function TestHoldRepeat() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim itemNo As Long
+    Dim transcript As String
+
+    gChangeCount = 0
+    ReDimUI.AutoPump False
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "wid46")
+    app.Stepper("qty").AtRect(24, 24, 120, 24).SliderRange(0, 50, 1).Value(5) _
+        .WritesTo("qty").OnChange "TestReDimWidgets.RecordChange"
+    app.TransferList("tl").AtRect 220, 24, 300, 160
+    For itemNo = 1 To 30
+        app.TransferList("tl").AddItem "Item " & itemNo
+    Next itemNo
+    app.Render
+
+    ReDimUI.OverridePointer 132, 36, True
+    ReDimUI.PumpOnce
+    transcript = "noStepAtPress=" & app.Stepper("qty").CurrentValue
+    Sleep 1100
+    ReDimUI.PumpOnce
+    transcript = transcript & "|firstRepeat=" & app.Stepper("qty").CurrentValue
+    Sleep 450
+    ReDimUI.PumpOnce
+    transcript = transcript & "|keepsRepeating=" & app.Stepper("qty").CurrentValue
+    transcript = transcript & "|stateLive=" & app.State("qty")
+    transcript = transcript & "|noChangeYet=" & gChangeCount
+    ReDimUI.OverridePointer 132, 36, False
+    ReDimUI.PumpOnce
+    transcript = transcript & "|releaseChange=" & gChangeCount
+    ReDimUI.DispatchShape "rdm_wid46_qty__plus"
+    transcript = transcript & "|releaseClickSwallowed=" & app.Stepper("qty").CurrentValue
+
+    Sleep 450
+    ReDimUI.OverridePointer 132, 36, True
+    ReDimUI.PumpOnce
+    ReDimUI.OverridePointer 132, 36, False
+    ReDimUI.PumpOnce
+    ReDimUI.DispatchShape "rdm_wid46_qty__plus"
+    transcript = transcript & "|tapSteps=" & app.Stepper("qty").CurrentValue & ":" & gChangeCount
+
+    ReDimUI.OverridePointer 335, 172, True
+    ReDimUI.PumpOnce
+    Sleep 1100
+    ReDimUI.PumpOnce
+    Sleep 450
+    ReDimUI.PumpOnce
+    ReDimUI.OverridePointer 335, 172, False
+    ReDimUI.PumpOnce
+    transcript = transcript & "|arrowPages=" & RowItem(host, "rdm_wid46_tl__al1")
+    ReDimUI.ClearPointerOverride
+    ReDimUI.AutoPump True
+    TestHoldRepeat = transcript
+End Function
+
+' Transfer gestures: a double click on a row moves it across; a press on
+' a row dragged onto the other panel outlines that panel and the release
+' there moves the row; a press dragged along a panel selects the rows it
+' covers and swallows the release click.
+Public Function TestTransferGestures() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim transcript As String
+
+    gChangeCount = 0
+    ReDimUI.AutoPump False
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "wid47")
+    app.TransferList("tl").AtRect(24, 24, 300, 200) _
+        .Items("A", "B", "C", "D", "E", "F", "G", "H").WritesTo("chosen") _
+        .OnChange "TestReDimWidgets.RecordChange"
+    app.Render
+
+    ReDimUI.DispatchShape "rdm_wid47_tl__al2"
+    ReDimUI.DispatchShape "rdm_wid47_tl__al2"
+    transcript = "doubleClickMoves=" & app.State("chosen") & ":" & _
+        RowItem(host, "rdm_wid47_tl__al2") & ":" & gChangeCount
+
+    Sleep 600
+    ReDimUI.OverridePointer 60, 55, True
+    ReDimUI.PumpOnce
+    ReDimUI.OverridePointer 240, 100, True
+    ReDimUI.PumpOnce
+    transcript = transcript & "|dropOutlined=" & _
+        CStr(host.Shapes("rdm_wid47_tl__rp").Line.ForeColor.RGB = app.Theme.PrimaryColor)
+    ReDimUI.OverridePointer 240, 100, False
+    ReDimUI.PumpOnce
+    transcript = transcript & "|dragMoves=" & app.State("chosen") & ":" & gChangeCount
+    transcript = transcript & "|outlineCleared=" & _
+        CStr(host.Shapes("rdm_wid47_tl__rp").Line.ForeColor.RGB = app.Theme.BorderColor)
+
+    ReDimUI.OverridePointer 60, 55, True
+    ReDimUI.PumpOnce
+    ReDimUI.OverridePointer 60, 95, True
+    ReDimUI.PumpOnce
+    ReDimUI.OverridePointer 60, 95, False
+    ReDimUI.PumpOnce
+    ReDimUI.DispatchShape "rdm_wid47_tl__al3"
+    transcript = transcript & "|rangeSelected=" & _
+        CStr(RowChecked(host, "rdm_wid47_tl__al1") _
+            And RowChecked(host, "rdm_wid47_tl__al2") _
+            And RowChecked(host, "rdm_wid47_tl__al3") _
+            And Not RowChecked(host, "rdm_wid47_tl__al4"))
+    Sleep 450
+    ReDimUI.DispatchShape "rdm_wid47_tl__mvr"
+    transcript = transcript & "|rangeMoves=" & app.State("chosen")
+    ReDimUI.ClearPointerOverride
+    ReDimUI.AutoPump True
+    TestTransferGestures = transcript
 End Function

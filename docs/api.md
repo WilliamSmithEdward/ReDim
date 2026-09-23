@@ -61,10 +61,11 @@ controls in the framework. Also:
 | `Render` | Mark everything dirty and paint. Call once after building the UI. |
 | `SetTheme theme` | Restyle every component, and repaint the canvas background if `PrepareCanvas` painted one. |
 | `PrepareCanvas` | Paint the sheet background and hide gridlines. |
-| `Toast messageText, ttlMs` | Transient card on a rail beside the content, clamped into the visible viewport, with a close button. Without `ttlMs` it stays long enough to read: three seconds plus 60 ms a character, from four seconds to twelve. `Primary`, `Success`, `Warning`, or `Danger` on the returned toast gives it an info, success, warning, or error tone, an icon and a matching edge; `.Action "Undo", "Module.Proc"` adds a button that dismisses the toast and runs the handler, and keeps the toast four seconds longer. Toasts slide up on entrance, and when one leaves the survivors slide up to fill its slot; modal chrome never shifts the rail. |
+| `Toast messageText, ttlMs` | Transient card on a rail beside the content, clamped into the visible viewport, with a close button. Without `ttlMs` it stays long enough to read: three seconds plus 60 ms a character, from four seconds to twelve. `Primary`, `Success`, `Warning`, or `Danger` on the returned toast gives it an info, success, warning, or error tone, an icon and a matching edge; `.Action "Undo", "Module.Proc"` adds a button that dismisses the toast and runs the handler, and keeps the toast four seconds longer. A toast under the pointer stops counting down and keeps at least a second once the pointer leaves. Toasts slide up on entrance, and when one leaves the survivors slide up to fill its slot; modal chrome never shifts the rail. |
 | `ToastTray rangeAddress` | Pins the tray's top-left to a range, exactly and unclamped. |
 | `Confirm titleText, messageText, okProc, cancelProc, okText, cancelText` | Shapes-based modal. It takes keyboard focus: Enter confirms, Esc cancels, and Tab stays among its buttons. |
 | `FocusFirst` / `DefaultButton componentId` | Keyboard focus to the first control in Tab order; the button Enter clicks from controls that do not use Enter themselves. |
+| `PointerEffects effectsOn` | Hover and press looks for the app's controls, and an open list whose highlight follows the pointer (see [Pointer](#pointer)). Off by default. |
 | `CloseModal` | Hide the modal set. |
 | `Async(opId)` / `CancelAsync opId` / `AsyncError(opId)` | Async ops (see [async.md](async.md)). |
 | `Job(jobId)` / `CancelJob jobId` | Chunked or paced background work. |
@@ -88,6 +89,8 @@ All fluent, all return the component:
 - Visibility: `Visible(flag)`, `Enabled(flag)`.
 - Accessibility: `AltText(text)` replaces the alternative text ReDim writes on the
   control's shape (see [Accessibility](#accessibility)); an empty string restores it.
+- Tooltips: `Tooltip(text)` shows a note under a resting pointer, and
+  `DisabledReason(text)` says why a disabled control is disabled (see [Pointer](#pointer)).
 - Values: `Value(number)` (progress, slider, picker index), `Checked(flag)`,
   `SliderRange(min, max, step)`.
 - Item lists (`SelectBox`, `ComboBox`, `RadioGroup`, `TransferList`, `CheckList`):
@@ -149,7 +152,8 @@ dependencies:
   then delivers is swallowed. A plain tap sets the value at the press point. Loop-free by
   construction: one key-state poll and at most one cursor read per 16 ms frame, and every
   other pump duty keeps running mid-drag. A visible slider on the active sheet keeps the
-  pump armed so presses are never missed - the idle cost is that one poll per frame.
+  pump armed so presses are never missed - the idle cost is that one poll per frame. While
+  a drag or keyboard focus moves the value, it shows in a bubble over the thumb.
   Coordinates come from `GetCursorPos` plus a DPI-and-zoom-aware inversion of
   `PointsToScreenPixels`; frozen-pane splits skew that calibration, so keep app surfaces
   unsplit. Floating chrome claims the points it covers, so a press on an open drop list
@@ -357,6 +361,44 @@ ui.TextInput("find").DebounceMs 250
 ui.ComboBox("fruit").AtRect(24, 162, 220, 22).Items("Apple", "Banana").RestrictToItems
 ```
 
+## Pointer
+
+Shape macros run when the mouse button comes up, so what a pointer does before that
+(resting, pressing, holding, dragging) is watched by the pump's frames. The watches read
+the pointer at most once a frame and act only while their sheet is in front.
+
+- Hover and press looks, with `ui.PointerEffects`: the fill under the pointer moves
+  toward its ink, 8 percent on hover and 16 while the left button that went down on it
+  stays down, the state layers Material Design draws. A press that went down elsewhere
+  presses nothing it crosses. Buttons, toggles, select and field faces, stepper buttons,
+  a slider's thumb, and a transfer list's rows, move buttons, and paging arrows tint; a
+  check box's or radio button's edge takes the accent; an open drop list's highlight
+  follows the pointer as it moves, as a Windows list's does, and Enter from a combo or a
+  keyboard-focused select takes that row. Off by default, since while it is on the pump
+  reads the pointer every frame the app's sheet is in front.
+- Tooltips: `Tooltip "Saves the form"` shows the note once the pointer has rested on the
+  control for the Windows tooltip delay, the double-click time, below the pointer and
+  flipped above or left to stay in view, in inverse colors, wrapping past 240 points. It
+  goes when the pointer leaves, and a press puts it away until the pointer leaves the
+  control. `DisabledReason "Fill in the address first"` is the note while the control is
+  disabled. Screen readers get the note with the control's alternative text. An app with
+  a tooltip reads the pointer every frame its sheet is in front, as `PointerEffects`
+  does.
+- Hold-to-repeat: a press held on a stepper's minus or plus, a drop list's pager, or a
+  transfer panel's paging arrow repeats after the Windows keyboard repeat delay, at the
+  keyboard repeat rate, while the pointer stays on it. A held stepper writes its
+  `WritesTo` state at each step and fires `OnChange` once at the release, as a slider
+  drag does, and the click Excel delivers for the release is swallowed.
+- Transfer gestures: a double click on a row, two clicks within the Windows double-click
+  time, moves it across; click a selected row again after that time to deselect it. A
+  press on a row dragged along its panel selects the rows from the pressed one to the one
+  under the pointer. Dragged onto the other panel, it outlines that panel in the accent,
+  and the release there moves the pressed row, or the whole selection when the row is
+  part of it. `OnChange` fires once per move.
+- The pump: a visible stepper or transfer list on the active sheet keeps the pump armed
+  for its press watch, as a slider does, at the cost of a key-state poll a frame. A
+  sheet coming back to the front arms the pump again for the watches it holds.
+
 ## Keyboard focus for every control
 
 Every interactive control takes keyboard focus: buttons, toggles, tick boxes, radio groups,
@@ -404,8 +446,9 @@ keep the keys.
 - Alternative text: ReDim writes a description on each control's shape from its kind, text,
   and state, such as "Save, button", "Agree, checkbox, checked", "Drop-down, South",
   "Progress, 40 percent" (in 5 percent steps), with ", unavailable" when disabled. Labels,
-  cards, and toasts carry none, since their text is what a reader announces. `AltText`
-  replaces the description.
+  cards, and toasts carry none, since their text is what a reader announces. A `Tooltip`
+  follows the description, or the `DisabledReason` while the control is disabled.
+  `AltText` replaces the description.
 - Keyboard: every control works without a mouse, and focus shows as a ring or a field
   border (see [Keyboard focus for every control](#keyboard-focus-for-every-control)).
 - State without color: a drop list's current item and a transfer panel's selected rows
