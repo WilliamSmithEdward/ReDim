@@ -40,6 +40,12 @@ Public Sub RecordAppCommand()
     gLastCommand = "app:" & ReDimUI.SenderApp.LastCommand
 End Sub
 
+' A table's row-open handler: the sender's value is the row.
+Public Sub RecordRowOpen()
+    gCommandCount = gCommandCount + 1
+    gLastCommand = CStr(ReDimUI.Sender.CurrentValue)
+End Sub
+
 Public Sub RecordCancelChoice()
     gCancelRan = gCancelRan + 1
 End Sub
@@ -4320,4 +4326,131 @@ Public Function TestCommandPalette() As String
     RdxReleaseKeys
     ReDimUI.AutoPump True
     TestCommandPalette = transcript
+End Function
+
+' Table data tools: typing filters the rows on any cell and the footer
+' names the filter; Backspace takes a letter back and Esc clears it.
+' Ctrl+C copies every row shown, or the selected one, under the header,
+' with dates the sheet reads back as dates. ExportTo writes the rows
+' shown, sorted, to a range. EmptyText words an empty table, a filter
+' that matches nothing says so, and a double click or Enter opens a row.
+' Each paste yields first: Excel sees a clipboard written through Windows
+' only once it has handled the change, which a user's Ctrl+V always allows.
+Public Function TestTableData() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim transcript As String
+
+    gCommandCount = 0
+    gLastCommand = vbNullString
+    ReDimUI.AutoPump False
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "wid63")
+    app.Table("orders").AtRect(24, 24, 360, 160).Columns "Item", "Qty", "Due"
+    With app.Table("orders")
+        .AddRow "Apple", 12, DateSerial(2026, 9, 1)
+        .AddRow "Apricot", 3, DateSerial(2026, 9, 5)
+        .AddRow "Banana", 7, DateSerial(2026, 9, 9)
+        .AddRow "Cherry", 1, DateSerial(2026, 9, 12)
+        .OnRowOpen "TestReDimWidgets.RecordRowOpen"
+    End With
+    app.Table("empty").AtRect(24, 220, 200, 80).Columns("Name").EmptyText "No orders yet"
+    app.Render
+
+    app.Table("orders").Focus
+    RdxKeyChar "a"
+    RdxKeyChar "p"
+    transcript = "typed=" & app.Table("orders").ShownRowCount & "/" & _
+        host.Shapes("rdm_wid63_orders__tf").TextFrame2.TextRange.Text
+    RdxKeyChar "{BS}"
+    transcript = transcript & "|backspace=" & app.Table("orders").ShownRowCount
+    RdxKeyChar "{ESC}"
+    transcript = transcript & "|escClears=" & app.Table("orders").ShownRowCount & "/" & _
+        CStr(ReDimUI.IsComponentFocused("wid63", "orders"))
+
+    app.Table("orders").FilterRows "an"
+    RdxKeyChar "{COPY}"
+    DoEvents
+    host.Paste host.Range("J1")
+    transcript = transcript & "|copied=" & host.Range("J1").Value & "," & _
+        host.Range("J2").Value & "," & host.Range("K2").Value & "," & _
+        CStr(VarType(host.Range("L2").Value) = vbDate) & "," & CStr(IsEmpty(host.Range("J3").Value))
+    app.Table("orders").FilterRows ""
+    RdxKeyChar "{DOWN}"
+    RdxKeyChar "{COPY}"
+    DoEvents
+    host.Paste host.Range("J5")
+    transcript = transcript & "|copiedRow=" & host.Range("J6").Value & "," & _
+        CStr(IsEmpty(host.Range("J7").Value))
+    app.Table("orders").FilterRows "an"
+    RdxKeyChar "{COPY}"
+    DoEvents
+    host.Paste host.Range("J9")
+    transcript = transcript & "|hiddenPick=" & host.Range("J10").Value
+    RdxKeyChar "{ENTER}"
+    transcript = transcript & "/" & gCommandCount
+
+    app.Table("orders").SortBy 2
+    app.Table("orders").FilterRows "r"
+    app.Table("orders").ExportTo host.Range("N1")
+    transcript = transcript & "|exported=" & host.Range("N1").Value & "," & _
+        host.Range("N2").Value & "," & host.Range("N3").Value & "," & _
+        CStr(IsEmpty(host.Range("N4").Value))
+
+    app.Table("orders").FilterRows "zzz"
+    transcript = transcript & "|noMatch=" & Trim$(Replace( _
+        host.Shapes("rdm_wid63_orders__tr1").TextFrame2.TextRange.Text, vbTab, " "))
+    transcript = transcript & "|emptyText=" & Trim$(Replace( _
+        host.Shapes("rdm_wid63_empty__tr1").TextFrame2.TextRange.Text, vbTab, " "))
+
+    app.Table("orders").FilterRows ""
+    app.Table("orders").SortBy 0
+    ReDimUI.DispatchShape "rdm_wid63_orders__tr3"
+    ReDimUI.DispatchShape "rdm_wid63_orders__tr3"
+    transcript = transcript & "|doubleOpens=" & gLastCommand & "/" & gCommandCount
+    app.Table("orders").Focus
+    RdxKeyChar "{ENTER}"
+    transcript = transcript & "|enterOpens=" & gCommandCount
+    RdxReleaseKeys
+    ReDimUI.AutoPump True
+    TestTableData = transcript
+End Function
+
+' Masked fields: the face shows a dot for each character, focused or not,
+' while InputValue and WritesTo keep the text; copy and cut take nothing.
+Public Function TestMasked() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim transcript As String
+    Dim faceNow As String
+
+    ReDimUI.AutoPump False
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "wid64")
+    app.TextInput("plain").AtRect(24, 24, 160, 22).Text "sentinel"
+    app.TextInput("pin").AtRect(24, 70, 160, 22).Masked.WritesTo "pinState"
+    app.Render
+
+    ReDimUI.DispatchShape "rdm_wid64_plain"
+    RdxKeyChar "{SELECTALL}"
+    RdxKeyChar "{COPY}"
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid64_pin"
+    TypeText "s3cret"
+    faceNow = host.Shapes("rdm_wid64_pin").TextFrame2.TextRange.Text
+    transcript = "focusedFace=" & CStr(InStr(faceNow, "s3cret") = 0 _
+        And InStr(faceNow, String$(6, ChrW(8226))) > 0)
+    RdxKeyChar "{SELECTALL}"
+    RdxKeyChar "{COPY}"
+    RdxKeyChar "{ENTER}"
+    host.Paste host.Range("J1")
+    transcript = transcript & "|copyTakesNothing=" & host.Range("J1").Value
+    transcript = transcript & "|committed=" & app.State("pinState") & "/" & _
+        app.TextInput("pin").InputValue
+    transcript = transcript & "|restFace=" & CStr( _
+        host.Shapes("rdm_wid64_pin").TextFrame2.TextRange.Text = String$(6, ChrW(8226)))
+    transcript = transcript & "|alt=" & host.Shapes("rdm_wid64_pin").AlternativeText
+    RdxReleaseKeys
+    ReDimUI.AutoPump True
+    TestMasked = transcript
 End Function

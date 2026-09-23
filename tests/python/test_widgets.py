@@ -1238,3 +1238,31 @@ def test_command_palette(run_widgets):
     assert facts["appEntry"] == "app:Say hello/2"
     assert facts["leaveCancels"] == "True", "leaving the palette runs nothing"
     assert facts["keyOpens"] == "True"
+
+
+def test_table_data(run_widgets):
+    facts = parse_transcript(run_widgets("TestTableData"))
+    assert facts["typed"] == '2/Filter "ap": 1-2 of 2', "typing filters and the footer names it"
+    assert facts["backspace"] == "3"
+    assert facts["escClears"] == "4/True", "Esc clears the filter before it leaves"
+    assert facts["copied"] == "Item,Banana,7,True,True", (
+        "Ctrl+C copies the rows shown under the header, dates as dates"
+    )
+    assert facts["copiedRow"] == "Apple,True"
+    assert facts["hiddenPick"] == "Banana/0", (
+        "a pick the filter hides is neither copied nor opened"
+    )
+    assert facts["exported"] == "Item,Cherry,Apricot,True"
+    assert facts["noMatch"] == "No rows match"
+    assert facts["emptyText"] == "No orders yet"
+    assert facts["doubleOpens"] == "3/1"
+    assert facts["enterOpens"] == "2"
+
+
+def test_masked(run_widgets):
+    facts = parse_transcript(run_widgets("TestMasked"))
+    assert facts["focusedFace"] == "True"
+    assert facts["copyTakesNothing"] == "sentinel", "copying a masked field must take nothing"
+    assert facts["committed"] == "s3cret/s3cret"
+    assert facts["restFace"] == "True"
+    assert facts["alt"] == "Edit field, masked", "the description names the mask, never the text"

@@ -604,6 +604,19 @@ Private mAppliedTableHeadStates() As String
 Private mAppliedTableFootSig As String
 Private mAppliedTableColsDrawn As Long
 Private mAppliedTableSlotsDrawn As Long
+' A table's typed filter, the rows it shows under it in order (source
+' row numbers) with the key they were found under, a count of order
+' rebuilds, the empty row's words, and the handler a row's double
+' click or Enter runs.
+Private mTableFilter As String
+Private mTableShown() As Long
+Private mTableShownCount As Long
+Private mTableShownKey As String
+Private mTableOrderGen As Long
+Private mTableEmptyText As String
+Private mRowOpenProc As String
+' A float TextInput that shows dots for its characters.
+Private mMasked As Boolean
 ' An icon before the control's text: its name, its character, and the
 ' character the text was last styled with.
 Private mIconName As String
@@ -4374,6 +4387,16 @@ Friend Property Get AccessKeyLetter() As String
     AccessKeyLetter = mAccessKey
 End Property
 
+' Shows a float TextInput's characters as dots, as a password box does.
+' Copying and cutting take nothing; the text still reads through
+' InputValue and writes to WritesTo.
+Public Function Masked(Optional ByVal maskedOn As Boolean = True) As ReDimUI
+    RequireRole ROLE_COMPONENT, "Masked"
+    mMasked = maskedOn
+    Touch
+    Set Masked = Me
+End Function
+
 ' A float TextInput or ComboBox shows a clear button inside its right
 ' end while it holds text. A click on it empties the field and leaves
 ' it focused; the emptied value commits when focus leaves.
@@ -4665,6 +4688,64 @@ Public Function SortBy( _
     Touch
     Set SortBy = Me
 End Function
+
+' The words the empty row shows while the table holds no rows.
+Public Function EmptyText(ByVal emptyWords As String) As ReDimUI
+    RequireTable "EmptyText"
+    mTableEmptyText = emptyWords
+    Touch
+    Set EmptyText = Me
+End Function
+
+' The Public procedure a double click on a row, or Enter on the
+' selected row while the table has the keys, runs, with the table as
+' ReDimUI.Sender and the row in its CurrentValue.
+Public Function OnRowOpen(ByVal handlerProc As String) As ReDimUI
+    RequireTable "OnRowOpen"
+    mRowOpenProc = handlerProc
+    Set OnRowOpen = Me
+End Function
+
+' Filters the rows from code, as typing does while the table has the
+' keys: a row shows when any of its cells, as shown, holds the text,
+' case aside. "" shows every row.
+Public Function FilterRows(ByVal filterText As String) As ReDimUI
+    RequireTable "FilterRows"
+    SetTableFilter filterText
+    Set FilterRows = Me
+End Function
+
+' Writes the header and the rows the table shows, filtered and sorted,
+' to the sheet from exportAnchor's top-left cell down, values as they
+' are, in one write.
+Public Function ExportTo(ByVal exportAnchor As Range) As ReDimUI
+    Dim grid() As Variant
+    Dim rowNo As Long
+    Dim colNo As Long
+
+    RequireTable "ExportTo"
+    If mTableCols = 0 Then
+        Set ExportTo = Me
+        Exit Function
+    End If
+    EnsureTableShown
+    ReDim grid(1 To mTableShownCount + 1, 1 To mTableCols)
+    For colNo = 1 To mTableCols
+        grid(1, colNo) = mTableHeads(colNo)
+        For rowNo = 1 To mTableShownCount
+            grid(rowNo + 1, colNo) = mTableCells(colNo, mTableShown(rowNo))
+        Next rowNo
+    Next colNo
+    exportAnchor.Cells(1, 1).Resize(mTableShownCount + 1, mTableCols).Value = grid
+    Set ExportTo = Me
+End Function
+
+' The rows the table shows under its filter, in order.
+Public Property Get ShownRowCount() As Long
+    RequireTable "ShownRowCount"
+    EnsureTableShown
+    ShownRowCount = mTableShownCount
+End Property
 
 Public Property Get RowCount() As Long
     RequireTable "RowCount"
@@ -7106,6 +7187,7 @@ Private Function AccessibleDescription() As String
             described = "Switch, " & IIf(mChecked, "on", "off")
         Case KIND_INPUT
             described = "Edit field"
+            If mMasked Then described = described & ", masked"
             If LenB(mPlaceholder) > 0 Then described = described & ", " & mPlaceholder
         Case KIND_COMBO
             described = "Combo box"
@@ -7147,6 +7229,10 @@ Private Function AccessibleDescription() As String
             If mSortColumn > 0 Then
                 described = described & ", sorted by " & mTableHeads(mSortColumn) & _
                     IIf(mSortDescending, ", descending", ", ascending")
+            End If
+            If LenB(mTableFilter) > 0 Then
+                EnsureTableShown
+                described = described & ", " & mTableShownCount & " shown"
             End If
             If CLng(mValue) >= 1 And CLng(mValue) <= mTableRows Then
                 described = described & ", " & _
@@ -7927,8 +8013,15 @@ Private Function BuildFace( _
     If mSelAnchor < 0 Or mSelAnchor > Len(mText) Then mSelAnchor = mCaretPos
     caretRender = mCaretPos + 1
     ' Completion letters follow the text and map to -1.
-    rendered = Left$(mText, mCaretPos) & IIf(mCaretOn, "|", " ") & _
-        Mid$(mText, mCaretPos + 1) & ghostText
+    ' A masked field renders a dot for each character, one for one, so
+    ' the caret and the face map line up with the text beneath.
+    If mMasked Then
+        rendered = String$(mCaretPos, ChrW(8226)) & IIf(mCaretOn, "|", " ") & _
+            String$(Len(mText) - mCaretPos, ChrW(8226)) & ghostText
+    Else
+        rendered = Left$(mText, mCaretPos) & IIf(mCaretOn, "|", " ") & _
+            Mid$(mText, mCaretPos + 1) & ghostText
+    End If
     ReDim renderMap(1 To Len(rendered))
     For idx = 1 To Len(rendered)
         If idx < caretRender Then
@@ -8163,6 +8256,8 @@ Private Sub ApplyText(ByVal mainShape As Shape, ByVal themeValue As ReDimUI)
             End If
         ElseIf LenB(mText) = 0 And LenB(mPlaceholder) > 0 Then
             shownText = mPlaceholder
+        ElseIf mMasked Then
+            shownText = String$(Len(mText), ChrW(8226))
         End If
         ' A placeholder reads in muted ink.
         If LenB(mText) = 0 And LenB(mPlaceholder) > 0 Then
@@ -10015,6 +10110,7 @@ End Sub
 Private Sub TableChanged()
     mTableVersion = mTableVersion + 1
     mTableOrderCurrent = False
+    mTableShownKey = vbNullString
     mColumnLayoutKey = vbNullString
     If CLng(mValue) > mTableRows Then mValue = 0
     Touch
@@ -10028,6 +10124,7 @@ Private Sub EnsureTableOrder()
 
     If mTableOrderCurrent Then Exit Sub
     mTableOrderCurrent = True
+    mTableOrderGen = mTableOrderGen + 1
     If mTableRows = 0 Then Exit Sub
     ReDim mTableOrder(1 To mTableRows)
     For rowNo = 1 To mTableRows
@@ -10075,6 +10172,131 @@ Private Sub MergeTableRows(ByVal lowAt As Long, ByVal highAt As Long, ByRef scra
         mTableOrder(outAt) = scratch(outAt)
     Next outAt
 End Sub
+
+' The rows the table shows: its order, less the rows the filter hides.
+' Rebuilt only when the filter, the order, or the data changed.
+Private Sub EnsureTableShown()
+    Dim shownKey As String
+    Dim displayNo As Long
+    Dim sourceRow As Long
+    Dim colNo As Long
+
+    EnsureTableOrder
+    shownKey = mTableFilter & Chr$(1) & CStr(mTableOrderGen) & Chr$(1) & CStr(mTableVersion)
+    If shownKey = mTableShownKey Then Exit Sub
+    mTableShownKey = shownKey
+    mTableShownCount = 0
+    If mTableRows = 0 Then Exit Sub
+    ReDim mTableShown(1 To mTableRows)
+    For displayNo = 1 To mTableRows
+        sourceRow = mTableOrder(displayNo)
+        If LenB(mTableFilter) = 0 Then
+            mTableShownCount = mTableShownCount + 1
+            mTableShown(mTableShownCount) = sourceRow
+        Else
+            For colNo = 1 To mTableCols
+                If InStr(1, TableCellText(colNo, mTableCells(colNo, sourceRow)), _
+                    mTableFilter, vbTextCompare) > 0 Then
+                    mTableShownCount = mTableShownCount + 1
+                    mTableShown(mTableShownCount) = sourceRow
+                    Exit For
+                End If
+            Next colNo
+        End If
+    Next displayNo
+End Sub
+
+Private Sub SetTableFilter(ByVal filterText As String)
+    If filterText = mTableFilter Then Exit Sub
+    mTableFilter = filterText
+    mTableOffset = 0
+    Touch
+End Sub
+
+' Typing while the table has the keys builds its filter; Backspace
+' takes a letter off.
+Private Function TypeTableFilter(ByVal keyText As String) As Boolean
+    Select Case keyText
+        Case "{APOS}"
+            keyText = "'"
+        Case "{QUOTE}"
+            keyText = """"
+    End Select
+    If keyText = "{BS}" Then
+        If LenB(mTableFilter) = 0 Then Exit Function
+        SetTableFilter Left$(mTableFilter, Len(mTableFilter) - 1)
+    ElseIf Len(keyText) = 1 Then
+        SetTableFilter mTableFilter & keyText
+    Else
+        Exit Function
+    End If
+    TypeTableFilter = True
+End Function
+
+' Where a source row sits among the rows shown; 0 when the filter hides
+' it or it is no row.
+Private Function TableShownAt(ByVal sourceRow As Long) As Long
+    Dim displayNo As Long
+
+    If sourceRow < 1 Then Exit Function
+    EnsureTableShown
+    For displayNo = 1 To mTableShownCount
+        If mTableShown(displayNo) = sourceRow Then
+            TableShownAt = displayNo
+            Exit Function
+        End If
+    Next displayNo
+End Function
+
+' Ctrl+C: the selected row, or every row shown when none is selected or
+' the filter hides it, under the header row, tab-separated for pasting
+' into the sheet. Dates go as yyyy-mm-dd so the sheet reads them back
+' as dates.
+Private Sub CopyTableRows()
+    Dim clipText As String
+    Dim colNo As Long
+    Dim displayNo As Long
+
+    If mTableCols = 0 Then Exit Sub
+    EnsureTableShown
+    For colNo = 1 To mTableCols
+        clipText = clipText & IIf(colNo > 1, vbTab, vbNullString) & ClipCell(mTableHeads(colNo))
+    Next colNo
+    If TableShownAt(CLng(mValue)) > 0 Then
+        clipText = clipText & vbCrLf & ClipRow(CLng(mValue))
+    Else
+        For displayNo = 1 To mTableShownCount
+            clipText = clipText & vbCrLf & ClipRow(mTableShown(displayNo))
+        Next displayNo
+    End If
+    WriteClipboardText clipText
+End Sub
+
+Private Function ClipRow(ByVal sourceRow As Long) As String
+    Dim colNo As Long
+
+    For colNo = 1 To mTableCols
+        If colNo > 1 Then ClipRow = ClipRow & vbTab
+        ClipRow = ClipRow & ClipCell(mTableCells(colNo, sourceRow))
+    Next colNo
+End Function
+
+Private Function ClipCell(ByVal cellEntry As Variant) As String
+    If IsError(cellEntry) Then
+        ClipCell = ErrorCellText(cellEntry)
+    ElseIf IsEmpty(cellEntry) Or IsNull(cellEntry) Then
+        Exit Function
+    ElseIf VarType(cellEntry) = vbDate Then
+        If cellEntry = Int(cellEntry) Then
+            ClipCell = Format$(cellEntry, "yyyy-mm-dd")
+        Else
+            ClipCell = Format$(cellEntry, "yyyy-mm-dd hh:nn:ss")
+        End If
+    Else
+        ClipCell = Replace(Replace(Replace(CStr(cellEntry), vbCr, " "), vbLf, " "), _
+            vbTab, " ")
+    End If
+End Function
 
 ' Orders two rows by the sort column: numbers and dates by value, before
 ' text, text without case, and empty cells last whichever the direction.
@@ -10275,16 +10497,19 @@ Private Sub ApplyTable(ByVal hostSheet As Worksheet, ByVal themeValue As ReDimUI
     textSize = mFontSize
     If textSize <= 0 Then textSize = themeValue.BaseFontSize
     rowPitch = textSize + 11
-    EnsureTableOrder
+    EnsureTableShown
     LayoutTableColumns textSize
     slotTotal = Int((mHeight - 2 - rowPitch) / rowPitch)
     If slotTotal < 1 Then slotTotal = 1
-    mTableFooterOn = (mTableRows > slotTotal)
+    ' The footer shows while rows page or a filter holds.
+    mTableFooterOn = (mTableShownCount > slotTotal) Or LenB(mTableFilter) > 0
     If mTableFooterOn Then
         slotTotal = Int((mHeight - 2 - 2 * rowPitch) / rowPitch)
         If slotTotal < 1 Then slotTotal = 1
     End If
-    If mTableOffset > mTableRows - slotTotal Then mTableOffset = mTableRows - slotTotal
+    If mTableOffset > mTableShownCount - slotTotal Then
+        mTableOffset = mTableShownCount - slotTotal
+    End If
     If mTableOffset < 0 Then mTableOffset = 0
     mTableRowPitch = rowPitch
     mTableSlots = slotTotal
@@ -10314,8 +10539,8 @@ Private Sub ApplyTable(ByVal hostSheet As Worksheet, ByVal themeValue As ReDimUI
     EnsureRowStates mAppliedTableRowStates, slotTotal
     For slotNo = 1 To slotTotal
         displayNo = mTableOffset + slotNo
-        If displayNo <= mTableRows Then
-            sourceRow = mTableOrder(displayNo)
+        If displayNo <= mTableShownCount Then
+            sourceRow = mTableShown(displayNo)
             rowWords = TableRowWords(sourceRow, textSize)
             If sourceRow = CLng(mValue) Then
                 rowFill = themeValue.PrimaryColor
@@ -10327,14 +10552,20 @@ Private Sub ApplyTable(ByVal hostSheet As Worksheet, ByVal themeValue As ReDimUI
                 rowInk = ResolveDrawnInk(themeValue)
             End If
         ElseIf displayNo = 1 Then
-            rowWords = vbTab & "No rows"
+            If mTableRows > 0 Then
+                rowWords = vbTab & "No rows match"
+            ElseIf LenB(mTableEmptyText) > 0 Then
+                rowWords = vbTab & mTableEmptyText
+            Else
+                rowWords = vbTab & "No rows"
+            End If
             rowFill = -1
             rowInk = themeValue.OnMutedColor
         Else
             rowWords = vbNullString
         End If
         SyncTableRow hostSheet, themeValue, slotNo, layoutKey, rowWords, rowFill, _
-            rowInk, rowPitch, textSize, (displayNo = 1 And mTableRows = 0)
+            rowInk, rowPitch, textSize, (displayNo = 1 And mTableShownCount = 0)
     Next slotNo
     For slotNo = slotTotal + 1 To mAppliedTableSlotsDrawn
         On Error Resume Next
@@ -10529,9 +10760,10 @@ Private Sub SyncTableFooter( _
 
     If mTableFooterOn Then
         lastShown = mTableOffset + mTableSlots
-        If lastShown > mTableRows Then lastShown = mTableRows
+        If lastShown > mTableShownCount Then lastShown = mTableShownCount
         footKey = PartsState(themeValue) & ":" & CStr(mTableOffset) & ":" & _
-            CStr(lastShown) & ":" & CStr(mTableRows) & ":" & PointerKey()
+            CStr(lastShown) & ":" & CStr(mTableShownCount) & ":" & PointerKey() & _
+            Chr$(1) & mTableFilter
     End If
     If footKey = mAppliedTableFootSig Then Exit Sub
     mAppliedTableFootSig = footKey
@@ -10558,8 +10790,7 @@ Private Sub SyncTableFooter( _
         .MarginBottom = 0
         .VerticalAnchor = msoAnchorMiddle
         .WordWrap = msoFalse
-        .TextRange.Text = CStr(mTableOffset + 1) & "-" & CStr(lastShown) & _
-            " of " & CStr(mTableRows)
+        .TextRange.Text = FooterWords(lastShown)
         .TextRange.ParagraphFormat.Alignment = msoAlignLeft
         With .TextRange.Font
             .Name = themeValue.FontName
@@ -10575,8 +10806,22 @@ Private Sub SyncTableFooter( _
         mTableOffset > 0, textSize
     SyncTablePager hostSheet, themeValue, "tn", ChrW(9654), _
         mLeft + mWidth - PAGER_TARGET - 4, footTop + (rowPitch - PAGER_TARGET) / 2, _
-        lastShown < mTableRows, textSize
+        lastShown < mTableShownCount, textSize
 End Sub
+
+' "1-6 of 14", and with a filter "Filter "ap": 1-3 of 3"; no rows
+' shown reads "0 of 0".
+Private Function FooterWords(ByVal lastShown As Long) As String
+    If mTableShownCount = 0 Then
+        FooterWords = "0 of 0"
+    Else
+        FooterWords = CStr(mTableOffset + 1) & "-" & CStr(lastShown) & _
+            " of " & CStr(mTableShownCount)
+    End If
+    If LenB(mTableFilter) > 0 Then
+        FooterWords = "Filter """ & mTableFilter & """: " & FooterWords
+    End If
+End Function
 
 Private Sub SyncTablePager( _
     ByVal hostSheet As Worksheet, _
@@ -10651,7 +10896,8 @@ Private Function TablePartAt(ByVal pointsX As Double, ByVal pointsY As Double) A
         Exit Function
     End If
     slotNo = Int((pointsY - mTop - 1) / mTableRowPitch)
-    If slotNo >= 1 And slotNo <= mTableSlots And mTableOffset + slotNo <= mTableRows Then
+    If slotNo >= 1 And slotNo <= mTableSlots _
+        And mTableOffset + slotNo <= mTableShownCount Then
         TablePartAt = "tr" & slotNo
     End If
 End Function
@@ -10661,6 +10907,7 @@ End Function
 ' selection changed, so the handlers run.
 Private Function ClickTable(ByVal hostApp As ReDimUI, ByVal partName As String) As Boolean
     Dim partNumber As Long
+    Dim sourceRow As Long
 
     If Len(partName) > 2 And IsNumeric(Mid$(partName, 3)) Then
         partNumber = CLng(Mid$(partName, 3))
@@ -10678,9 +10925,12 @@ Private Function ClickTable(ByVal hostApp As ReDimUI, ByVal partName As String) 
             mTableOffset = 0
             Touch
         Case "tr"
-            If partNumber < 1 Or mTableOffset + partNumber > mTableRows Then Exit Function
-            EnsureTableOrder
-            ClickTable = SelectTableRow(hostApp, mTableOrder(mTableOffset + partNumber))
+            EnsureTableShown
+            If partNumber < 1 Or mTableOffset + partNumber > mTableShownCount Then Exit Function
+            sourceRow = mTableShown(mTableOffset + partNumber)
+            ClickTable = SelectTableRow(hostApp, sourceRow)
+            ' The second click of a double click on the row opens it.
+            If RowDoubleClicked("row" & sourceRow) Then RunRowOpen hostApp
         Case Else
             If partName = "tp" Then
                 PageTable -1
@@ -10695,7 +10945,9 @@ Private Sub PageTable(ByVal pageDirection As Long)
 
     offsetBefore = mTableOffset
     mTableOffset = mTableOffset + pageDirection * mTableSlots
-    If mTableOffset > mTableRows - mTableSlots Then mTableOffset = mTableRows - mTableSlots
+    If mTableOffset > mTableShownCount - mTableSlots Then
+        mTableOffset = mTableShownCount - mTableSlots
+    End If
     If mTableOffset < 0 Then mTableOffset = 0
     If mTableOffset <> offsetBefore Then Touch
 End Sub
@@ -10711,26 +10963,31 @@ Private Function SelectTableRow(ByVal hostApp As ReDimUI, ByVal sourceRow As Lon
     SelectTableRow = True
 End Function
 
-' Up and Down move the selection a row in the order shown, Page Up and
-' Page Down a page, Home and End to the first and last row; the rows
-' scroll to keep it in view, and each move fires OnChange.
+' Up and Down move the selection a row among the rows shown, Page Up and
+' Page Down a page, Home and End to the first and last; the rows scroll
+' to keep it in view, and each move fires OnChange. Typing filters the
+' rows, Ctrl+C copies, and Enter opens the selected row when the table
+' has OnRowOpen.
 Private Sub HandleTableKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
     Dim shownAt As Long
     Dim aimAt As Long
-    Dim displayNo As Long
 
-    If keyText = "{ENTER}" Then
-        hostApp.ClickDefaultButton
-        Exit Sub
-    End If
-    If mTableRows = 0 Then Exit Sub
-    EnsureTableOrder
-    For displayNo = 1 To mTableRows
-        If mTableOrder(displayNo) = CLng(mValue) Then
-            shownAt = displayNo
-            Exit For
-        End If
-    Next displayNo
+    Select Case keyText
+        Case "{ENTER}"
+            If LenB(mRowOpenProc) > 0 And TableShownAt(CLng(mValue)) > 0 Then
+                RunRowOpen hostApp
+            Else
+                hostApp.ClickDefaultButton
+            End If
+            Exit Sub
+        Case "{COPY}"
+            CopyTableRows
+            Exit Sub
+    End Select
+    If TypeTableFilter(keyText) Then Exit Sub
+    EnsureTableShown
+    If mTableShownCount = 0 Then Exit Sub
+    shownAt = TableShownAt(CLng(mValue))
     Select Case keyText
         Case "{UP}"
             aimAt = shownAt - 1
@@ -10744,19 +11001,24 @@ Private Sub HandleTableKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
         Case "{HOME}"
             aimAt = 1
         Case "{END}"
-            aimAt = mTableRows
+            aimAt = mTableShownCount
         Case Else
             Exit Sub
     End Select
     If aimAt < 1 Then aimAt = 1
-    If aimAt > mTableRows Then aimAt = mTableRows
+    If aimAt > mTableShownCount Then aimAt = mTableShownCount
     If aimAt <= mTableOffset Then mTableOffset = aimAt - 1
     If aimAt > mTableOffset + mTableSlots Then mTableOffset = aimAt - mTableSlots
-    If SelectTableRow(hostApp, mTableOrder(aimAt)) Then
+    If SelectTableRow(hostApp, mTableShown(aimAt)) Then
         RunClickHandlers hostApp
     Else
         Touch
     End If
+End Sub
+
+Private Sub RunRowOpen(ByVal hostApp As ReDimUI)
+    If LenB(mRowOpenProc) = 0 Then Exit Sub
+    ReDimUI.RunHandlerAs hostApp, Me, mRowOpenProc
 End Sub
 
 Friend Sub JoinStack(ByVal memberId As String)
@@ -12626,6 +12888,11 @@ Private Function ClearListFilter() As Boolean
         If LenB(PanelFilter(mKeyPanel)) = 0 Then Exit Function
     ElseIf mKind = KIND_CHECKLIST Then
         If LenB(mFilterCheck) = 0 Then Exit Function
+    ElseIf mKind = KIND_TABLE Then
+        If LenB(mTableFilter) = 0 Then Exit Function
+        SetTableFilter vbNullString
+        ClearListFilter = True
+        Exit Function
     Else
         Exit Function
     End If
@@ -14360,16 +14627,16 @@ Private Sub SyncEmptyRow( _
 )
     Dim emptyShape As Shape
     Dim emptyKey As String
-    Dim emptyText As String
+    Dim emptyRowWords As String
 
     If showIt Then
         If mKind = KIND_COMBO Then
-            emptyText = "No matches"
+            emptyRowWords = "No matches"
         Else
-            emptyText = "No items"
+            emptyRowWords = "No items"
         End If
         emptyKey = PartsState(themeValue) & ":" & CStr(rowTop) & ":" & _
-            CStr(rowPitch) & ":" & CStr(resolvedSize) & ":" & emptyText
+            CStr(rowPitch) & ":" & CStr(resolvedSize) & ":" & emptyRowWords
         If emptyKey = mAppliedEmptyRowSig Then Exit Sub
         mAppliedEmptyRowSig = emptyKey
         Set emptyShape = EnsurePartShape(hostSheet, "optn", msoShapeRectangle)
@@ -14389,7 +14656,7 @@ Private Sub SyncEmptyRow( _
             .MarginBottom = 2
             .VerticalAnchor = msoAnchorMiddle
             .WordWrap = msoFalse
-            .TextRange.Text = GutterText(False, emptyText)
+            .TextRange.Text = GutterText(False, emptyRowWords)
             .TextRange.ParagraphFormat.Alignment = msoAlignLeft
             With .TextRange.Font
                 .Name = themeValue.FontName
@@ -14986,11 +15253,11 @@ Friend Sub HandleKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
             mCaretPos = Len(mText)
             mLastEditKind = vbNullString
         Case "{COPY}"
-            If HasSelection() Then
+            If HasSelection() And Not mMasked Then
                 WriteClipboardText Mid$(mText, SelStart() + 1, SelLength())
             End If
         Case "{CUT}"
-            If HasSelection() Then
+            If HasSelection() And Not mMasked Then
                 If WriteClipboardText(Mid$(mText, SelStart() + 1, SelLength())) Then
                     RecordUndo "cut"
                     ReplaceSelection vbNullString

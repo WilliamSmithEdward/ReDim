@@ -434,6 +434,17 @@
   own `AddCommand` entries, every button with a click handler, and
   every menu command. Typing filters it, a pick runs the entry, and
   leaving it runs nothing.
+- A `Table` filters as you type while it has the keys: a row stays when
+  any cell holds the text, the footer names the filter, Backspace takes
+  a letter off, and Esc clears it. `FilterRows` filters from code and
+  `ShownRowCount` counts what passes. Ctrl+C copies the selected row, or
+  the rows shown, under the header as text that pastes into cells with
+  dates intact, and `ExportTo` writes the rows shown to a range in one
+  write. `EmptyText` words an empty table, a filter that matches nothing
+  says so, and `OnRowOpen` runs on a row's double click or on Enter.
+- `Masked` turns a float `TextInput` into a password box: dots on the
+  face, nothing for copy or cut, and "Edit field, masked" for screen
+  readers, while `InputValue` and `WritesTo` keep the text.
 
 ## 0.19.2 - 2026-08-02
 

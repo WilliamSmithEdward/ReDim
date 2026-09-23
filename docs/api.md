@@ -150,8 +150,8 @@ All fluent, all return the component:
 - Text fields (float `TextInput` and `ComboBox`): `Placeholder(hint)`, `OnInput(proc)` with
   `DebounceMs(ms)`, `Numeric`, `MaxLength(n)`, `Required`, `ErrorText(message)`, and
   `Validates(checkProc)` read back with `ValidationError` (see [Field rules](#field-rules));
-  `MultiLine` and `AutoGrow(maxLines)` for a TextInput and `RestrictToItems` for a
-  ComboBox.
+  `MultiLine`, `AutoGrow(maxLines)`, and `Masked` for a TextInput and `RestrictToItems`
+  for a ComboBox.
 - Adornments (any control): `Caption(text)` puts a label in small text above the control,
   and `Hint(text)` helper text in muted ink below it (see [Field rules](#field-rules)).
 - Reads: `CurrentValue`, `CurrentText`, `IsChecked`, `IsEnabled`, `IsVisible`, `IsBusy`, `InputValue`
@@ -354,10 +354,24 @@ ui.TickBox("beta").AtRect(24, 70, 200, 18).Text("Beta features").OnTab "tabs", 2
   footer that counts them (`6-10 of 14`) with arrows that page. `RowCount`,
   `CellValue(row, column)`, `SortColumn`, and `SortedDescending` read it back.
 
+  Typing while the table has the keys filters it: a row shows when any cell, as shown,
+  holds the text in any case, and the footer names the filter (`Filter "ap": 1-2 of 2`).
+  Backspace takes a letter off, Esc clears the filter before it ends focus, and
+  `FilterRows "ap"` filters from code; `ShownRowCount` counts the rows it lets through.
+  Ctrl+C copies the selected row, or every row shown when none is selected or the filter
+  hides it, under the header row as tab-separated text that pastes into cells, dates as
+  yyyy-mm-dd so the sheet reads them back as dates. `ExportTo Range("H1")` writes the header and the rows
+  shown, filtered and sorted, from that cell down in one write.
+  `EmptyText "No orders yet"` words the row an empty table shows, and a filter that
+  matches nothing reads "No rows match". `OnRowOpen "Module.Proc"` runs on a double
+  click on a row, or on Enter while the table has the keys and shows its selected row,
+  with the table as `ReDimUI.Sender` and the row in its `CurrentValue`.
+
 ```vba
 ui.Table("orders").AtRect(24, 24, 360, 160).TableFrom Range("Orders!A1:C40")
 ui.Table("orders").ColumnFormat 3, "#,##0.00"
 ui.Table("orders").WritesTo "orderId"
+ui.Table("orders").EmptyText("No orders yet").OnRowOpen "Orders.OpenOrder"
 ```
 
 ## Float fields and keyboard focus
@@ -496,6 +510,9 @@ Builders for float `TextInput` and `ComboBox` fields:
 - `ErrorText "That name is taken"` shows an error from outside the field, a server's
   answer for one, with the same danger border and message line. It stays until
   `ErrorText ""` clears it. A validation message shows in its place while there is one.
+- `Masked` shows a float TextInput's characters as dots, focused or not, as a password
+  box does. Copy and cut take nothing from it, while `InputValue` and `WritesTo` keep
+  the text. `Masked False` lifts it.
 
 Any control, not only a field, takes the two adornments. `Caption "Email"` sets a label in
 text a point smaller than the control's, above its rectangle, so leave room for it there;
@@ -679,7 +696,7 @@ keep the keys.
 | Tabs | Left and Right show the tab beside, wrapping at the ends; Home and End jump. Each move fires `OnChange`. |
 | Expander | Space or Enter opens or closes it; Right opens and Left closes. Each change fires `OnChange`. |
 | MenuButton | Closed: Space, Enter, Down, Up, Alt+Down, or F4 opens the menu with the first command highlighted. Open: the arrows, Page Up, Page Down, Home, and End move the highlight past disabled commands and headers, letters jump by name, Enter or Space runs the highlighted command, and Esc, F4, Alt+Up, or Tab closes. |
-| Table | Up and Down move the selection a row in the order shown, Page Up and Page Down a page, Home and End to the first and last row; the rows scroll to keep it in view, and each move fires `OnChange`. |
+| Table | Up and Down move the selection a row in the order shown, Page Up and Page Down a page, Home and End to the first and last row; the rows scroll to keep it in view, and each move fires `OnChange`. Other characters filter the rows, Backspace takes one off, and Esc clears the filter. Ctrl+C copies the selected row or the rows shown, and Enter opens the selected row when the table has `OnRowOpen`. |
 | DatePicker | Closed: Alt+Down, F4, Space, or Down opens the calendar on the date held, or today. Open: Left and Right move a day, Up and Down a week, Page Up and Page Down a month, Home and End to the month's first and last day; Enter or Space picks the day reached, and Esc, F4, or Alt+Up closes. A dashed ring marks the day reached. |
 | Stepper | Up and Right step up, Down and Left step down, Page Up and Page Down step ten times, Home and End jump to the range ends. |
 | SlideBar | Arrows move a step, Page Up and Page Down a tenth of the range in whole steps, Home and End go to the ends. |
@@ -693,8 +710,9 @@ keep the keys.
 - Alternative text: ReDim writes a description on each control's shape from its kind, text,
   and state, such as "Save, button", "Agree, checkbox, checked", "Drop-down, South",
   "Tabs, Advanced selected, tab 2 of 3", "Progress, 40 percent" (in 5 percent steps),
-  with ", unavailable" when disabled. Labels,
-  cards, and toasts carry none, since their text is what a reader announces. A `Tooltip`
+  with ", unavailable" when disabled. A `Masked` field reads "Edit field, masked" and
+  never its text. Labels, cards, and toasts carry none, since their text is what a
+  reader announces. A `Tooltip`
   follows the description, or the `DisabledReason` while the control is disabled.
   `AltText` replaces the description.
 - Keyboard: every control works without a mouse, and focus shows as a ring or a field
