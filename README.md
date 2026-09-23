@@ -41,12 +41,20 @@ user keeps working in the workbook.
 - **Components over shapes.** Button, Label, Card, ProgressBar, Spinner, Toggle, TickBox,
   RadioGroup, Stepper, SlideBar (press-drag), SelectBox, ComboBox (editable, filtering live
   as you type), TransferList (dual listbox with move buttons), CheckList (checkbox list
-  with a tri-state select-all header), Image (embedded picture fills), TextInput, Toast,
-  and a shapes-based modal overlay with Confirm - every
+  with a tri-state select-all header), DatePicker (month calendar), Table (sortable,
+  paged), Tabs (with panels of controls), Skeleton (loading placeholder), Image (embedded
+  picture fills), TextInput with captions, hints, and validation, Toast, and a
+  shapes-based modal overlay with Confirm - every
   control drawn from shapes and fully themed, with light and dark presets, no native form
   controls anywhere, no cells required (text fields float free of the grid via a keyboard
   focus layer, or anchor to a cell if you want one), and no dependencies beyond a stock
   Excel 365 install.
+- **Keyboard and pointer.** Every control takes keyboard focus, with Tab order, arrow keys,
+  access keys, and a default button. Float fields edit like Windows text boxes: selection,
+  word moves, the clipboard, and undo. Opt-in hover and press looks, tooltips,
+  hold-to-repeat, and drag gestures come from the pump watching the pointer. Every
+  control carries alternative text for screen readers, a high-contrast theme passes WCAG
+  AA, and motion follows the Windows animation setting.
 - **Stateful.** Each app owns a key-value store. `BindText`, `BindValue`, `BindVisible`, and
   `BindEnabled` re-render only what changed. `OnStateChanged` registers workbook procedures as
   state listeners. `WritesTo` flows control values back into state. The store is deliberately
@@ -99,7 +107,7 @@ and it builds itself (each ships an `Auto_Open`); the entry macro rebuilds on de
 | Workbook | Shows | Entry macro |
 |---|---|---|
 | `ReDim_Mission_Control.xlsm` | Three cancellable feeds with live progress, toasts, KPI cards, dark mode, confirm modal | `BuildMissionControl` |
-| `ReDim_Widget_Gallery.xlsm` | Every component wired to a live state inspector | `BuildWidgetGallery` |
+| `ReDim_Widget_Gallery.xlsm` | Every component wired to a live state inspector, with the 0.20 controls in a tabbed section: form fields, a date picker, a sortable table, a skeleton | `BuildWidgetGallery` |
 | `ReDim_Snake.xlsm` | A real game loop: paced pump job, arrow-key steering, score state, game-over modal | `BuildSnake` |
 | `ReDim_Navigator.xlsm` | Sheets as forms: Navigate, back stack, lifecycle hooks | `BuildNavigator` |
 | `ReDim_ReDex.xlsm` | The full-framework showcase: a living Pokedex on PokeAPI - async HTTP + JSON, sprite images, tweened stat bars, team building, custom theme with night mode | `BuildPokeDex` |

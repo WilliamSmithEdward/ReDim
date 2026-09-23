@@ -405,3 +405,80 @@ Public Function BenchNavigate() As String
     ReDimUI.AutoPump True
     BenchNavigate = gTranscript
 End Function
+
+' The 0.20.0 components: a tab switch over panels of ten buttons, a date
+' picker's calendar opening, turning a month, and picking a day, a
+' skeleton's pulse frames, and a 1000-row table filled from an array,
+' sorted by a header, paged, and a row picked.
+Public Function BenchComponents() As String
+    Dim ui As ReDimUI
+    Dim host As Worksheet
+    Dim idx As Long
+    Dim started As Double
+    Dim grid() As Variant
+    Dim frameTotal As Double
+
+    StartScenario
+    Set host = NewCanvas()
+    Set ui = ReDimUI.Mount(host, "benchc")
+    ui.Tabs("tabs").AtRect(24, 24, 360, 30).Items "One", "Two", "Three"
+    For idx = 1 To 30
+        ui.Button("b" & idx).AtRect(24 + ((idx - 1) Mod 10) * 40, 70, 36, 24) _
+            .Text(CStr(idx)).OnTab "tabs", (idx - 1) \ 10 + 1
+    Next idx
+    ui.DatePicker("due").AtRect(24, 120, 150, 24).PickDate DateSerial(2026, 9, 22)
+    ui.Skeleton("skel").AtRect(420, 120, 200, 60).SkeletonLines 3
+    ui.Render
+
+    started = NowMs()
+    ReDimUI.DispatchShape "rdm_benchc_tabs__tb2"
+    Record "tabSwitch10", NowMs() - started
+
+    started = NowMs()
+    ReDimUI.DispatchShape "rdm_benchc_due"
+    Record "dateOpen", NowMs() - started
+    started = NowMs()
+    ReDimUI.DispatchShape "rdm_benchc_due__cn"
+    Record "dateMonth", NowMs() - started
+    started = NowMs()
+    ReDimUI.DispatchShape "rdm_benchc_due__cd15"
+    Record "datePickClose", NowMs() - started
+
+    ' Only the frames count: a Sleep runs a timer tick or two past its ask.
+    For idx = 1 To 20
+        started = NowMs()
+        ReDimUI.PumpOnce
+        frameTotal = frameTotal + NowMs() - started
+        Sleep 20
+    Next idx
+    Record "frameSkeleton", frameTotal / 20
+
+    ReDim grid(1 To 1001, 1 To 5)
+    grid(1, 1) = "Name"
+    grid(1, 2) = "Qty"
+    grid(1, 3) = "Price"
+    grid(1, 4) = "Date"
+    grid(1, 5) = "Zone"
+    For idx = 2 To 1001
+        grid(idx, 1) = "Item" & Format$(idx - 1, "0000")
+        grid(idx, 2) = (idx * 7919) Mod 1000
+        grid(idx, 3) = ((idx * 31) Mod 97) / 4
+        grid(idx, 4) = DateSerial(2026, 1, 1) + (idx Mod 300)
+        grid(idx, 5) = IIf(idx Mod 3 = 0, "North", "South")
+    Next idx
+    ui.Table("tbl").AtRect 24, 220, 480, 300
+    started = NowMs()
+    ui.Table("tbl").TableFrom grid
+    Record "tableFrom1000", NowMs() - started
+    started = NowMs()
+    ReDimUI.DispatchShape "rdm_benchc_tbl__th2"
+    Record "tableSort1000", NowMs() - started
+    started = NowMs()
+    ReDimUI.DispatchShape "rdm_benchc_tbl__tn"
+    Record "tablePage1000", NowMs() - started
+    started = NowMs()
+    ReDimUI.DispatchShape "rdm_benchc_tbl__tr3"
+    Record "tableRowPick1000", NowMs() - started
+    ReDimUI.AutoPump True
+    BenchComponents = gTranscript
+End Function

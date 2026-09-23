@@ -9202,7 +9202,9 @@ Private Sub SyncTableCell( _
 End Sub
 
 ' A row slot: one shape across the table with a thin rule; its tab stops
-' change only when the columns do. An empty words string removes it.
+' change only when the columns do. A slot whose place, size, and font held
+' rewrites only the words, fill, and ink that changed. An empty words
+' string removes it.
 Private Sub SyncTableRow( _
     ByVal hostSheet As Worksheet, _
     ByVal themeValue As ReDimUI, _
@@ -9215,14 +9217,15 @@ Private Sub SyncTableRow( _
     ByVal textSize As Double, _
     ByVal emptyNote As Boolean _
 )
-    Dim partKey As String
-    Dim priorKey As String
+    Dim frameKey As String
+    Dim lookKey As String
+    Dim priorParts() As String
+    Dim priorLook() As String
     Dim rowShape As Shape
     Dim colNo As Long
 
-    priorKey = mAppliedTableRowStates(slotNo)
     If LenB(rowWords) = 0 Then
-        If LenB(priorKey) > 0 Then
+        If LenB(mAppliedTableRowStates(slotNo)) > 0 Then
             mAppliedTableRowStates(slotNo) = vbNullString
             On Error Resume Next
             hostSheet.Shapes(ShapeName & PART_SEPARATOR & "tr" & slotNo).Delete
@@ -9230,11 +9233,27 @@ Private Sub SyncTableRow( _
         End If
         Exit Sub
     End If
-    partKey = layoutKey & Chr$(1) & PartsState(themeValue) & ":" & rowWords & ":" & _
-        CStr(fillRgb) & ":" & CStr(inkRgb) & ":" & CStr(emptyNote)
-    If priorKey = partKey Then Exit Sub
-    mAppliedTableRowStates(slotNo) = partKey
+    frameKey = layoutKey & Chr$(1) & PartsState(themeValue) & ":" & CStr(rowPitch) & _
+        ":" & CStr(textSize) & ":" & CStr(emptyNote)
+    lookKey = rowWords & Chr$(2) & CStr(fillRgb) & Chr$(2) & CStr(inkRgb)
+    If mAppliedTableRowStates(slotNo) = frameKey & Chr$(3) & lookKey Then Exit Sub
+    priorParts = Split(mAppliedTableRowStates(slotNo) & Chr$(3), Chr$(3))
+    mAppliedTableRowStates(slotNo) = frameKey & Chr$(3) & lookKey
     Set rowShape = EnsurePartShape(hostSheet, "tr" & slotNo, msoShapeRectangle)
+    If priorParts(0) = frameKey Then
+        priorLook = Split(priorParts(1) & Chr$(2) & Chr$(2), Chr$(2))
+        If priorLook(1) <> CStr(fillRgb) Then
+            rowShape.Fill.Visible = BoolToMso(fillRgb >= 0)
+            If fillRgb >= 0 Then rowShape.Fill.ForeColor.RGB = fillRgb
+        End If
+        With rowShape.TextFrame2.TextRange
+            If priorLook(0) <> rowWords Then .Text = rowWords
+            If priorLook(2) <> CStr(inkRgb) Or priorLook(0) <> rowWords Then
+                .Font.Fill.ForeColor.RGB = inkRgb
+            End If
+        End With
+        Exit Sub
+    End If
     rowShape.Left = mLeft + 1
     rowShape.Top = mTop + 1 + slotNo * rowPitch
     rowShape.Width = mWidth - 2
@@ -9253,7 +9272,7 @@ Private Sub SyncTableRow( _
         .WordWrap = msoFalse
         .TextRange.Text = rowWords
         .TextRange.ParagraphFormat.Alignment = msoAlignLeft
-        If Split(priorKey & Chr$(1), Chr$(1))(0) <> layoutKey Then
+        If Split(priorParts(0) & Chr$(1), Chr$(1))(0) <> layoutKey Then
             With .TextRange.ParagraphFormat.TabStops
                 Do While .Count > 0
                     .Item(1).Clear
@@ -9704,6 +9723,17 @@ Private Sub SyncCalendar(ByVal hostSheet As Worksheet, ByVal themeValue As ReDim
     Dim partShape As Shape
 
     If Not (mSelectOpen And mVisible) Then
+        ' A first draw looks once for a card an earlier session left open,
+        ' as a VBA reset leaves it, and sweeps that calendar away.
+        If Not mAppliedValid Then
+            On Error Resume Next
+            Set partShape = hostSheet.Shapes(ShapeName & PART_SEPARATOR & "cb")
+            On Error GoTo 0
+            If Not partShape Is Nothing Then
+                EnsureRowStates mAppliedRowStates, 53
+                mAppliedRowStates(1) = "?"
+            End If
+        End If
         DeleteCalendarParts hostSheet
         Exit Sub
     End If
@@ -9739,13 +9769,7 @@ Private Sub SyncCalendar(ByVal hostSheet As Worksheet, ByVal themeValue As ReDim
         cardTop + CAL_PAD, CAL_CELL_W, CAL_HEAD_H, ChrW(9654), _
         PartFill("cn", themeValue), themeValue.OnMutedColor, -1, False, textSize - 2
     gridStart = CalendarGridStart()
-    For cellNo = 1 To 7
-        SyncCalendarPart hostSheet, themeValue, 4 + cellNo, "cw" & cellNo, _
-            mLeft + CAL_PAD + (cellNo - 1) * CAL_CELL_W, cardTop + CAL_PAD + CAL_HEAD_H, _
-            CAL_CELL_W, CAL_WEEK_H, _
-            Left$(WeekdayName(Weekday(gridStart + cellNo - 1), True), 2), -1, _
-            themeValue.OnMutedColor, -1, False, textSize - 2
-    Next cellNo
+    SyncCalendarWeekdays hostSheet, themeValue, cardTop, gridStart, textSize
     cursorShown = ReDimUI.IsComponentFocused(mOwnerAppId, mComponentId)
     For cellNo = 1 To 42
         cellDay = gridStart + cellNo - 1
@@ -9775,6 +9799,62 @@ Private Sub SyncCalendar(ByVal hostSheet As Worksheet, ByVal themeValue As ReDim
     Next cellNo
 End Sub
 
+' The weekday initials: one shape whose center tab stops sit over the
+' day columns, where seven shapes cost the opening six more creations.
+Private Sub SyncCalendarWeekdays( _
+    ByVal hostSheet As Worksheet, _
+    ByVal themeValue As ReDimUI, _
+    ByVal cardTop As Double, _
+    ByVal gridStart As Date, _
+    ByVal textSize As Double _
+)
+    Dim weekWords As String
+    Dim weekKey As String
+    Dim dayNo As Long
+    Dim weekShape As Shape
+
+    For dayNo = 1 To 7
+        weekWords = weekWords & vbTab & _
+            Left$(WeekdayName(Weekday(gridStart + dayNo - 1), True), 2)
+    Next dayNo
+    weekKey = PartsState(themeValue) & ":" & CStr(cardTop) & ":" & weekWords & _
+        ":" & CStr(textSize)
+    If mAppliedRowStates(5) = weekKey Then Exit Sub
+    mAppliedRowStates(5) = weekKey
+    Set weekShape = EnsurePartShape(hostSheet, "cw", msoShapeRectangle)
+    weekShape.Left = mLeft + CAL_PAD
+    weekShape.Top = cardTop + CAL_PAD + CAL_HEAD_H
+    weekShape.Width = 7 * CAL_CELL_W
+    weekShape.Height = CAL_WEEK_H
+    weekShape.Fill.Visible = msoFalse
+    weekShape.Line.Visible = msoFalse
+    With weekShape.TextFrame2
+        .MarginLeft = 0
+        .MarginRight = 0
+        .MarginTop = 0
+        .MarginBottom = 0
+        .VerticalAnchor = msoAnchorMiddle
+        .WordWrap = msoFalse
+        .TextRange.Text = weekWords
+        .TextRange.ParagraphFormat.Alignment = msoAlignLeft
+        With .TextRange.ParagraphFormat.TabStops
+            Do While .Count > 0
+                .Item(1).Clear
+            Loop
+            For dayNo = 1 To 7
+                .Add msoTabStopCenter, (dayNo - 0.5) * CAL_CELL_W
+            Next dayNo
+        End With
+        With .TextRange.Font
+            .Name = themeValue.FontName
+            .Size = textSize - 2
+            .Bold = msoFalse
+            .Fill.ForeColor.RGB = themeValue.OnMutedColor
+        End With
+    End With
+    weekShape.OnAction = mAppliedOnAction
+End Sub
+
 ' The hover look of a calendar part: a tint of the card under PointerEffects,
 ' otherwise no fill (-1).
 Private Function PartFill(ByVal partName As String, ByVal themeValue As ReDimUI) As Long
@@ -9783,7 +9863,9 @@ Private Function PartFill(ByVal partName As String, ByVal themeValue As ReDimUI)
 End Function
 
 ' One calendar part: a rounded cell with centered text, written only
-' when its look differs from what its slot recorded.
+' when its look differs from what its slot recorded. A part whose place,
+' size, and font held rewrites only the words, fill, ink, and ring that
+' changed, as the days do when the month turns.
 Private Sub SyncCalendarPart( _
     ByVal hostSheet As Worksheet, _
     ByVal themeValue As ReDimUI, _
@@ -9801,16 +9883,41 @@ Private Sub SyncCalendarPart( _
     ByVal textSize As Double, _
     Optional ByVal ringDashed As Boolean _
 )
-    Dim partKey As String
+    Dim frameKey As String
+    Dim lookKey As String
+    Dim priorParts() As String
+    Dim priorLook() As String
     Dim partShape As Shape
 
-    partKey = CStr(ObjPtr(themeValue)) & ":" & CStr(partLeft) & ":" & CStr(partTop) & _
-        ":" & CStr(partWidth) & ":" & partWords & ":" & CStr(fillRgb) & ":" & _
-        CStr(inkRgb) & ":" & CStr(ringRgb) & ":" & CStr(wordsBold) & ":" & _
-        CStr(textSize) & ":" & CStr(ringDashed) & ":" & mAppliedOnAction
-    If mAppliedRowStates(stateSlot) = partKey Then Exit Sub
-    mAppliedRowStates(stateSlot) = partKey
+    frameKey = CStr(ObjPtr(themeValue)) & ":" & CStr(partLeft) & ":" & CStr(partTop) & _
+        ":" & CStr(partWidth) & ":" & CStr(partHeight) & ":" & CStr(textSize) & ":" & _
+        mAppliedOnAction
+    lookKey = partWords & Chr$(2) & CStr(fillRgb) & Chr$(2) & CStr(inkRgb) & Chr$(2) & _
+        CStr(ringRgb) & Chr$(2) & CStr(wordsBold) & Chr$(2) & CStr(ringDashed)
+    If mAppliedRowStates(stateSlot) = frameKey & Chr$(3) & lookKey Then Exit Sub
+    priorParts = Split(mAppliedRowStates(stateSlot) & Chr$(3), Chr$(3))
+    mAppliedRowStates(stateSlot) = frameKey & Chr$(3) & lookKey
     Set partShape = EnsurePartShape(hostSheet, partName, msoShapeRoundedRectangle)
+    If priorParts(0) = frameKey Then
+        priorLook = Split(priorParts(1) & String$(5, Chr$(2)), Chr$(2))
+        If priorLook(1) <> CStr(fillRgb) Then
+            partShape.Fill.Visible = BoolToMso(fillRgb >= 0)
+            If fillRgb >= 0 Then partShape.Fill.ForeColor.RGB = fillRgb
+        End If
+        If priorLook(3) <> CStr(ringRgb) Or priorLook(5) <> CStr(ringDashed) Then
+            ApplyCalendarRing partShape, ringRgb, ringDashed
+        End If
+        With partShape.TextFrame2.TextRange
+            If priorLook(0) <> partWords Then .Text = partWords
+            If priorLook(2) <> CStr(inkRgb) Or priorLook(0) <> partWords Then
+                .Font.Fill.ForeColor.RGB = inkRgb
+            End If
+            If priorLook(4) <> CStr(wordsBold) Or priorLook(0) <> partWords Then
+                .Font.Bold = BoolToMso(wordsBold)
+            End If
+        End With
+        Exit Sub
+    End If
     On Error Resume Next
     partShape.Adjustments(1) = 0.3
     On Error GoTo 0
@@ -9820,16 +9927,7 @@ Private Sub SyncCalendarPart( _
     partShape.Height = partHeight
     partShape.Fill.Visible = BoolToMso(fillRgb >= 0)
     If fillRgb >= 0 Then partShape.Fill.ForeColor.RGB = fillRgb
-    partShape.Line.Visible = BoolToMso(ringRgb >= 0)
-    If ringRgb >= 0 Then
-        partShape.Line.ForeColor.RGB = ringRgb
-        partShape.Line.Weight = 1.25
-        If ringDashed Then
-            partShape.Line.DashStyle = msoLineDash
-        Else
-            partShape.Line.DashStyle = msoLineSolid
-        End If
-    End If
+    ApplyCalendarRing partShape, ringRgb, ringDashed
     With partShape.TextFrame2
         .MarginLeft = 0
         .MarginRight = 0
@@ -9849,6 +9947,22 @@ Private Sub SyncCalendarPart( _
     partShape.OnAction = mAppliedOnAction
 End Sub
 
+Private Sub ApplyCalendarRing( _
+    ByVal partShape As Shape, _
+    ByVal ringRgb As Long, _
+    ByVal ringDashed As Boolean _
+)
+    partShape.Line.Visible = BoolToMso(ringRgb >= 0)
+    If ringRgb < 0 Then Exit Sub
+    partShape.Line.ForeColor.RGB = ringRgb
+    partShape.Line.Weight = 1.25
+    If ringDashed Then
+        partShape.Line.DashStyle = msoLineDash
+    Else
+        partShape.Line.DashStyle = msoLineSolid
+    End If
+End Sub
+
 ' A closed calendar leaves no shapes behind.
 Private Sub DeleteCalendarParts(ByVal hostSheet As Worksheet)
     Dim partNo As Long
@@ -9863,9 +9977,7 @@ Private Sub DeleteCalendarParts(ByVal hostSheet As Worksheet)
     hostSheet.Shapes(ShapeName & PART_SEPARATOR & "ch").Delete
     hostSheet.Shapes(ShapeName & PART_SEPARATOR & "cp").Delete
     hostSheet.Shapes(ShapeName & PART_SEPARATOR & "cn").Delete
-    For partNo = 1 To 7
-        hostSheet.Shapes(ShapeName & PART_SEPARATOR & "cw" & partNo).Delete
-    Next partNo
+    hostSheet.Shapes(ShapeName & PART_SEPARATOR & "cw").Delete
     For partNo = 1 To 42
         hostSheet.Shapes(ShapeName & PART_SEPARATOR & "cd" & partNo).Delete
     Next partNo

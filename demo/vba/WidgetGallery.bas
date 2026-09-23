@@ -27,7 +27,9 @@ Attribute VB_Name = "WidgetGallery"
 Option Explicit
 
 ' Widget Gallery: every ReDim component on one sheet, wired to a live state
-' inspector so interactions are visible as data, not just pixels.
+' inspector so interactions are visible as data, not just pixels. The
+' controls new in 0.20 sit in a tabbed section on the right, and the
+' gallery turns on the hover and press looks.
 
 Private Const APP_ID As String = "gallery"
 
@@ -45,8 +47,12 @@ Public Sub BuildWidgetGallery()
 
     Set host = ThisWorkbook.Worksheets(1)
     Set ui = ReDimUI.Mount(host, APP_ID)
+    ' A rebuild over the shapes already drawn applies each control once,
+    ' at Render, instead of once per builder call.
+    ui.BeginUpdate
     ui.ProtectSurface False
     ui.PrepareCanvas
+    ui.PointerEffects
 
     ui.Label("title").AtRect(24, 16, 300, 30).Text("Widget Gallery") _
         .FontSize(20).Bold
@@ -62,7 +68,7 @@ Public Sub BuildWidgetGallery()
         .OnClick "WidgetGallery.HandleModal"
     ui.Button("busywork").AtRect(440, 80, 120, 30).Text("Run async work") _
         .OnClickAsync "WidgetGallery.SimulatedWork"
-    ui.Label("oplog").AtRect(440, 114, 220, 16).BindText "oplog"
+    ui.Label("oplog").AtRect(440, 114, 160, 16).BindText "oplog"
 
     ui.Label("lblValues").AtRect(24, 128, 200, 16).Text("Value controls").Bold
     ui.Toggle("notify").AtRect(24, 150, 44, 22).WritesTo "notifications"
@@ -126,6 +132,8 @@ Public Sub BuildWidgetGallery()
     ui.Card("inspector").AtRect(24, 606, 560, 110).Text("State inspector")
     ui.Label("inspectorBody").AtRect(36, 634, 536, 74).BindText "inspector"
 
+    BuildNewSection ui
+
     ui.SetState "notifications", False
     ui.SetState "region", "North"
     ui.SetState "drawnCheck", False
@@ -136,11 +144,16 @@ Public Sub BuildWidgetGallery()
     ui.SetState "notes", vbNullString
     ui.SetState "crew", "Barbara"
     ui.SetState "options", "Auto-save"
+    ui.SetState "email", vbNullString
+    ui.SetState "dueDate", vbNullString
+    ui.SetState "size", vbNullString
+    ui.SetState "stock", vbNullString
     ui.SetState "lastAction", "none yet"
     ui.SetState "oplog", "no run yet"
     RefreshInspector
     WireInspector ui
     ui.Render
+    ui.EndUpdate
     ui.ProtectSurface
 End Sub
 
@@ -152,6 +165,60 @@ Private Sub WireInspector(ByVal ui As ReDimUI)
     ui.OnStateChanged "volume", "WidgetGallery.RefreshInspector"
     ui.OnStateChanged "userName", "WidgetGallery.RefreshInspector"
     ui.OnStateChanged "lastAction", "WidgetGallery.RefreshInspector"
+    ui.OnStateChanged "email", "WidgetGallery.RefreshInspector"
+    ui.OnStateChanged "dueDate", "WidgetGallery.RefreshInspector"
+    ui.OnStateChanged "size", "WidgetGallery.RefreshInspector"
+    ui.OnStateChanged "stock", "WidgetGallery.RefreshInspector"
+End Sub
+
+' New in 0.20: a tab strip whose panels hold a form with captions, hints,
+' a date picker, and a grouped select; a sortable table that pages; and
+' a loading placeholder the button swaps for its content.
+Private Sub BuildNewSection(ByVal ui As ReDimUI)
+    ui.Label("lblNew").AtRect(616, 60, 420, 16) _
+        .Text("New in 0.20: tabs, form fields, dates, and tables").Bold
+    ui.Tabs("newTabs").AtRect(616, 80, 420, 30).Items "Form", "Table", "Loading"
+
+    ui.TextInput("email").AtRect(616, 140, 200, 22).Placeholder("name@example.com") _
+        .Caption("Email").Hint("We never share it").Required.Clearable.WritesTo "email"
+    ui.TextInput("email").Validates("WidgetGallery.CheckEmail") _
+        .Tooltip("Where the receipts go").OnTab "newTabs", 1
+    ui.DatePicker("due").AtRect(836, 140, 180, 24).Caption("Due date") _
+        .Text("Pick a date").DateFormat("d mmm yyyy").WritesTo "dueDate"
+    ui.DatePicker("due").OnTab "newTabs", 1
+    ui.SelectBox("size").AtRect(616, 214, 200, 24).Caption("Size").Text("Choose a size") _
+        .AddGroup("Everyday").AddItem("Small").AddItem("Medium").AddItem("Large") _
+        .AddGroup("Special order").AddItem("Tall").AddItem("Petite").WritesTo "size"
+    ui.SelectBox("size").ItemEnabled(7, False).OnTab "newTabs", 1
+
+    ui.Table("stockTable").AtRect(616, 124, 420, 178) _
+        .Columns("Fruit", "Qty", "Price", "Restocked").WritesTo "stock"
+    With ui.Table("stockTable")
+        .AddRow "Apple", 120, 0.5, DateSerial(2026, 9, 1)
+        .AddRow "Banana", 80, 0.25, DateSerial(2026, 9, 18)
+        .AddRow "Cherry", 0, 6.4, DateSerial(2026, 8, 22)
+        .AddRow "Fig", 35, 1.1, DateSerial(2026, 9, 12)
+        .AddRow "Grape", 64, 3.2, DateSerial(2026, 9, 3)
+        .AddRow "Kiwi", 48, 0.6, DateSerial(2026, 9, 15)
+        .AddRow "Lemon", 90, 0.4, DateSerial(2026, 8, 30)
+        .AddRow "Mango", 22, 1.8, DateSerial(2026, 9, 20)
+        .AddRow "Orange", 110, 0.55, DateSerial(2026, 9, 9)
+        .AddRow "Pear", 57, 0.7, DateSerial(2026, 9, 5)
+        .ColumnFormat 3, "0.00"
+        .ColumnFormat 4, "d mmm"
+        .OnChange "WidgetGallery.HandleStockPick"
+        .OnTab "newTabs", 2
+    End With
+    ui.Label("tableHint").AtRect(616, 306, 420, 16) _
+        .Text("Click a header to sort, again to reverse; click a row to pick it.") _
+        .OnTab "newTabs", 2
+
+    ui.Skeleton("skel").AtRect(616, 130, 300, 66).SkeletonLines(3).OnTab "newTabs", 3
+    ui.Label("profile").AtRect(616, 130, 300, 66) _
+        .Text("Loaded: 3 new messages, 2 tasks due today, and 1 invitation.") _
+        .Visible(False).OnTab "newTabs", 3
+    ui.Button("load").AtRect(616, 210, 110, 28).Text("Load") _
+        .OnClick("WidgetGallery.HandleLoad").OnTab "newTabs", 3
 End Sub
 
 Public Sub RefreshInspector()
@@ -165,6 +232,10 @@ Public Sub RefreshInspector()
         "volume = " & CStr(ui.State("volume")) & _
         "   priority = " & CStr(ui.State("priority")) & _
         "   userName = " & CStr(ui.State("userName")) & vbLf & _
+        "email = " & CStr(ui.State("email")) & _
+        "   due = " & CStr(ui.State("dueDate")) & _
+        "   size = " & CStr(ui.State("size")) & _
+        "   stock row = " & CStr(ui.State("stock")) & vbLf & _
         "last action = " & CStr(ui.State("lastAction"))
     ui.SetState "inspector", inspectorText
 End Sub
@@ -175,6 +246,40 @@ End Sub
 
 Public Sub HandleCrewChange()
     GalleryApp().SetState "lastAction", "crew transferred"
+End Sub
+
+Public Sub HandleStockPick()
+    GalleryApp().SetState "lastAction", "stock row picked"
+End Sub
+
+' The email field's check. An empty field is Required's to report;
+' anything else needs text on both sides of an @.
+Public Function CheckEmail(ByVal emailText As String) As String
+    Dim markAt As Long
+
+    markAt = InStr(1, emailText, "@")
+    If markAt <= 1 Or markAt = Len(emailText) Then
+        CheckEmail = "Enter an address such as name@example.com"
+    End If
+End Function
+
+' The loading tab: the skeleton stands in until the button loads the
+' content, and a second press puts the skeleton back.
+Public Sub HandleLoad()
+    Dim ui As ReDimUI
+    Dim contentShown As Boolean
+
+    Set ui = GalleryApp()
+    contentShown = ui.Label("profile").IsVisible
+    ui.Skeleton("skel").Visible contentShown
+    ui.Label("profile").Visible Not contentShown
+    If contentShown Then
+        ui.Button("load").Text "Load"
+        ui.SetState "lastAction", "skeleton shown"
+    Else
+        ui.Button("load").Text "Reset"
+        ui.SetState "lastAction", "content loaded"
+    End If
 End Sub
 
 ' A stand-in logo generated on the spot: overlapping shapes and text

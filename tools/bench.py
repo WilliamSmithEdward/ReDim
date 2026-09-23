@@ -40,6 +40,7 @@ SCENARIOS = [
     "BenchItems",
     "BenchPump",
     "BenchNavigate",
+    "BenchComponents",
 ]
 
 BUILD_PROCS = {

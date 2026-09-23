@@ -1,9 +1,9 @@
 # ReDim design
 
 ReDim is a stateful UI framework for Excel worksheets. It renders retained components as worksheet
-shapes and form controls, binds them to a per-app state store, and drives async behavior through a
-timer pump layered over ROneCOne's cooperative task scheduler. No UserForms, no ActiveX, no VBIDE
-access.
+shapes, binds them to a per-app state store, and drives async behavior through a timer pump
+layered over ROneCOne's cooperative task scheduler. No UserForms, no ActiveX, no form controls,
+no VBIDE access.
 
 ## Naming
 
@@ -29,22 +29,18 @@ Retained mode. A component is a `ReDimUI` instance holding desired props (text, 
 visible, enabled, value) plus the id of its worksheet shape(s). Rendering diffs desired props
 against last-applied props and touches only changed shape members inside a `ScreenUpdating` batch.
 
-Shape naming: `rdm_<appId>_<componentId>` (plus suffixes such as `_fill` or `_knob` for composite
-widgets). `Mount` is idempotent: an existing shape with a matching name is adopted, so re-running
-setup code never duplicates shapes and app code can be re-entered safely after a crash.
+Shape naming: `rdm_<appId>_<componentId>` for a component's main shape, and
+`rdm_<appId>_<componentId>__<part>` for the parts of composite widgets, such as a toggle's knob,
+a list's rows, or a calendar's days. `Mount` is idempotent: an existing shape with a matching
+name is adopted, so re-running setup code never duplicates shapes and app code can be re-entered
+safely after a crash.
 
-Widget set, v1:
-
-- Button: rounded rectangle, styled states (normal, hover-free, disabled, busy)
-- Label: borderless text box
-- Card: rectangle panel with optional title, used for KPI tiles and modal bodies
-- ProgressBar: track rectangle plus fill rectangle, value 0 to 100
-- Spinner: arc shape rotated by the pump while visible
-- Toggle: drawn pill plus knob, flips a bound state key
-- Checkbox, Dropdown, Slider: native form controls wrapped and synced to state keys
-- TextInput: cell-backed input with a frame shape, change captured via Application events
-- Toast: transient card with TTL, dismissed by the pump
-- Overlay and Modal: dimming rectangle that swallows clicks plus a centered card with buttons
+Every control is drawn from shapes; native form controls went in 0.5.0. Composite widgets keep
+the look each part was last drawn with and rewrite only the parts whose look changed, and a part
+whose place and font held rewrites only its text, fill, and ink. [api.md](api.md) describes the
+widget set: buttons, labels, cards, progress bars, spinners, skeletons, toggles, tick boxes,
+radio groups, steppers, sliders, selects, combos, transfer lists, check lists, text fields,
+date pickers, images, tab strips, tables, toasts, and the modal overlay.
 
 ## State
 
@@ -66,14 +62,18 @@ calling the dispatcher with an explicit shape name.
 
 ## Async engine
 
-The pump is a `SetTimer` callback (default 50 ms) plus a public `PumpOnce` for deterministic tests.
-Each tick, inside a reentrancy guard with errors swallowed:
+The pump is a `SetTimer` callback (a 16 ms frame by default) plus a public `PumpOnce` for
+deterministic tests. Each tick, inside a reentrancy guard with errors swallowed:
 
-1. Advance animations: spinner rotation, indeterminate progress sweep
+1. Advance animations: spinner rotation, toast slides, a skeleton's pulse, caret blinks
 2. Expire toasts
-3. Step registered async ops: call `AdvanceTask` (Friend, same-project) on the underlying ROneCOne
+3. Watch what Shape macros cannot see: the pointer for hover looks, tooltips, hold-to-repeat,
+   and drags, and presses or selection moves that close an open list or end a field's focus
+4. Step registered async ops: call `AdvanceTask` (Friend, same-project) on the underlying ROneCOne
    task; on terminal state run done or fail handlers and restore bound controls
-4. Run chunked jobs inside a per-tick millisecond budget using `GetTickCount64`
+5. Run chunked jobs inside a per-tick millisecond budget using `GetTickCount64`
+
+A frame visits only the controls that tick and reads the pointer at most once.
 
 Task kinds and how they behave under the pump:
 
@@ -96,13 +96,15 @@ Pump safety rails, in order of importance:
 
 - The callback body is a single guarded call; no error ever escapes into Excel
 - A consecutive-failure counter kills the timer after repeated faults
-- The timer stops when no animations, ops, jobs, or toasts remain
+- The timer stops when no animations, ops, jobs, toasts, or watches remain
 - `WorkbookBeforeClose` (Application events) and `ReDimUI.Shutdown` kill timers deterministically
 
 ## Theming
 
-`ReDimUI.ThemeLight` and `ReDimUI.ThemeDark` presets plus a custom builder: primary, success,
-danger, surface, border, text, muted colors, font name and size, corner radius. `ui.SetTheme`
+`ReDimUI.ThemeLight`, `ReDimUI.ThemeDark`, and `ReDimUI.ThemeHighContrast` presets, customized
+with `WithPrimary` and `WithFont`. A theme carries the primary, surface, and muted colors with
+their inks, the success, warning, danger, border, and canvas colors, and the font name and size;
+`theme.ContrastReport` checks every pairing the controls draw against WCAG. `ui.SetTheme`
 restyles every component through the normal diff path.
 
 ## Build and verification
@@ -124,7 +126,10 @@ restyles every component through the normal diff path.
 - `tests/python/test_casing.py` guards the host project's identifier casing: VBA keeps one
   spelling per name project-wide, so the runtime and demos may not declare a name in a casing
   that differs from the default type libraries or from ReDim's and ROneCOne's members, and a
-  VBE export of ReDim, every demo, and sample host code must return every token as written
+  VBE export of ROneCOne, ReDim, every demo, and sample host code must return every token as
+  written
+- `tools/bench.py` times framework scenarios, the newer controls, and demo builds in live
+  Excel, and compares runs saved with `--save`
 - Demos are smoke-run live before release
 
 Harness constraint, pinned by the spike suite: module globals do not survive across

@@ -112,13 +112,15 @@
 - Lists redraw only the rows that changed. Each row keeps the state it
   was last drawn with, and a row whose place and font held rewrites only
   its fill, text, and ink. Against 0.19.2, as the fastest of three warm
-  runs on one machine: toggling one row of a 150-row `CheckList` fell
-  from 348 ms to 0.7 ms and its select-all from 352 ms to 39 ms. A
-  `TransferList` row click among 1,000 items fell from 22 ms to 0.3 ms
-  and a page from 28 ms to 1.9 ms. An arrow key in an open 2,000-item
-  combo fell from 10 ms to 2.9 ms. Opening a 2,000-item `SelectBox` took
-  8.3 seconds when it drew every row and takes 14 ms windowed, and a
-  pick from it fell from 547 ms to 3 ms.
+  runs on one machine with both versions benched back to back: toggling
+  one row of a 150-row `CheckList` fell from 351 ms to 0.9 ms and its
+  select-all from 358 ms to 40 ms. A `TransferList` row click among
+  1,000 items fell from 22 ms to 0.4 ms and a page from 28 ms to 2.5 ms.
+  An arrow key in an open 2,000-item combo fell from 10 ms to 2.9 ms.
+  Opening a 2,000-item `SelectBox` took 8.4 seconds when it drew every
+  row and takes 15 ms windowed, and a pick from it fell from 577 ms to
+  3.6 ms. Paging it costs 11 ms, where 0.19.2 only scrolled rows it had
+  already drawn.
 - Tick boxes, radio groups, steppers, toggles, sliders, and drop-list
   carets skip their part writes when nothing they draw has changed.
   `Render` still rewrites them, so a part moved or deleted by hand comes
@@ -128,33 +130,36 @@
   matching, and drawing a long list paid a walk per read. A closed list
   also no longer rebuilds its matches on every change: adding or
   removing an item at the front of a closed 2,000-item select fell from
-  about 0.22 ms to 0.04 ms. `ItemsFrom` reads a range one area at a
+  about 0.22 ms to 0.05 ms. `ItemsFrom` reads a range one area at a
   time instead of one cell at a time, and loading 2,000 items fell from
-  3.4 ms to 0.5 ms.
+  3.3 ms to 0.5 ms.
 - The frame pump visits only the controls that tick: spinners, toasts,
   sliders, the text fields and combos whose caret blinks, and open drop
-  lists. An idle frame over 100 controls fell from 0.26 ms to 0.008 ms.
+  lists. An idle frame over 100 controls fell from 0.27 ms to 0.007 ms.
   Focus moving from one text field to another keeps the typing keys
   bound instead of releasing and binding them again.
 - `Unmount` deletes an app's shapes in one pass over the sheet and one
   batch delete. It used to try every name a part could have, eight per
   control and four more per item, and each absent part cost a failed
-  lookup. Unmounting 100 controls fell from 86 ms to 4 ms.
+  lookup. Unmounting 100 controls fell from 87 ms to 5 ms.
 - Rebuilding a surface over its existing shapes takes about half as
-  long for the gallery (100 ms to 45 ms) and ReDex (91 ms to 49 ms). A
-  session's first build runs up to 16 ms slower than in 0.19.2 (the
-  gallery 315 ms to 331 ms). That cost is paid once per session: the
-  same build repeated from empty sheets costs what it did in 0.19.2 or
-  less, ReDex 198 ms to 177 ms.
+  long: ReDex 95 ms to 52 ms. A session's first build runs 70 to 130 ms
+  slower than in 0.19.2 (Mission Control 152 ms to 233 ms, ReDex
+  439 ms to 565 ms). That cost is paid once per session: the same build
+  repeated from empty sheets costs what it did in 0.19.2 or less, ReDex
+  229 ms to 184 ms. The Widget Gallery builds its new section as well,
+  so its numbers do not compare; it now batches its build between
+  `BeginUpdate` and `EndUpdate`, and rebuilds in 66 ms against 0.19.2's
+  103 ms.
 - `ReDimUI.Shutdown` forgets window registrations and the back stack
   along with the apps. A multi-window surface rebuilt after a
   `Shutdown` in the same session failed in its `NavBar` with "No
   mounted app is named", because the bar still tabbed to the unmounted
   windows. The new bench's warm builds found it in Navigator and ReDex.
-- `tools/bench.py` times framework scenarios and each demo's first
-  build, warm build, and rebuild in a live Excel, and compares against
-  a saved run with `--save NAME` and `--compare NAME`. The numbers
-  above come from it.
+- `tools/bench.py` times framework scenarios, the controls new in
+  0.20.0, and each demo's first build, warm build, and rebuild in a
+  live Excel, and compares against a saved run with `--save NAME` and
+  `--compare NAME`. The numbers in these notes come from it.
 - Drop lists dismiss the way native ones do. A press anywhere off an
   open list's face and rows closes it, and so does a move of the grid
   selection, a click on another control, or another list opening, so
@@ -184,8 +189,9 @@
   `Success`, `Warning`, and `Danger` give it an info, success, warning,
   or error tone, an icon and a matching edge. `.Action "Undo",
   "Module.Proc"` adds a button that dismisses the toast and runs the
-  handler, and gives the toast four more seconds. The close button adds
-  about 2 ms to a toast's appearance.
+  handler, and gives the toast four more seconds. The new parts cost
+  time: a toast appears in 4.1 ms instead of 1.9 ms, and a frame that
+  slides five toasts takes 1.0 ms instead of 0.45 ms.
 - A `Warning` style variant joins the set: amber, from
   `theme.WarningColor`, which picks a dark shade on light surfaces and
   a bright one on dark surfaces so it keeps its contrast in every
@@ -284,11 +290,11 @@
   typed. `RestrictToItems` makes a float combo commit only an item: the
   one its text names or begins, or an empty text, and otherwise the
   text it had when focus arrived.
-- The editing costs a little time. A key in a float field takes 0.10 ms
-  instead of 0.07 ms, and a key in an open 300-item combo 0.96 ms
-  instead of 0.50 ms, most of it bolding the matches. Focusing a field
-  from the grid binds 139 keys instead of 86 and takes 1.4 ms instead
-  of 0.9 ms.
+- The editing costs a little time. Against 0.19.2, a key in a float
+  field takes 0.11 ms instead of 0.07 ms, and focusing a field from the
+  grid binds 139 keys instead of 86 and takes 1.3 ms instead of 0.8 ms.
+  A key in an open 300-item combo takes 0.95 ms instead of 1.9 ms:
+  bolding the matches gives back part of what the item snapshot saved.
 - `ui.PointerEffects` gives an app hover and press looks: the fill under
   the pointer moves toward its ink, 8 percent on hover and 16 while the
   press that went down on it is held, and a check box's or radio
@@ -379,6 +385,20 @@
   click selects, writes the row's first cell to `WritesTo`, and fires
   `OnChange`; the keys move the selection, and rows that outgrow the
   table page behind a footer.
+- The new controls, as the fastest of three warm runs: a tab switch
+  that hides ten controls and shows ten takes 4 ms. A date picker's
+  calendar opens in 78 ms, drawing its card and 42 days, turns a month
+  in 6 ms, and picks and closes in 13 ms. A 1,000-row `Table` fills
+  from an array in 34 ms, sorts in 7 ms, pages in 5 ms, and picks a row
+  in 0.6 ms. A `Skeleton` frame costs 0.6 ms. Calendar days and table
+  rows whose place and font held rewrite only their text, fill, and
+  ink, which took a month turn from 45 ms to 6 ms and a page of rows
+  from 16 ms to 5 ms.
+- The Widget Gallery shows the new controls in a tabbed section beside
+  the others: a form with captions, a hint, a required field with a
+  check, a date picker, and a grouped select; a sortable table that
+  pages; and a skeleton that a button swaps for its content. It turns
+  on `PointerEffects`.
 
 ## 0.19.2 - 2026-08-02
 
