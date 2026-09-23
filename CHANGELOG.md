@@ -34,6 +34,24 @@
 - A part deleted when a list or calendar closes is known to be gone,
   so drawing it at the next opening skips a lookup that could only
   miss.
+- Tooltips stay out of the way. A tip waits for the pointer to hold
+  still on its control for the tooltip delay, as Windows does, instead
+  of counting from the moment the pointer arrived, so a pointer passing
+  over a control no longer raises one. On a control no taller than 48
+  points the tip sits clear of the control, below its hint or message;
+  it used to sit 18 points under the pointer, over the control's lower
+  half and its hint. On a taller control it still sits under the
+  pointer, and it goes as soon as the pointer reaches it, so a click
+  there lands on the control instead of dismissing the tip. An open drop
+  list or calendar shows no tip over its rows, where the owner's tip
+  used to appear after a rest on a row. A tip is sized by Office to fit
+  its words, replacing an estimate from the character count that could
+  cut a long tip short.
+- A MenuButton's menu runs as wide as its widest command needs. It took
+  the button's width, so a longer command ran past the menu's edge. A
+  menu that would pass the window's right edge ends at the button's
+  right edge instead, and a press anywhere on the widened rows counts as
+  a press on the menu.
 
 ## 1.0.0 - 2026-09-23
 

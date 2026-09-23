@@ -3214,15 +3214,20 @@ Public Function TestPointerEffects() As String
     TestPointerEffects = transcript
 End Function
 
-' Tooltips: after the pointer rests on a control for the double-click
-' time its tooltip shows below the pointer; a press puts it away until the
-' pointer leaves; a disabled control shows its DisabledReason; leaving
-' hides it; and the alternative text carries both.
+' Tooltips: once the pointer rests on a control for the double-click time
+' its tooltip shows, and a pointer still moving starts the wait over. A
+' field-sized control's tip sits clear below it; a tall control's sits
+' under the pointer and goes when the pointer reaches it. A press puts a
+' tip away until the pointer leaves; a disabled control shows its
+' DisabledReason; leaving hides it; an open list shows none; a tip fits
+' its words and wraps a long one; and the alternative text carries both.
 Public Function TestTooltips() As String
     Dim app As ReDimUI
     Dim host As Worksheet
     Dim restMs As Long
     Dim transcript As String
+    Dim tipX As Double
+    Dim tipY As Double
 
     ReDimUI.AutoPump False
     Set host = NewCanvas()
@@ -3230,20 +3235,35 @@ Public Function TestTooltips() As String
     app.Button("save").AtRect(24, 24, 100, 30).Text("Save").Tooltip "Saves the form"
     app.Button("send").AtRect(24, 70, 100, 30).Text("Send").Enabled(False) _
         .DisabledReason "Fill in the address first"
+    app.Button("tall").AtRect(300, 24, 140, 160).Text("Tall").Tooltip "A tall control"
+    app.SelectBox("pick").AtRect(500, 24, 120, 22).Items("A", "B", "C") _
+        .Tooltip "Pick a letter"
+    app.Button("long").AtRect(24, 240, 100, 30).Text("Long").Tooltip _
+        "A long tooltip wraps once it runs past the widest a tip may grow, " & _
+        "so its lines stay short enough to read at a glance."
     app.Render
     restMs = GetDoubleClickTime() + 60
 
     transcript = "altTip=" & host.Shapes("rdm_wid45_save").AlternativeText
     transcript = transcript & "|altReason=" & host.Shapes("rdm_wid45_send").AlternativeText
-    ReDimUI.OverridePointer 74, 39
+    ReDimUI.OverridePointer 40, 39
     ReDimUI.PumpOnce
     transcript = transcript & "|waits=" & CStr(Not ShapeExists(host, "rdm_wid45_save__tt"))
+    Sleep restMs \ 2
+    ReDimUI.OverridePointer 74, 39
+    ReDimUI.PumpOnce
+    Sleep restMs \ 2 + 30
+    ReDimUI.PumpOnce
+    transcript = transcript & "|movingWaits=" & _
+        CStr(Not ShapeExists(host, "rdm_wid45_save__tt"))
     Sleep restMs
     ReDimUI.PumpOnce
     transcript = transcript & "|tipShows=" & _
         host.Shapes("rdm_wid45_save__tt").TextFrame2.TextRange.Text
-    transcript = transcript & "|belowPointer=" & _
-        CStr(host.Shapes("rdm_wid45_save__tt").Top > 39)
+    With host.Shapes("rdm_wid45_save__tt")
+        transcript = transcript & "|clearsControl=" & CStr(.Top >= 54 _
+            And .Width < 150 And .Width > .TextFrame2.TextRange.BoundWidth)
+    End With
 
     ReDimUI.OverridePointer 74, 39, True
     ReDimUI.PumpOnce
@@ -3261,6 +3281,43 @@ Public Function TestTooltips() As String
     ReDimUI.OverridePointer 600, 400
     ReDimUI.PumpOnce
     transcript = transcript & "|leaveHides=" & CStr(Not ShapeExists(host, "rdm_wid45_send__tt"))
+
+    ' A tall control's tip sits under the pointer, inside the control, and
+    ' goes when the pointer reaches it, so a click there lands on the control.
+    ReDimUI.OverridePointer 320, 40
+    ReDimUI.PumpOnce
+    Sleep restMs
+    ReDimUI.PumpOnce
+    With host.Shapes("rdm_wid45_tall__tt")
+        transcript = transcript & "|tallUnderPointer=" & CStr(.Top >= 40 And .Top < 184)
+        tipX = .Left + .Width / 2
+        tipY = .Top + .Height / 2
+    End With
+    ReDimUI.OverridePointer tipX, tipY
+    ReDimUI.PumpOnce
+    transcript = transcript & "|reachedHides=" & CStr(Not ShapeExists(host, "rdm_wid45_tall__tt"))
+    Sleep restMs
+    ReDimUI.PumpOnce
+    transcript = transcript & "|staysAway=" & CStr(Not ShapeExists(host, "rdm_wid45_tall__tt"))
+
+    ' An open list shows no tip over its rows.
+    ReDimUI.DispatchShape "rdm_wid45_pick"
+    ReDimUI.OverridePointer 540, 58
+    ReDimUI.PumpOnce
+    Sleep restMs
+    ReDimUI.PumpOnce
+    transcript = transcript & "|openListNoTip=" & CStr(ShapeExists(host, "rdm_wid45_pick__opt1") _
+        And Not ShapeExists(host, "rdm_wid45_pick__tt"))
+    ReDimUI.DispatchShape "rdm_wid45_pick"
+
+    ' A long tip wraps at its widest.
+    ReDimUI.OverridePointer 60, 255
+    ReDimUI.PumpOnce
+    Sleep restMs
+    ReDimUI.PumpOnce
+    With host.Shapes("rdm_wid45_long__tt")
+        transcript = transcript & "|longWraps=" & CStr(.Width <= 241 And .Height > 30)
+    End With
     ReDimUI.ClearPointerOverride
     ReDimUI.AutoPump True
     TestTooltips = transcript
@@ -4298,6 +4355,8 @@ Public Function TestMenuButton() As String
     Dim app As ReDimUI
     Dim host As Worksheet
     Dim transcript As String
+    Dim farX As Double
+    Dim farY As Double
 
     gCommandCount = 0
     gLastCommand = vbNullString
@@ -4350,6 +4409,29 @@ Public Function TestMenuButton() As String
         host.Shapes("rdm_wid61_actions").Fill.ForeColor.RGB = app.Theme.PrimaryColor _
         And host.Shapes("rdm_wid61_actions").TextFrame2.TextRange.Font.Fill.ForeColor.RGB _
             = app.Theme.OnPrimaryColor)
+
+    ' A command wider than its button widens every row to fit it, and a
+    ' press on the rows' far side, past the button, keeps the menu open.
+    app.MenuButton("wide").AtRect(24, 200, 80, 26).Text("Wide") _
+        .AddCommand("Export this view to a new sheet", "TestReDimWidgets.RecordCommand", _
+            "Download") _
+        .AddCommand "Copy", "TestReDimWidgets.RecordCommand", "Copy"
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid61_wide"
+    With host.Shapes("rdm_wid61_wide__opt1")
+        transcript = transcript & "|fitsWords=" & CStr(.Width > 80 _
+            And .TextFrame2.TextRange.BoundWidth + 12 <= .Width _
+            And host.Shapes("rdm_wid61_wide__opt2").Width = .Width _
+            And host.Shapes("rdm_wid61_wide__opt2").Left = .Left)
+        farX = .Left + .Width - 4
+        farY = .Top + .Height / 2
+    End With
+    ReDimUI.OverridePointer farX, farY
+    ReDimUI.ForcePressEdge
+    ReDimUI.PumpOnce
+    transcript = transcript & "|farSideKeeps=" & _
+        CStr(ShapeExists(host, "rdm_wid61_wide__opt1"))
+    ReDimUI.ClearPointerOverride
     ReDimUI.AutoPump True
     TestMenuButton = transcript
 End Function

@@ -169,6 +169,12 @@ Private Const DEFAULT_LIST_ROWS As Long = 8
 ' selected item: the glyph, a tab, then the item, aligned by a tab stop
 ' this many points in.
 Private Const LIST_GUTTER As Double = 14
+' Tooltips: the widest a tip grows before it wraps, the tallest control a
+' tip sits clear below rather than under the pointer, and how far the
+' pointer may drift, in points, and still count as resting.
+Private Const TIP_MAX_WIDTH As Double = 240
+Private Const TIP_BELOW_MAX_H As Double = 48
+Private Const TIP_REST_SLOP As Double = 3
 
 ' Transfer paging arrows are square pointer targets of this many points,
 ' 24 pixels at 96 DPI: the WCAG 2.5.8 minimum target size.
@@ -521,6 +527,13 @@ Private mTipTargetId As String
 Private mTipSinceMs As LongLong
 Private mTipShownId As String
 Private mTipSuppressed As Boolean
+' Where the pointer came to rest, and the shown tip's edges, in points.
+Private mTipRestX As Double
+Private mTipRestY As Double
+Private mTipLeft As Double
+Private mTipTop As Double
+Private mTipRight As Double
+Private mTipBottom As Double
 ' Hold-to-repeat, per app: the control and part a held press repeats,
 ' when the next repeat is due, how many ran, and the button last frame;
 ' per control, the value a hold started from and the release click it
@@ -829,6 +842,10 @@ Private mListMatches As Collection
 Private mListMatchesFilter As String
 ' Set when the list opened upward for want of room below the face.
 Private mListFlipped As Boolean
+' A menu's rows run as wide as its widest command needs; 0 while the rows
+' take the face's span.
+Private mListLeft As Double
+Private mListWidth As Double
 ' Items as a String array (1-based), rebuilt by one For Each after any
 ' change: a VBA Collection read by index walks the list, so loops that
 ' indexed mItems went quadratic on long lists.
@@ -3988,9 +4005,12 @@ Private Sub TickPointer(ByVal nowMs As LongLong, ByVal leftButtonDown As Boolean
 End Sub
 
 ' A tooltip shows once the pointer has rested on its control for the
-' Windows tooltip delay, the double-click time. It goes when the
-' pointer leaves or a button goes down, and after a press it stays away
-' until the pointer leaves the control.
+' Windows tooltip delay, the double-click time; a move of more than a few
+' points starts the wait over, so a pointer passing through raises none.
+' It goes when the pointer leaves the control, a button goes down, the
+' control opens its list, or the pointer reaches the tip itself, so a
+' click there lands on what the tip covered. After any of those it stays
+' away until the pointer leaves the control.
 Private Sub TickTooltip( _
     ByVal nowMs As LongLong, _
     ByVal hitId As String, _
@@ -4004,6 +4024,8 @@ Private Sub TickTooltip( _
         HideTooltip
         mTipTargetId = hitId
         mTipSinceMs = nowMs
+        mTipRestX = pointsX
+        mTipRestY = pointsY
         mTipSuppressed = False
     End If
     If leftButtonDown Then
@@ -4011,10 +4033,30 @@ Private Sub TickTooltip( _
         mTipSuppressed = True
         Exit Sub
     End If
-    If mTipSuppressed Or LenB(hitId) = 0 Or LenB(mTipShownId) > 0 Then Exit Sub
+    If mTipSuppressed Or LenB(hitId) = 0 Then Exit Sub
+    If LenB(mTipShownId) > 0 Then
+        If pointsX >= mTipLeft - 2 And pointsX <= mTipRight + 2 _
+            And pointsY >= mTipTop - 2 And pointsY <= mTipBottom + 2 Then
+            HideTooltip
+            mTipSuppressed = True
+        ElseIf TryGetComponent(mTipShownId, componentValue) Then
+            If componentValue.ListIsOpen Then
+                HideTooltip
+                mTipSuppressed = True
+            End If
+        End If
+        Exit Sub
+    End If
+    If Abs(pointsX - mTipRestX) > TIP_REST_SLOP Or Abs(pointsY - mTipRestY) > TIP_REST_SLOP Then
+        mTipRestX = pointsX
+        mTipRestY = pointsY
+        mTipSinceMs = nowMs
+        Exit Sub
+    End If
     If nowMs - mTipSinceMs < GetDoubleClickTime() Then Exit Sub
     If Not TryGetComponent(hitId, componentValue) Then Exit Sub
-    If componentValue.DrawTooltip(pointsX, pointsY) Then mTipShownId = hitId
+    If componentValue.DrawTooltip(pointsX, pointsY, mTipLeft, mTipTop, mTipRight, _
+        mTipBottom) Then mTipShownId = hitId
 End Sub
 
 Private Sub HideTooltip()
@@ -14553,14 +14595,16 @@ Private Function ListAreaHolds( _
             And pointsY <= CalendarTop() + CAL_DEPTH + 2)
         Exit Function
     End If
-    If pointsX < mLeft - 2 Or pointsX > mLeft + mWidth + 2 Then Exit Function
-    If mListFlipped Then
-        If pointsY < mTop - DropListDepth() - 2 Then Exit Function
-        If pointsY > mTop + mHeight + 2 Then Exit Function
-    Else
-        If pointsY < mTop - 2 Then Exit Function
-        If pointsY > mTop + mHeight + DropListDepth() + 2 Then Exit Function
+    ' The face, then the rows and pagers across the span they drew.
+    If pointsX >= mLeft - 2 And pointsX <= mLeft + mWidth + 2 _
+        And pointsY >= mTop - 2 And pointsY <= mTop + mHeight + 2 Then
+        ListAreaHolds = True
+        Exit Function
     End If
+    If pointsX < ListSpanLeft() - 2 Then Exit Function
+    If pointsX > ListSpanLeft() + ListSpanWidth() + 2 Then Exit Function
+    If pointsY < ListTop() - 2 Then Exit Function
+    If pointsY > ListTop() + DropListDepth() + 2 Then Exit Function
     ListAreaHolds = True
 End Function
 
@@ -14786,26 +14830,37 @@ Private Sub TransferLayout( _
     If btnTop < panelTop Then btnTop = panelTop
 End Sub
 
-' The tooltip under the pointer, in inverse colors: DisabledReason while
-' the control is disabled and has one, else Tooltip. It wraps past 240
-' points and flips above the pointer or left of it to stay in view.
-' False when there is nothing to show.
-Friend Function DrawTooltip(ByVal pointsX As Double, ByVal pointsY As Double) As Boolean
+' The tooltip, in inverse colors: DisabledReason while the control is
+' disabled and has one, else Tooltip. It fits its words, wrapping past
+' TIP_MAX_WIDTH. A control no taller than a field row keeps its whole
+' drawing clear: the tip sits below the hint or message, or above the
+' caption when the window has no room below. On a taller control, a table
+' or a list, the tip sits under the pointer, flipping above it or left to
+' stay in view. None while the control's list or calendar is open, which
+' the tip would cover. False when there is nothing to show; the tip's
+' edges come back for the pointer watch.
+Friend Function DrawTooltip( _
+    ByVal pointsX As Double, _
+    ByVal pointsY As Double, _
+    ByRef tipLeft As Double, _
+    ByRef tipTop As Double, _
+    ByRef tipRight As Double, _
+    ByRef tipBottom As Double _
+) As Boolean
     Dim tipText As String
     Dim tipShape As Shape
     Dim hostApp As ReDimUI
     Dim themeValue As ReDimUI
-    Dim tipSize As Double
     Dim tipWidth As Double
     Dim tipHeight As Double
-    Dim lineTotal As Long
-    Dim tipLeft As Double
-    Dim tipTop As Double
+    Dim spanTop As Double
+    Dim spanBottom As Double
     Dim viewLeft As Double
     Dim viewTop As Double
     Dim viewWidth As Double
     Dim viewHeight As Double
 
+    If mSelectOpen Then Exit Function
     If Not mEnabled And LenB(mDisabledReason) > 0 Then
         tipText = mDisabledReason
     Else
@@ -14814,30 +14869,7 @@ Friend Function DrawTooltip(ByVal pointsX As Double, ByVal pointsY As Double) As
     If LenB(tipText) = 0 Then Exit Function
     Set hostApp = OwnerApp
     Set themeValue = hostApp.Theme
-    tipSize = themeValue.BaseFontSize - 1
-    tipWidth = Len(tipText) * tipSize * 0.55 + 14
-    lineTotal = 1
-    If tipWidth > 240 Then
-        lineTotal = -Int(-(tipWidth - 14) / (240 - 14))
-        tipWidth = 240
-    End If
-    tipHeight = lineTotal * tipSize * 1.3 + 8
-    hostApp.ResolveViewport viewLeft, viewTop, viewWidth, viewHeight
-    tipLeft = pointsX
-    If tipLeft + tipWidth > viewLeft + viewWidth Then
-        tipLeft = viewLeft + viewWidth - tipWidth - 4
-    End If
-    If tipLeft < 0 Then tipLeft = 0
-    tipTop = pointsY + 18
-    If tipTop + tipHeight > viewTop + viewHeight Then
-        tipTop = pointsY - tipHeight - 6
-    End If
-    If tipTop < 0 Then tipTop = 0
     Set tipShape = EnsurePartShape(hostApp.Sheet, "tt", msoShapeRoundedRectangle)
-    tipShape.Left = tipLeft
-    tipShape.Top = tipTop
-    tipShape.Width = tipWidth
-    tipShape.Height = tipHeight
     tipShape.Fill.Visible = msoTrue
     tipShape.Fill.ForeColor.RGB = themeValue.OnSurfaceColor
     tipShape.Line.Visible = msoFalse
@@ -14847,21 +14879,75 @@ Friend Function DrawTooltip(ByVal pointsX As Double, ByVal pointsY As Double) As
         .MarginTop = 3
         .MarginBottom = 3
         .VerticalAnchor = msoAnchorMiddle
-        .WordWrap = msoTrue
+        .WordWrap = msoFalse
+        .AutoSize = msoAutoSizeShapeToFitText
         .TextRange.Text = tipText
         .TextRange.ParagraphFormat.Alignment = msoAlignLeft
         With .TextRange.Font
             .Name = themeValue.FontName
-            .Size = tipSize
+            .Size = themeValue.BaseFontSize - 1
             .Bold = msoFalse
             .Fill.ForeColor.RGB = themeValue.SurfaceColor
         End With
+        ' A long tip wraps. Office refits a shape to its text only when the
+        ' text or the fit changes, so the fit goes off and on again for the
+        ' height to follow the wrap.
+        If tipShape.Width > TIP_MAX_WIDTH Then
+            .WordWrap = msoTrue
+            tipShape.Width = TIP_MAX_WIDTH
+            .AutoSize = msoAutoSizeNone
+            .AutoSize = msoAutoSizeShapeToFitText
+        End If
     End With
+    tipWidth = tipShape.Width
+    tipHeight = tipShape.Height
+    hostApp.ResolveViewport viewLeft, viewTop, viewWidth, viewHeight
+    tipLeft = pointsX
+    If tipLeft + tipWidth > viewLeft + viewWidth Then
+        tipLeft = viewLeft + viewWidth - tipWidth - 4
+    End If
+    If tipLeft < 0 Then tipLeft = 0
+    If mHeight <= TIP_BELOW_MAX_H Then
+        DrawingSpan spanTop, spanBottom
+        tipTop = spanBottom + 4
+        If tipTop + tipHeight > viewTop + viewHeight Then
+            tipTop = spanTop - tipHeight - 4
+        End If
+    Else
+        tipTop = pointsY + 18
+        If tipTop + tipHeight > viewTop + viewHeight Then
+            tipTop = pointsY - tipHeight - 6
+        End If
+    End If
+    If tipTop < 0 Then tipTop = 0
+    tipShape.Left = tipLeft
+    tipShape.Top = tipTop
     tipShape.Visible = msoTrue
     tipShape.OnAction = mAppliedOnAction
     tipShape.ZOrder msoBringToFront
+    tipRight = tipLeft + tipWidth
+    tipBottom = tipTop + tipHeight
     DrawTooltip = True
 End Function
+
+' The span a control's drawing takes, top to bottom: the control, the
+' caption above it, and the hint, message, or count below it.
+Private Sub DrawingSpan(ByRef spanTop As Double, ByRef spanBottom As Double)
+    Dim noteSize As Double
+
+    noteSize = mFontSize
+    If noteSize <= 0 Then noteSize = OwnerApp.Theme.BaseFontSize
+    spanTop = mTop
+    spanBottom = mTop + mHeight
+    If LenB(mAppliedCaptionSig) > 0 Then spanTop = mTop - noteSize - 7
+    If LenB(mAppliedHintSig) > 0 Or LenB(mAppliedMessageSig) > 0 _
+        Or LenB(mAppliedCountSig) > 0 Then spanBottom = mTop + mHeight + noteSize + 6
+End Sub
+
+' True while this control's drop list or calendar is open.
+Friend Property Get ListIsOpen() As Boolean
+    ListIsOpen = mSelectOpen
+End Property
 
 Friend Sub ClearTooltipPart()
     On Error Resume Next
@@ -15608,7 +15694,7 @@ Private Sub SyncDropList( _
             End If
             rowCopied = Not optionShape Is Nothing
             If rowCopied Then
-                optionShape.Left = mLeft
+                optionShape.Left = ListSpanLeft()
                 optionShape.Top = rowTop
             Else
                 Set optionShape = EnsurePartShape( _
@@ -15635,9 +15721,9 @@ Private Sub SyncDropList( _
                     End If
                 End With
             Else
-                optionShape.Left = mLeft
+                optionShape.Left = ListSpanLeft()
                 optionShape.Top = rowTop
-                optionShape.Width = mWidth
+                optionShape.Width = ListSpanWidth()
                 optionShape.Height = rowPitch
                 optionShape.Fill.Visible = msoTrue
                 optionShape.Fill.ForeColor.RGB = rowFill
@@ -15675,6 +15761,14 @@ Private Sub SyncDropList( _
             Set styledRow = optionShape
         End If
     Next idx
+    If wanted = 0 Then
+        mListWidth = 0
+    ElseIf mIsMenu And mListWidth = 0 Then
+        FitMenuWidth hostSheet, wanted
+        ' The up pager drew before the rows; it follows the fitted width.
+        SyncListPager hostSheet, themeValue, "optu", ChrW(9650), _
+            aboveCount, listTopAt, resolvedSize, mAppliedPagerUpSig
+    End If
     EnsureRowStates mAppliedRowStates, mAppliedOptionCount
     For idx = wanted + 1 To mAppliedOptionCount
         mAppliedRowStates(idx) = vbNullString
@@ -15762,9 +15856,9 @@ Private Sub SyncEmptyRow( _
         If emptyKey = mAppliedEmptyRowSig Then Exit Sub
         mAppliedEmptyRowSig = emptyKey
         Set emptyShape = EnsurePartShape(hostSheet, "optn", msoShapeRectangle)
-        emptyShape.Left = mLeft
+        emptyShape.Left = ListSpanLeft()
         emptyShape.Top = rowTop
-        emptyShape.Width = mWidth
+        emptyShape.Width = ListSpanWidth()
         emptyShape.Height = rowPitch
         emptyShape.Fill.Visible = msoTrue
         emptyShape.Fill.ForeColor.RGB = themeValue.SurfaceColor
@@ -15796,6 +15890,62 @@ Private Sub SyncEmptyRow( _
         mAppliedEmptyRowSig = vbNullString
         DropPart hostSheet, "optn"
     End If
+End Sub
+
+' Where an open list's rows run across: the face's span, or the width a
+' menu fitted to its commands.
+Private Function ListSpanLeft() As Double
+    If mListWidth > 0 Then
+        ListSpanLeft = mListLeft
+    Else
+        ListSpanLeft = mLeft
+    End If
+End Function
+
+Private Function ListSpanWidth() As Double
+    If mListWidth > 0 Then
+        ListSpanWidth = mListWidth
+    Else
+        ListSpanWidth = mWidth
+    End If
+End Function
+
+' A menu runs as wide as its widest command needs, never narrower than
+' its button, and ends at the button's right edge instead when it would
+' pass the window's, as a native menu does. It measures the rows as they
+' first draw and gives them the width at once.
+Private Sub FitMenuWidth(ByVal hostSheet As Worksheet, ByVal rowTotal As Long)
+    Dim idx As Long
+    Dim rowNeed As Double
+    Dim fitWidth As Double
+    Dim fitLeft As Double
+    Dim viewLeft As Double
+    Dim viewTop As Double
+    Dim viewWidth As Double
+    Dim viewHeight As Double
+
+    fitWidth = mWidth
+    For idx = 1 To rowTotal
+        With hostSheet.Shapes(ShapeName & PART_SEPARATOR & "opt" & idx).TextFrame2
+            rowNeed = .TextRange.BoundWidth + .MarginLeft + .MarginRight + 6
+        End With
+        If rowNeed > fitWidth Then fitWidth = rowNeed
+    Next idx
+    fitLeft = mLeft
+    If fitWidth > mWidth Then
+        OwnerApp.ResolveViewport viewLeft, viewTop, viewWidth, viewHeight
+        If mLeft + fitWidth > viewLeft + viewWidth Then fitLeft = mLeft + mWidth - fitWidth
+        If fitLeft < viewLeft Then fitLeft = viewLeft
+    End If
+    mListLeft = fitLeft
+    mListWidth = fitWidth
+    If fitWidth = mWidth Then Exit Sub
+    For idx = 1 To rowTotal
+        With hostSheet.Shapes(ShapeName & PART_SEPARATOR & "opt" & idx)
+            .Left = fitLeft
+            .Width = fitWidth
+        End With
+    Next idx
 End Sub
 
 ' The top edge of the open list: right under the face, or above it with
@@ -16007,15 +16157,16 @@ Private Sub SyncListPager( _
     If beyondCount > 0 Then
         pagerWords = arrowGlyph & " " & Phrase(UI_MORE_ITEMS, beyondCount)
         pagerKey = PartsState(themeValue) & ":" & CStr(rowTop) & ":" & _
-            pagerWords & ":" & CStr(resolvedSize)
+            pagerWords & ":" & CStr(resolvedSize) & ":" & CStr(ListSpanLeft()) & ":" & _
+            CStr(ListSpanWidth())
         If pagerKey = appliedKey Then Exit Sub
         firstDraw = (LenB(appliedKey) = 0 Or appliedKey = "?")
         appliedKey = pagerKey
         Set pagerShape = EnsurePartShape( _
             hostSheet, partName, msoShapeRectangle)
-        pagerShape.Left = mLeft
+        pagerShape.Left = ListSpanLeft()
         pagerShape.Top = rowTop
-        pagerShape.Width = mWidth
+        pagerShape.Width = ListSpanWidth()
         pagerShape.Height = mHeight
         pagerShape.Fill.Visible = msoTrue
         pagerShape.Fill.ForeColor.RGB = themeValue.MutedColor
@@ -16906,6 +17057,7 @@ End Sub
 Private Sub NoteListOpened()
     mListSelAtOpen = vbNullString
     mOffPressPending = False
+    mListWidth = 0
     mListFlipped = ListOpensUpward()
     OwnerApp.CloseListsExcept mComponentId
     If mKind = KIND_DATE Then OwnerApp.TickablesChanged

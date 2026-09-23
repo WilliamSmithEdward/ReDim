@@ -963,13 +963,25 @@ def test_tooltips(run_widgets):
     assert facts["altTip"] == "Save, button, Saves the form"
     assert facts["altReason"] == "Send, button, unavailable, Fill in the address first"
     assert facts["waits"] == "True", "a tooltip must wait for the pointer to rest"
+    assert facts["movingWaits"] == "True", (
+        "a pointer still moving must start the tooltip's wait over"
+    )
     assert facts["tipShows"] == "Saves the form"
-    assert facts["belowPointer"] == "True"
+    assert facts["clearsControl"] == "True", (
+        "a field-sized control's tip must sit below it and fit its words"
+    )
     assert facts["pressHides"] == "True", (
         "a press must put the tooltip away until the pointer leaves"
     )
     assert facts["reasonShows"] == "Fill in the address first"
     assert facts["leaveHides"] == "True"
+    assert facts["tallUnderPointer"] == "True"
+    assert facts["reachedHides"] == "True", (
+        "a tip must go when the pointer reaches it, so a click lands beneath"
+    )
+    assert facts["staysAway"] == "True"
+    assert facts["openListNoTip"] == "True", "an open list must show no tip over its rows"
+    assert facts["longWraps"] == "True", "a long tip must wrap at its widest"
 
 
 def test_hold_repeat(run_widgets):
@@ -1241,6 +1253,12 @@ def test_menu_button(run_widgets):
     assert facts["alt"] == "True"
     assert facts["keys"] == "Duplicate/2"
     assert facts["primary"] == "True"
+    assert facts["fitsWords"] == "True", (
+        "a menu must widen every row to fit its widest command"
+    )
+    assert facts["farSideKeeps"] == "True", (
+        "a press on a widened menu's far side must count as a press on the menu"
+    )
 
 
 def test_command_palette(run_widgets):

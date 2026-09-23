@@ -119,7 +119,7 @@ All fluent, all return the component:
   pill on the control's top-right corner, such as the unread count on an Inbox button;
   it hides with the control, a click on it acts as a click on the control, and `""`
   takes it off.
-- Tooltips: `Tooltip(text)` shows a note under a resting pointer, and
+- Tooltips: `Tooltip(text)` shows a note once the pointer rests on the control, and
   `DisabledReason(text)` says why a disabled control is disabled (see [Pointer](#pointer)).
 - Values: `Value(number)` (progress, slider, picker index), `Checked(flag)`,
   `SliderRange(min, max, step)`.
@@ -315,8 +315,10 @@ dependencies:
   and runs the command's handler with the menu as `ReDimUI.Sender`, whose `LastCommand`
   names the command; a command without a handler runs the menu's `OnClick` instead. The
   face keeps the menu's own `Text` and looks like a button in its variant, `Secondary` by
-  default, with a caret. It shares the drop list's windowing, keys, and dismissal, and
-  `ClearItems` drops the commands.
+  default, with a caret. The menu runs as wide as its widest command needs, never
+  narrower than the button, and ends at the button's right edge when it would pass the
+  window's. It shares the drop list's windowing, keys, and dismissal, and `ClearItems`
+  drops the commands.
 - `Expander`: a collapsible section. Its header shows a chevron and its `Text` in bold;
   a click, or Space and Enter while it has the keys, opens and closes it, and Right opens
   and Left closes. Controls join its panel with `InExpander "adv"`, the same as
@@ -683,14 +685,19 @@ the pointer at most once a frame and act only while their sheet is in front.
   follows the pointer as it moves, as a Windows list's does, and Enter from a combo or a
   keyboard-focused select takes that row. Off by default, since while it is on the pump
   reads the pointer every frame the app's sheet is in front.
-- Tooltips: `Tooltip "Saves the form"` shows the note once the pointer has rested on the
-  control for the Windows tooltip delay, the double-click time, below the pointer and
-  flipped above or left to stay in view, in inverse colors, wrapping past 240 points. It
+- Tooltips: `Tooltip "Saves the form"` shows the note once the pointer has held still on
+  the control for the Windows tooltip delay, the double-click time; a pointer that moves
+  more than a few points starts the wait over, so passing over a control raises nothing.
+  The note is in inverse colors, as wide as its words, and wraps past 240 points. Under a
+  control no taller than 48 points it sits clear of the control, below its hint or
+  message, or above its caption when the window has no room below. On a taller control,
+  such as a table, it sits under the pointer, flipped above or left to stay in view, and
+  goes as soon as the pointer reaches it, so a click there lands on the control. It also
   goes when the pointer leaves, and a press puts it away until the pointer leaves the
-  control. `DisabledReason "Fill in the address first"` is the note while the control is
-  disabled. Screen readers get the note with the control's alternative text. An app with
-  a tooltip reads the pointer every frame its sheet is in front, as `PointerEffects`
-  does.
+  control. An open drop list or calendar shows no note over its rows. `DisabledReason
+  "Fill in the address first"` is the note while the control is disabled. Screen
+  readers get the note with the control's alternative text. An app with a tooltip reads
+  the pointer every frame its sheet is in front, as `PointerEffects` does.
 - Hold-to-repeat: a press held on a stepper's minus or plus, a drop list's pager, or a
   transfer panel's paging arrow repeats after the Windows keyboard repeat delay, at the
   keyboard repeat rate, while the pointer stays on it. A held stepper writes its
