@@ -9,6 +9,8 @@ Private Declare PtrSafe Function GetCaretBlinkTime Lib "user32" () As Long
 
 Private gChangeCount As Long
 Private gConfirmRan As Long
+Private gInputCount As Long
+Private gLastInput As String
 Private gCancelRan As Long
 
 Private Function NewCanvas() As Worksheet
@@ -1066,6 +1068,8 @@ Public Function TestFloatField() As String
     transcript = transcript & "|editFilters=" & _
         CStr(ShapeExists(host, "rdm_wid21_color__opt1") And _
              Not ShapeExists(host, "rdm_wid21_color__opt2"))
+    ' Tab takes the suggestion the edit shows (Gree, then Green's n) and
+    ' commits.
     RdxKeyChar "{TAB}"
 
     ' Esc on a combo closes an open list first, keeping focus and text;
@@ -1076,12 +1080,12 @@ Public Function TestFloatField() As String
     RdxKeyChar "{ESC}"
     transcript = transcript & "|escClosesList=" & _
         CStr(ReDimUI.HasKeyboardFocus And _
-            app.ComboBox("color").InputValue = "Greez" And _
+            app.ComboBox("color").InputValue = "Greenz" And _
             Not ShapeExists(host, "rdm_wid21_color__optn"))
     RdxKeyChar "{ESC}"
     transcript = transcript & "|escEscReverts=" & _
         CStr(Not ReDimUI.HasKeyboardFocus And _
-            app.ComboBox("color").InputValue = "Gree")
+            app.ComboBox("color").InputValue = "Green")
 
     ' Outside-press blur through the watch seam commits the field.
     Sleep 200
@@ -2554,4 +2558,399 @@ Public Function TestClearable() As String
     RdxReleaseKeys
     ReDimUI.AutoPump True
     TestClearable = transcript
+End Function
+
+' Text editing in float fields: Shift selection painted as a highlight,
+' the clipboard through Ctrl+C, Ctrl+X, and Ctrl+V, undo and redo with
+' typing grouped, Ctrl+A, word moves and deletes, and symbol keys.
+Public Function TestTextEditing() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim fieldShape As Shape
+    Dim transcript As String
+    Dim keyNo As Long
+
+    ReDimUI.AutoPump False
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "wid38")
+    app.TextInput("one").AtRect 24, 24, 220, 22
+    app.TextInput("two").AtRect 24, 60, 220, 22
+    app.Render
+    Set fieldShape = host.Shapes("rdm_wid38_one")
+
+    ReDimUI.DispatchShape "rdm_wid38_one"
+    For keyNo = 1 To Len("hello world")
+        RdxKeyChar Mid$("hello world", keyNo, 1)
+    Next keyNo
+    For keyNo = 1 To 5
+        RdxKeyChar "{SHIFTLEFT}"
+    Next keyNo
+    ' The face reads "hello |world": the bar sits before the selection.
+    transcript = "selectionPainted=" & _
+        CStr(fieldShape.TextFrame2.TextRange.Characters(8, 1).Font.Highlight.RGB _
+            = app.Theme.PrimaryColor And _
+            fieldShape.TextFrame2.TextRange.Characters(1, 1).Font.Highlight.RGB _
+            <> app.Theme.PrimaryColor)
+    RdxKeyChar "{COPY}"
+    RdxKeyChar "{CUT}"
+    transcript = transcript & "|cut=" & app.TextInput("one").InputValue
+    RdxKeyChar "{UNDO}"
+    transcript = transcript & "|undo=" & app.TextInput("one").InputValue
+    RdxKeyChar "{REDO}"
+    transcript = transcript & "|redo=" & app.TextInput("one").InputValue
+
+    ' Paste into the other field, replacing its selection.
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid38_two"
+    RdxKeyChar "a"
+    RdxKeyChar "b"
+    RdxKeyChar "{SELECTALL}"
+    RdxKeyChar "{PASTE}"
+    transcript = transcript & "|pasted=" & app.TextInput("two").InputValue
+    RdxKeyChar "{UNDO}"
+    transcript = transcript & "|pasteUndone=" & app.TextInput("two").InputValue
+    RdxKeyChar "{UNDO}"
+    transcript = transcript & "|typingOneStep=" & _
+        CStr(LenB(app.TextInput("two").InputValue) = 0)
+
+    ' Word moves and deletes.
+    RdxKeyChar "{SELECTALL}"
+    For keyNo = 1 To Len("one two three")
+        RdxKeyChar Mid$("one two three", keyNo, 1)
+    Next keyNo
+    RdxKeyChar "{WORDLEFT}"
+    RdxKeyChar "_"
+    transcript = transcript & "|wordLeft=" & app.TextInput("two").InputValue
+    RdxKeyChar "{TEXTEND}"
+    RdxKeyChar "{WORDBS}"
+    transcript = transcript & "|wordBackspace=" & app.TextInput("two").InputValue
+    RdxKeyChar "{TEXTHOME}"
+    RdxKeyChar "{SHIFTWORDRIGHT}"
+    RdxKeyChar "{DEL}"
+    transcript = transcript & "|shiftWordDelete=" & app.TextInput("two").InputValue
+
+    ' Symbols, the apostrophe and quote included.
+    RdxKeyChar "{SELECTALL}"
+    RdxKeyChar "@"
+    RdxKeyChar "{APOS}"
+    RdxKeyChar "{QUOTE}"
+    RdxKeyChar "("
+    RdxKeyChar "~"
+    transcript = transcript & "|symbols=" & app.TextInput("two").InputValue
+    RdxKeyChar "{ESC}"
+    RdxReleaseKeys
+    ReDimUI.AutoPump True
+    TestTextEditing = transcript
+End Function
+
+' Points the pointer override at a fraction across one face character.
+Private Sub PointAtChar(ByVal fieldShape As Shape, ByVal charIndex As Long, ByVal across As Double)
+    With fieldShape.TextFrame2.TextRange.Characters(charIndex, 1)
+        ReDimUI.OverridePointer .BoundLeft + .BoundWidth * across, _
+            .BoundTop + .BoundHeight / 2
+    End With
+End Sub
+
+' Clicks in a float field: the first click focuses it and puts the caret
+' at the character under the pointer, a later click moves the caret, and
+' a double click selects the word under the pointer.
+Public Function TestFieldClicks() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim fieldShape As Shape
+    Dim faceIndex As Long
+    Dim transcript As String
+
+    ReDimUI.AutoPump False
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "wid39")
+    app.TextInput("f").AtRect 24, 24, 260, 22
+    app.TextInput("f").InputValue = "alpha beta gamma"
+    app.Render
+    Set fieldShape = host.Shapes("rdm_wid39_f")
+
+    ' The left half of the b in beta, character 7: the caret goes before it.
+    PointAtChar fieldShape, 7, 0.25
+    ReDimUI.DispatchShape "rdm_wid39_f"
+    RdxKeyChar "X"
+    transcript = "clickPlacesCaret=" & app.TextInput("f").InputValue
+
+    ' The right half of the l in alpha, a later click: the caret follows.
+    faceIndex = InStr(fieldShape.TextFrame2.TextRange.Text, "l")
+    PointAtChar fieldShape, faceIndex, 0.75
+    Sleep 600
+    ReDimUI.DispatchShape "rdm_wid39_f"
+    RdxKeyChar "Y"
+    transcript = transcript & "|clickMovesCaret=" & app.TextInput("f").InputValue
+
+    ' Two quick clicks on the m in gamma select the word.
+    faceIndex = InStr(fieldShape.TextFrame2.TextRange.Text, "gamma") + 2
+    PointAtChar fieldShape, faceIndex, 0.5
+    Sleep 600
+    ReDimUI.DispatchShape "rdm_wid39_f"
+    ReDimUI.DispatchShape "rdm_wid39_f"
+    RdxKeyChar "Z"
+    transcript = transcript & "|doubleClickWord=" & app.TextInput("f").InputValue
+    ReDimUI.ClearPointerOverride
+    RdxKeyChar "{ENTER}"
+    RdxReleaseKeys
+    ReDimUI.AutoPump True
+    TestFieldClicks = transcript
+End Function
+
+Public Sub RecordInput()
+    gInputCount = gInputCount + 1
+    gLastInput = ReDimUI.Sender.InputValue
+End Sub
+
+Public Function CheckEmail(ByVal candidate As String) As String
+    If InStr(candidate, "@") = 0 Then CheckEmail = "Needs an @"
+End Function
+
+Private Sub TypeText(ByVal typedText As String)
+    Dim keyNo As Long
+
+    For keyNo = 1 To Len(typedText)
+        RdxKeyChar Mid$(typedText, keyNo, 1)
+    Next keyNo
+End Sub
+
+' Field rules: a placeholder in muted ink, Numeric's filter, MaxLength
+' with its count, Validates with its border and message rechecked live,
+' and OnInput now or after a pause.
+Public Function TestFieldRules() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim transcript As String
+    Dim separatorChar As String
+
+    gInputCount = 0
+    gLastInput = vbNullString
+    ReDimUI.AutoPump False
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "wid40")
+    app.TextInput("find").AtRect(24, 24, 200, 22).Placeholder "Search..."
+    app.TextInput("qty").AtRect(24, 60, 120, 22).Numeric
+    app.TextInput("code").AtRect(24, 96, 160, 22).MaxLength 5
+    app.TextInput("mail").AtRect(24, 150, 200, 22).Validates "TestReDimWidgets.CheckEmail"
+    app.TextInput("live").AtRect(260, 24, 160, 22).OnInput "TestReDimWidgets.RecordInput"
+    app.Render
+
+    transcript = "placeholderShown=" & _
+        CStr(host.Shapes("rdm_wid40_find").TextFrame2.TextRange.Text = "Search..." _
+            And InkOf(host, "rdm_wid40_find") = app.Theme.OnMutedColor)
+    ReDimUI.DispatchShape "rdm_wid40_find"
+    transcript = transcript & "|placeholderFocused=" & _
+        CStr(host.Shapes("rdm_wid40_find").TextFrame2.TextRange.Text = "|Search...")
+    RdxKeyChar "a"
+    transcript = transcript & "|placeholderGone=" & _
+        CStr(host.Shapes("rdm_wid40_find").TextFrame2.TextRange.Text = "a|" _
+            And InkOf(host, "rdm_wid40_find") = app.Theme.OnSurfaceColor)
+
+    ReDimUI.DispatchShape "rdm_wid40_qty"
+    TypeText "1a2.3.4-"
+    RdxKeyChar "{TEXTHOME}"
+    RdxKeyChar "-"
+    If Application.UseSystemSeparators Then
+        separatorChar = Application.International(xlDecimalSeparator)
+    Else
+        separatorChar = Application.DecimalSeparator
+    End If
+    transcript = transcript & "|numeric=" & _
+        CStr(app.TextInput("qty").InputValue = "-12" & separatorChar & "34")
+
+    ReDimUI.DispatchShape "rdm_wid40_code"
+    TypeText "abcdefg"
+    transcript = transcript & "|maxLength=" & app.TextInput("code").InputValue
+    transcript = transcript & "|counter=" & _
+        host.Shapes("rdm_wid40_code__mc").TextFrame2.TextRange.Text
+
+    ReDimUI.DispatchShape "rdm_wid40_mail"
+    TypeText "bob"
+    RdxKeyChar "{ENTER}"
+    transcript = transcript & "|invalid=" & app.TextInput("mail").ValidationError
+    transcript = transcript & "|messageShown=" & _
+        CStr(host.Shapes("rdm_wid40_mail__me").TextFrame2.TextRange.Text = "Needs an @")
+    transcript = transcript & "|dangerBorder=" & _
+        CStr(host.Shapes("rdm_wid40_mail").Line.ForeColor.RGB = app.Theme.DangerColor)
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid40_mail"
+    RdxKeyChar "@"
+    transcript = transcript & "|liveRecheck=" & _
+        CStr(LenB(app.TextInput("mail").ValidationError) = 0 And _
+            Not ShapeExists(host, "rdm_wid40_mail__me"))
+    RdxKeyChar "{ENTER}"
+
+    ReDimUI.DispatchShape "rdm_wid40_live"
+    TypeText "xy"
+    transcript = transcript & "|inputNow=" & gInputCount & ":" & gLastInput
+    app.TextInput("live").DebounceMs 150
+    RdxKeyChar "z"
+    transcript = transcript & "|debounceWaits=" & CStr(gInputCount = 2)
+    Sleep 200
+    ReDimUI.PumpOnce
+    transcript = transcript & "|debounceFires=" & gInputCount & ":" & gLastInput
+    RdxKeyChar "{ENTER}"
+    RdxReleaseKeys
+    ReDimUI.AutoPump True
+    TestFieldRules = transcript
+End Function
+
+' AutoGrow: a multi-line field grows a line at a time from the height it
+' was given up to its cap and shrinks back as lines go, a component placed
+' Below it moves with it, and a first render starts at the grown height.
+Public Function TestAutoGrow() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim fieldShape As Shape
+    Dim lineStep As Double
+    Dim transcript As String
+
+    ReDimUI.AutoPump False
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "wid41")
+    app.TextInput("notes").AtRect(24, 24, 220, 22).AutoGrow 3
+    app.Label("after").Below("notes", 6).Sized(220, 18).Text "Below the notes"
+    app.TextInput("pre").AtRect(280, 24, 220, 22).AutoGrow
+    app.TextInput("pre").InputValue = "first" & vbLf & "second"
+    app.Render
+    Set fieldShape = host.Shapes("rdm_wid41_notes")
+    lineStep = app.Theme.BaseFontSize * 1.35
+
+    transcript = "startsAtGiven=" & CStr(Abs(fieldShape.Height - 22) < 0.01)
+    transcript = transcript & "|firstRenderGrown=" & _
+        CStr(Abs(host.Shapes("rdm_wid41_pre").Height - (2 * lineStep + 6)) < 0.01)
+
+    ReDimUI.DispatchShape "rdm_wid41_notes"
+    TypeText "one"
+    RdxKeyChar "{ENTER}"
+    TypeText "two"
+    transcript = transcript & "|grewTwoLines=" & _
+        CStr(Abs(fieldShape.Height - (2 * lineStep + 6)) < 0.01)
+    transcript = transcript & "|belowFollows=" & _
+        CStr(Abs(host.Shapes("rdm_wid41_after").Top _
+            - (fieldShape.Top + fieldShape.Height + 6)) < 0.01)
+    RdxKeyChar "{ENTER}"
+    TypeText "three"
+    RdxKeyChar "{ENTER}"
+    TypeText "four"
+    transcript = transcript & "|capped=" & _
+        CStr(Abs(fieldShape.Height - (3 * lineStep + 6)) < 0.01)
+    transcript = transcript & "|faceScrolls=" & _
+        CStr(fieldShape.TextFrame2.TextRange.Text = _
+            ChrW(8230) & "two" & vbLf & "three" & vbLf & "four|")
+
+    RdxKeyChar "{SELECTALL}"
+    RdxKeyChar "{BS}"
+    transcript = transcript & "|shrinksBack=" & _
+        CStr(Abs(fieldShape.Height - 22) < 0.01)
+    transcript = transcript & "|belowReturns=" & _
+        CStr(Abs(host.Shapes("rdm_wid41_after").Top - 52) < 0.01)
+
+    ' At rest a long line wraps, and the field grows to hold it.
+    RdxKeyChar "{CTRLENTER}"
+    app.TextInput("notes").InputValue = String(90, "x")
+    transcript = transcript & "|wrapGrows=" & CStr(fieldShape.Height > 23)
+    RdxReleaseKeys
+    ReDimUI.AutoPump True
+    TestAutoGrow = transcript
+End Function
+
+' The bold letters of a shape's text, in order.
+Private Function BoldRun(ByVal host As Worksheet, ByVal shapeName As String) As String
+    Dim charNo As Long
+
+    With host.Shapes(shapeName).TextFrame2.TextRange
+        For charNo = 1 To .Length
+            If .Characters(charNo, 1).Font.Bold = msoTrue Then
+                BoldRun = BoldRun & .Characters(charNo, 1).Text
+            End If
+        Next charNo
+    End With
+End Function
+
+' Combo assists: rows bold what the text matched; the first item the text
+' begins shows its rest after the caret in muted ink, which Right at the
+' end or Tab takes and Undo gives back; RestrictToItems commits only
+' items, a prefix, or an empty text, and otherwise reverts.
+Public Function TestComboAssists() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim fieldShape As Shape
+    Dim transcript As String
+
+    ReDimUI.AutoPump False
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "wid42")
+    app.ComboBox("fruit").AtRect 24, 24, 200, 22
+    app.ComboBox("fruit").Items "Apple", "Banana", "Blueberry", "Cherry"
+    app.ComboBox("strict").AtRect 260, 24, 200, 22
+    app.ComboBox("strict").Items("Apple", "Banana", "Blueberry", "Cherry") _
+        .RestrictToItems
+    app.Render
+    Set fieldShape = host.Shapes("rdm_wid42_fruit")
+
+    ReDimUI.DispatchShape "rdm_wid42_fruit"
+    RdxKeyChar "b"
+    transcript = "boldMatch=" & BoldRun(host, "rdm_wid42_fruit__opt1") & "," & _
+        BoldRun(host, "rdm_wid42_fruit__opt2")
+    transcript = transcript & "|ghostShown=" & _
+        CStr(fieldShape.TextFrame2.TextRange.Text = "b|anana")
+    transcript = transcript & "|ghostMuted=" & _
+        CStr(fieldShape.TextFrame2.TextRange.Characters(3, 5).Font.Fill.ForeColor.RGB _
+            = app.Theme.OnMutedColor _
+        And fieldShape.TextFrame2.TextRange.Characters(1, 1).Font.Fill.ForeColor.RGB _
+            = app.Theme.OnSurfaceColor)
+    RdxKeyChar "a"
+    transcript = transcript & "|boldGrows=" & _
+        BoldRun(host, "rdm_wid42_fruit__opt1")
+    RdxKeyChar "{BS}"
+    transcript = transcript & "|boldShrinks=" & _
+        BoldRun(host, "rdm_wid42_fruit__opt1")
+    RdxKeyChar "{BS}"
+    transcript = transcript & "|boldCleared=" & _
+        CStr(LenB(BoldRun(host, "rdm_wid42_fruit__opt1")) = 0 _
+            And LenB(BoldRun(host, "rdm_wid42_fruit__opt2")) = 0)
+    TypeText "bl"
+    transcript = transcript & "|ghostFollows=" & _
+        CStr(fieldShape.TextFrame2.TextRange.Text = "bl|ueberry") & _
+        ":" & BoldRun(host, "rdm_wid42_fruit__opt1")
+    RdxKeyChar "{RIGHT}"
+    transcript = transcript & "|rightTakes=" & app.ComboBox("fruit").InputValue
+    RdxKeyChar "{UNDO}"
+    transcript = transcript & "|undoGivesBack=" & app.ComboBox("fruit").InputValue
+    BackspaceAll app.ComboBox("fruit")
+    RdxKeyChar "c"
+    RdxKeyChar "{TAB}"
+    transcript = transcript & "|tabTakes=" & app.ComboBox("fruit").InputValue & _
+        ":" & CStr(ReDimUI.FocusedComponentId = "strict")
+    RdxKeyChar "{ESC}"
+    RdxKeyChar "{ESC}"
+
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid42_strict"
+    TypeText "zz"
+    RdxKeyChar "{ENTER}"
+    transcript = transcript & "|restrictReverts=" & _
+        CStr(LenB(app.ComboBox("strict").InputValue) = 0)
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid42_strict"
+    TypeText "blu"
+    RdxKeyChar "{ENTER}"
+    transcript = transcript & "|restrictCompletes=" & app.ComboBox("strict").InputValue
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid42_strict"
+    BackspaceAll app.ComboBox("strict")
+    TypeText "APPLE"
+    RdxKeyChar "{ENTER}"
+    transcript = transcript & "|restrictSpelling=" & app.ComboBox("strict").InputValue
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid42_strict"
+    BackspaceAll app.ComboBox("strict")
+    RdxKeyChar "{ENTER}"
+    transcript = transcript & "|restrictEmpty=" & _
+        CStr(LenB(app.ComboBox("strict").InputValue) = 0)
+    RdxReleaseKeys
+    ReDimUI.AutoPump True
+    TestComboAssists = transcript
 End Function

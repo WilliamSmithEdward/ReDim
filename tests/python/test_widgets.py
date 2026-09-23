@@ -806,3 +806,101 @@ def test_clearable(run_widgets):
     assert facts["comboCleared"] == "True", (
         "clearing a combo must open its whole list"
     )
+
+
+def test_text_editing(run_widgets):
+    facts = parse_transcript(run_widgets("TestTextEditing"))
+    assert facts["selectionPainted"] == "True", (
+        "a Shift selection must show as an accent highlight"
+    )
+    assert facts["cut"] == "hello "
+    assert facts["undo"] == "hello world"
+    assert facts["redo"] == "hello "
+    assert facts["pasted"] == "world", "Ctrl+V must replace the selection"
+    assert facts["pasteUndone"] == "ab"
+    assert facts["typingOneStep"] == "True", "a typing run undoes as one step"
+    assert facts["wordLeft"] == "one two _three"
+    assert facts["wordBackspace"] == "one two ", (
+        "Ctrl+Backspace deletes a word; the underscore is part of it"
+    )
+    assert facts["shiftWordDelete"] == "two ", (
+        "Ctrl+Shift+Right selects to the next word start"
+    )
+    assert facts["symbols"] == "@'\"(~"
+
+
+def test_field_clicks(run_widgets):
+    facts = parse_transcript(run_widgets("TestFieldClicks"))
+    assert facts["clickPlacesCaret"] == "alpha Xbeta gamma", (
+        "the focusing click must put the caret under the pointer"
+    )
+    assert facts["clickMovesCaret"] == "alYpha Xbeta gamma"
+    assert facts["doubleClickWord"] == "alYpha Xbeta Z", (
+        "a double click must select the word under the pointer"
+    )
+
+
+def test_field_rules(run_widgets):
+    facts = parse_transcript(run_widgets("TestFieldRules"))
+    assert facts["placeholderShown"] == "True", (
+        "an empty field must show its placeholder in muted ink"
+    )
+    assert facts["placeholderFocused"] == "True"
+    assert facts["placeholderGone"] == "True"
+    assert facts["numeric"] == "True", (
+        "Numeric must keep digits, one separator, and a leading minus"
+    )
+    assert facts["maxLength"] == "abcde"
+    assert facts["counter"] == "5/5"
+    assert facts["invalid"] == "Needs an @"
+    assert facts["messageShown"] == "True"
+    assert facts["dangerBorder"] == "True"
+    assert facts["liveRecheck"] == "True", (
+        "an invalid field must recheck on every edit and clear once valid"
+    )
+    assert facts["inputNow"] == "2:xy"
+    assert facts["debounceWaits"] == "True"
+    assert facts["debounceFires"] == "3:xyz"
+
+
+def test_auto_grow(run_widgets):
+    facts = parse_transcript(run_widgets("TestAutoGrow"))
+    assert facts["startsAtGiven"] == "True"
+    assert facts["firstRenderGrown"] == "True", (
+        "a first render must size an AutoGrow field to its text"
+    )
+    assert facts["grewTwoLines"] == "True"
+    assert facts["belowFollows"] == "True", (
+        "a component placed Below a growing field must move with it"
+    )
+    assert facts["capped"] == "True"
+    assert facts["faceScrolls"] == "True"
+    assert facts["shrinksBack"] == "True"
+    assert facts["belowReturns"] == "True"
+    assert facts["wrapGrows"] == "True"
+
+
+def test_combo_assists(run_widgets):
+    facts = parse_transcript(run_widgets("TestComboAssists"))
+    assert facts["boldMatch"] == "B,B", (
+        "drop rows must bold what the typed text matched"
+    )
+    assert facts["ghostShown"] == "True", (
+        "the first item the text begins must show its rest after the caret"
+    )
+    assert facts["ghostMuted"] == "True"
+    assert facts["boldGrows"] == "Ba", (
+        "a row that keeps its item must bold a longer match"
+    )
+    assert facts["boldShrinks"] == "B"
+    assert facts["boldCleared"] == "True"
+    assert facts["ghostFollows"] == "True:Bl"
+    assert facts["rightTakes"] == "Blueberry"
+    assert facts["undoGivesBack"] == "bl"
+    assert facts["tabTakes"] == "Cherry:True"
+    assert facts["restrictReverts"] == "True", (
+        "a restricted combo must revert a commit that names no item"
+    )
+    assert facts["restrictCompletes"] == "Blueberry"
+    assert facts["restrictSpelling"] == "Apple"
+    assert facts["restrictEmpty"] == "True"

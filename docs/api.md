@@ -118,6 +118,10 @@ All fluent, all return the component:
   `AccessKey(letter)` binds Alt+letter for a button or tick box, and `Clearable` gives a
   float TextInput or ComboBox a clear button (see
   [Keyboard focus for every control](#keyboard-focus-for-every-control)).
+- Text fields (float `TextInput` and `ComboBox`): `Placeholder(hint)`, `OnInput(proc)` with
+  `DebounceMs(ms)`, `Numeric`, `MaxLength(n)`, and `Validates(checkProc)` read back with
+  `ValidationError` (see [Field rules](#field-rules)); `MultiLine` and `AutoGrow(maxLines)`
+  for a TextInput and `RestrictToItems` for a ComboBox.
 - Reads: `CurrentValue`, `CurrentText`, `IsChecked`, `IsEnabled`, `IsVisible`, `IsBusy`, `InputValue`
   (TextInput and ComboBox; reads the float buffer or the backing cell, and assigning it
   writes without firing change events).
@@ -186,7 +190,13 @@ dependencies:
   re-filters, and clickable pager rows at the list edges (arrow plus the count beyond that
   edge) page the window for the mouse, appearing only when something lies beyond them.
   When the text names an item, as it does after a pick, the list reopens unfiltered and
-  scrolled to that item, and Down walks on from it; the first edit filters again.
+  scrolled to that item, and Down walks on from it; the first edit filters again. While
+  the text filters the list, each row bolds what the text matched, and the first item
+  that begins with the text shows the rest of its name after the caret in muted ink.
+  Right at the end of the text, or Tab, takes it in the item's spelling; Enter commits
+  what was typed. A click on a focused combo's text places the caret, and the arrow at
+  its right edge toggles the list. `RestrictToItems` limits a float combo's commits to
+  its items (see [Field rules](#field-rules)).
 - `TextInput`: a text field. Float by default (`AtRect`), cell-backed with `At` when you
   want the value to live in the grid. A cell-backed field's frame covers its cell, so a
   click on the frame selects the cell: typing replaces the value and F2 edits it in place,
@@ -212,7 +222,8 @@ dependencies:
 
 As of 0.9.0 no control needs a cell. `TextInput` and `ComboBox` placed with `AtRect`,
 `Below`, or `RightOf` render and edit entirely on their shapes: clicking a field gives it
-keyboard focus, an accent ring and an insertion bar appear (blinking at the Windows caret
+keyboard focus with the caret where the click landed, an accent ring and an insertion bar
+appear (blinking at the Windows caret
 rate, or steady when Windows is set not to blink), and characters go to the
 component's text buffer instead of a cell. That sidesteps Excel's edit-mode VBA pause - the
 framework sees every keystroke, which is what makes live combo filtering possible - and it
@@ -225,12 +236,18 @@ Focus mechanics, all automatic:
   fires if the text changed, and then Enter clicks the app's `DefaultButton` if it has
   one. Tab and Shift+Tab commit the same way and move focus to the next or previous
   control in Tab order (see [Keyboard focus for every control](#keyboard-focus-for-every-control));
-  with no other control to move to, they commit and leave. A combo commit that exactly
-  matches an item takes that item. A `MultiLine` TextInput follows textarea conventions
+  with no other control to move to, they commit and leave. Tab first takes a combo's
+  shown suggestion. A combo commit whose text names an item, in any case, takes that
+  item. A `MultiLine` TextInput follows textarea conventions
   instead: Enter inserts a newline and keeps focus, while Tab, Ctrl+Enter, and clicking
   away commit; the value carries its newlines into state. Size the rectangle for the
   lines you expect - roughly 15 points per line plus 6 points of margin; a line that
-  cannot fully fit is not drawn at all, which reads as a missing line.
+  cannot fully fit is not drawn at all, which reads as a missing line. Or let
+  `AutoGrow(maxLines)` size it: the field grows a line at a time from the height it was
+  given, up to `maxLines` lines (six by default), shrinks back as lines go, and moves
+  anything placed `Below` it. At rest a line too long for the field wraps, and the
+  height counts the wrapped lines, so the field keeps one height with focus or without.
+  `AutoGrow` turns `MultiLine` on.
 - Overflow follows the caret. Shape text cannot scroll, so a focused field renders the
   tail window of its buffer - the last lines that fit (multi-line) or the rightmost
   characters that fit (single-line and combo) - with a leading ellipsis marking trimmed
@@ -257,20 +274,88 @@ Focus mechanics, all automatic:
 
 Capture uses `Application.OnKey`, bound only while a control holds focus and released when
 it leaves, so sheet typing is untouched the rest of the time. The bound set is the
-practical editing and navigation set: letters (with Shift capitals), digits, space, minus,
-period, comma, Backspace, Del, the arrow keys, Home, End, Page Up, Page Down, Tab and
-Shift+Tab, Enter (and Ctrl+Enter), Esc, Alt+Down, Alt+Up, and F4. Editing is full caret
+practical editing and navigation set: the letters a to z (with Shift capitals), digits,
+space, punctuation and symbols (bound by character, so each follows the active keyboard
+layout), Backspace, Del, the arrow keys, Home, End, Page Up, Page Down, Tab and
+Shift+Tab, Enter (and Ctrl+Enter), Esc, Alt+Down, Alt+Up, F4, and the selection,
+clipboard, and undo chords under [Text editing](#text-editing). Editing is full caret
 editing: arrows move the insertion point, characters insert at it, Backspace and Del
 delete around it, Home and End jump the line edges, and Up and Down move across hard
 lines with the column clamped (a long wrapped line counts as one line). While a field is
-focused the arrows belong to editing, so they do not move the cell selection. Text
-selection (shift-selection, copy/paste) is not modeled. Keys outside the bound set fall
-through to the grid as usual; on a `ProtectSurface` sheet Excel answers those with its
+focused the arrows belong to editing, so they do not move the cell selection. Keys outside
+the bound set, accented letters and IME input among them, fall through to the grid as
+usual; on a `ProtectSurface` sheet Excel answers those with its
 protected-cell notice, and protection stays on the whole time - OnKey capture works fine
 under protection (verified with message-level keystrokes). Apps that bind arrow HotKeys
 should re-arm them after field focus sessions if they mix the two. `ReDimUI.HasKeyboardFocus`
 and `ReDimUI.FocusedComponentId` report the current holder; `RdxReleaseKeys` is the panic
 release that unbinds everything regardless of state.
+
+## Text editing
+
+A focused float field edits the way a Windows text box does.
+
+| Keys | Action |
+|---|---|
+| Shift with Left, Right, Up, Down, Home, or End | Extend the selection. |
+| Ctrl+Left, Ctrl+Right | Move a word; with Shift, select by words. |
+| Ctrl+Home, Ctrl+End | Jump to the start or end of the text; with Shift, select to there. |
+| Ctrl+Backspace, Ctrl+Del | Delete the word before or after the caret. |
+| Ctrl+A | Select everything. |
+| Ctrl+C, Ctrl+X, Ctrl+V | Copy, cut, and paste through the Windows clipboard, as Unicode text. |
+| Ctrl+Z; Ctrl+Y or Ctrl+Shift+Z | Undo; redo. |
+
+- The selection shows in the accent color with accent ink. Typing, a delete, or a paste
+  replaces it, and Left or Right without Shift collapses it to its start or end.
+- A word is a run of letters, digits, underscores, and characters past ASCII.
+- A paste keeps what the field takes: a single-line field turns line breaks and tabs into
+  spaces, a trailing line break (a copied cell brings one) is dropped, and `Numeric` and
+  `MaxLength` apply as they do to typing.
+- Undo steps back through the edits since the field took focus, up to 100 of them. Typing
+  groups into one step until it pauses for a second; a delete, a cut, a paste, and a taken
+  combo suggestion are steps of their own.
+- A click puts the caret at the character boundary nearest the pointer, and a double click
+  within the Windows double-click time selects the word under it. A click raised with the
+  pointer off the face, from code for instance, places no caret: a field it focuses starts
+  with the caret at the end.
+- `CurrentText` and `InputValue` return the text alone, without the insertion bar.
+
+## Field rules
+
+Builders for float `TextInput` and `ComboBox` fields:
+
+- `Placeholder "Search..."` shows a hint in muted ink while the field is empty, focused or
+  not. The hint is not text: `InputValue` stays empty, and the alternative text includes
+  the hint.
+- `OnInput "Module.Proc"` runs after every edit that changes the text, typing, deletes,
+  paste, cut, and undo alike. `ReDimUI.Sender` is the field, so
+  `ReDimUI.Sender.InputValue` is the text so far. `DebounceMs 300` waits until typing
+  pauses that long; a pending call runs before focus leaves the field. `OnChange` still
+  fires once per commit.
+- `Numeric` keeps digits, one decimal separator, and a leading minus. The separator is the
+  locale's, and both the period and the comma type it. `Numeric allowDecimal:=False` refuses
+  the separator and `Numeric allowNegative:=False` the minus.
+- `MaxLength 5` caps the text: typing and pasting stop at the cap, and a count under the
+  field's right edge shows the length against it.
+- `Validates "Module.CheckEmail"` names a Public Function that takes the text and returns
+  "" when it is valid or a message when it is not. It runs on commit. An invalid field
+  gets a danger border and the message under it, and from then on every edit rechecks
+  until the text passes. The commit still happens; `ValidationError` reads the message,
+  so gate whatever the value feeds on it.
+- `RestrictToItems` makes a float `ComboBox` commit only its items. A commit takes the
+  item the text names in any case, or else the first item the text begins, in the item's
+  spelling. An empty text stays empty, and any other text goes back to what the field held
+  when focus arrived. A cell-backed combo's cell is Excel's to restrict, with data
+  validation.
+
+```vba
+ui.TextInput("email").AtRect(24, 24, 220, 22).Placeholder "name@example.com"
+ui.TextInput("email").Validates "Checks.Email"
+ui.TextInput("qty").AtRect(24, 70, 80, 22).Numeric allowDecimal:=False
+ui.TextInput("find").AtRect(24, 116, 220, 22).OnInput "Search.Refilter"
+ui.TextInput("find").DebounceMs 250
+ui.ComboBox("fruit").AtRect(24, 162, 220, 22).Items("Apple", "Banana").RestrictToItems
+```
 
 ## Keyboard focus for every control
 
@@ -312,7 +397,7 @@ keep the keys.
 | SelectBox | Closed: arrows, Home, End, Page Up, and Page Down change the selection, and Space, Alt+Down, or F4 opens the list. Open: they move the highlight; Enter, Space, or Alt+Up takes it, Tab takes it and moves on, and Esc or F4 closes. Letters jump to the next item that starts with them, open or closed: letters typed within a second build a prefix, and one letter typed again steps through its items. |
 | CheckList | Up and Down move the row cursor, the select-all header included; Home and End jump; Space toggles the cursor's row. |
 | TransferList | Up and Down move the row cursor, Left and Right switch panels, Space toggles the cursor's row in the selection, and Enter moves the panel's selection across, or the cursor's row when nothing is selected. |
-| TextInput, ComboBox | The editing keys above; a combo also opens with Alt+Down or F4, closes with Alt+Up, and pages its list with Page Up and Page Down. |
+| TextInput, ComboBox | The editing keys under [Text editing](#text-editing); a combo also opens with Alt+Down or F4, closes with Alt+Up, pages its list with Page Up and Page Down, and takes its suggestion with Right at the end of the text or Tab. |
 
 ## Accessibility
 

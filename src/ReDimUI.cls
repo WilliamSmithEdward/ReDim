@@ -62,16 +62,42 @@ Private Declare PtrSafe Function GetDeviceCaps Lib "gdi32" ( _
 Private Declare PtrSafe Function GetAsyncKeyState Lib "user32" ( _
     ByVal virtualKey As Long) As Integer
 Private Declare PtrSafe Function GetCaretBlinkTime Lib "user32" () As Long
+Private Declare PtrSafe Function GetDoubleClickTime Lib "user32" () As Long
 Private Declare PtrSafe Function SystemParametersInfo Lib "user32" _
     Alias "SystemParametersInfoW" (ByVal actionCode As Long, _
     ByVal actionParam As Long, ByRef resultValue As Long, _
     ByVal profileFlags As Long) As Long
+Private Declare PtrSafe Function OpenClipboard Lib "user32" ( _
+    ByVal ownerWindow As LongPtr) As Long
+Private Declare PtrSafe Function CloseClipboard Lib "user32" () As Long
+Private Declare PtrSafe Function EmptyClipboard Lib "user32" () As Long
+Private Declare PtrSafe Function IsClipboardFormatAvailable Lib "user32" ( _
+    ByVal formatCode As Long) As Long
+Private Declare PtrSafe Function GetClipboardData Lib "user32" ( _
+    ByVal formatCode As Long) As LongPtr
+Private Declare PtrSafe Function SetClipboardData Lib "user32" ( _
+    ByVal formatCode As Long, ByVal memoryHandle As LongPtr) As LongPtr
+Private Declare PtrSafe Function GlobalAlloc Lib "kernel32" ( _
+    ByVal allocFlags As Long, ByVal byteCount As LongPtr) As LongPtr
+Private Declare PtrSafe Function GlobalFree Lib "kernel32" ( _
+    ByVal memoryHandle As LongPtr) As LongPtr
+Private Declare PtrSafe Function GlobalLock Lib "kernel32" ( _
+    ByVal memoryHandle As LongPtr) As LongPtr
+Private Declare PtrSafe Function GlobalUnlock Lib "kernel32" ( _
+    ByVal memoryHandle As LongPtr) As Long
+Private Declare PtrSafe Function lstrlenW Lib "kernel32" ( _
+    ByVal textAddress As LongPtr) As Long
+Private Declare PtrSafe Sub CopyMemory Lib "kernel32" Alias "RtlMoveMemory" ( _
+    ByVal toAddress As LongPtr, ByVal fromAddress As LongPtr, _
+    ByVal byteCount As LongPtr)
 
 Private Const LOGPIXELSX As Long = 88
 Private Const LOGPIXELSY As Long = 90
 Private Const VK_LEFT_BUTTON As Long = 1
 Private Const VK_RIGHT_BUTTON As Long = 2
 Private Const SPI_GETCLIENTAREAANIMATION As Long = &H1042
+Private Const CF_UNICODETEXT As Long = 13
+Private Const GMEM_MOVEABLE_ZEROED As Long = &H42
 
 Private Const SHAPE_PREFIX As String = "rdm_"
 Private Const PART_SEPARATOR As String = "__"
@@ -316,6 +342,54 @@ Private mAltText As String
 Private mAppliedAltText As String
 ' The caret index: characters before the caret, 0 through Len(mText).
 Private mCaretPos As Long
+' The selection runs from this anchor to the caret; equal means none.
+Private mSelAnchor As Long
+' Undo and redo snapshots (text, caret, anchor) for the focus session,
+' and the kind and time of the last edit, which group typing.
+Private mUndoStack As Collection
+Private mRedoStack As Collection
+Private mLastEditKind As String
+Private mLastEditMs As LongLong
+' The focused face's characters mapped to the text characters they show
+' (0 for the insertion bar, ellipses, and completion letters).
+Private mFaceMap() As Long
+Private mFaceLength As Long
+' Selection marks painted on the face now, and whether the face has ever
+' carried a highlight, which Excel cannot take off again.
+Private mMarksPainted As Boolean
+Private mHighlightTouched As Boolean
+' The last click in the field and where it put the caret, which tell a
+' double click from two single ones.
+Private mLastFieldClickMs As LongLong
+Private mLastFieldClickPos As Long
+' Field rules: the placeholder, the OnInput handler and its debounce with
+' the time a pending call falls due, Numeric's allowances, MaxLength, and
+' Validates' check with its current message; once a message shows, every
+' edit rechecks until the text passes.
+Private mPlaceholder As String
+Private mInputProc As String
+Private mDebounceMs As Long
+Private mInputDueMs As LongLong
+Private mNumeric As Boolean
+Private mNumericDecimal As Boolean
+Private mNumericNegative As Boolean
+Private mMaxLength As Long
+Private mValidateProc As String
+Private mValidationError As String
+Private mValidationLive As Boolean
+Private mAppliedErrorBorder As Boolean
+Private mAppliedMessageSig As String
+Private mAppliedCountSig As String
+' AutoGrow: the line cap (0 for off) and how far the field has grown past
+' the height it was given; the geometry setters start that over.
+Private mAutoGrowLines As Long
+Private mGrowAdded As Double
+' Combo assists: commits limited to the items, where the face shows the
+' completion letters, and where they were painted last.
+Private mRestrictToItems As Boolean
+Private mGhostFaceStart As Long
+Private mGhostFaceLength As Long
+Private mAppliedGhostKey As String
 ' Windowed long lists: a SelectBox or ComboBox drop list shows at most
 ' mListRows of mListMatches (item indexes in list order) from
 ' mListOffset, with mListHighlight as the combo's keyboard cursor
@@ -686,6 +760,40 @@ Friend Property Get CaretBlinkMs() As Long
     End If
     CaretBlinkMs = mCaretBlinkMs
 End Property
+
+' Runs a handler with ReDimUI.Sender set to the component, the way a
+' click does, for handlers fired from keys or the pump; a failure goes
+' to the app's error handler.
+Friend Sub RunHandlerAs( _
+    ByVal hostApp As ReDimUI, _
+    ByVal componentValue As ReDimUI, _
+    ByVal handlerProc As String _
+)
+    Dim priorApp As ReDimUI
+    Dim priorComponent As ReDimUI
+    Dim failure As String
+
+    If Not IsFactory(Me) Then
+        ReDimUI.RunHandlerAs hostApp, componentValue, handlerProc
+        Exit Sub
+    End If
+    Set priorApp = mSenderApp
+    Set priorComponent = mSenderComponent
+    Set mSenderApp = hostApp
+    Set mSenderComponent = componentValue
+    On Error GoTo HandlerFailed
+    Application.Run handlerProc
+    On Error GoTo 0
+    Set mSenderApp = priorApp
+    Set mSenderComponent = priorComponent
+    Exit Sub
+HandlerFailed:
+    failure = "ReDim handler error " & Err.Number & ": " & Err.Description
+    On Error GoTo 0
+    Set mSenderApp = priorApp
+    Set mSenderComponent = priorComponent
+    hostApp.ReportAppError failure
+End Sub
 
 ' Binds Alt plus each access key the active sheet's apps declare and
 ' releases the rest, so the chords belong to ReDim only while an app
@@ -1731,6 +1839,20 @@ Public Function PrepareCanvas( _
     Set PrepareCanvas = Me
 End Function
 
+' Components placed Below or RightOf one that changed size follow it, and
+' the ones placed against those follow in turn.
+Friend Sub ReapplyDependents(ByVal anchorId As String)
+    Dim componentValue As ReDimUI
+
+    RequireRole ROLE_APP, "ReapplyDependents"
+    For Each componentValue In mComponents
+        If componentValue.PlacedRelativeTo = anchorId Then
+            componentValue.Apply mSheet, mTheme, Me
+            ReapplyDependents componentValue.ComponentId
+        End If
+    Next componentValue
+End Sub
+
 Friend Sub HandleSheetChange(ByVal changed As Range)
     Dim componentValue As ReDimUI
 
@@ -2701,6 +2823,7 @@ Public Function AtRect( _
     mTop = topPoints
     mWidth = widthPoints
     mHeight = heightPoints
+    mGrowAdded = 0
     mHasRect = True
     Touch
     Set AtRect = Me
@@ -2743,6 +2866,7 @@ Public Function Sized( _
     RequireRole ROLE_COMPONENT, "Sized"
     mWidth = widthPoints
     mHeight = heightPoints
+    mGrowAdded = 0
     Touch
     Set Sized = Me
 End Function
@@ -2818,6 +2942,26 @@ Public Function MultiLine(Optional ByVal multiLineOn As Boolean = True) As ReDim
     mMultiLine = multiLineOn
     Touch
     Set MultiLine = Me
+End Function
+
+' A multi-line float TextInput grows with its text from the height it was
+' given, a line at a time up to maxLines, and shrinks back as lines go;
+' components placed Below it move with it. AutoGrow turns MultiLine on,
+' and 0 turns growing off.
+Public Function AutoGrow(Optional ByVal maxLines As Long = 6) As ReDimUI
+    RequireRole ROLE_COMPONENT, "AutoGrow"
+    If mKind <> KIND_INPUT Then
+        RaiseError ERROR_INVALID_OPERATION, "AutoGrow", _
+            "AutoGrow applies to TextInput only."
+    End If
+    If maxLines < 0 Then
+        RaiseError ERROR_INVALID_ARGUMENT, "AutoGrow", _
+            "maxLines must be 0 or more."
+    End If
+    mAutoGrowLines = maxLines
+    If maxLines > 0 Then mMultiLine = True
+    Touch
+    Set AutoGrow = Me
 End Function
 
 Public Function Primary() As ReDimUI
@@ -2929,6 +3073,85 @@ Public Function Clearable(Optional ByVal clearOn As Boolean = True) As ReDimUI
     Touch
     Set Clearable = Me
 End Function
+
+' A float ComboBox that commits only its items: a commit takes the item
+' the text names or begins, in the item's spelling, keeps an empty text,
+' and otherwise goes back to the text the field had when focus arrived.
+' A cell-backed combo's cell is Excel's to restrict, with data validation.
+Public Function RestrictToItems(Optional ByVal restrictOn As Boolean = True) As ReDimUI
+    RequireRole ROLE_COMPONENT, "RestrictToItems"
+    If mKind <> KIND_COMBO Then
+        RaiseError ERROR_INVALID_OPERATION, "RestrictToItems", _
+            "RestrictToItems applies to ComboBox only."
+    End If
+    mRestrictToItems = restrictOn
+    Set RestrictToItems = Me
+End Function
+
+' A float TextInput or ComboBox shows this hint in muted ink while it is
+' empty, focused or not.
+Public Function Placeholder(ByVal hintText As String) As ReDimUI
+    RequireRole ROLE_COMPONENT, "Placeholder"
+    mPlaceholder = hintText
+    Touch
+    Set Placeholder = Me
+End Function
+
+' Runs while the user types in a float field: after each edit, or once
+' typing pauses for DebounceMs. ReDimUI.Sender is the field, and its
+' InputValue holds the text so far.
+Public Function OnInput(ByVal handlerProc As String) As ReDimUI
+    RequireRole ROLE_COMPONENT, "OnInput"
+    mInputProc = handlerProc
+    Set OnInput = Me
+End Function
+
+Public Function DebounceMs(ByVal pauseMs As Long) As ReDimUI
+    RequireRole ROLE_COMPONENT, "DebounceMs"
+    If pauseMs < 0 Then pauseMs = 0
+    mDebounceMs = pauseMs
+    Set DebounceMs = Me
+End Function
+
+' Digits only, plus one decimal separator (the locale's; . and , both
+' type it) and a leading minus, unless turned off. Pasted text keeps
+' what fits a number.
+Public Function Numeric( _
+    Optional ByVal allowDecimal As Boolean = True, _
+    Optional ByVal allowNegative As Boolean = True _
+) As ReDimUI
+    RequireRole ROLE_COMPONENT, "Numeric"
+    mNumeric = True
+    mNumericDecimal = allowDecimal
+    mNumericNegative = allowNegative
+    Set Numeric = Me
+End Function
+
+' Caps the text at maxChars: typing and pasting stop there, and a count
+' under the field's right edge shows the length against the cap.
+Public Function MaxLength(ByVal maxChars As Long) As ReDimUI
+    RequireRole ROLE_COMPONENT, "MaxLength"
+    If maxChars < 0 Then maxChars = 0
+    mMaxLength = maxChars
+    Touch
+    Set MaxLength = Me
+End Function
+
+' Checks the text on commit with a Public Function that takes the text
+' and returns "" when it is valid or a message when it is not. An
+' invalid field shows a danger border and the message under it, and
+' rechecks on every edit until the text passes. The commit still
+' happens; ValidationError reads the message.
+Public Function Validates(ByVal checkProc As String) As ReDimUI
+    RequireRole ROLE_COMPONENT, "Validates"
+    mValidateProc = checkProc
+    Set Validates = Me
+End Function
+
+Public Property Get ValidationError() As String
+    RequireRole ROLE_COMPONENT, "ValidationError"
+    ValidationError = mValidationError
+End Property
 
 Public Property Get IsVisible() As Boolean
     RequireRole ROLE_COMPONENT, "IsVisible"
@@ -4140,7 +4363,11 @@ End Sub
 
 Friend Function CanClick() As Boolean
     If Not mVisible Or Not mEnabled Or mBusy Then Exit Function
-    If GetTickCount64() - mLastClickMs < CLICK_DEBOUNCE_MS Then Exit Function
+    ' A float field takes every click, so the second of a double click
+    ' reaches it; a click there only moves the caret.
+    If Not IsFloatField() Then
+        If GetTickCount64() - mLastClickMs < CLICK_DEBOUNCE_MS Then Exit Function
+    End If
     CanClick = True
 End Function
 
@@ -4164,7 +4391,7 @@ Friend Sub RunClickBehavior()
             If ReDimUI.SenderPart = "cx" Then
                 ClearFieldText hostApp
             ElseIf IsFloatField() Then
-                FocusField hostApp
+                ClickField hostApp
             Else
                 ' The frame covers the anchor cell and takes the click, so
                 ' the click selects that cell: typing lands in the grid and
@@ -4192,10 +4419,13 @@ Friend Sub RunClickBehavior()
                     Exit Sub
                 End If
             ElseIf IsFloatField() Then
-                If ReDimUI.IsComponentFocused(hostApp.AppId, mComponentId) Then
+                ' The caret glyph toggles the list; the face takes the
+                ' caret like any field.
+                If ReDimUI.SenderPart = "caret" _
+                    And ReDimUI.IsComponentFocused(hostApp.AppId, mComponentId) Then
                     ToggleDropList hostApp.Sheet
                 Else
-                    FocusField hostApp
+                    ClickField hostApp
                 End If
                 Exit Sub
             Else
@@ -4421,9 +4651,13 @@ Friend Sub Apply( _
     ByVal hostApp As ReDimUI _
 )
     Dim mainShape As Shape
+    Dim wasApplied As Boolean
+    Dim growBefore As Double
 
     RequireRole ROLE_COMPONENT, "Apply"
     ResolveBindings hostApp
+    wasApplied = mAppliedValid
+    growBefore = mGrowAdded
     EnsureGeometryResolved hostSheet
     Set mainShape = EnsureShape(hostSheet)
     ApplyGeometry mainShape
@@ -4431,10 +4665,18 @@ Friend Sub Apply( _
     ApplyText mainShape, themeValue
     ApplyBehavior mainShape, hostSheet
     ApplyKindExtras mainShape, hostSheet, themeValue
-    If IsFloatField() Then ApplyClearButton mainShape, hostSheet, themeValue
+    If IsFloatField() Then
+        ApplyClearButton mainShape, hostSheet, themeValue
+        ApplyFieldNotes hostSheet, themeValue
+    End If
     ApplyFocusRing hostSheet, themeValue
     ApplyAltText mainShape
     mAppliedValid = True
+    ' A field that grew or shrank since it was drawn moves what is placed
+    ' against it; a first draw leaves that to the render in progress.
+    If wasApplied And Abs(mGrowAdded - growBefore) > 0.01 Then
+        hostApp.ReapplyDependents mComponentId
+    End If
 End Sub
 
 Private Sub ApplyAltText(ByVal mainShape As Shape)
@@ -4475,8 +4717,10 @@ Private Function AccessibleDescription() As String
             described = "Switch, " & IIf(mChecked, "on", "off")
         Case KIND_INPUT
             described = "Edit field"
+            If LenB(mPlaceholder) > 0 Then described = described & ", " & mPlaceholder
         Case KIND_COMBO
             described = "Combo box"
+            If LenB(mPlaceholder) > 0 Then described = described & ", " & mPlaceholder
         Case KIND_SELECT
             If CLng(mValue) >= 1 And CLng(mValue) <= ItemCount Then
                 described = "Drop-down, " & ItemAt(CLng(mValue))
@@ -4579,6 +4823,7 @@ Private Sub ResolveGeometry(ByVal hostSheet As Worksheet)
     mTop = anchorRange.Top
     mWidth = anchorRange.Width
     mHeight = anchorRange.Height
+    mGrowAdded = 0
     Exit Sub
 
 BadAnchor:
@@ -4596,6 +4841,7 @@ Friend Sub EnsureGeometryResolved(ByVal hostSheet As Worksheet)
     mGeometryResolving = True
     On Error GoTo Unwind
     ResolveGeometry hostSheet
+    If mAutoGrowLines > 0 Or mGrowAdded <> 0 Then GrowToText
     mGeometryResolving = False
     Exit Sub
 
@@ -4613,6 +4859,58 @@ End Sub
 Friend Property Get BoundsHeight() As Double
     BoundsHeight = mHeight
 End Property
+
+' The component this one is placed Below or RightOf, or "" for none.
+Friend Property Get PlacedRelativeTo() As String
+    If mRelMode <> REL_NONE Then PlacedRelativeTo = mRelTargetId
+End Property
+
+' AutoGrow: a multi-line float field's height follows the lines its text
+' takes, never below the height it was given and never past the cap.
+Private Sub GrowToText()
+    Dim resolvedSize As Double
+    Dim baseHeight As Double
+    Dim neededHeight As Double
+    Dim lineTotal As Long
+
+    baseHeight = mHeight - mGrowAdded
+    neededHeight = baseHeight
+    If mAutoGrowLines > 0 And mMultiLine And IsFloatField() Then
+        resolvedSize = mFontSize
+        If resolvedSize <= 0 Then resolvedSize = OwnerApp.Theme.BaseFontSize
+        lineTotal = WrappedLineCount(FaceCharsPerLine(resolvedSize))
+        If lineTotal > mAutoGrowLines Then lineTotal = mAutoGrowLines
+        If lineTotal * FaceLineHeight(resolvedSize) + 6 > neededHeight Then
+            neededHeight = lineTotal * FaceLineHeight(resolvedSize) + 6
+        End If
+    End If
+    mGrowAdded = neededHeight - baseHeight
+    mHeight = neededHeight
+End Sub
+
+' The lines the text takes at rest, where a line longer than the face
+' holds wraps. The height counts them with focus too, though the editing
+' face scrolls a long line instead, so focus never resizes the field.
+Private Function WrappedLineCount(ByVal charsPerLine As Long) As Long
+    Dim textLines() As String
+    Dim lineNo As Long
+    Dim lineLength As Long
+
+    If LenB(mText) = 0 Then
+        WrappedLineCount = 1
+        Exit Function
+    End If
+    textLines = Split(mText, vbLf)
+    For lineNo = LBound(textLines) To UBound(textLines)
+        lineLength = Len(textLines(lineNo))
+        If lineLength <= charsPerLine Then
+            WrappedLineCount = WrappedLineCount + 1
+        Else
+            WrappedLineCount = WrappedLineCount + _
+                (lineLength + charsPerLine - 1) \ charsPerLine
+        End If
+    Next lineNo
+End Function
 
 Private Function EnsureShape(ByVal hostSheet As Worksheet) As Shape
     Dim mainShape As Shape
@@ -4825,14 +5123,21 @@ Private Sub ApplyStyle(ByVal mainShape As Shape, ByVal themeValue As ReDimUI)
                 ' face takes clicks, accent border while focused. Diffed
                 ' so a keystroke repaint costs no style writes at all.
                 Dim ringOn As Boolean
+                Dim errorOn As Boolean
                 ringOn = ReDimUI.IsComponentFocused(mOwnerAppId, mComponentId)
+                errorOn = LenB(mValidationError) > 0
                 If Not mAppliedValid _
                     Or mAppliedFill <> ResolveSurfaceFill(themeValue) _
-                    Or mAppliedFocusRing <> ringOn Then
+                    Or mAppliedFocusRing <> ringOn _
+                    Or mAppliedErrorBorder <> errorOn Then
                     mainShape.Fill.Visible = msoTrue
                     mainShape.Fill.ForeColor.RGB = ResolveSurfaceFill(themeValue)
                     mainShape.Line.Visible = msoTrue
-                    If ringOn Then
+                    mAppliedErrorBorder = errorOn
+                    If errorOn Then
+                        mainShape.Line.ForeColor.RGB = themeValue.DangerColor
+                        mainShape.Line.Weight = 1.5
+                    ElseIf ringOn Then
                         mainShape.Line.ForeColor.RGB = themeValue.PrimaryColor
                         mainShape.Line.Weight = 1.5
                     Else
@@ -5022,16 +5327,6 @@ Friend Function ResolveText(ByVal hostApp As ReDimUI) As String
             Exit Function
         End If
     End If
-    ' A focused float field shows the blinking insertion bar at the
-    ' caret index; the blink swaps to a space so text never shifts.
-    If IsFloatField() Then
-        If ReDimUI.IsComponentFocused(mOwnerAppId, mComponentId) Then
-            If mCaretPos > Len(mText) Then mCaretPos = Len(mText)
-            ResolveText = Left$(mText, mCaretPos) & _
-                IIf(mCaretOn, "|", " ") & Mid$(mText, mCaretPos + 1)
-            Exit Function
-        End If
-    End If
     ResolveText = mText
 End Function
 
@@ -5041,93 +5336,223 @@ End Function
 ' an ellipsis when long, so line estimates stay exact), and ellipses at
 ' the edges mark trimmed content above and below. Character columns are
 ' estimated at 0.58 of the font size, lines at 1.35, conservatively.
-Private Function WindowFieldText( _
-    ByVal shownText As String, _
-    ByVal resolvedSize As Double _
+' The focused field's face: the text with the insertion bar at the
+' caret (a space while the blink is off, so nothing shifts), windowed
+' to what fits, with ellipses marking what is cut: the lines around the
+' caret, and a long caret line trimmed around the caret. Fills mFaceMap,
+' which selection painting and click-to-caret read.
+Private Function BuildFace( _
+    ByVal resolvedSize As Double, _
+    Optional ByVal ghostText As String _
 ) As String
+    Dim rendered As String
+    Dim renderMap() As Long
+    Dim caretRender As Long
+    Dim idx As Long
     Dim charsPerLine As Long
     Dim maxLines As Long
-    Dim caretRender As Long
-    Dim hardLines() As String
+    Dim lineStarts() As Long
+    Dim lineEnds() As Long
+    Dim lineTotal As Long
+    Dim segmentStart As Long
     Dim caretLine As Long
-    Dim caretCol As Long
-    Dim probe As Long
-    Dim lineStart As Long
-    Dim startLine As Long
-    Dim endLine As Long
-    Dim segment As String
-    Dim viewText As String
-    Dim idx As Long
+    Dim firstLine As Long
+    Dim lastLine As Long
+    Dim lineNumber As Long
+    Dim lineLength As Long
+    Dim windowStart As Long
+    Dim faceText As String
 
-    charsPerLine = Int((mWidth - 12 - ClearReserve()) / (resolvedSize * 0.58))
-    If charsPerLine < 4 Then charsPerLine = 4
+    If mCaretPos > Len(mText) Then mCaretPos = Len(mText)
+    If mSelAnchor < 0 Or mSelAnchor > Len(mText) Then mSelAnchor = mCaretPos
     caretRender = mCaretPos + 1
-    If Not mMultiLine Then
-        WindowFieldText = WindowLineAroundCaret( _
-            shownText, caretRender, charsPerLine)
-        Exit Function
-    End If
-    maxLines = Int((mHeight - 6) / (resolvedSize * 1.35))
-    If maxLines < 1 Then maxLines = 1
-    hardLines = Split(shownText, vbLf)
-    caretLine = 0
-    lineStart = 0
-    For probe = 1 To caretRender - 1
-        If Mid$(shownText, probe, 1) = vbLf Then
-            caretLine = caretLine + 1
-            lineStart = probe
-        End If
-    Next probe
-    caretCol = caretRender - lineStart
-    startLine = caretLine - maxLines + 1
-    If startLine < 0 Then startLine = 0
-    endLine = startLine + maxLines - 1
-    If endLine > UBound(hardLines) Then endLine = UBound(hardLines)
-    For idx = startLine To endLine
-        If idx = caretLine Then
-            segment = WindowLineAroundCaret( _
-                hardLines(idx), caretCol, charsPerLine)
-        ElseIf Len(hardLines(idx)) > charsPerLine Then
-            segment = Left$(hardLines(idx), charsPerLine - 1) & _
-                ChrW(8230)
-        Else
-            segment = hardLines(idx)
-        End If
-        If LenB(viewText) = 0 Then
-            viewText = segment
-        Else
-            viewText = viewText & vbLf & segment
+    ' Completion letters follow the text and map to -1.
+    rendered = Left$(mText, mCaretPos) & IIf(mCaretOn, "|", " ") & _
+        Mid$(mText, mCaretPos + 1) & ghostText
+    ReDim renderMap(1 To Len(rendered))
+    For idx = 1 To Len(rendered)
+        If idx < caretRender Then
+            renderMap(idx) = idx
+        ElseIf idx > Len(mText) + 1 Then
+            renderMap(idx) = -1
+        ElseIf idx > caretRender Then
+            renderMap(idx) = idx - 1
         End If
     Next idx
-    If startLine > 0 Then viewText = ChrW(8230) & viewText
-    If endLine < UBound(hardLines) Then viewText = viewText & ChrW(8230)
-    WindowFieldText = viewText
+    charsPerLine = FaceCharsPerLine(resolvedSize)
+    ' Line spans of the rendered text, line breaks excluded.
+    segmentStart = 1
+    For idx = 1 To Len(rendered) + 1
+        If idx > Len(rendered) Or Mid$(rendered, idx, 1) = vbLf Then
+            lineTotal = lineTotal + 1
+            ReDim Preserve lineStarts(1 To lineTotal)
+            ReDim Preserve lineEnds(1 To lineTotal)
+            lineStarts(lineTotal) = segmentStart
+            lineEnds(lineTotal) = idx - 1
+            If caretRender >= segmentStart And caretRender <= idx - 1 Then
+                caretLine = lineTotal
+            End If
+            segmentStart = idx + 1
+        End If
+    Next idx
+    If caretLine = 0 Then caretLine = lineTotal
+    firstLine = 1
+    lastLine = lineTotal
+    If mMultiLine Then
+        maxLines = Int((mHeight - 6) / FaceLineHeight(resolvedSize) + 0.001)
+        If maxLines < 1 Then maxLines = 1
+        firstLine = caretLine - maxLines + 1
+        If firstLine < 1 Then firstLine = 1
+        lastLine = firstLine + maxLines - 1
+        If lastLine > lineTotal Then lastLine = lineTotal
+    End If
+    mFaceLength = 0
+    mGhostFaceStart = 0
+    mGhostFaceLength = 0
+    ReDim mFaceMap(1 To Len(rendered) + 2 * lineTotal + 2)
+    If firstLine > 1 Then AppendFace faceText, ChrW(8230), 0
+    For lineNumber = firstLine To lastLine
+        If lineNumber > firstLine Then
+            AppendFace faceText, vbLf, renderMap(lineStarts(lineNumber) - 1)
+        End If
+        lineLength = lineEnds(lineNumber) - lineStarts(lineNumber) + 1
+        If lineLength <= charsPerLine Then
+            For idx = lineStarts(lineNumber) To lineEnds(lineNumber)
+                AppendFace faceText, Mid$(rendered, idx, 1), renderMap(idx)
+            Next idx
+        ElseIf lineNumber = caretLine Then
+            windowStart = caretRender - lineStarts(lineNumber) + 1 - charsPerLine + 2
+            If windowStart < 1 Then windowStart = 1
+            If windowStart + charsPerLine - 1 > lineLength Then
+                windowStart = lineLength - charsPerLine + 1
+            End If
+            If windowStart > 1 Then AppendFace faceText, ChrW(8230), 0
+            For idx = lineStarts(lineNumber) + windowStart - 1 To _
+                lineStarts(lineNumber) + windowStart + charsPerLine - 2
+                AppendFace faceText, Mid$(rendered, idx, 1), renderMap(idx)
+            Next idx
+            If windowStart + charsPerLine - 1 < lineLength Then
+                AppendFace faceText, ChrW(8230), 0
+            End If
+        Else
+            For idx = lineStarts(lineNumber) To lineStarts(lineNumber) + charsPerLine - 2
+                AppendFace faceText, Mid$(rendered, idx, 1), renderMap(idx)
+            Next idx
+            AppendFace faceText, ChrW(8230), 0
+        End If
+    Next lineNumber
+    If lastLine < lineTotal Then AppendFace faceText, ChrW(8230), 0
+    ' An empty field keeps its placeholder, after the bar.
+    If LenB(mText) = 0 And LenB(mPlaceholder) > 0 Then
+        For idx = 1 To Len(mPlaceholder)
+            AppendFace faceText, Mid$(mPlaceholder, idx, 1), 0
+        Next idx
+    End If
+    BuildFace = faceText
 End Function
 
-Private Function WindowLineAroundCaret( _
-    ByVal lineText As String, _
-    ByVal caretIndexInLine As Long, _
-    ByVal charsPerLine As Long _
-) As String
-    Dim startChar As Long
-    Dim windowText As String
+Private Sub AppendFace(ByRef faceText As String, ByVal faceChar As String, ByVal textIndex As Long)
+    faceText = faceText & faceChar
+    mFaceLength = mFaceLength + 1
+    If mFaceLength > UBound(mFaceMap) Then
+        ReDim Preserve mFaceMap(1 To mFaceLength + 8)
+    End If
+    ' Completion letters show no text character; the face notes where
+    ' they run, for their muted ink.
+    If textIndex < 0 Then
+        If mGhostFaceLength = 0 Then mGhostFaceStart = mFaceLength
+        mGhostFaceLength = mGhostFaceLength + 1
+        textIndex = 0
+    End If
+    mFaceMap(mFaceLength) = textIndex
+End Sub
 
-    If Len(lineText) <= charsPerLine Then
-        WindowLineAroundCaret = lineText
-        Exit Function
-    End If
-    startChar = caretIndexInLine - charsPerLine + 2
-    If startChar < 1 Then startChar = 1
-    If startChar + charsPerLine - 1 > Len(lineText) Then
-        startChar = Len(lineText) - charsPerLine + 1
-    End If
-    windowText = Mid$(lineText, startChar, charsPerLine)
-    If startChar > 1 Then windowText = ChrW(8230) & windowText
-    If startChar + charsPerLine - 1 < Len(lineText) Then
-        windowText = windowText & ChrW(8230)
-    End If
-    WindowLineAroundCaret = windowText
+' The characters a face line holds and the height a line takes, both
+' estimated from the font size because they are needed before the text
+' is written.
+Private Function FaceCharsPerLine(ByVal resolvedSize As Double) As Long
+    FaceCharsPerLine = Int((mWidth - 12 - ClearReserve()) / (resolvedSize * 0.58))
+    If FaceCharsPerLine < 4 Then FaceCharsPerLine = 4
 End Function
+
+Private Function FaceLineHeight(ByVal resolvedSize As Double) As Double
+    FaceLineHeight = resolvedSize * 1.35
+End Function
+
+' The selection shows as a highlight in the accent with accent ink. Excel
+' offers no way to take a highlight off, and a text write spreads the
+' first character's formatting over the rest, so once a field has shown
+' a selection its face is reset (the fill as highlight, the resolved
+' ink) whenever marks change or the face is rewritten or restyled.
+' Completion letters read in muted ink, painted again after every
+' rewrite for the same reason.
+Private Sub PaintFieldMarks( _
+    ByVal mainShape As Shape, _
+    ByVal themeValue As ReDimUI, _
+    ByVal inkColor As Long, _
+    ByVal focusedField As Boolean, _
+    ByVal faceRewritten As Boolean _
+)
+    Dim marksWanted As Boolean
+    Dim resetWanted As Boolean
+    Dim ghostKey As String
+    Dim selFrom As Long
+    Dim selTo As Long
+    Dim idx As Long
+    Dim runStart As Long
+    Dim inRun As Boolean
+
+    If mSelAnchor < 0 Or mSelAnchor > Len(mText) Then mSelAnchor = mCaretPos
+    marksWanted = focusedField And HasSelection()
+    If focusedField And mGhostFaceLength > 0 Then
+        ghostKey = CStr(mGhostFaceStart) & "+" & CStr(mGhostFaceLength)
+    End If
+    resetWanted = marksWanted Or mMarksPainted _
+        Or (mHighlightTouched And faceRewritten)
+    If Not resetWanted And ghostKey = mAppliedGhostKey Then
+        If Not faceRewritten Or LenB(ghostKey) = 0 Then Exit Sub
+    End If
+    On Error Resume Next
+    With mainShape.TextFrame2.TextRange
+        If resetWanted Then
+            .Font.Highlight.RGB = ResolveSurfaceFill(themeValue)
+            .Font.Fill.ForeColor.RGB = inkColor
+            If marksWanted Then
+                selFrom = SelStart() + 1
+                selTo = SelStart() + SelLength()
+                For idx = 1 To mFaceLength + 1
+                    inRun = False
+                    If idx <= mFaceLength Then
+                        inRun = (mFaceMap(idx) >= selFrom And mFaceMap(idx) <= selTo)
+                    End If
+                    If inRun Then
+                        If runStart = 0 Then runStart = idx
+                    ElseIf runStart > 0 Then
+                        With .Characters(runStart, idx - runStart).Font
+                            .Highlight.RGB = themeValue.PrimaryColor
+                            .Fill.ForeColor.RGB = themeValue.OnPrimaryColor
+                        End With
+                        runStart = 0
+                    End If
+                Next idx
+            End If
+        ElseIf LenB(mAppliedGhostKey) > 0 And Not faceRewritten Then
+            ' Completion letters that went without a rewrite give the
+            ' ink back.
+            .Font.Fill.ForeColor.RGB = inkColor
+        End If
+        If LenB(ghostKey) > 0 Then
+            .Characters(mGhostFaceStart, mGhostFaceLength).Font.Fill _
+                .ForeColor.RGB = themeValue.OnMutedColor
+        End If
+    End With
+    On Error GoTo 0
+    If resetWanted Then
+        mHighlightTouched = True
+        mMarksPainted = marksWanted
+    End If
+    mAppliedGhostKey = ghostKey
+End Sub
 
 Private Function ResolveSpinnerColor(ByVal themeValue As ReDimUI) As Long
     If mFillColor >= 0 Then
@@ -5152,12 +5577,24 @@ Private Sub ApplyText(ByVal mainShape As Shape, ByVal themeValue As ReDimUI)
     resolvedColor = ResolveTextColor(themeValue)
     resolvedSize = mFontSize
     If resolvedSize <= 0 Then resolvedSize = themeValue.BaseFontSize
-    ' Shape text cannot scroll, so a focused field renders the tail
-    ' window of its buffer: the caret lives at the end, and the view
-    ' follows it. The full text stays in the buffer and commits intact.
+    ' Shape text cannot scroll, so a focused field renders a window of
+    ' its buffer that follows the caret. The full text stays in the
+    ' buffer and commits intact.
+    Dim focusedField As Boolean
     If IsFloatField() Then
-        If ReDimUI.IsComponentFocused(mOwnerAppId, mComponentId) Then
-            shownText = WindowFieldText(shownText, resolvedSize)
+        focusedField = ReDimUI.IsComponentFocused(mOwnerAppId, mComponentId)
+        If focusedField Then
+            If mKind = KIND_COMBO Then
+                shownText = BuildFace(resolvedSize, GhostRest(mainShape.Parent))
+            Else
+                shownText = BuildFace(resolvedSize)
+            End If
+        ElseIf LenB(mText) = 0 And LenB(mPlaceholder) > 0 Then
+            shownText = mPlaceholder
+        End If
+        ' A placeholder reads in muted ink.
+        If LenB(mText) = 0 And LenB(mPlaceholder) > 0 Then
+            resolvedColor = themeValue.OnMutedColor
         End If
     End If
     If Not mAppliedValid Then
@@ -5204,6 +5641,10 @@ Private Sub ApplyText(ByVal mainShape As Shape, ByVal themeValue As ReDimUI)
         mAppliedTextColor = resolvedColor
         mAppliedFontSize = resolvedSize
         mAppliedFontBold = mFontBold
+    End If
+    If IsFloatField() Then
+        PaintFieldMarks mainShape, themeValue, resolvedColor, focusedField, _
+            textChanged Or mustRestyle
     End If
     If mKind = KIND_BUTTON Then
         If LenB(mAccessKey) > 0 Or LenB(mAppliedAccessKey) > 0 Then
@@ -5741,6 +6182,80 @@ Private Sub ApplyClearButton( _
     End If
 End Sub
 
+' Under a float field: Validates' message in danger ink at the left, and
+' with MaxLength the length against the cap at the right, both in a
+' size below the field's.
+Private Sub ApplyFieldNotes(ByVal hostSheet As Worksheet, ByVal themeValue As ReDimUI)
+    Dim noteSize As Double
+    Dim noteKey As String
+
+    noteSize = mFontSize
+    If noteSize <= 0 Then noteSize = themeValue.BaseFontSize
+    noteSize = noteSize - 2
+    If LenB(mValidationError) > 0 And mVisible Then
+        noteKey = PartsState(themeValue) & ":" & mValidationError
+    End If
+    SyncFieldNote hostSheet, themeValue, "me", noteKey, mValidationError, _
+        themeValue.DangerColor, msoAlignLeft, noteSize, mAppliedMessageSig
+    noteKey = vbNullString
+    If mMaxLength > 0 And mVisible Then
+        noteKey = PartsState(themeValue) & ":" & Len(mText) & "/" & mMaxLength
+    End If
+    SyncFieldNote hostSheet, themeValue, "mc", noteKey, _
+        Len(mText) & "/" & mMaxLength, themeValue.OnMutedColor, msoAlignRight, _
+        noteSize, mAppliedCountSig
+End Sub
+
+' One note under the field; an empty key removes it.
+Private Sub SyncFieldNote( _
+    ByVal hostSheet As Worksheet, _
+    ByVal themeValue As ReDimUI, _
+    ByVal partName As String, _
+    ByVal noteKey As String, _
+    ByVal noteWords As String, _
+    ByVal inkColor As Long, _
+    ByVal textAlign As Long, _
+    ByVal noteSize As Double, _
+    ByRef appliedKey As String _
+)
+    Dim noteShape As Shape
+
+    If noteKey = appliedKey Then Exit Sub
+    If LenB(noteKey) = 0 Then
+        appliedKey = vbNullString
+        On Error Resume Next
+        hostSheet.Shapes(ShapeName & PART_SEPARATOR & partName).Delete
+        On Error GoTo 0
+        Exit Sub
+    End If
+    appliedKey = noteKey
+    Set noteShape = EnsurePartShape(hostSheet, partName, msoShapeRectangle)
+    noteShape.Left = mLeft
+    noteShape.Top = mTop + mHeight + 1
+    noteShape.Width = mWidth
+    noteShape.Height = noteSize + 6
+    noteShape.Fill.Visible = msoFalse
+    noteShape.Line.Visible = msoFalse
+    With noteShape.TextFrame2
+        .MarginLeft = 2
+        .MarginRight = 2
+        .MarginTop = 0
+        .MarginBottom = 0
+        .VerticalAnchor = msoAnchorTop
+        .WordWrap = msoFalse
+        .TextRange.Text = noteWords
+        .TextRange.ParagraphFormat.Alignment = textAlign
+        With .TextRange.Font
+            .Name = themeValue.FontName
+            .Size = noteSize
+            .Bold = msoFalse
+            .Fill.ForeColor.RGB = inkColor
+        End With
+    End With
+    noteShape.Visible = msoTrue
+    noteShape.OnAction = mAppliedOnAction
+End Sub
+
 ' Points the clear button takes from the text, 0 while it is not shown.
 Private Function ClearReserve() As Double
     If mClearable And mVisible And mEnabled And LenB(mText) > 0 Then
@@ -5752,6 +6267,186 @@ Private Function ClearButtonSize() As Double
     ClearButtonSize = mHeight - 4
     If ClearButtonSize > 16 Then ClearButtonSize = 16
 End Function
+
+' A click in a float field: the first focuses it (a combo also opens its
+' list), and every click puts the caret at the character under the
+' pointer. A second click on the same spot inside the Windows
+' double-click time selects the word there.
+Private Sub ClickField(ByVal hostApp As ReDimUI)
+    Dim wasFocused As Boolean
+    Dim hitPos As Long
+    Dim nowMs As LongLong
+
+    wasFocused = ReDimUI.IsComponentFocused(hostApp.AppId, mComponentId)
+    hitPos = PointerCaretIndex(wasFocused)
+    If Not wasFocused Then FocusField hostApp
+    nowMs = GetTickCount64()
+    If hitPos >= 0 Then
+        If wasFocused And Abs(hitPos - mLastFieldClickPos) <= 1 _
+            And nowMs - mLastFieldClickMs <= GetDoubleClickTime() Then
+            SelectWordAt hitPos
+        Else
+            mCaretPos = hitPos
+            mSelAnchor = hitPos
+        End If
+    End If
+    mLastFieldClickMs = nowMs
+    mLastFieldClickPos = hitPos
+    mLastEditKind = vbNullString
+    mCaretOn = True
+    mCaretAccumMs = 0
+    Touch
+End Sub
+
+' The caret index the pointer points at, read from the face as drawn:
+' the nearest character on the nearest line, before it or after it by
+' which half the pointer is over. A focused face maps back through
+' mFaceMap; an unfocused face is the text itself. -1 when unreadable,
+' or when the pointer is off the face (a keyboard or scripted stand-in
+' for the click, or a pointer that moved on), so the caret stays put.
+Private Function PointerCaretIndex(ByVal focusedFace As Boolean) As Long
+    Dim pointsX As Double
+    Dim pointsY As Double
+    Dim faceRange As Object
+    Dim charCount As Long
+    Dim idx As Long
+    Dim boxLeft As Double
+    Dim boxTop As Double
+    Dim boxWidth As Double
+    Dim boxHeight As Double
+    Dim lineGap As Double
+    Dim sideGap As Double
+    Dim distance As Double
+    Dim bestDistance As Double
+    Dim bestChar As Long
+    Dim afterChar As Boolean
+    Dim textChar As Long
+
+    PointerCaretIndex = -1
+    If LenB(mText) = 0 Then
+        PointerCaretIndex = 0
+        Exit Function
+    End If
+    If Not PointerPoints(pointsX, pointsY) Then Exit Function
+    If pointsX < mLeft - 4 Or pointsX > mLeft + mWidth + 4 _
+        Or pointsY < mTop - 4 Or pointsY > mTop + mHeight + 4 Then
+        Exit Function
+    End If
+    On Error GoTo Unreadable
+    Set faceRange = OwnerApp.Sheet.Shapes(ShapeName).TextFrame2.TextRange
+    charCount = faceRange.Length
+    If charCount = 0 Then
+        PointerCaretIndex = 0
+        Exit Function
+    End If
+    bestDistance = 1E+30
+    For idx = 1 To charCount
+        With faceRange.Characters(idx, 1)
+            boxLeft = .BoundLeft
+            boxTop = .BoundTop
+            boxWidth = .BoundWidth
+            boxHeight = .BoundHeight
+        End With
+        lineGap = 0
+        If pointsY < boxTop Then lineGap = boxTop - pointsY
+        If pointsY > boxTop + boxHeight Then lineGap = pointsY - boxTop - boxHeight
+        sideGap = 0
+        If pointsX < boxLeft Then sideGap = boxLeft - pointsX
+        If pointsX > boxLeft + boxWidth Then sideGap = pointsX - boxLeft - boxWidth
+        ' The line decides first, the position along it second.
+        distance = lineGap * 10000 + sideGap
+        If distance < bestDistance Then
+            bestDistance = distance
+            bestChar = idx
+            afterChar = (pointsX > boxLeft + boxWidth / 2)
+        End If
+    Next idx
+    If Not focusedFace Then
+        textChar = bestChar
+        If textChar > Len(mText) Then textChar = Len(mText)
+        PointerCaretIndex = IIf(afterChar, textChar, textChar - 1)
+        Exit Function
+    End If
+    If bestChar > mFaceLength Then bestChar = mFaceLength
+    textChar = mFaceMap(bestChar)
+    If textChar > 0 Then
+        PointerCaretIndex = IIf(afterChar, textChar, textChar - 1)
+        Exit Function
+    End If
+    ' The bar or an ellipsis: the caret goes next to the nearest real
+    ' character on the side the pointer is.
+    For idx = bestChar - 1 To 1 Step -1
+        If mFaceMap(idx) > 0 Then
+            PointerCaretIndex = mFaceMap(idx)
+            Exit Function
+        End If
+    Next idx
+    For idx = bestChar + 1 To mFaceLength
+        If mFaceMap(idx) > 0 Then
+            PointerCaretIndex = mFaceMap(idx) - 1
+            Exit Function
+        End If
+    Next idx
+    PointerCaretIndex = 0
+    Exit Function
+Unreadable:
+    PointerCaretIndex = -1
+End Function
+
+' Selects the word at or next to a caret index, as a double click does.
+Private Sub SelectWordAt(ByVal atPos As Long)
+    Dim wordFrom As Long
+    Dim wordTo As Long
+
+    wordFrom = atPos
+    wordTo = atPos
+    Do While wordFrom > 0
+        If Not IsWordChar(Mid$(mText, wordFrom, 1)) Then Exit Do
+        wordFrom = wordFrom - 1
+    Loop
+    Do While wordTo < Len(mText)
+        If Not IsWordChar(Mid$(mText, wordTo + 1, 1)) Then Exit Do
+        wordTo = wordTo + 1
+    Loop
+    mSelAnchor = wordFrom
+    mCaretPos = wordTo
+End Sub
+
+' After any edit: OnInput now or once typing pauses, and a recheck while
+' a validation message shows.
+Private Sub NoteFieldEdit(ByVal hostApp As ReDimUI)
+    If mValidationLive Then RunValidation hostApp
+    If LenB(mInputProc) = 0 Then Exit Sub
+    If mDebounceMs <= 0 Then
+        FireInput hostApp
+    Else
+        mInputDueMs = GetTickCount64() + mDebounceMs
+    End If
+End Sub
+
+Private Sub FireInput(ByVal hostApp As ReDimUI)
+    mInputDueMs = 0
+    If LenB(mInputProc) = 0 Then Exit Sub
+    ReDimUI.RunHandlerAs hostApp, Me, mInputProc
+End Sub
+
+' Runs Validates' check on the text. A check that fails to run counts
+' as a pass and goes to the app's error handler.
+Private Sub RunValidation(ByVal hostApp As ReDimUI)
+    Dim verdict As Variant
+
+    If LenB(mValidateProc) = 0 Then Exit Sub
+    On Error GoTo CheckFailed
+    verdict = Application.Run(mValidateProc, mText)
+    On Error GoTo 0
+    mValidationError = CStr(verdict)
+    mValidationLive = (LenB(mValidationError) > 0)
+    Exit Sub
+CheckFailed:
+    mValidationError = vbNullString
+    mValidationLive = False
+    hostApp.ReportAppError "ReDim validation error " & Err.Number & ": " & Err.Description
+End Sub
 
 ' The clear button: empties the field and leaves it focused for typing;
 ' a combo's list opens unfiltered, as after deleting the text by hand.
@@ -5769,6 +6464,7 @@ Private Sub ClearFieldText(ByVal hostApp As ReDimUI)
         mListOffset = 0
         mListHighlight = 0
     End If
+    NoteFieldEdit hostApp
     Touch
 End Sub
 
@@ -7451,6 +8147,9 @@ Private Sub SyncDropList( _
     Dim rowKey As String
     Dim rowFrame As String
     Dim rowText As String
+    Dim rowLook As String
+    Dim boldAt As Long
+    Dim boldLength As Long
     Dim priorKey As String
     Dim partCreated As Boolean
     Dim listSig As String
@@ -7489,7 +8188,8 @@ Private Sub SyncDropList( _
         CStr(mListHighlight) & ":" & CStr(aboveCount) & ":" & _
         CStr(belowCount) & ":" & CStr(showEmpty) & ":" & _
         CStr(listTopAt) & ":" & CStr(mLeft) & ":" & CStr(mTop) & ":" & _
-        CStr(mWidth) & ":" & CStr(mHeight) & ":" & CStr(resolvedSize)
+        CStr(mWidth) & ":" & CStr(mHeight) & ":" & CStr(resolvedSize) & _
+        Chr$(2) & mListMatchesFilter
     For idx = 1 To wanted
         itemIndex = CLng(mListMatches.Item(mListOffset + idx))
         listSig = listSig & "|" & CStr(itemIndex) & "=" & ItemAt(itemIndex)
@@ -7524,19 +8224,42 @@ Private Sub SyncDropList( _
         rowFrame = PartsState(themeValue) & ":" & CStr(rowTop) & ":" & _
             CStr(rowPitch) & ":" & CStr(resolvedSize)
         rowText = GutterText(itemIndex = CLng(mValue), ItemAt(itemIndex))
-        rowKey = rowFrame & Chr$(1) & CStr(rowFill) & ":" & _
+        ' A filtering combo bolds what the text matched in each row. The
+        ' gutter leads every row and is never bold, so a text write
+        ' clears an older match.
+        boldAt = 0
+        boldLength = 0
+        If LenB(mListMatchesFilter) > 0 Then
+            boldAt = InStr(1, ItemAt(itemIndex), mListMatchesFilter, vbTextCompare)
+            If boldAt > 0 Then
+                boldAt = boldAt + Len(rowText) - Len(ItemAt(itemIndex))
+                boldLength = Len(mListMatchesFilter)
+            End If
+        End If
+        ' The key ends with the bold span, after its own separator, so a
+        ' row that kept its look can tell a moved match from a new row.
+        rowLook = rowFrame & Chr$(1) & CStr(rowFill) & ":" & _
             CStr(rowInk) & ":" & rowText
+        rowKey = rowLook & Chr$(2) & CStr(boldAt) & "+" & CStr(boldLength)
         priorKey = mAppliedRowStates(idx)
         If rowKey <> priorKey Then
             mAppliedRowStates(idx) = rowKey
             Set optionShape = EnsurePartShape( _
                 hostSheet, "opt" & idx, msoShapeRectangle, partCreated)
-            If KeyFrame(priorKey) = rowFrame And Not partCreated Then
+            If Not partCreated And Left$(priorKey, Len(rowLook) + 1) _
+                = rowLook & Chr$(2) Then
+                ' Same row, the match moved: only its letters change.
+                MoveRowBold optionShape, Mid$(priorKey, Len(rowLook) + 2), _
+                    boldAt, boldLength
+            ElseIf KeyFrame(priorKey) = rowFrame And Not partCreated Then
                 ' Same frame: only the fill, the text, and the ink move.
                 optionShape.Fill.ForeColor.RGB = rowFill
                 With optionShape.TextFrame2.TextRange
                     .Text = rowText
                     .Font.Fill.ForeColor.RGB = rowInk
+                    If boldAt > 0 Then
+                        .Characters(boldAt, boldLength).Font.Bold = msoTrue
+                    End If
                 End With
             Else
                 optionShape.Left = mLeft
@@ -7563,6 +8286,9 @@ Private Sub SyncDropList( _
                         .Bold = msoFalse
                         .Fill.ForeColor.RGB = rowInk
                     End With
+                    If boldAt > 0 Then
+                        .TextRange.Characters(boldAt, boldLength).Font.Bold = msoTrue
+                    End If
                 End With
                 If LenB(priorKey) = 0 Or partCreated Then
                     EnsureGutterTab optionShape
@@ -7584,6 +8310,38 @@ Private Sub SyncDropList( _
     SyncListPager hostSheet, themeValue, "optd", ChrW(9660), _
         belowCount, listTopAt + (rowShift + wanted) * rowPitch, _
         resolvedSize, mAppliedPagerDownSig
+End Sub
+
+' A drop row that kept its item while its match changed: the letters
+' that left the match lose bold and the ones that joined it gain it.
+' priorSpan is the span the row was drawn with, as "at+length".
+Private Sub MoveRowBold( _
+    ByVal rowShape As Shape, _
+    ByVal priorSpan As String, _
+    ByVal boldAt As Long, _
+    ByVal boldLength As Long _
+)
+    Dim priorAt As Long
+    Dim priorLength As Long
+    Dim splitAt As Long
+
+    splitAt = InStr(1, priorSpan, "+")
+    priorAt = CLng(Left$(priorSpan, splitAt - 1))
+    priorLength = CLng(Mid$(priorSpan, splitAt + 1))
+    With rowShape.TextFrame2.TextRange
+        If priorAt = boldAt And boldAt > 0 Then
+            If boldLength > priorLength Then
+                .Characters(boldAt + priorLength, boldLength - priorLength) _
+                    .Font.Bold = msoTrue
+            ElseIf boldLength < priorLength Then
+                .Characters(boldAt + boldLength, priorLength - boldLength) _
+                    .Font.Bold = msoFalse
+            End If
+        Else
+            If priorAt > 0 Then .Characters(priorAt, priorLength).Font.Bold = msoFalse
+            If boldAt > 0 Then .Characters(boldAt, boldLength).Font.Bold = msoTrue
+        End If
+    End With
 End Sub
 
 ' A list row's text: the check in the gutter when the row is marked,
@@ -8027,6 +8785,10 @@ Friend Sub FocusField(ByVal hostApp As ReDimUI, Optional ByVal openList As Boole
     mFieldTextAtFocus = mText
     mFieldSelAtFocus = CurrentSelectionKey()
     mCaretPos = Len(mText)
+    mSelAnchor = mCaretPos
+    Set mUndoStack = Nothing
+    Set mRedoStack = Nothing
+    mLastEditKind = vbNullString
     mCaretOn = True
     mCaretAccumMs = 0
     ReDimUI.SetKeyboardFocus hostApp, Me
@@ -8052,9 +8814,21 @@ Friend Sub BlurField(ByVal hostApp As ReDimUI, ByVal keepEdits As Boolean)
     If Not ReDimUI.IsComponentFocused(hostApp.AppId, mComponentId) Then Exit Sub
     ReDimUI.ClearKeyboardFocus
     mCaretOn = False
+    mSelAnchor = mCaretPos
+    ' A pending OnInput reports the final text before the commit.
+    If mInputDueMs > 0 Then FireInput hostApp
     If keepEdits Then
         If mKind = KIND_COMBO Then
             exactAt = ExactItemMatch(mText)
+            If exactAt = 0 And mRestrictToItems And LenB(mText) > 0 Then
+                ' A restricted combo takes the first item the text
+                ' begins, or goes back to its text at focus.
+                exactAt = PrefixItemMatch(mText)
+                If exactAt = 0 Then
+                    mText = mFieldTextAtFocus
+                    exactAt = ExactItemMatch(mText)
+                End If
+            End If
             If exactAt > 0 Then
                 mValue = exactAt
                 mText = ItemAt(exactAt)
@@ -8062,6 +8836,7 @@ Friend Sub BlurField(ByVal hostApp As ReDimUI, ByVal keepEdits As Boolean)
                 mValue = 0
             End If
         End If
+        RunValidation hostApp
         If mText <> mFieldTextAtFocus Then
             If LenB(mWritesToKey) > 0 Then
                 hostApp.SetState mWritesToKey, mText
@@ -8081,13 +8856,22 @@ End Sub
 
 Friend Sub HandleKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
     Dim textBeforeKey As String
+    Dim extendSelection As Boolean
+    Dim pastedText As String
 
     If Not IsFloatField() Then
         HandleControlKey hostApp, keyText
         Exit Sub
     End If
     If mCaretPos > Len(mText) Then mCaretPos = Len(mText)
+    If mSelAnchor < 0 Or mSelAnchor > Len(mText) Then mSelAnchor = mCaretPos
     textBeforeKey = mText
+    ' Shift-extended keys arrive as {SHIFTLEFT} and the like: the plain
+    ' key's move, with the selection's anchor kept.
+    If Left$(keyText, 6) = "{SHIFT" Then
+        extendSelection = True
+        keyText = "{" & Mid$(keyText, 7)
+    End If
     Select Case keyText
         Case "{ENTER}"
             ' Single-line: Enter commits - except a combo with a
@@ -8095,7 +8879,8 @@ Friend Sub HandleKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
             ' Enter is a newline and committing moves to Tab,
             ' Ctrl+Enter, or clicking away.
             If mMultiLine Then
-                InsertAtCaret vbLf
+                RecordUndo "type"
+                ReplaceSelection vbLf
             ElseIf mKind = KIND_COMBO And mSelectOpen _
                 And mListHighlight >= 1 Then
                 ' A keyboard pick commits exactly like a mouse pick,
@@ -8111,8 +8896,12 @@ Friend Sub HandleKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
                 Exit Sub
             End If
         Case "{TAB}", "{BACKTAB}"
-            ' Tab commits and moves focus on; with no other control to
-            ' move to, it commits and leaves.
+            ' Tab takes a combo's suggestion, commits, and moves focus
+            ' on; with no other control to move to, it commits and
+            ' leaves.
+            If keyText = "{TAB}" Then
+                If AcceptGhost(hostApp.Sheet) Then NoteFieldEdit hostApp
+            End If
             If Not hostApp.MoveFocusFrom(mComponentId, keyText = "{TAB}") Then
                 BlurField hostApp, True
             End If
@@ -8141,42 +8930,100 @@ Friend Sub HandleKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
             If mKind = KIND_COMBO Then
                 ComboListNav hostApp, IIf(keyText = "{PGDN}", mListRows, -mListRows)
             End If
-        Case "{BS}"
-            If mCaretPos > 0 Then
-                mText = Left$(mText, mCaretPos - 1) & Mid$(mText, mCaretPos + 1)
-                mCaretPos = mCaretPos - 1
+        Case "{BS}", "{DEL}", "{WORDBS}", "{WORDDEL}"
+            ' Deletes take the selection when there is one; otherwise
+            ' a character, or a word with Ctrl, before or after.
+            If Not HasSelection() Then
+                Select Case keyText
+                    Case "{BS}"
+                        mSelAnchor = mCaretPos - 1
+                    Case "{DEL}"
+                        mSelAnchor = mCaretPos + 1
+                    Case "{WORDBS}"
+                        mSelAnchor = WordStartBefore(mCaretPos)
+                    Case Else
+                        mSelAnchor = WordStartAfter(mCaretPos)
+                End Select
+                If mSelAnchor < 0 Then mSelAnchor = 0
+                If mSelAnchor > Len(mText) Then mSelAnchor = Len(mText)
             End If
-        Case "{DEL}"
-            If mCaretPos < Len(mText) Then
-                mText = Left$(mText, mCaretPos) & Mid$(mText, mCaretPos + 2)
+            If HasSelection() Then
+                RecordUndo "delete"
+                ReplaceSelection vbNullString
             End If
         Case "{LEFT}"
-            If mCaretPos > 0 Then mCaretPos = mCaretPos - 1
+            If HasSelection() And Not extendSelection Then
+                MoveCaretTo SelStart(), False
+            Else
+                MoveCaretTo mCaretPos - 1, extendSelection
+            End If
         Case "{RIGHT}"
-            If mCaretPos < Len(mText) Then mCaretPos = mCaretPos + 1
-        Case "{UP}"
-            If mMultiLine Then
-                MoveCaretLine -1
-            ElseIf mKind = KIND_COMBO Then
-                ComboListNav hostApp, -1
+            ' Right at the end of a combo's text takes its suggestion.
+            If HasSelection() And Not extendSelection Then
+                MoveCaretTo SelStart() + SelLength(), False
+            ElseIf extendSelection Then
+                MoveCaretTo mCaretPos + 1, True
+            ElseIf Not AcceptGhost(hostApp.Sheet) Then
+                MoveCaretTo mCaretPos + 1, False
             End If
-        Case "{DOWN}"
+        Case "{WORDLEFT}"
+            MoveCaretTo WordStartBefore(mCaretPos), extendSelection
+        Case "{WORDRIGHT}"
+            MoveCaretTo WordStartAfter(mCaretPos), extendSelection
+        Case "{UP}", "{DOWN}"
             If mMultiLine Then
-                MoveCaretLine 1
-            ElseIf mKind = KIND_COMBO Then
-                ComboListNav hostApp, 1
+                MoveCaretLine IIf(keyText = "{UP}", -1, 1)
+                MoveCaretTo mCaretPos, extendSelection
+            ElseIf mKind = KIND_COMBO And Not extendSelection Then
+                ComboListNav hostApp, IIf(keyText = "{UP}", -1, 1)
             End If
-        Case "{HOME}"
-            MoveCaretLineEdge False
-        Case "{END}"
-            MoveCaretLineEdge True
+        Case "{HOME}", "{END}"
+            MoveCaretLineEdge (keyText = "{END}")
+            MoveCaretTo mCaretPos, extendSelection
+        Case "{TEXTHOME}"
+            MoveCaretTo 0, extendSelection
+        Case "{TEXTEND}"
+            MoveCaretTo Len(mText), extendSelection
+        Case "{SELECTALL}"
+            mSelAnchor = 0
+            mCaretPos = Len(mText)
+            mLastEditKind = vbNullString
+        Case "{COPY}"
+            If HasSelection() Then
+                WriteClipboardText Mid$(mText, SelStart() + 1, SelLength())
+            End If
+        Case "{CUT}"
+            If HasSelection() Then
+                If WriteClipboardText(Mid$(mText, SelStart() + 1, SelLength())) Then
+                    RecordUndo "cut"
+                    ReplaceSelection vbNullString
+                End If
+            End If
+        Case "{PASTE}"
+            pastedText = ReadClipboardText()
+            If LenB(pastedText) > 0 Then
+                RecordUndo "paste"
+                ReplaceSelection pastedText
+            End If
+        Case "{UNDO}"
+            StepHistory True
+        Case "{REDO}"
+            StepHistory False
+        Case "{APOS}"
+            RecordUndo "type"
+            ReplaceSelection "'"
+        Case "{QUOTE}"
+            RecordUndo "type"
+            ReplaceSelection """"
         Case Else
             ' Named keys a field has no use for are dropped, not typed.
             If Len(keyText) > 1 And Left$(keyText, 1) = "{" Then Exit Sub
-            InsertAtCaret keyText
+            RecordUndo "type"
+            ReplaceSelection keyText
     End Select
     mCaretOn = True
     mCaretAccumMs = 0
+    If mText <> textBeforeKey Then NoteFieldEdit hostApp
     ' Live filtering, the payoff cells could never give: an edit leaves
     ' the pristine full list and re-filters by the new text, rewinding
     ' the window and dropping the keyboard highlight. Keys that change
@@ -8229,10 +9076,242 @@ Private Sub ComboListNav(ByVal hostApp As ReDimUI, ByVal rowDelta As Long)
     End If
 End Sub
 
-Private Sub InsertAtCaret(ByVal insertText As String)
-    mText = Left$(mText, mCaretPos) & insertText & Mid$(mText, mCaretPos + 1)
-    mCaretPos = mCaretPos + Len(insertText)
+Private Function HasSelection() As Boolean
+    HasSelection = (mSelAnchor <> mCaretPos)
+End Function
+
+Private Function SelStart() As Long
+    If mSelAnchor < mCaretPos Then
+        SelStart = mSelAnchor
+    Else
+        SelStart = mCaretPos
+    End If
+End Function
+
+Private Function SelLength() As Long
+    SelLength = Abs(mCaretPos - mSelAnchor)
+End Function
+
+' Replaces the selection, or inserts at the caret when there is none,
+' with what the field admits of the given text; the caret lands after
+' it with nothing selected.
+Private Sub ReplaceSelection(ByVal insertText As String)
+    Dim keptBefore As String
+    Dim keptAfter As String
+
+    keptBefore = Left$(mText, SelStart())
+    keptAfter = Mid$(mText, SelStart() + SelLength() + 1)
+    insertText = FieldAdmits(insertText, keptBefore, keptAfter)
+    mText = keptBefore & insertText & keptAfter
+    mCaretPos = Len(keptBefore) + Len(insertText)
+    mSelAnchor = mCaretPos
 End Sub
+
+' What a field takes of typed or pasted text, given the text around
+' the insertion: CR and CRLF become line breaks, a trailing break (a
+' copied cell brings one) is dropped, a single-line field turns breaks
+' and tabs into spaces, Numeric keeps what a number can hold, and
+' MaxLength cuts what does not fit.
+Private Function FieldAdmits( _
+    ByVal givenText As String, _
+    ByVal keptBefore As String, _
+    ByVal keptAfter As String _
+) As String
+    Dim room As Long
+    givenText = Replace(givenText, vbCrLf, vbLf)
+    givenText = Replace(givenText, vbCr, vbLf)
+    If Len(givenText) > 1 And Right$(givenText, 1) = vbLf Then
+        givenText = Left$(givenText, Len(givenText) - 1)
+    End If
+    If Not mMultiLine Then
+        givenText = Replace(givenText, vbLf, " ")
+        givenText = Replace(givenText, vbTab, " ")
+    End If
+    If mNumeric Then givenText = NumericAdmits(givenText, keptBefore, keptAfter)
+    If mMaxLength > 0 Then
+        room = mMaxLength - Len(keptBefore) - Len(keptAfter)
+        If room < 0 Then room = 0
+        If Len(givenText) > room Then givenText = Left$(givenText, room)
+    End If
+    FieldAdmits = givenText
+End Function
+
+' Numeric's filter: digits, one decimal separator (either . or , types
+' the locale's), and a minus only at the very start.
+Private Function NumericAdmits( _
+    ByVal givenText As String, _
+    ByVal keptBefore As String, _
+    ByVal keptAfter As String _
+) As String
+    Dim separatorChar As String
+    Dim hasSeparator As Boolean
+    Dim idx As Long
+    Dim oneChar As String
+
+    If Application.UseSystemSeparators Then
+        separatorChar = Application.International(xlDecimalSeparator)
+    Else
+        separatorChar = Application.DecimalSeparator
+    End If
+    hasSeparator = InStr(keptBefore & keptAfter, separatorChar) > 0
+    For idx = 1 To Len(givenText)
+        oneChar = Mid$(givenText, idx, 1)
+        If oneChar Like "#" Then
+            NumericAdmits = NumericAdmits & oneChar
+        ElseIf mNumericDecimal And Not hasSeparator _
+            And (oneChar = "." Or oneChar = "," Or oneChar = separatorChar) Then
+            NumericAdmits = NumericAdmits & separatorChar
+            hasSeparator = True
+        ElseIf mNumericNegative And oneChar = "-" And LenB(keptBefore) = 0 _
+            And LenB(NumericAdmits) = 0 And Left$(keptAfter, 1) <> "-" Then
+            NumericAdmits = "-"
+        End If
+    Next idx
+End Function
+
+' Moves the caret. Extending keeps the selection's anchor; otherwise
+' the selection collapses onto the caret. Either ends a typing run.
+Private Sub MoveCaretTo(ByVal newPos As Long, ByVal extendSelection As Boolean)
+    If newPos < 0 Then newPos = 0
+    If newPos > Len(mText) Then newPos = Len(mText)
+    mCaretPos = newPos
+    If Not extendSelection Then mSelAnchor = newPos
+    mLastEditKind = vbNullString
+End Sub
+
+' Undo steps: a run of typing is one step until a second's pause or any
+' other kind of edit; each delete, cut, or paste is a step of its own.
+' The history holds a hundred steps and a new edit clears the redo.
+Private Sub RecordUndo(ByVal editKind As String)
+    Dim nowMs As LongLong
+
+    nowMs = GetTickCount64()
+    If editKind <> "type" Or mLastEditKind <> "type" _
+        Or nowMs - mLastEditMs > 1000 Then
+        If mUndoStack Is Nothing Then Set mUndoStack = New Collection
+        mUndoStack.Add Array(mText, mCaretPos, mSelAnchor)
+        If mUndoStack.Count > 100 Then mUndoStack.Remove 1
+        Set mRedoStack = New Collection
+    End If
+    mLastEditKind = editKind
+    mLastEditMs = nowMs
+End Sub
+
+' Undo (backward) or redo: the current state goes on the other stack.
+Private Sub StepHistory(ByVal undoing As Boolean)
+    Dim fromStack As Collection
+    Dim toStack As Collection
+    Dim snapshot As Variant
+
+    If mUndoStack Is Nothing Then Set mUndoStack = New Collection
+    If mRedoStack Is Nothing Then Set mRedoStack = New Collection
+    If undoing Then
+        Set fromStack = mUndoStack
+        Set toStack = mRedoStack
+    Else
+        Set fromStack = mRedoStack
+        Set toStack = mUndoStack
+    End If
+    If fromStack.Count = 0 Then Exit Sub
+    toStack.Add Array(mText, mCaretPos, mSelAnchor)
+    snapshot = fromStack.Item(fromStack.Count)
+    fromStack.Remove fromStack.Count
+    mText = snapshot(0)
+    mCaretPos = snapshot(1)
+    mSelAnchor = snapshot(2)
+    mLastEditKind = vbNullString
+End Sub
+
+Private Function IsWordChar(ByVal oneChar As String) As Boolean
+    If LenB(oneChar) = 0 Then Exit Function
+    IsWordChar = (oneChar Like "[A-Za-z0-9_]") Or AscW(oneChar) > 127
+End Function
+
+' Ctrl+Left: back over spaces and punctuation, then over the word
+' before them, to where that word starts.
+Private Function WordStartBefore(ByVal fromPos As Long) As Long
+    Dim pos As Long
+
+    pos = fromPos
+    Do While pos > 0
+        If IsWordChar(Mid$(mText, pos, 1)) Then Exit Do
+        pos = pos - 1
+    Loop
+    Do While pos > 0
+        If Not IsWordChar(Mid$(mText, pos, 1)) Then Exit Do
+        pos = pos - 1
+    Loop
+    WordStartBefore = pos
+End Function
+
+' Ctrl+Right: over the rest of the word, then over the spaces after
+' it, to where the next word starts, as Windows moves.
+Private Function WordStartAfter(ByVal fromPos As Long) As Long
+    Dim pos As Long
+
+    pos = fromPos
+    Do While pos < Len(mText)
+        If Not IsWordChar(Mid$(mText, pos + 1, 1)) Then Exit Do
+        pos = pos + 1
+    Loop
+    Do While pos < Len(mText)
+        If IsWordChar(Mid$(mText, pos + 1, 1)) Then Exit Do
+        pos = pos + 1
+    Loop
+    WordStartAfter = pos
+End Function
+
+' Unicode text on the clipboard, or "" when it holds none or is busy.
+Private Function ReadClipboardText() As String
+    Dim memoryHandle As LongPtr
+    Dim textAddress As LongPtr
+    Dim charCount As Long
+
+    If IsClipboardFormatAvailable(CF_UNICODETEXT) = 0 Then Exit Function
+    If OpenClipboard(0) = 0 Then Exit Function
+    memoryHandle = GetClipboardData(CF_UNICODETEXT)
+    If memoryHandle <> 0 Then
+        textAddress = GlobalLock(memoryHandle)
+        If textAddress <> 0 Then
+            charCount = lstrlenW(textAddress)
+            If charCount > 0 Then
+                ReadClipboardText = String$(charCount, vbNullChar)
+                CopyMemory StrPtr(ReadClipboardText), textAddress, charCount * 2
+            End If
+            GlobalUnlock memoryHandle
+        End If
+    End If
+    CloseClipboard
+End Function
+
+' Puts Unicode text on the clipboard. True when it landed.
+Private Function WriteClipboardText(ByVal copiedText As String) As Boolean
+    Dim memoryHandle As LongPtr
+    Dim textAddress As LongPtr
+    Dim byteCount As LongPtr
+
+    If OpenClipboard(0) = 0 Then Exit Function
+    EmptyClipboard
+    byteCount = (Len(copiedText) + 1) * 2
+    memoryHandle = GlobalAlloc(GMEM_MOVEABLE_ZEROED, byteCount)
+    If memoryHandle <> 0 Then
+        textAddress = GlobalLock(memoryHandle)
+        If textAddress <> 0 Then
+            If Len(copiedText) > 0 Then
+                CopyMemory textAddress, StrPtr(copiedText), byteCount - 2
+            End If
+            GlobalUnlock memoryHandle
+            If SetClipboardData(CF_UNICODETEXT, memoryHandle) <> 0 Then
+                WriteClipboardText = True
+            Else
+                GlobalFree memoryHandle
+            End If
+        Else
+            GlobalFree memoryHandle
+        End If
+    End If
+    CloseClipboard
+End Function
 
 ' The caret's hard-line index and column, walking newline characters up
 ' to the caret. Vertical moves work in hard lines: a wrapped visual line
@@ -8401,6 +9480,73 @@ Private Function FilterItems(ByVal filterText As String) As Collection
             End If
         Next idx
     End If
+End Function
+
+' The first item that begins with the text, in any case.
+Private Function PrefixItemMatch(ByVal candidate As String) As Long
+    Dim idx As Long
+
+    If LenB(candidate) = 0 Then Exit Function
+    If mItems Is Nothing Then Exit Function
+    If mItems.Count = 0 Then Exit Function
+    EnsureItemTexts
+    For idx = 1 To mItems.Count
+        If StrComp(Left$(mItemTexts(idx), Len(candidate)), candidate, _
+            vbTextCompare) = 0 Then
+            PrefixItemMatch = idx
+            Exit Function
+        End If
+    Next idx
+End Function
+
+' A combo filtering its list suggests the first item that begins with
+' the typed text, unless an item is that text already: the rest of it
+' shows after the caret in muted ink, and Right at the end or Tab takes
+' it.
+Private Function GhostItem(ByVal hostSheet As Worksheet) As Long
+    Dim matchEntry As Variant
+    Dim itemText As String
+    Dim typedLength As Long
+
+    If mKind <> KIND_COMBO Then Exit Function
+    If Not mSelectOpen Or mFilterPristine Then Exit Function
+    typedLength = Len(mText)
+    If typedLength = 0 Or mCaretPos <> typedLength Then Exit Function
+    If HasSelection() Then Exit Function
+    Set mListMatches = BuildListMatches(hostSheet)
+    For Each matchEntry In mListMatches
+        itemText = ItemAt(CLng(matchEntry))
+        If Len(itemText) = typedLength Then
+            If StrComp(itemText, mText, vbTextCompare) = 0 Then
+                GhostItem = 0
+                Exit Function
+            End If
+        ElseIf GhostItem = 0 And Len(itemText) > typedLength Then
+            If StrComp(Left$(itemText, typedLength), mText, vbTextCompare) = 0 Then
+                GhostItem = CLng(matchEntry)
+            End If
+        End If
+    Next matchEntry
+End Function
+
+Private Function GhostRest(ByVal hostSheet As Worksheet) As String
+    Dim ghostAt As Long
+
+    ghostAt = GhostItem(hostSheet)
+    If ghostAt > 0 Then GhostRest = Mid$(ItemAt(ghostAt), Len(mText) + 1)
+End Function
+
+' Takes the suggested item whole, in the item's own spelling.
+Private Function AcceptGhost(ByVal hostSheet As Worksheet) As Boolean
+    Dim ghostAt As Long
+
+    ghostAt = GhostItem(hostSheet)
+    If ghostAt = 0 Then Exit Function
+    RecordUndo "complete"
+    mSelAnchor = 0
+    mCaretPos = Len(mText)
+    ReplaceSelection ItemAt(ghostAt)
+    AcceptGhost = True
 End Function
 
 Private Function ExactItemMatch(ByVal candidate As String) As Long
@@ -8602,6 +9748,9 @@ Friend Sub TickAnimation(ByVal hostSheet As Worksheet, ByVal elapsedMs As Long)
             End If
             TrackToastParts hostSheet
         Case KIND_INPUT, KIND_COMBO
+            If mInputDueMs > 0 Then
+                If GetTickCount64() >= mInputDueMs Then FireInput OwnerApp
+            End If
             ' Insertion bar blink for the focused float field, at the
             ' Windows rate; a caret set not to blink stays on.
             blinkMs = ReDimUI.CaretBlinkMs

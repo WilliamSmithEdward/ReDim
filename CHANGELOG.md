@@ -123,8 +123,8 @@
 - The frame pump visits only the controls that tick: spinners, toasts,
   sliders, the text fields and combos whose caret blinks, and open drop
   lists. An idle frame over 100 controls fell from 0.26 ms to 0.008 ms.
-  Focus moving from one text field to another keeps the eighty typing
-  keys bound instead of releasing and binding them again.
+  Focus moving from one text field to another keeps the typing keys
+  bound instead of releasing and binding them again.
 - `Unmount` deletes an app's shapes in one pass over the sheet and one
   batch delete. It used to try every name a part could have, eight per
   control and four more per item, and each absent part cost a failed
@@ -231,6 +231,53 @@
   `ComboBox`, for the clearing Esc no longer does.
 - The captured keys add Page Up, Page Down, Shift+Tab, Alt+Down, Alt+Up,
   and F4, bound and released from one list the two share.
+- Float fields edit like a Windows text box. Shift with the arrows,
+  Home, and End selects, and the selection shows in the accent color.
+  Ctrl+Left and Ctrl+Right move by words, Ctrl+Backspace and Ctrl+Del
+  delete them, Ctrl+Home and Ctrl+End reach the ends of the text, and
+  Ctrl+A selects everything. Typing, a delete, or a paste replaces the
+  selection. Fields had no selection before.
+- Ctrl+C, Ctrl+X, and Ctrl+V copy, cut, and paste through the Windows
+  clipboard as Unicode text. A single-line field turns pasted line
+  breaks and tabs into spaces, and drops the line break a copied cell
+  brings along.
+- Ctrl+Z undoes and Ctrl+Y or Ctrl+Shift+Z redoes, up to 100 steps
+  since the field took focus. Typing groups into one step until it
+  pauses for a second.
+- Punctuation and symbols type into fields: `@`, `#`, brackets, quotes,
+  slashes, and the rest, bound by character so each follows the active
+  keyboard layout. Fields took only letters, digits, space, minus,
+  period, and comma, so an email address could not be typed.
+- A click puts the caret where it lands, the click that focuses the
+  field included, and a double click selects the word under the
+  pointer. The caret used to go to the end. A click on a focused
+  combo's text now places the caret instead of toggling the list; the
+  arrow at its right edge still toggles it.
+- `CurrentText` on a focused float field returns the text. It carried
+  the insertion bar, or the space the bar blinks to.
+- New builders for float fields. `Placeholder` shows a muted hint while
+  the field is empty. `OnInput` runs a handler after every edit, or once
+  typing pauses for `DebounceMs`. `Numeric` keeps digits, one decimal
+  separator in the locale's form, and a leading minus. `MaxLength` caps
+  the text and counts it under the field. `Validates` checks the text on
+  commit with a function that returns a message: an invalid field shows
+  the message and a danger border and rechecks on every edit until the
+  text passes, and `ValidationError` reads the message.
+- `AutoGrow(maxLines)` lets a multi-line `TextInput` grow with its text
+  from the height it was given, up to six lines by default, and shrink
+  back, moving anything placed `Below` it.
+- Combo lists bold what the typed text matched in each row, and the
+  first item the text begins shows the rest of its name after the caret
+  in muted ink. Right at the end of the text or Tab takes it, in the
+  item's spelling. This changes Tab, which committed exactly what was
+  typed. `RestrictToItems` makes a float combo commit only an item: the
+  one its text names or begins, or an empty text, and otherwise the
+  text it had when focus arrived.
+- The editing costs a little time. A key in a float field takes 0.10 ms
+  instead of 0.07 ms, and a key in an open 300-item combo 0.96 ms
+  instead of 0.50 ms, most of it bolding the matches. Focusing a field
+  from the grid binds 139 keys instead of 86 and takes 1.4 ms instead
+  of 0.9 ms.
 
 ## 0.19.2 - 2026-08-02
 

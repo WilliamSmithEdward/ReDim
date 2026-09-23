@@ -149,8 +149,11 @@ Public Function BenchTyping() As String
         RdxKeyChar "{LEFT}"
     Next idx
     Record "caretMove", (NowMs() - started) / 20
+    ' Enter commits and leaves. Tab would move focus into the combo with
+    ' its list closed, and the click below would time a caret placement
+    ' instead of a focus that opens the list.
     started = NowMs()
-    RdxKeyChar "{TAB}"
+    RdxKeyChar "{ENTER}"
     Record "commitBlur", NowMs() - started
 
     started = NowMs()
