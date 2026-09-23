@@ -1052,3 +1052,20 @@ def test_list_filter(run_widgets):
     assert facts["checkRowsHidden"] == "True"
     assert facts["selectAllShown"] == "Green, Gray"
     assert facts["allBack"] == "True"
+
+
+def test_adornments(run_widgets):
+    facts = parse_transcript(run_widgets("TestAdornments"))
+    assert facts["captionAbove"] == "True", (
+        "a caption must sit above the field with a danger-colored required mark"
+    )
+    assert facts["hintBelow"] == "True"
+    assert facts["selectCaption"] == "True"
+    assert facts["requiredShown"] == "True", (
+        "an empty commit of a required field must show its message"
+    )
+    assert facts["requiredClears"] == "True"
+    assert facts["errorTextShown"] == "True"
+    assert facts["errorTextCleared"] == "True"
+    assert facts["skeletonBars"] == "True"
+    assert facts["skeletonPulses"] == "True"

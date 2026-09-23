@@ -344,6 +344,18 @@
   rest; Backspace takes a letter off and Esc clears the filter. Moves
   under a filter take only the rows that show, and hidden rows keep
   their selection and their checks.
+- Controls take a `Caption` above them and a `Hint` below them, in
+  small text. A float field's validation message takes the hint's
+  place while it shows, and a `MaxLength` count keeps its corner.
+- `Required` marks a field: its caption ends in an asterisk in the
+  danger color, and an empty commit shows "Required", or the message
+  given, as a validation message before any `Validates` check runs.
+  `ErrorText` shows an error from outside the field, such as a server's
+  answer, with the same danger border until it is set to "".
+- `Skeleton` is a loading placeholder: a muted block, or with
+  `SkeletonLines n` the bars of the text it stands in for, the last one
+  short. It pulses gently unless motion is reduced; hide it and show
+  the content when the data arrives.
 
 ## 0.19.2 - 2026-08-02
 

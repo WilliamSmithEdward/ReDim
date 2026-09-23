@@ -137,6 +137,7 @@ Private Const KIND_COMBO As Long = 18
 Private Const KIND_TRANSFER As Long = 19
 Private Const KIND_CHECKLIST As Long = 20
 Private Const KIND_IMAGE As Long = 21
+Private Const KIND_SKELETON As Long = 22
 
 ' Option rows a SelectBox or ComboBox drop list draws at once unless
 ' ListRows says otherwise; longer lists window behind pager rows.
@@ -482,6 +483,22 @@ Private mValidationLive As Boolean
 Private mAppliedErrorBorder As Boolean
 Private mAppliedMessageSig As String
 Private mAppliedCountSig As String
+' Field adornments: a caption above the control, a hint below it (a
+' message takes its place), a required mark with the message an empty
+' commit shows, and an error set from outside; with the signatures the
+' parts were drawn with.
+Private mCaptionText As String
+Private mHintText As String
+Private mRequired As Boolean
+Private mRequiredMessage As String
+Private mErrorText As String
+Private mAppliedCaptionSig As String
+Private mAppliedHintSig As String
+' Skeleton: the text lines it stands in for (0 draws one block), the
+' time into its pulse, and the pulse step drawn.
+Private mSkeletonLines As Long
+Private mPulseMs As Double
+Private mAppliedPulseStep As Long
 ' AutoGrow: the line cap (0 for off) and how far the field has grown past
 ' the height it was given; the geometry setters start that over.
 Private mAutoGrowLines As Long
@@ -1706,6 +1723,13 @@ End Function
 ' its source file has since gone away.
 Public Function Image(ByVal targetComponentId As String) As ReDimUI
     Set Image = GetOrCreateComponent(targetComponentId, KIND_IMAGE)
+End Function
+
+' A loading placeholder: a muted block, or with SkeletonLines the bars of
+' the text it stands in for, pulsing gently unless motion is reduced.
+' Hide it and show the content when the data arrives.
+Public Function Skeleton(ByVal targetComponentId As String) As ReDimUI
+    Set Skeleton = GetOrCreateComponent(targetComponentId, KIND_SKELETON)
 End Function
 
 ' Drawn single-select option rows. Items supplies the rows, Value the
@@ -3207,6 +3231,8 @@ Friend Sub ConfigureComponent( _
             mSelectAllRow = True
         Case KIND_IMAGE
             mWidth = 120: mHeight = 80
+        Case KIND_SKELETON
+            mWidth = 200: mHeight = 60
         Case Else
             mWidth = 120: mHeight = 24
     End Select
@@ -3225,7 +3251,7 @@ End Property
 Friend Property Get IsTickable() As Boolean
     Select Case mKind
         Case KIND_SPINNER, KIND_TOAST, KIND_SLIDEBAR, KIND_INPUT, KIND_COMBO, _
-            KIND_SELECT, KIND_STEPPER, KIND_TRANSFER
+            KIND_SELECT, KIND_STEPPER, KIND_TRANSFER, KIND_SKELETON
             IsTickable = True
     End Select
 End Property
@@ -3519,6 +3545,62 @@ Public Function RestrictToItems(Optional ByVal restrictOn As Boolean = True) As 
     End If
     mRestrictToItems = restrictOn
     Set RestrictToItems = Me
+End Function
+
+' A caption above the control, in small text; leave room for it above
+' the control's rectangle.
+Public Function Caption(ByVal captionWords As String) As ReDimUI
+    RequireRole ROLE_COMPONENT, "Caption"
+    mCaptionText = captionWords
+    Touch
+    Set Caption = Me
+End Function
+
+' Helper text below the control in muted ink. A float field's validation
+' or error message takes its place while one shows.
+Public Function Hint(ByVal hintText As String) As ReDimUI
+    RequireRole ROLE_COMPONENT, "Hint"
+    mHintText = hintText
+    Touch
+    Set Hint = Me
+End Function
+
+' Marks the control required: an asterisk after its caption, in the
+' danger color. A float TextInput or ComboBox committed empty shows
+' emptyMessage as its validation message.
+Public Function Required( _
+    Optional ByVal requiredOn As Boolean = True, _
+    Optional ByVal emptyMessage As String = "Required" _
+) As ReDimUI
+    RequireRole ROLE_COMPONENT, "Required"
+    mRequired = requiredOn
+    mRequiredMessage = emptyMessage
+    Touch
+    Set Required = Me
+End Function
+
+' An error from outside the field, a server's answer for one: a float
+' TextInput or ComboBox shows it with a danger border until it is set
+' to "". A validation message shows in its place while there is one.
+Public Function ErrorText(ByVal messageText As String) As ReDimUI
+    RequireRole ROLE_COMPONENT, "ErrorText"
+    mErrorText = messageText
+    Touch
+    Set ErrorText = Me
+End Function
+
+' The text lines a Skeleton stands in for, drawn as bars with the last
+' one shorter; 0 draws one block.
+Public Function SkeletonLines(ByVal lineCount As Long) As ReDimUI
+    RequireRole ROLE_COMPONENT, "SkeletonLines"
+    If mKind <> KIND_SKELETON Then
+        RaiseError ERROR_INVALID_OPERATION, "SkeletonLines", _
+            "SkeletonLines applies to Skeleton only."
+    End If
+    If lineCount < 0 Then lineCount = 0
+    mSkeletonLines = lineCount
+    Touch
+    Set SkeletonLines = Me
 End Function
 
 ' A float TextInput or ComboBox shows this hint in muted ink while it is
@@ -5543,6 +5625,7 @@ Friend Sub Apply( _
         ApplyClearButton mainShape, hostSheet, themeValue
         ApplyFieldNotes hostSheet, themeValue
     End If
+    ApplyAdornments hostSheet, themeValue
     ApplyFocusRing hostSheet, themeValue
     ApplyAltText mainShape
     mAppliedValid = True
@@ -5621,6 +5704,8 @@ Private Function AccessibleDescription() As String
                 CStr(ItemCount) & " checked"
         Case KIND_IMAGE
             described = "Image"
+        Case KIND_SKELETON
+            described = "Loading"
     End Select
     If Not mEnabled And LenB(described) > 0 Then
         described = described & ", unavailable"
@@ -5893,6 +5978,10 @@ Private Function CreateShapeForKind(ByVal hostSheet As Worksheet) As Shape
             Set mainShape = hostSheet.Shapes.AddShape( _
                 msoShapeRoundedRectangle, mLeft, mTop, mWidth, mHeight)
             mainShape.Adjustments(1) = 0.08
+        Case KIND_SKELETON
+            Set mainShape = hostSheet.Shapes.AddShape( _
+                msoShapeRoundedRectangle, mLeft, mTop, mWidth, mHeight)
+            mainShape.Adjustments(1) = 0.1
         Case Else
             Set mainShape = hostSheet.Shapes.AddShape( _
                 msoShapeRectangle, mLeft, mTop, mWidth, mHeight)
@@ -5993,6 +6082,19 @@ Private Sub ApplyStyle(ByVal mainShape As Shape, ByVal themeValue As ReDimUI)
             End If
         Case KIND_IMAGE
             ApplyImageFill mainShape, themeValue
+        Case KIND_SKELETON
+            ' With lines the bars carry the pulse and the block is clear.
+            If mSkeletonLines > 0 Then
+                resolvedFill = -1
+            Else
+                resolvedFill = SkeletonFill(themeValue)
+            End If
+            If Not mAppliedValid Or mAppliedFill <> resolvedFill Then
+                mainShape.Fill.Visible = BoolToMso(resolvedFill >= 0)
+                If resolvedFill >= 0 Then mainShape.Fill.ForeColor.RGB = resolvedFill
+                mainShape.Line.Visible = msoFalse
+                mAppliedFill = resolvedFill
+            End If
         Case KIND_INPUT, KIND_COMBO
             ' Shapes adopted from builds older than 0.9.1 are square;
             ' coerce them to the rounded profile the family shares.
@@ -6009,7 +6111,7 @@ Private Sub ApplyStyle(ByVal mainShape As Shape, ByVal themeValue As ReDimUI)
                 Dim ringOn As Boolean
                 Dim errorOn As Boolean
                 ringOn = ReDimUI.IsComponentFocused(mOwnerAppId, mComponentId)
-                errorOn = LenB(mValidationError) > 0
+                errorOn = LenB(ShownError()) > 0
                 resolvedFill = PointerTint(ResolveSurfaceFill(themeValue), _
                     themeValue.OnSurfaceColor)
                 If Not mAppliedValid _
@@ -6458,7 +6560,8 @@ Private Sub ApplyText(ByVal mainShape As Shape, ByVal themeValue As ReDimUI)
     Dim textChanged As Boolean
 
     If mKind = KIND_SPINNER Or mKind = KIND_TOGGLE Or mKind = KIND_OVERLAY _
-        Or mKind = KIND_IMAGE Or IsCompositeDrawnKind() Then Exit Sub
+        Or mKind = KIND_IMAGE Or mKind = KIND_SKELETON _
+        Or IsCompositeDrawnKind() Then Exit Sub
     If (mKind = KIND_INPUT Or mKind = KIND_COMBO) And Not IsFloatField() Then
         Exit Sub
     End If
@@ -7137,10 +7240,10 @@ Private Sub ApplyFieldNotes(ByVal hostSheet As Worksheet, ByVal themeValue As Re
     noteSize = mFontSize
     If noteSize <= 0 Then noteSize = themeValue.BaseFontSize
     noteSize = noteSize - 2
-    If LenB(mValidationError) > 0 And mVisible Then
-        noteKey = PartsState(themeValue) & ":" & mValidationError
+    If LenB(ShownError()) > 0 And mVisible Then
+        noteKey = PartsState(themeValue) & ":" & ShownError()
     End If
-    SyncFieldNote hostSheet, themeValue, "me", noteKey, mValidationError, _
+    SyncFieldNote hostSheet, themeValue, "me", noteKey, ShownError(), _
         themeValue.DangerColor, msoAlignLeft, noteSize, mAppliedMessageSig
     noteKey = vbNullString
     If mMaxLength > 0 And mVisible Then
@@ -7149,6 +7252,130 @@ Private Sub ApplyFieldNotes(ByVal hostSheet As Worksheet, ByVal themeValue As Re
     SyncFieldNote hostSheet, themeValue, "mc", noteKey, _
         Len(mText) & "/" & mMaxLength, themeValue.OnMutedColor, msoAlignRight, _
         noteSize, mAppliedCountSig
+End Sub
+
+' The caption above the control and the hint below it, small text; the
+' hint gives its place to a float field's message, and leaves room for
+' a length count.
+Private Sub ApplyAdornments(ByVal hostSheet As Worksheet, ByVal themeValue As ReDimUI)
+    Dim noteSize As Double
+    Dim captionKey As String
+    Dim hintKey As String
+
+    If LenB(mCaptionText) = 0 And LenB(mAppliedCaptionSig) = 0 _
+        And LenB(mHintText) = 0 And LenB(mAppliedHintSig) = 0 Then Exit Sub
+    noteSize = mFontSize
+    If noteSize <= 0 Then noteSize = themeValue.BaseFontSize
+    noteSize = noteSize - 1
+    If LenB(mCaptionText) > 0 And mVisible Then
+        captionKey = PartsState(themeValue) & ":" & mCaptionText & ":" & CStr(mRequired)
+    End If
+    SyncFieldCaption hostSheet, themeValue, captionKey, noteSize
+    If LenB(mHintText) > 0 And mVisible _
+        And Not (IsFloatField() And LenB(ShownError()) > 0) Then
+        hintKey = PartsState(themeValue) & ":" & mHintText & ":" & CStr(mMaxLength)
+    End If
+    SyncFieldNote hostSheet, themeValue, "fh", hintKey, mHintText, _
+        themeValue.OnMutedColor, msoAlignLeft, noteSize - 1, mAppliedHintSig
+End Sub
+
+Private Sub SyncFieldCaption( _
+    ByVal hostSheet As Worksheet, _
+    ByVal themeValue As ReDimUI, _
+    ByVal captionKey As String, _
+    ByVal noteSize As Double _
+)
+    Dim captionShape As Shape
+    Dim captionWords As String
+
+    If captionKey = mAppliedCaptionSig Then Exit Sub
+    mAppliedCaptionSig = captionKey
+    If LenB(captionKey) = 0 Then
+        On Error Resume Next
+        hostSheet.Shapes(ShapeName & PART_SEPARATOR & "fc").Delete
+        On Error GoTo 0
+        Exit Sub
+    End If
+    captionWords = mCaptionText
+    If mRequired Then captionWords = captionWords & " *"
+    Set captionShape = EnsurePartShape(hostSheet, "fc", msoShapeRectangle)
+    captionShape.Left = mLeft
+    captionShape.Top = mTop - noteSize - 8
+    If captionShape.Top < 0 Then captionShape.Top = 0
+    captionShape.Width = mWidth
+    captionShape.Height = noteSize + 7
+    captionShape.Fill.Visible = msoFalse
+    captionShape.Line.Visible = msoFalse
+    With captionShape.TextFrame2
+        .MarginLeft = 1
+        .MarginRight = 1
+        .MarginTop = 0
+        .MarginBottom = 0
+        .VerticalAnchor = msoAnchorBottom
+        .WordWrap = msoFalse
+        .TextRange.Text = captionWords
+        .TextRange.ParagraphFormat.Alignment = msoAlignLeft
+        With .TextRange.Font
+            .Name = themeValue.FontName
+            .Size = noteSize
+            .Bold = msoFalse
+            .Fill.ForeColor.RGB = ResolveDrawnInk(themeValue)
+        End With
+        If mRequired Then
+            .TextRange.Characters(Len(captionWords), 1).Font.Fill.ForeColor.RGB = _
+                themeValue.DangerColor
+        End If
+    End With
+    captionShape.Visible = msoTrue
+    captionShape.OnAction = mAppliedOnAction
+End Sub
+
+' The Skeleton's muted fill at its pulse step: toward the surface and
+' back over 1.4 seconds, in 16 steps; flat when motion is reduced.
+Private Function SkeletonFill(ByVal themeValue As ReDimUI) As Long
+    Dim stepNow As Long
+
+    stepNow = PulseStep()
+    mAppliedPulseStep = stepNow
+    SkeletonFill = BlendRgb(themeValue.MutedColor, themeValue.SurfaceColor, _
+        0.5 * (1 - Cos(6.2831853 * stepNow / 16)) * 0.6)
+End Function
+
+Private Function PulseStep() As Long
+    If ReDimUI.MotionReduced Then Exit Function
+    PulseStep = Int(((mPulseMs Mod 1400) / 1400) * 16)
+End Function
+
+' A Skeleton's text bars: evenly spaced, the last at 60 percent.
+Private Sub ApplySkeletonBars(ByVal hostSheet As Worksheet, ByVal themeValue As ReDimUI)
+    Dim skeletonBar As Shape
+    Dim barNo As Long
+    Dim barPitch As Double
+    Dim barFill As Long
+
+    barFill = SkeletonFill(themeValue)
+    If ExtrasCurrent(PartsState(themeValue) & ":" & CStr(mSkeletonLines) & _
+        ":" & CStr(barFill)) Then Exit Sub
+    If mSkeletonLines > 0 Then barPitch = mHeight / mSkeletonLines
+    For barNo = 1 To mSkeletonLines
+        Set skeletonBar = EnsurePartShape(hostSheet, "sk" & barNo, msoShapeRoundedRectangle)
+        skeletonBar.Left = mLeft
+        skeletonBar.Top = mTop + (barNo - 1) * barPitch + barPitch * 0.2
+        skeletonBar.Height = barPitch * 0.6
+        skeletonBar.Width = mWidth * IIf(barNo = mSkeletonLines And barNo > 1, 0.6, 1)
+        skeletonBar.Fill.Visible = msoTrue
+        skeletonBar.Fill.ForeColor.RGB = barFill
+        skeletonBar.Line.Visible = msoFalse
+        skeletonBar.Visible = BoolToMso(mVisible)
+        skeletonBar.OnAction = mAppliedOnAction
+    Next barNo
+    ' Bars past the count are leftovers of a longer skeleton.
+    For barNo = mSkeletonLines + 1 To mAppliedOptionCount
+        On Error Resume Next
+        hostSheet.Shapes(ShapeName & PART_SEPARATOR & "sk" & barNo).Delete
+        On Error GoTo 0
+    Next barNo
+    mAppliedOptionCount = mSkeletonLines
 End Sub
 
 ' One note under the field; an empty key removes it.
@@ -7178,6 +7405,7 @@ Private Sub SyncFieldNote( _
     noteShape.Left = mLeft
     noteShape.Top = mTop + mHeight + 1
     noteShape.Width = mWidth
+    If partName = "fh" And mMaxLength > 0 Then noteShape.Width = mWidth - 44
     noteShape.Height = noteSize + 6
     noteShape.Fill.Visible = msoFalse
     noteShape.Line.Visible = msoFalse
@@ -7377,10 +7605,30 @@ End Sub
 
 ' Runs Validates' check on the text. A check that fails to run counts
 ' as a pass and goes to the app's error handler.
+' The message a float field shows: its validation's, else the one set
+' from outside.
+Private Function ShownError() As String
+    If LenB(mValidationError) > 0 Then
+        ShownError = mValidationError
+    Else
+        ShownError = mErrorText
+    End If
+End Function
+
 Private Sub RunValidation(ByVal hostApp As ReDimUI)
     Dim verdict As Variant
 
-    If LenB(mValidateProc) = 0 Then Exit Sub
+    ' Required speaks first: an empty text never reaches the check.
+    If mRequired And LenB(Trim$(mText)) = 0 Then
+        mValidationError = mRequiredMessage
+        mValidationLive = True
+        Exit Sub
+    End If
+    If LenB(mValidateProc) = 0 Then
+        mValidationError = vbNullString
+        mValidationLive = False
+        Exit Sub
+    End If
     On Error GoTo CheckFailed
     verdict = Application.Run(mValidateProc, mText)
     On Error GoTo 0
@@ -7555,6 +7803,8 @@ Private Sub ApplyKindExtras( _
         Case KIND_TOAST
             If mSlideRemaining > 0 Then mainShape.Top = mTop + mSlideRemaining
             ApplyToastParts mainShape, hostSheet, themeValue
+        Case KIND_SKELETON
+            ApplySkeletonBars hostSheet, themeValue
     End Select
 End Sub
 
@@ -11939,6 +12189,7 @@ End Sub
 
 Friend Function NeedsAnimation() As Boolean
     NeedsAnimation = (mKind = KIND_SPINNER And mVisible) _
+        Or (mKind = KIND_SKELETON And mVisible And Not ReDimUI.MotionReduced) _
         Or (mKind = KIND_TOAST And (mSlideRemaining > 0 Or mToastExiting)) _
         Or (IsFloatField() And _
             ReDimUI.IsComponentFocused(mOwnerAppId, mComponentId))
@@ -11954,6 +12205,10 @@ Friend Sub TickAnimation(ByVal hostSheet As Worksheet, ByVal elapsedMs As Long)
     If Not NeedsAnimation() Then Exit Sub
     On Error Resume Next
     Select Case mKind
+        Case KIND_SKELETON
+            ' The pulse repaints only when its step changes.
+            mPulseMs = mPulseMs + elapsedMs
+            If PulseStep() <> mAppliedPulseStep Then Touch
         Case KIND_SPINNER
             ' Re-pin the frame after every rotation write. Probing never
             ' caught rotation moving the frame at the object-model level,

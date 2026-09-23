@@ -46,9 +46,9 @@ demo is the working reference.
 ## App
 
 Component factories, get-or-create by id: `Button`, `Label`, `Card`, `Spinner`, `ProgressBar`,
-`Toggle`, `TickBox`, `RadioGroup`, `Stepper`, `SlideBar`, `SelectBox`, `ComboBox`,
-`TextInput`. Every control is drawn from shapes and fully themed; there are no native form
-controls in the framework. Also:
+`Skeleton`, `Toggle`, `TickBox`, `RadioGroup`, `Stepper`, `SlideBar`, `SelectBox`, `ComboBox`,
+`TransferList`, `CheckList`, `TextInput`, and `Image`. Every control is drawn from shapes and
+fully themed; there are no native form controls in the framework. Also:
 
 | Member | Purpose |
 |---|---|
@@ -132,9 +132,12 @@ All fluent, all return the component:
   float TextInput or ComboBox a clear button (see
   [Keyboard focus for every control](#keyboard-focus-for-every-control)).
 - Text fields (float `TextInput` and `ComboBox`): `Placeholder(hint)`, `OnInput(proc)` with
-  `DebounceMs(ms)`, `Numeric`, `MaxLength(n)`, and `Validates(checkProc)` read back with
-  `ValidationError` (see [Field rules](#field-rules)); `MultiLine` and `AutoGrow(maxLines)`
-  for a TextInput and `RestrictToItems` for a ComboBox.
+  `DebounceMs(ms)`, `Numeric`, `MaxLength(n)`, `Required`, `ErrorText(message)`, and
+  `Validates(checkProc)` read back with `ValidationError` (see [Field rules](#field-rules));
+  `MultiLine` and `AutoGrow(maxLines)` for a TextInput and `RestrictToItems` for a
+  ComboBox.
+- Adornments (any control): `Caption(text)` puts a label in small text above the control,
+  and `Hint(text)` helper text in muted ink below it (see [Field rules](#field-rules)).
 - Reads: `CurrentValue`, `CurrentText`, `IsChecked`, `IsEnabled`, `IsVisible`, `IsBusy`, `InputValue`
   (TextInput and ComboBox; reads the float buffer or the backing cell, and assigning it
   writes without firing change events).
@@ -253,6 +256,11 @@ dependencies:
   even after its source file goes away.
 - `Toggle`: the pill switch for booleans. Switched on, the knob takes the theme's
   `OnPrimary` ink, as Windows draws it, so it stays visible on every accent track.
+- `Skeleton`: a loading placeholder in the muted color. On its own it is one rounded
+  block; `SkeletonLines 3` draws the bars of three text lines instead, the last at 60
+  percent of the width. It pulses toward the surface color and back every 1.4 seconds,
+  and holds still when motion is reduced. Give it the rectangle the content will take,
+  and hide it with `Visible False` when the data arrives.
 
 ## Float fields and keyboard focus
 
@@ -383,9 +391,25 @@ Builders for float `TextInput` and `ComboBox` fields:
   spelling. An empty text stays empty, and any other text goes back to what the field held
   when focus arrived. A cell-backed combo's cell is Excel's to restrict, with data
   validation.
+- `Required` marks the field: an empty commit, or one of only spaces, shows "Required"
+  as its validation message, the same way `Validates` shows one, and the check function
+  never sees the empty text. `Required emptyMessage:="Enter an email"` words it;
+  `Required False` lifts it.
+- `ErrorText "That name is taken"` shows an error from outside the field, a server's
+  answer for one, with the same danger border and message line. It stays until
+  `ErrorText ""` clears it. A validation message shows in its place while there is one.
+
+Any control, not only a field, takes the two adornments. `Caption "Email"` sets a label in
+text a point smaller than the control's, above its rectangle, so leave room for it there;
+a `Required` control's caption ends in an asterisk in the danger color. `Hint "We never
+share it"` sets helper text in muted ink below the control, where a float field's message
+takes its place while one shows and a `MaxLength` count keeps the right edge. Both follow
+the control's visibility, a disabled control's caption reads muted, and a click on the
+caption acts as a click on the control.
 
 ```vba
 ui.TextInput("email").AtRect(24, 24, 220, 22).Placeholder "name@example.com"
+ui.TextInput("email").Caption("Email").Hint("We never share it").Required
 ui.TextInput("email").Validates "Checks.Email"
 ui.TextInput("qty").AtRect(24, 70, 80, 22).Numeric allowDecimal:=False
 ui.TextInput("find").AtRect(24, 116, 220, 22).OnInput "Search.Refilter"

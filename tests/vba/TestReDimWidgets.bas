@@ -3564,3 +3564,75 @@ Public Function TestListFilter() As String
     ReDimUI.AutoPump True
     TestListFilter = transcript
 End Function
+
+' Field adornments: a caption above with the required mark in the danger
+' color, a hint below that gives way to the Required message an empty
+' commit shows and comes back once the text passes, and an error set from
+' outside with its danger border. A Skeleton draws its bars, the last one
+' short, and pulses.
+Public Function TestAdornments() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim firstFill As Long
+    Dim transcript As String
+
+    ReDimUI.AutoPump False
+    ReDimUI.ReduceMotion False
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "wid52")
+    app.TextInput("email").AtRect(24, 40, 200, 22).Caption("Email").Hint("We never share it") _
+        .Required
+    app.TextInput("user").AtRect(24, 110, 200, 22).Caption "User name"
+    app.SelectBox("size").AtRect(260, 40, 140, 22).Items("S", "M").Caption "Size"
+    app.Skeleton("sk").AtRect(260, 100, 160, 60).SkeletonLines 3
+    app.Render
+
+    With host.Shapes("rdm_wid52_email__fc")
+        transcript = "captionAbove=" & CStr(.TextFrame2.TextRange.Text = "Email *" _
+            And .Top + .Height <= 40 _
+            And .TextFrame2.TextRange.Characters(7, 1).Font.Fill.ForeColor.RGB _
+                = app.Theme.DangerColor)
+    End With
+    transcript = transcript & "|hintBelow=" & _
+        CStr(host.Shapes("rdm_wid52_email__fh").TextFrame2.TextRange.Text = "We never share it" _
+            And host.Shapes("rdm_wid52_email__fh").Top >= 62)
+    transcript = transcript & "|selectCaption=" & CStr(ShapeExists(host, "rdm_wid52_size__fc"))
+
+    ReDimUI.DispatchShape "rdm_wid52_email"
+    RdxKeyChar "{ENTER}"
+    transcript = transcript & "|requiredShown=" & _
+        CStr(host.Shapes("rdm_wid52_email__me").TextFrame2.TextRange.Text = "Required" _
+            And Not ShapeExists(host, "rdm_wid52_email__fh") _
+            And host.Shapes("rdm_wid52_email").Line.ForeColor.RGB = app.Theme.DangerColor)
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid52_email"
+    TypeText "a@b"
+    transcript = transcript & "|requiredClears=" & _
+        CStr(Not ShapeExists(host, "rdm_wid52_email__me") _
+            And ShapeExists(host, "rdm_wid52_email__fh"))
+    RdxKeyChar "{ENTER}"
+
+    app.TextInput("user").ErrorText "Taken"
+    transcript = transcript & "|errorTextShown=" & _
+        CStr(host.Shapes("rdm_wid52_user__me").TextFrame2.TextRange.Text = "Taken" _
+            And host.Shapes("rdm_wid52_user").Line.ForeColor.RGB = app.Theme.DangerColor)
+    app.TextInput("user").ErrorText ""
+    transcript = transcript & "|errorTextCleared=" & _
+        CStr(Not ShapeExists(host, "rdm_wid52_user__me"))
+
+    transcript = transcript & "|skeletonBars=" & _
+        CStr(ShapeExists(host, "rdm_wid52_sk__sk3") _
+            And host.Shapes("rdm_wid52_sk__sk3").Width < host.Shapes("rdm_wid52_sk__sk1").Width)
+    firstFill = host.Shapes("rdm_wid52_sk__sk1").Fill.ForeColor.RGB
+    ReDimUI.PumpOnce
+    ReDimUI.PumpOnce
+    ReDimUI.PumpOnce
+    ReDimUI.PumpOnce
+    transcript = transcript & "|skeletonPulses=" & _
+        CStr(host.Shapes("rdm_wid52_sk__sk1").Fill.ForeColor.RGB <> firstFill)
+    app.Skeleton("sk").Visible False
+    RdxReleaseKeys
+    ReDimUI.ReduceMotion
+    ReDimUI.AutoPump True
+    TestAdornments = transcript
+End Function
