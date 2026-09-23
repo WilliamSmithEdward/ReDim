@@ -138,6 +138,7 @@ Private Const KIND_TRANSFER As Long = 19
 Private Const KIND_CHECKLIST As Long = 20
 Private Const KIND_IMAGE As Long = 21
 Private Const KIND_SKELETON As Long = 22
+Private Const KIND_TABS As Long = 23
 
 ' Option rows a SelectBox or ComboBox drop list draws at once unless
 ' ListRows says otherwise; longer lists window behind pager rows.
@@ -198,10 +199,10 @@ Private mFocusHandoff As Boolean
 ' Test seam: the next real tick treats the field-watch press edge as
 ' fired, so in-tick blur paths are testable without physical input.
 Private mForcePressEdge As Boolean
-' Test seam: a fixed pointer position, in sheet points, that stands in
-' for the cursor until cleared.
 ' The Alt+letter chords bound for the active sheet's access keys.
 Private mBoundAccessKeys As String
+' Test seam: a fixed pointer position, in sheet points, that stands in
+' for the cursor until cleared.
 Private mPointerOverridden As Boolean
 Private mPointerX As Double
 Private mPointerY As Double
@@ -499,6 +500,18 @@ Private mAppliedHintSig As String
 Private mSkeletonLines As Long
 Private mPulseMs As Double
 Private mAppliedPulseStep As Long
+' Tabs: each tab's right edge as drawn, measured from the control's
+' left, for the pointer; and the tab its panels were last shown for
+' (-2 before the first sync).
+Private mTabRights() As Double
+Private mAppliedPanelTab As Long
+' A component on a Tabs panel: the Tabs control and the tab it belongs
+' to, whether that tab hides it now, and the visibility it has apart
+' from the tab, which Visible and BindVisible set while it is hidden.
+Private mTabOwnerId As String
+Private mTabNumber As Long
+Private mTabShut As Boolean
+Private mVisibleBeforeTab As Boolean
 ' AutoGrow: the line cap (0 for off) and how far the field has grown past
 ' the height it was given; the geometry setters start that over.
 Private mAutoGrowLines As Long
@@ -1732,6 +1745,13 @@ Public Function Skeleton(ByVal targetComponentId As String) As ReDimUI
     Set Skeleton = GetOrCreateComponent(targetComponentId, KIND_SKELETON)
 End Function
 
+' A tab strip: one tab per item, the shown tab in bold over an accent
+' bar. Controls join a tab's panel with OnTab and show only while their
+' tab is the one shown.
+Public Function Tabs(ByVal targetComponentId As String) As ReDimUI
+    Set Tabs = GetOrCreateComponent(targetComponentId, KIND_TABS)
+End Function
+
 ' Drawn single-select option rows. Items supplies the rows, Value the
 ' selected index, and WritesTo receives the selected item's text.
 Public Function RadioGroup(ByVal targetComponentId As String) As ReDimUI
@@ -2035,6 +2055,41 @@ End Function
 
 ' Components placed Below or RightOf one that changed size follow it, and
 ' the ones placed against those follow in turn.
+' The tab whose panel a Tabs control shows: 0 while the control is
+' hidden or has no tabs, so its panels hide with it; -1 when the app
+' has no Tabs control by that id, which gates nothing.
+Friend Function ShownTabOf(ByVal tabsId As String) As Long
+    Dim componentValue As ReDimUI
+
+    RequireRole ROLE_APP, "ShownTabOf"
+    ShownTabOf = -1
+    If TryGetComponent(tabsId, componentValue) Then
+        ShownTabOf = componentValue.PanelTab
+    End If
+End Function
+
+' Re-applies the controls on a Tabs control's panels that the tab now
+' shown hides or shows. One that hides while it has keyboard focus
+' commits and lets focus go first.
+Friend Sub ReapplyTabMembers(ByVal tabsId As String, ByVal panelNow As Long)
+    Dim componentValue As ReDimUI
+    Dim shutNow As Boolean
+
+    RequireRole ROLE_APP, "ReapplyTabMembers"
+    For Each componentValue In mComponents
+        If StrComp(componentValue.TabOwnerId, tabsId, vbTextCompare) = 0 Then
+            shutNow = componentValue.TabShutUnder(panelNow)
+            If shutNow <> componentValue.TabShut Then
+                If shutNow And ReDimUI.IsComponentFocused(mAppId, _
+                    componentValue.ComponentId) Then
+                    ReDimUI.EndKeyboardFocus
+                End If
+                componentValue.Apply mSheet, mTheme, Me
+            End If
+        End If
+    Next componentValue
+End Sub
+
 Friend Sub ReapplyDependents(ByVal anchorId As String)
     Dim componentValue As ReDimUI
 
@@ -3233,6 +3288,10 @@ Friend Sub ConfigureComponent( _
             mWidth = 120: mHeight = 80
         Case KIND_SKELETON
             mWidth = 200: mHeight = 60
+        Case KIND_TABS
+            mWidth = 360: mHeight = 32
+            mValue = 1
+            mAppliedPanelTab = -2
         Case Else
             mWidth = 120: mHeight = 24
     End Select
@@ -3454,7 +3513,12 @@ End Function
 
 Public Function Visible(ByVal flag As Boolean) As ReDimUI
     RequireRole ROLE_COMPONENT, "Visible"
-    mVisible = flag
+    ' While its tab hides the control, the flag waits for the tab.
+    If mTabShut Then
+        mVisibleBeforeTab = flag
+    Else
+        mVisible = flag
+    End If
     Touch
     Set Visible = Me
 End Function
@@ -3466,10 +3530,17 @@ Public Function Enabled(ByVal flag As Boolean) As ReDimUI
     Set Enabled = Me
 End Function
 
-' The alternative text screen readers announce for the control. ReDim
-' writes one from the kind, text, and state ("Save, button", "Agree,
-' checkbox, checked", ", unavailable" when disabled); AltText replaces
-' it, and an empty string restores the generated one.
+' Puts the control on a Tabs control's panel: it shows only while tab
+' tabNumber is the one shown, and hides with the Tabs control. Visible
+' still decides whether it shows on its tab; OnTab "" takes it off.
+Public Function OnTab(ByVal tabsId As String, ByVal tabNumber As Long) As ReDimUI
+    RequireRole ROLE_COMPONENT, "OnTab"
+    mTabOwnerId = tabsId
+    mTabNumber = tabNumber
+    Touch
+    Set OnTab = Me
+End Function
+
 ' A toast's action button, such as Undo: a click dismisses the toast and
 ' runs handlerProc. A toast with an action stays four seconds longer.
 Public Function Action(ByVal actionLabel As String, ByVal handlerProc As String) As ReDimUI
@@ -3673,6 +3744,10 @@ Public Property Get IsVisible() As Boolean
     IsVisible = mVisible
 End Property
 
+' The alternative text screen readers announce for the control. ReDim
+' writes one from the kind, text, and state ("Save, button", "Agree,
+' checkbox, checked", ", unavailable" when disabled); AltText replaces
+' it, and an empty string restores the generated one.
 Public Function AltText(ByVal altDescription As String) As ReDimUI
     RequireRole ROLE_COMPONENT, "AltText"
     mAltText = altDescription
@@ -3713,7 +3788,11 @@ End Function
 
 Public Property Get CurrentValue() As Double
     RequireRole ROLE_COMPONENT, "CurrentValue"
-    CurrentValue = mValue
+    If mKind = KIND_TABS Then
+        CurrentValue = ShownTab()
+    Else
+        CurrentValue = mValue
+    End If
 End Property
 
 Public Property Get CurrentText() As String
@@ -4799,6 +4878,8 @@ Public Sub Remove()
     End If
     DeleteOwnShapes hostApp.Sheet
     hostApp.ForgetComponent mComponentId
+    ' Its panels show again, ungated.
+    If mKind = KIND_TABS Then hostApp.ReapplyTabMembers mComponentId, -1
 End Sub
 
 Friend Sub ForgetComponent(ByVal targetComponentId As String)
@@ -5476,6 +5557,13 @@ Friend Sub RunClickBehavior()
                 ReorderChosen hostApp, (transferPart = "mvu")
             End If
             Exit Sub
+        Case KIND_TABS
+            Dim tabPicked As Long
+            If Left$(ReDimUI.SenderPart, 2) = "tb" _
+                And IsNumeric(Mid$(ReDimUI.SenderPart, 3)) Then
+                tabPicked = CLng(Mid$(ReDimUI.SenderPart, 3))
+            End If
+            If Not SelectTab(hostApp, tabPicked) Then Exit Sub
         Case KIND_RADIO
             Dim rowNumber As Long
             If LenB(ReDimUI.SenderPart) = 0 Then
@@ -5612,6 +5700,7 @@ Friend Sub Apply( _
 
     RequireRole ROLE_COMPONENT, "Apply"
     ResolveBindings hostApp
+    RefreshTabShut hostApp
     wasApplied = mAppliedValid
     growBefore = mGrowAdded
     EnsureGeometryResolved hostSheet
@@ -5634,6 +5723,7 @@ Friend Sub Apply( _
     If wasApplied And Abs(mGrowAdded - growBefore) > 0.01 Then
         hostApp.ReapplyDependents mComponentId
     End If
+    If mKind = KIND_TABS Then SyncTabPanels hostApp
 End Sub
 
 Private Sub ApplyAltText(ByVal mainShape As Shape)
@@ -5706,6 +5796,12 @@ Private Function AccessibleDescription() As String
             described = "Image"
         Case KIND_SKELETON
             described = "Loading"
+        Case KIND_TABS
+            described = "Tabs"
+            If ShownTab() >= 1 Then
+                described = described & ", " & ItemAt(ShownTab()) & _
+                    " selected, tab " & ShownTab() & " of " & ItemCount
+            End If
     End Select
     If Not mEnabled And LenB(described) > 0 Then
         described = described & ", unavailable"
@@ -5740,7 +5836,12 @@ Private Sub ResolveBindings(ByVal hostApp As ReDimUI)
     End If
     If LenB(mBindVisibleKey) > 0 Then
         If hostApp.HasState(mBindVisibleKey) Then
-            mVisible = CBool(hostApp.State(mBindVisibleKey)) Xor mBindVisibleInvert
+            If mTabShut Then
+                mVisibleBeforeTab = CBool(hostApp.State(mBindVisibleKey)) _
+                    Xor mBindVisibleInvert
+            Else
+                mVisible = CBool(hostApp.State(mBindVisibleKey)) Xor mBindVisibleInvert
+            End If
         End If
     End If
     If LenB(mBindSourceKey) > 0 Then
@@ -5982,6 +6083,10 @@ Private Function CreateShapeForKind(ByVal hostSheet As Worksheet) As Shape
             Set mainShape = hostSheet.Shapes.AddShape( _
                 msoShapeRoundedRectangle, mLeft, mTop, mWidth, mHeight)
             mainShape.Adjustments(1) = 0.1
+        Case KIND_TABS
+            ' The rule along the strip's foot; the tabs are parts.
+            Set mainShape = hostSheet.Shapes.AddShape( _
+                msoShapeRectangle, mLeft, mTop + mHeight - 1, mWidth, 1)
         Case Else
             Set mainShape = hostSheet.Shapes.AddShape( _
                 msoShapeRectangle, mLeft, mTop, mWidth, mHeight)
@@ -6018,7 +6123,8 @@ End Function
 Private Function IsCompositeDrawnKind() As Boolean
     IsCompositeDrawnKind = (mKind = KIND_TICKBOX Or mKind = KIND_RADIO _
         Or mKind = KIND_STEPPER Or mKind = KIND_SLIDEBAR _
-        Or mKind = KIND_TRANSFER Or mKind = KIND_CHECKLIST)
+        Or mKind = KIND_TRANSFER Or mKind = KIND_CHECKLIST _
+        Or mKind = KIND_TABS)
 End Function
 
 ' Geometry diffs against the shape's actual position rather than a cache, so
@@ -6709,6 +6815,8 @@ Private Sub HandleControlKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
             End If
         Case KIND_RADIO
             HandleRadioKey hostApp, keyText
+        Case KIND_TABS
+            HandleTabsKey hostApp, keyText
         Case KIND_STEPPER
             HandleStepperKey hostApp, keyText
         Case KIND_SLIDEBAR
@@ -6730,6 +6838,32 @@ End Sub
 
 ' Arrows move the selection itself, wrapping at the ends; each move
 ' writes the state and fires OnChange as a click would.
+' Left and Right move to the tab beside, wrapping at the ends; Home and
+' End go to the first and last. The tab shown follows the keys.
+Private Sub HandleTabsKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
+    Dim tabTotal As Long
+    Dim aimTab As Long
+
+    tabTotal = ItemCount
+    If tabTotal = 0 Then Exit Sub
+    Select Case keyText
+        Case "{LEFT}"
+            aimTab = ShownTab() - 1
+            If aimTab < 1 Then aimTab = tabTotal
+        Case "{RIGHT}"
+            aimTab = ShownTab() + 1
+            If aimTab > tabTotal Then aimTab = 1
+        Case "{HOME}"
+            aimTab = 1
+        Case "{END}"
+            aimTab = tabTotal
+        Case "{ENTER}"
+            hostApp.ClickDefaultButton
+    End Select
+    If aimTab = 0 Then Exit Sub
+    If SelectTab(hostApp, aimTab) Then RunClickHandlers hostApp
+End Sub
+
 Private Sub HandleRadioKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
     Dim itemTotal As Long
     Dim aimRow As Long
@@ -7792,6 +7926,8 @@ Private Sub ApplyKindExtras( _
             ApplyTickBox mainShape, hostSheet, themeValue
         Case KIND_RADIO
             ApplyRadioGroup mainShape, hostSheet, themeValue
+        Case KIND_TABS
+            ApplyTabs mainShape, hostSheet, themeValue
         Case KIND_STEPPER
             ApplyStepper mainShape, hostSheet, themeValue
         Case KIND_SLIDEBAR
@@ -8103,6 +8239,210 @@ End Sub
 
 ' One circle-and-caption row per item. The selected row's circle fills with
 ' the accent and carries an inner dot part.
+' A Tabs control: a rule along its foot, one tab per item sized to its
+' text (equal shares when the texts need more than the width, cut short
+' with an ellipsis where they do not fit), and an accent bar under the
+' tab shown.
+Private Sub ApplyTabs( _
+    ByVal mainShape As Shape, _
+    ByVal hostSheet As Worksheet, _
+    ByVal themeValue As ReDimUI _
+)
+    Dim tabTotal As Long
+    Dim tabNow As Long
+    Dim textSize As Double
+    Dim tabWidths() As Double
+    Dim widthSum As Double
+    Dim tabLeft As Double
+    Dim idx As Long
+    Dim tabShape As Shape
+    Dim accentBar As Shape
+    Dim tabFill As Long
+    Dim tabWords As String
+    Dim fitChars As Long
+
+    tabTotal = ItemCount
+    tabNow = ShownTab()
+    If ExtrasCurrent(PartsState(themeValue) & ":" & CStr(tabNow) & ":" & _
+        PointerKey() & ":" & CStr(mItemsVersion)) Then Exit Sub
+    mainShape.Left = mLeft
+    mainShape.Top = mTop + mHeight - 1
+    mainShape.Width = mWidth
+    mainShape.Height = 1
+    mainShape.Fill.Visible = msoTrue
+    mainShape.Fill.ForeColor.RGB = themeValue.BorderColor
+    mainShape.Line.Visible = msoFalse
+    mainShape.Visible = BoolToMso(mVisible)
+    textSize = mFontSize
+    If textSize <= 0 Then textSize = themeValue.BaseFontSize
+    If tabTotal > 0 Then
+        EnsureItemTexts
+        ReDim tabWidths(1 To tabTotal)
+        ReDim mTabRights(1 To tabTotal)
+        For idx = 1 To tabTotal
+            tabWidths(idx) = Len(mItemTexts(idx)) * textSize * 0.6 + 24
+            widthSum = widthSum + tabWidths(idx)
+        Next idx
+        If widthSum > mWidth Then
+            For idx = 1 To tabTotal
+                tabWidths(idx) = mWidth / tabTotal
+            Next idx
+        End If
+    End If
+    tabLeft = mLeft
+    For idx = 1 To tabTotal
+        Set tabShape = EnsurePartShape(hostSheet, "tb" & idx, msoShapeRectangle)
+        tabShape.Left = tabLeft
+        tabShape.Top = mTop
+        tabShape.Width = tabWidths(idx)
+        ' The foot stays clear for the rule and the accent bar.
+        tabShape.Height = mHeight - 3
+        tabFill = PointerTint(themeValue.SurfaceColor, themeValue.OnSurfaceColor, _
+            "tab" & idx)
+        tabShape.Fill.Visible = BoolToMso(tabFill <> themeValue.SurfaceColor)
+        If tabFill <> themeValue.SurfaceColor Then tabShape.Fill.ForeColor.RGB = tabFill
+        tabShape.Line.Visible = msoFalse
+        tabWords = mItemTexts(idx)
+        fitChars = Int((tabWidths(idx) - 8) / (textSize * 0.6))
+        If Len(tabWords) > fitChars And fitChars >= 2 Then
+            tabWords = Left$(tabWords, fitChars - 1) & ChrW(8230)
+        End If
+        With tabShape.TextFrame2
+            .MarginLeft = 4
+            .MarginRight = 4
+            .MarginTop = 0
+            .MarginBottom = 0
+            .VerticalAnchor = msoAnchorMiddle
+            .WordWrap = msoFalse
+            .TextRange.Text = tabWords
+            .TextRange.ParagraphFormat.Alignment = msoAlignCenter
+            With .TextRange.Font
+                .Name = themeValue.FontName
+                .Size = textSize
+                .Bold = BoolToMso(idx = tabNow)
+                If idx = tabNow And mEnabled Then
+                    .Fill.ForeColor.RGB = themeValue.OnSurfaceColor
+                Else
+                    .Fill.ForeColor.RGB = themeValue.OnMutedColor
+                End If
+            End With
+        End With
+        tabShape.Visible = BoolToMso(mVisible)
+        tabShape.OnAction = mAppliedOnAction
+        tabLeft = tabLeft + tabWidths(idx)
+        mTabRights(idx) = tabLeft - mLeft
+    Next idx
+    If tabNow >= 1 Then
+        Set accentBar = EnsurePartShape(hostSheet, "ti", msoShapeRoundedRectangle)
+        accentBar.Width = tabWidths(tabNow) - 16
+        If accentBar.Width < 8 Then accentBar.Width = 8
+        accentBar.Left = mLeft + mTabRights(tabNow) - tabWidths(tabNow) _
+            + (tabWidths(tabNow) - accentBar.Width) / 2
+        accentBar.Top = mTop + mHeight - 3
+        accentBar.Height = 3
+        accentBar.Fill.Visible = msoTrue
+        If mEnabled Then
+            accentBar.Fill.ForeColor.RGB = themeValue.PrimaryColor
+        Else
+            accentBar.Fill.ForeColor.RGB = themeValue.OnMutedColor
+        End If
+        accentBar.Line.Visible = msoFalse
+        accentBar.Visible = BoolToMso(mVisible)
+        accentBar.OnAction = mAppliedOnAction
+    Else
+        On Error Resume Next
+        hostSheet.Shapes(ShapeName & PART_SEPARATOR & "ti").Delete
+        On Error GoTo 0
+    End If
+    ' Tabs past the count are leftovers of a longer strip.
+    For idx = tabTotal + 1 To mAppliedOptionCount
+        On Error Resume Next
+        hostSheet.Shapes(ShapeName & PART_SEPARATOR & "tb" & idx).Delete
+        On Error GoTo 0
+    Next idx
+    mAppliedOptionCount = tabTotal
+End Sub
+
+' The tab a Tabs control shows: its value held to its tabs, the first
+' when the value is out of range, and 0 with no tabs.
+Private Function ShownTab() As Long
+    Dim tabTotal As Long
+
+    tabTotal = ItemCount
+    If tabTotal = 0 Then Exit Function
+    ShownTab = CLng(mValue)
+    If ShownTab < 1 Or ShownTab > tabTotal Then ShownTab = 1
+End Function
+
+' For the panels: the tab shown, 0 while the Tabs control is hidden, and
+' -1 for any other kind.
+Friend Property Get PanelTab() As Long
+    If mKind <> KIND_TABS Then
+        PanelTab = -1
+    ElseIf mVisible Then
+        PanelTab = ShownTab()
+    End If
+End Property
+
+Friend Property Get TabOwnerId() As String
+    TabOwnerId = mTabOwnerId
+End Property
+
+Friend Property Get TabShut() As Boolean
+    TabShut = mTabShut
+End Property
+
+' Whether this control's tab is hidden while panelNow shows; a panel of
+' no Tabs control (-1) is never hidden.
+Friend Function TabShutUnder(ByVal panelNow As Long) As Boolean
+    If panelNow < 0 Then Exit Function
+    TabShutUnder = (mTabNumber <> panelNow)
+End Function
+
+' Hides the control while its tab is not the one shown, keeping the
+' visibility it has apart from the tab, and gives it back when its tab
+' shows. A list open on a panel that hides closes.
+Private Sub RefreshTabShut(ByVal hostApp As ReDimUI)
+    Dim shutNow As Boolean
+
+    If LenB(mTabOwnerId) = 0 And Not mTabShut Then Exit Sub
+    If LenB(mTabOwnerId) > 0 Then
+        shutNow = TabShutUnder(hostApp.ShownTabOf(mTabOwnerId))
+    End If
+    If shutNow = mTabShut Then Exit Sub
+    If shutNow Then
+        mVisibleBeforeTab = mVisible
+        mVisible = False
+        mSelectOpen = False
+        mListHighlight = 0
+    Else
+        mVisible = mVisibleBeforeTab
+    End If
+    mTabShut = shutNow
+End Sub
+
+' After a Tabs control draws: when the tab its panels show for changed,
+' the controls that change with it re-apply.
+Private Sub SyncTabPanels(ByVal hostApp As ReDimUI)
+    Dim panelNow As Long
+
+    panelNow = PanelTab
+    If panelNow = mAppliedPanelTab Then Exit Sub
+    mAppliedPanelTab = panelNow
+    hostApp.ReapplyTabMembers mComponentId, panelNow
+End Sub
+
+Private Function SelectTab(ByVal hostApp As ReDimUI, ByVal tabNumber As Long) As Boolean
+    If tabNumber < 1 Or tabNumber > ItemCount Then Exit Function
+    If tabNumber = ShownTab() Then Exit Function
+    mValue = tabNumber
+    If LenB(mWritesToKey) > 0 Then
+        hostApp.SetState mWritesToKey, ItemStateValue(ItemAt(tabNumber))
+    End If
+    Touch
+    SelectTab = True
+End Function
+
 Private Sub ApplyRadioGroup( _
     ByVal mainShape As Shape, _
     ByVal hostSheet As Worksheet, _
@@ -9767,6 +10107,15 @@ Friend Function PartAtPoint(ByVal pointsX As Double, ByVal pointsY As Double) As
             If mSelectOpen Then PartAtPoint = ListPartAt(pointsY)
         Case KIND_TRANSFER
             PartAtPoint = TransferPartAt(pointsX, pointsY)
+        Case KIND_TABS
+            If itemTotal > 0 And mAppliedOptionCount = itemTotal Then
+                For slot = 1 To itemTotal
+                    If pointsX - mLeft < mTabRights(slot) Then
+                        PartAtPoint = "tab" & slot
+                        Exit For
+                    End If
+                Next slot
+            End If
     End Select
 End Function
 
@@ -10301,7 +10650,7 @@ Friend Sub SetPointerLook( _
         Select Case mKind
             Case KIND_BUTTON, KIND_TOGGLE, KIND_TICKBOX, KIND_RADIO, _
                 KIND_STEPPER, KIND_SLIDEBAR, KIND_SELECT, KIND_CHECKLIST, _
-                KIND_TRANSFER
+                KIND_TRANSFER, KIND_TABS
             Case KIND_INPUT, KIND_COMBO
                 If Not IsFloatField() Then Exit Sub
             Case Else
@@ -11153,7 +11502,7 @@ Friend Function IsFocusable() As Boolean
     Select Case mKind
         Case KIND_BUTTON, KIND_TOGGLE, KIND_TICKBOX, KIND_RADIO, _
             KIND_STEPPER, KIND_SLIDEBAR, KIND_SELECT, KIND_CHECKLIST, _
-            KIND_TRANSFER
+            KIND_TRANSFER, KIND_TABS
             IsFocusable = True
         Case KIND_INPUT, KIND_COMBO
             IsFocusable = IsFloatField()

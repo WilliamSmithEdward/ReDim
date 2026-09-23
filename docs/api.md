@@ -47,7 +47,7 @@ demo is the working reference.
 
 Component factories, get-or-create by id: `Button`, `Label`, `Card`, `Spinner`, `ProgressBar`,
 `Skeleton`, `Toggle`, `TickBox`, `RadioGroup`, `Stepper`, `SlideBar`, `SelectBox`, `ComboBox`,
-`TransferList`, `CheckList`, `TextInput`, and `Image`. Every control is drawn from shapes and
+`TransferList`, `CheckList`, `TextInput`, `Image`, and `Tabs`. Every control is drawn from shapes and
 fully themed; there are no native form controls in the framework. Also:
 
 | Member | Purpose |
@@ -86,7 +86,9 @@ All fluent, all return the component:
 - Style: `Primary`, `Secondary`, `Success`, `Warning`, `Danger`, `Fill(color)`,
   `TextColor(color)`. `Warning` is amber, dark on light surfaces and bright on dark ones
   (`theme.WarningColor`).
-- Visibility: `Visible(flag)`, `Enabled(flag)`.
+- Visibility: `Visible(flag)`, `Enabled(flag)`. `OnTab(tabsId, tabNumber)` puts the
+  control on a tab's panel of a `Tabs` control, where it shows only while that tab does;
+  `OnTab "", 0` takes it off.
 - Accessibility: `AltText(text)` replaces the alternative text ReDim writes on the
   control's shape (see [Accessibility](#accessibility)); an empty string restores it.
 - Tooltips: `Tooltip(text)` shows a note under a resting pointer, and
@@ -261,6 +263,28 @@ dependencies:
   percent of the width. It pulses toward the surface color and back every 1.4 seconds,
   and holds still when motion is reduced. Give it the rectangle the content will take,
   and hide it with `Visible False` when the data arrives.
+- `Tabs`: a tab strip, one tab per item from `Items`, `ItemsFrom`, and the item APIs.
+  Each tab is as wide as its text; when the texts need more than the strip's width the
+  tabs share it equally and a text that does not fit ends in an ellipsis. The tab shown
+  is bold over an accent bar, the first by default; `Value(n)` shows tab n and
+  `CurrentValue` reads it. A click, or Left and Right (wrapping) and Home and End while
+  it has the keys, shows a tab, writes its text to `WritesTo` (its value, when it has
+  one), and fires `OnChange`. A programmatic `Value` writes and fires nothing.
+
+  Controls join a tab's panel with `OnTab`: `ui.CheckList("feat").OnTab "tabs", 2`
+  shows the list only while tab 2 is shown. A panel is any set of controls in the
+  same app, placed under the strip as usual. A control's own `Visible` and
+  `BindVisible` still decide whether it shows on its tab, and one set while its tab
+  is hidden waits for the tab. A panel that hides closes its open list, and a field
+  on it that has keyboard focus commits and lets focus go. Hiding the `Tabs` control
+  hides every panel, `Remove` shows them all, and a `Tabs` control can itself sit on
+  another's panel.
+
+```vba
+ui.Tabs("tabs").AtRect(24, 24, 360, 32).Items("General", "Advanced").WritesTo "tab"
+ui.TextInput("name").AtRect(24, 70, 200, 22).OnTab "tabs", 1
+ui.TickBox("beta").AtRect(24, 70, 200, 18).Text("Beta features").OnTab "tabs", 2
+```
 
 ## Float fields and keyboard focus
 
@@ -458,8 +482,8 @@ the pointer at most once a frame and act only while their sheet is in front.
 ## Keyboard focus for every control
 
 Every interactive control takes keyboard focus: buttons, toggles, tick boxes, radio groups,
-steppers, sliders, selects, check lists, transfer lists, images with a click handler, and
-float fields. Focus comes from the keyboard or from code: Tab and Shift+Tab walk the app's
+steppers, sliders, selects, check lists, transfer lists, tab strips, images with a click
+handler, and float fields. Focus comes from the keyboard or from code: Tab and Shift+Tab walk the app's
 controls, `component.Focus` and `ui.FocusFirst` place it, and a modal takes it. A click
 focuses only a text field, since someone who clicks a button in Excel expects the grid to
 keep the keys.
@@ -490,6 +514,7 @@ keep the keys.
 | Button, Image | Space or Enter clicks. |
 | Toggle, TickBox | Space toggles. |
 | RadioGroup | Arrows move the selection, wrapping at the ends; Home and End jump. Each move fires `OnChange`. |
+| Tabs | Left and Right show the tab beside, wrapping at the ends; Home and End jump. Each move fires `OnChange`. |
 | Stepper | Up and Right step up, Down and Left step down, Page Up and Page Down step ten times, Home and End jump to the range ends. |
 | SlideBar | Arrows move a step, Page Up and Page Down a tenth of the range in whole steps, Home and End go to the ends. |
 | SelectBox | Closed: arrows, Home, End, Page Up, and Page Down change the selection, and Space, Alt+Down, or F4 opens the list. Open: they move the highlight; Enter, Space, or Alt+Up takes it, Tab takes it and moves on, and Esc or F4 closes. Letters jump to the next item that starts with them, open or closed: letters typed within a second build a prefix, and one letter typed again steps through its items. Every move passes over disabled items and group headers. |
@@ -501,7 +526,8 @@ keep the keys.
 
 - Alternative text: ReDim writes a description on each control's shape from its kind, text,
   and state, such as "Save, button", "Agree, checkbox, checked", "Drop-down, South",
-  "Progress, 40 percent" (in 5 percent steps), with ", unavailable" when disabled. Labels,
+  "Tabs, Advanced selected, tab 2 of 3", "Progress, 40 percent" (in 5 percent steps),
+  with ", unavailable" when disabled. Labels,
   cards, and toasts carry none, since their text is what a reader announces. A `Tooltip`
   follows the description, or the `DisabledReason` while the control is disabled.
   `AltText` replaces the description.
@@ -513,8 +539,9 @@ keep the keys.
   `theme.ContrastReport` checks any theme, a custom one included. The light and dark
   presets keep their look, and their reports show one shortfall each: the field edge
   (`Border` on `Surface`) reaches 1.32:1 and 2.01:1 against the 3:1 non-text minimum.
-- Motion: toasts stop sliding and fading when Windows animations are off or
-  `ReduceMotion True` is set. The spinner keeps turning; it is status, not decoration.
+- Motion: toasts stop sliding and fading, and a `Skeleton` stops pulsing, when Windows
+  animations are off or `ReduceMotion True` is set. The spinner keeps turning; it is
+  status, not decoration.
 - Targets: transfer paging arrows and the toast close button are 18 points square, the
   WCAG 2.5.8 minimum of 24 pixels at 96 DPI.
 

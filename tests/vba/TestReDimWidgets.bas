@@ -3636,3 +3636,108 @@ Public Function TestAdornments() As String
     ReDimUI.AutoPump True
     TestAdornments = transcript
 End Function
+
+' Tabs: the first tab shows its panel and hides the rest. A click on a
+' tab switches panels, writes the tab's text, and fires OnChange once.
+' Visible still decides a control on its own tab, and waits while the tab
+' hides it. The keys walk the tabs, the pointer tints the tab under it, a
+' focused field on a panel that hides commits, a hidden Tabs control
+' hides every panel, and removing it shows them all.
+Public Function TestTabs() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim transcript As String
+
+    gChangeCount = 0
+    ReDimUI.AutoPump False
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "wid53")
+    app.Tabs("tabs").AtRect(24, 24, 360, 32).Items("General", "Advanced", "About") _
+        .WritesTo "tabState"
+    app.Tabs("tabs").OnChange "TestReDimWidgets.RecordChange"
+    app.TextInput("name").AtRect(24, 70, 200, 22).WritesTo("nameState").OnTab "tabs", 1
+    app.TickBox("beta").AtRect(24, 70, 200, 18).Text("Beta").OnTab "tabs", 2
+    app.Label("later").AtRect(24, 100, 200, 20).Text("Soon").OnTab("tabs", 2).Visible False
+    app.Label("ver").AtRect(24, 70, 200, 20).Text("Version 1").OnTab "tabs", 3
+    app.Render
+
+    transcript = "firstPanel=" & CStr(host.Shapes("rdm_wid53_name").Visible = msoTrue _
+        And host.Shapes("rdm_wid53_beta").Visible = msoFalse _
+        And host.Shapes("rdm_wid53_ver").Visible = msoFalse _
+        And host.Shapes("rdm_wid53_later").Visible = msoFalse)
+    transcript = transcript & "|firstBold=" & CStr( _
+        host.Shapes("rdm_wid53_tabs__tb1").TextFrame2.TextRange.Font.Bold = msoTrue _
+        And host.Shapes("rdm_wid53_tabs__tb2").TextFrame2.TextRange.Font.Bold = msoFalse)
+    With host.Shapes("rdm_wid53_tabs__ti")
+        transcript = transcript & "|barUnderFirst=" & CStr( _
+            .Left >= host.Shapes("rdm_wid53_tabs__tb1").Left _
+            And .Left + .Width <= host.Shapes("rdm_wid53_tabs__tb2").Left _
+            And .Fill.ForeColor.RGB = app.Theme.PrimaryColor)
+    End With
+
+    ReDimUI.DispatchShape "rdm_wid53_tabs__tb2"
+    transcript = transcript & "|clickSwitches=" & CStr( _
+        host.Shapes("rdm_wid53_name").Visible = msoFalse _
+        And host.Shapes("rdm_wid53_beta").Visible = msoTrue _
+        And app.Tabs("tabs").CurrentValue = 2)
+    transcript = transcript & "|writes=" & CStr(app.State("tabState"))
+    transcript = transcript & "|fires=" & gChangeCount
+    transcript = transcript & "|hiddenStays=" & _
+        CStr(host.Shapes("rdm_wid53_later").Visible = msoFalse)
+    transcript = transcript & "|altText=" & CStr(InStr(1, _
+        host.Shapes("rdm_wid53_tabs").AlternativeText, "Advanced selected, tab 2 of 3") > 0)
+
+    app.Label("later").Visible True
+    app.Label("ver").Visible False
+    transcript = transcript & "|visibleOnTab=" & _
+        CStr(host.Shapes("rdm_wid53_later").Visible = msoTrue)
+
+    app.Tabs("tabs").Focus
+    RdxKeyChar "{RIGHT}"
+    transcript = transcript & "|keyRight=" & CStr(app.Tabs("tabs").CurrentValue = 3 _
+        And host.Shapes("rdm_wid53_beta").Visible = msoFalse _
+        And host.Shapes("rdm_wid53_ver").Visible = msoFalse)
+    app.Label("ver").Visible True
+    transcript = transcript & "|visibleWaited=" & _
+        CStr(host.Shapes("rdm_wid53_ver").Visible = msoTrue)
+    RdxKeyChar "{RIGHT}"
+    transcript = transcript & "|keyWraps=" & CStr(app.Tabs("tabs").CurrentValue)
+    RdxKeyChar "{END}"
+    transcript = transcript & "|keyEnd=" & CStr(app.Tabs("tabs").CurrentValue)
+    RdxKeyChar "{HOME}"
+    RdxReleaseKeys
+
+    app.PointerEffects
+    ReDimUI.OverridePointer host.Shapes("rdm_wid53_tabs__tb3").Left + 10, 38
+    ReDimUI.PumpOnce
+    transcript = transcript & "|hoverTints=" & CStr( _
+        host.Shapes("rdm_wid53_tabs__tb3").Fill.Visible = msoTrue _
+        And host.Shapes("rdm_wid53_tabs__tb2").Fill.Visible = msoFalse)
+    ReDimUI.ClearPointerOverride
+    app.PointerEffects False
+
+    ReDimUI.DispatchShape "rdm_wid53_name"
+    TypeText "Ada"
+    app.Tabs("tabs").Value 2
+    transcript = transcript & "|hidingCommits=" & CStr(app.State("nameState") = "Ada" _
+        And Not ReDimUI.IsComponentFocused("wid53", "name") _
+        And host.Shapes("rdm_wid53_name").Visible = msoFalse)
+
+    app.Tabs("tabs").Visible False
+    transcript = transcript & "|tabsHidden=" & CStr( _
+        host.Shapes("rdm_wid53_beta").Visible = msoFalse _
+        And host.Shapes("rdm_wid53_tabs__tb1").Visible = msoFalse)
+    app.Tabs("tabs").Visible True
+    transcript = transcript & "|tabsBack=" & CStr( _
+        host.Shapes("rdm_wid53_beta").Visible = msoTrue _
+        And host.Shapes("rdm_wid53_name").Visible = msoFalse)
+
+    app.Tabs("tabs").Remove
+    transcript = transcript & "|removedShowsAll=" & CStr( _
+        host.Shapes("rdm_wid53_name").Visible = msoTrue _
+        And host.Shapes("rdm_wid53_beta").Visible = msoTrue _
+        And host.Shapes("rdm_wid53_ver").Visible = msoTrue)
+    RdxReleaseKeys
+    ReDimUI.AutoPump True
+    TestTabs = transcript
+End Function

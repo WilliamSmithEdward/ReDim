@@ -356,6 +356,14 @@
   `SkeletonLines n` the bars of the text it stands in for, the last one
   short. It pulses gently unless motion is reduced; hide it and show
   the content when the data arrives.
+- `Tabs` is a tab strip: one tab per item, each as wide as its text,
+  the tab shown in bold over an accent bar. A click, or Left, Right,
+  Home, and End, shows a tab, writes it to `WritesTo`, and fires
+  `OnChange`. Controls join a tab's panel with `OnTab "tabs", 2` and
+  show only while their tab does; their own `Visible` still applies on
+  the tab, and a change made while the tab hides them waits for it. A
+  panel that hides closes its open list and commits a focused field,
+  and hiding the strip hides every panel.
 
 ## 0.19.2 - 2026-08-02
 

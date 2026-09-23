@@ -1069,3 +1069,33 @@ def test_adornments(run_widgets):
     assert facts["errorTextCleared"] == "True"
     assert facts["skeletonBars"] == "True"
     assert facts["skeletonPulses"] == "True"
+
+
+def test_tabs(run_widgets):
+    facts = parse_transcript(run_widgets("TestTabs"))
+    assert facts["firstPanel"] == "True", (
+        "the first tab must show its panel and hide the others"
+    )
+    assert facts["firstBold"] == "True"
+    assert facts["barUnderFirst"] == "True"
+    assert facts["clickSwitches"] == "True"
+    assert facts["writes"] == "Advanced"
+    assert facts["fires"] == "1"
+    assert facts["hiddenStays"] == "True", (
+        "a control set Visible False stays hidden on its own tab"
+    )
+    assert facts["altText"] == "True"
+    assert facts["visibleOnTab"] == "True"
+    assert facts["keyRight"] == "True"
+    assert facts["visibleWaited"] == "True", (
+        "Visible set while the tab hid the control must apply when the tab shows"
+    )
+    assert facts["keyWraps"] == "1"
+    assert facts["keyEnd"] == "3"
+    assert facts["hoverTints"] == "True"
+    assert facts["hidingCommits"] == "True", (
+        "a focused field on a panel that hides must commit and let focus go"
+    )
+    assert facts["tabsHidden"] == "True"
+    assert facts["tabsBack"] == "True"
+    assert facts["removedShowsAll"] == "True"
