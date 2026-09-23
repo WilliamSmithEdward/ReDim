@@ -52,6 +52,22 @@
   menu that would pass the window's right edge ends at the button's
   right edge instead, and a press anywhere on the widened rows counts as
   a press on the menu.
+- A click on a toast puts it away at once. The close button, the action
+  button, and the card only set the toast to expire, and while the
+  pointer rested on the toast (as it does for any click) the rest held
+  the countdown and undid the dismissal, so the close button seemed to
+  do nothing. The close button now runs no handler.
+- `OnClick` on a toast runs when the card itself is clicked, with the
+  toast as `ReDimUI.Sender`, before the toast goes.
+- `ActionBorder rgb` colors a toast's action button border, the theme's
+  accent until set.
+- A toast is as tall as its message. It was a fixed 240 by 40 points,
+  so a message longer than a line spilled out of the card and over the
+  toast below. The card now wraps the message and grows to fit it, up
+  to 160 points, where the message ends in an ellipsis; `MaxHeight`
+  moves that cap. `MinWidth` and `MaxWidth` let the card fit its words
+  between them, 240 until set. Toasts stack by their heights, and the
+  corner radius holds at 8 points however tall a card grows.
 
 ## 1.0.0 - 2026-09-23
 

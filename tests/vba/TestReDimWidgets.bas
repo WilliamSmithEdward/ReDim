@@ -15,6 +15,8 @@ Private gLastInput As String
 Private gCancelRan As Long
 Private gCommandCount As Long
 Private gLastCommand As String
+Private gToastClicks As Long
+Private gToastSender As String
 
 Private Function NewCanvas() As Worksheet
     Set NewCanvas = ActiveWorkbook.Worksheets.Add
@@ -26,6 +28,12 @@ End Sub
 
 Public Sub RecordConfirm()
     gConfirmRan = gConfirmRan + 1
+End Sub
+
+' A toast's click handler: the sender is the toast.
+Public Sub RecordToastClick()
+    gToastClicks = gToastClicks + 1
+    gToastSender = ReDimUI.SenderId
 End Sub
 
 ' A menu command's handler: the sender is the menu.
@@ -2328,6 +2336,8 @@ Public Function TestToastConventions() As String
     toastName = "rdm_wid33_" & toastValue.ComponentId
     transcript = transcript & "|actionText=" & _
         host.Shapes(toastName & "__ta").TextFrame2.TextRange.Text
+    transcript = transcript & "|actionAccent=" & _
+        CStr(host.Shapes(toastName & "__ta").Line.ForeColor.RGB = app.Theme.PrimaryColor)
     transcript = transcript & "|actionLongerTtl=" & _
         CStr(toastValue.ToastRemainingMs > 8800)
     ReDimUI.DispatchShape toastName & "__ta"
@@ -2335,9 +2345,136 @@ Public Function TestToastConventions() As String
     transcript = transcript & "|actionRan=" & CStr(gChangeCount = 1)
     transcript = transcript & "|actionDismisses=" & _
         CStr(Not ShapeExists(host, toastName & "__ta"))
+
+    ' The close button puts a toast away at once, even with the pointer
+    ' resting on it and holding its countdown, and runs no handler.
+    Set toastValue = app.Toast("Row deleted.", 5000)
+    toastValue.Action "Undo", "TestReDimWidgets.RecordChange"
+    toastName = "rdm_wid33_" & toastValue.ComponentId
+    With host.Shapes(toastName)
+        ReDimUI.OverridePointer .Left + 20, .Top + .Height / 2
+    End With
+    ReDimUI.PumpOnce
+    ReDimUI.DispatchShape toastName & "__tx"
+    ReDimUI.PumpOnce
+    ReDimUI.PumpOnce
+    transcript = transcript & "|closeUnderPointer=" & _
+        CStr(Not ShapeExists(host, toastName) And gChangeCount = 1)
+
+    ' A click on the card runs the toast's OnClick, with the toast as the
+    ' sender, and puts it away; the close button runs nothing.
+    gToastClicks = 0
+    Set toastValue = app.Toast("Report ready.").OnClick("TestReDimWidgets.RecordToastClick")
+    toastName = "rdm_wid33_" & toastValue.ComponentId
+    With host.Shapes(toastName)
+        ReDimUI.OverridePointer .Left + 20, .Top + .Height / 2
+    End With
+    ReDimUI.PumpOnce
+    ReDimUI.DispatchShape toastName
+    ReDimUI.PumpOnce
+    ReDimUI.PumpOnce
+    transcript = transcript & "|cardRunsOnClick=" & CStr(gToastClicks = 1 _
+        And gToastSender = toastValue.ComponentId And Not ShapeExists(host, toastName))
+    ReDimUI.ClearPointerOverride
+    Set toastValue = app.Toast("Report ready.").OnClick("TestReDimWidgets.RecordToastClick")
+    toastName = "rdm_wid33_" & toastValue.ComponentId
+    ReDimUI.DispatchShape toastName & "__tx"
+    ReDimUI.PumpOnce
+    transcript = transcript & "|closeRunsNothing=" & _
+        CStr(gToastClicks = 1 And Not ShapeExists(host, toastName))
+
+    ' ActionBorder colors the action button's border.
+    Set toastValue = app.Toast("Moved to the archive.")
+    toastValue.Action("Undo", "TestReDimWidgets.RecordChange").ActionBorder RGB(200, 30, 30)
+    toastName = "rdm_wid33_" & toastValue.ComponentId
+    transcript = transcript & "|actionBorder=" & _
+        CStr(host.Shapes(toastName & "__ta").Line.ForeColor.RGB = RGB(200, 30, 30))
+    ReDimUI.DispatchShape toastName & "__tx"
+    ReDimUI.PumpOnce
     ReDimUI.ReduceMotion
     ReDimUI.AutoPump True
     TestToastConventions = transcript
+End Function
+
+' Toast size: a toast keeps 240 points across unless MinWidth and MaxWidth
+' let it fit its words, grows as tall as its wrapped message up to
+' MaxHeight, where the message ends in an ellipsis, and stacks under the
+' toasts above it by their heights; when a tall toast leaves, the one
+' under it moves up to its place.
+Public Function TestToastSize() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim transcript As String
+    Dim toastValue As ReDimUI
+    Dim tallName As String
+    Dim nextName As String
+    Dim toastName As String
+    Dim tallTop As Double
+    Dim longWords As String
+
+    ReDimUI.Shutdown
+    ReDimUI.AutoPump False
+    ReDimUI.ReduceMotion True
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "wid72")
+    app.Label("anchorlbl").At("B2").Text "x"
+    app.Render
+    longWords = "The export finished and the workbook was saved to the shared folder, " & _
+        "where everyone on the team can open it and check the totals before Friday."
+
+    Set toastValue = app.Toast("Saved.")
+    toastName = "rdm_wid72_" & toastValue.ComponentId
+    transcript = "shortSize=" & Format$(host.Shapes(toastName).Width, "0") & "x" & _
+        Format$(host.Shapes(toastName).Height, "0")
+    ReDimUI.DispatchShape toastName & "__tx"
+    ReDimUI.PumpOnce
+
+    Set toastValue = app.Toast(longWords)
+    tallName = "rdm_wid72_" & toastValue.ComponentId
+    With host.Shapes(tallName)
+        transcript = transcript & "|growsTall=" & CStr(.Width = 240 And .Height > 40 _
+            And .TextFrame2.TextRange.BoundHeight <= .Height)
+        tallTop = .Top
+    End With
+    Set toastValue = app.Toast("Next.")
+    nextName = "rdm_wid72_" & toastValue.ComponentId
+    transcript = transcript & "|stacksBelow=" & CStr(host.Shapes(nextName).Top >= _
+        tallTop + host.Shapes(tallName).Height + 5.5)
+    ReDimUI.DispatchShape tallName & "__tx"
+    ReDimUI.PumpOnce
+    ReDimUI.PumpOnce
+    transcript = transcript & "|movesUp=" & _
+        CStr(Abs(host.Shapes(nextName).Top - tallTop) < 0.5)
+    ReDimUI.DispatchShape nextName & "__tx"
+    ReDimUI.PumpOnce
+
+    Set toastValue = app.Toast(longWords & " " & longWords).MaxHeight(70)
+    toastName = "rdm_wid72_" & toastValue.ComponentId
+    With host.Shapes(toastName)
+        transcript = transcript & "|capsHeight=" & CStr(.Height <= 70.01 _
+            And Right$(.TextFrame2.TextRange.Text, 1) = ChrW(8230))
+    End With
+    ReDimUI.DispatchShape toastName & "__tx"
+    ReDimUI.PumpOnce
+
+    Set toastValue = app.Toast("Saved.").MinWidth(100).MaxWidth(420)
+    toastName = "rdm_wid72_" & toastValue.ComponentId
+    transcript = transcript & "|fitsNarrow=" & CStr(host.Shapes(toastName).Width < 240 _
+        And host.Shapes(toastName).Width >= 100)
+    ReDimUI.DispatchShape toastName & "__tx"
+    ReDimUI.PumpOnce
+    Set toastValue = app.Toast("The quarterly report is ready to download now") _
+        .MinWidth(100).MaxWidth(420)
+    toastName = "rdm_wid72_" & toastValue.ComponentId
+    With host.Shapes(toastName)
+        transcript = transcript & "|fitsWide=" & CStr(.Width > 240 And .Width <= 420 _
+            And .Height = 40)
+    End With
+    ReDimUI.DispatchShape toastName & "__tx"
+    ReDimUI.PumpOnce
+    ReDimUI.ReduceMotion
+    ReDimUI.AutoPump True
+    TestToastSize = transcript
 End Function
 
 ' Keyboard focus: Tab order (TabIndex first, then creation order, -1

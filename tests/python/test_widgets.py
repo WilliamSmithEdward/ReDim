@@ -711,6 +711,23 @@ def test_accessibility(run_widgets):
     assert facts["knobOnAccent"] == "True"
 
 
+def test_toast_size(run_widgets):
+    facts = parse_transcript(run_widgets("TestToastSize"))
+    assert facts["shortSize"] == "240x40", "a short toast keeps its 240 by 40 card"
+    assert facts["growsTall"] == "True", (
+        "a long message must grow the toast as tall as its wrapped words"
+    )
+    assert facts["stacksBelow"] == "True", "a toast must stack under a tall one"
+    assert facts["movesUp"] == "True", (
+        "when a tall toast leaves, the one under it must move up to its place"
+    )
+    assert facts["capsHeight"] == "True", (
+        "MaxHeight must cap the toast and end the message in an ellipsis"
+    )
+    assert facts["fitsNarrow"] == "True", "MinWidth must let a short toast go narrow"
+    assert facts["fitsWide"] == "True", "MaxWidth must let a toast widen for its words"
+
+
 def test_toast_conventions(run_widgets):
     facts = parse_transcript(run_widgets("TestToastConventions"))
     assert facts["closeButton"] == "True", "every toast needs a visible close"
@@ -727,11 +744,20 @@ def test_toast_conventions(run_widgets):
         "a tone colors the icon and the edge; the close glyph stays muted"
     )
     assert facts["actionText"] == "Undo"
+    assert facts["actionAccent"] == "True", "an action button's border is the accent by default"
     assert facts["actionLongerTtl"] == "True", (
         "an action adds four seconds to the toast's time"
     )
     assert facts["actionRan"] == "True"
     assert facts["actionDismisses"] == "True"
+    assert facts["closeUnderPointer"] == "True", (
+        "the close button must dismiss a toast the pointer rests on, and run no handler"
+    )
+    assert facts["cardRunsOnClick"] == "True", (
+        "a click on the card must run OnClick with the toast as sender and dismiss it"
+    )
+    assert facts["closeRunsNothing"] == "True"
+    assert facts["actionBorder"] == "True", "ActionBorder must color the action button's border"
 
 
 def test_keyboard_focus(run_widgets):

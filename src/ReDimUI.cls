@@ -180,6 +180,18 @@ Private Const TIP_REST_SLOP As Double = 3
 ' 24 pixels at 96 DPI: the WCAG 2.5.8 minimum target size.
 Private Const PAGER_TARGET As Double = 18
 
+' Toast size, in points: the width a toast keeps unless MinWidth and
+' MaxWidth let it fit its words, the height of one line, the greatest
+' height before the message ends in an ellipsis, and the gap between
+' stacked toasts.
+Private Const TOAST_WIDTH As Double = 240
+Private Const TOAST_MIN_HEIGHT As Double = 40
+Private Const TOAST_MAX_HEIGHT As Double = 160
+Private Const TOAST_GAP As Double = 6
+' The card's corner radius, and the inset it gives the words on each side.
+Private Const TOAST_CORNER As Double = 8
+Private Const TOAST_TEXT_INSET As Double = 2.35
+
 ' Transfer list layout, in points: the header over each panel, the move
 ' buttons between the panels and the gap around them, and a row.
 Private Const TRANSFER_HEADER_H As Double = 18
@@ -426,6 +438,9 @@ Private mToastTrayAnchor As String
 Private mToastRailLeft As Double
 Private mToastRailTop As Double
 Private mToastRailStored As Boolean
+' Set when a toast's height changed during a flush; the tray restacks
+' once the flush ends.
+Private mToastRestackPending As Boolean
 Private mHotKeys As Collection
 Private mSurfaceProtected As Boolean
 Private mIsWindow As Boolean
@@ -491,6 +506,14 @@ Private mLastClickMs As LongLong
 Private mExpiresAtMs As LongLong
 Private mToastActionLabel As String
 Private mToastActionProc As String
+' The action button's border, -1 for the theme's accent.
+Private mToastActionBorder As Long
+' A toast's size limits (0 for the defaults) and the tray top its stack
+' measures from.
+Private mToastMinWidth As Double
+Private mToastMaxWidth As Double
+Private mToastMaxHeight As Double
+Private mToastOriginTop As Double
 Private mSlideRemaining As Double
 Private mToastExiting As Boolean
 Private mExitRemaining As Double
@@ -2687,17 +2710,19 @@ Friend Sub RecordToastRail( _
     mToastRailStored = True
 End Sub
 
-' The lowest visual position any live toast currently occupies, glides
-' included. -1 when the tray is otherwise empty.
-Friend Function MaxToastVisualTop(ByVal claimantId As String) As Double
+' The lowest edge any live toast currently reaches, glides included. -1
+' when the tray is otherwise empty.
+Friend Function MaxToastVisualBottom(ByVal claimantId As String) As Double
     Dim componentValue As ReDimUI
 
-    MaxToastVisualTop = -1
+    MaxToastVisualBottom = -1
     For Each componentValue In mComponents
         If componentValue.IsPendingToast Then
             If componentValue.ComponentId <> claimantId Then
-                If componentValue.ToastVisualTop > MaxToastVisualTop Then
-                    MaxToastVisualTop = componentValue.ToastVisualTop
+                If componentValue.ToastVisualTop + componentValue.ToastHeight _
+                    > MaxToastVisualBottom Then
+                    MaxToastVisualBottom = componentValue.ToastVisualTop _
+                        + componentValue.ToastHeight
                 End If
             End If
         End If
@@ -3482,6 +3507,10 @@ Public Sub FlushDirty()
     Next dirtyId
     Set mDirtyIds = New Collection
     ProcessPendingReflows
+    If mToastRestackPending Then
+        mToastRestackPending = False
+        CompactToastSlots
+    End If
     If toggledScreen Then Application.ScreenUpdating = priorScreenUpdating
     Exit Sub
 
@@ -4203,7 +4232,9 @@ End Sub
 
 ' After any toast leaves, survivors renumber to slots 1..N in their current
 ' order and slide up into the freed positions, the way a notification tray
-' behaves.
+' behaves. Each sits under the toasts above it, heights and gaps summed,
+' since a toast is as tall as its message; the same pass restacks the
+' tray when a toast's height changes.
 Private Sub CompactToastSlots()
     Dim live As Collection
     Dim componentValue As ReDimUI
@@ -4211,6 +4242,7 @@ Private Sub CompactToastSlots()
     Dim idx As Long
     Dim lowestAt As Long
     Dim assigned As Long
+    Dim stackAbove As Double
 
     Set live = New Collection
     For Each componentValue In mComponents
@@ -4232,10 +4264,33 @@ Private Sub CompactToastSlots()
             End If
         Next idx
         assigned = assigned + 1
-        If lowest.ToastSlot <> assigned Then lowest.ReslotToast assigned
+        lowest.ReslotToast assigned, stackAbove
+        stackAbove = stackAbove + lowest.ToastHeight + TOAST_GAP
         live.Remove lowestAt
     Loop
 End Sub
+
+' A toast's height changed while drawing; the tray restacks after the
+' flush, not in the middle of it.
+Friend Sub NoteToastResized()
+    mToastRestackPending = True
+End Sub
+
+' How far down the tray a slot sits: the live toasts in the slots above
+' it, each with its height and gap.
+Friend Function ToastStackAbove(ByVal claimantId As String, ByVal slot As Long) As Double
+    Dim componentValue As ReDimUI
+
+    For Each componentValue In mComponents
+        If componentValue.IsPendingToast Then
+            If componentValue.ComponentId <> claimantId Then
+                If componentValue.ToastSlot < slot Then
+                    ToastStackAbove = ToastStackAbove + componentValue.ToastHeight + TOAST_GAP
+                End If
+            End If
+        End If
+    Next componentValue
+End Function
 
 Friend Function HasAppWork() As Boolean
     Dim opValue As ReDimUI
@@ -4742,6 +4797,50 @@ Public Function Action(ByVal actionLabel As String, ByVal handlerProc As String)
     Touch
     Set Action = Me
 End Function
+
+' The border of a toast's action button, an RGB color; the theme's accent
+' until set.
+Public Function ActionBorder(ByVal borderRgb As Long) As ReDimUI
+    RequireToastKind "ActionBorder"
+    mToastActionBorder = borderRgb
+    Touch
+    Set ActionBorder = Me
+End Function
+
+' The narrowest and widest a toast may be, in points. A toast fits its
+' message between the two and wraps past the widest; both are 240 until
+' set, a fixed width. A MinWidth under the MaxWidth lets a short message
+' make a narrow toast, and a MinWidth over it fixes the wider width.
+Public Function MinWidth(ByVal widthPoints As Double) As ReDimUI
+    RequireToastKind "MinWidth"
+    mToastMinWidth = widthPoints
+    Touch
+    Set MinWidth = Me
+End Function
+
+Public Function MaxWidth(ByVal widthPoints As Double) As ReDimUI
+    RequireToastKind "MaxWidth"
+    mToastMaxWidth = widthPoints
+    Touch
+    Set MaxWidth = Me
+End Function
+
+' The tallest a toast grows to fit a wrapped message, in points, 160
+' until set; a longer message ends in an ellipsis. Never less than one
+' line's 40 points.
+Public Function MaxHeight(ByVal heightPoints As Double) As ReDimUI
+    RequireToastKind "MaxHeight"
+    mToastMaxHeight = heightPoints
+    Touch
+    Set MaxHeight = Me
+End Function
+
+Private Sub RequireToastKind(ByVal memberName As String)
+    RequireRole ROLE_COMPONENT, memberName
+    If mKind <> KIND_TOAST Then
+        RaiseError ERROR_INVALID_ARGUMENT, memberName, memberName & " applies to toasts."
+    End If
+End Sub
 
 ' Tab order: positive values come first, ascending; the rest follow in
 ' creation order; -1 takes the control out of Tab while Focus still
@@ -6512,6 +6611,7 @@ Friend Sub ConfigureToast( _
     mText = messageText
     mExpiresAtMs = GetTickCount64() + ttlMs
     mValue = slot
+    mToastActionBorder = -1
     Set hostApp = OwnerApp
     ' Tray origin, in preference order: an explicit ToastTray anchor (used
     ' exactly as pinned), or a rail just outside the content's right edge,
@@ -6549,21 +6649,22 @@ Friend Sub ConfigureToast( _
         hostApp.RecordToastRail originLeft, originTop
     End If
     mLeft = originLeft
-    mTop = originTop + (slot - 1) * (mHeight + 6)
+    mToastOriginTop = originTop
+    mTop = originTop + hostApp.ToastStackAbove(mComponentId, slot)
     ' Entrance animation: the shape spawns below its slot and the pump
     ' eases it up into place. During a compaction glide the newcomer's
     ' slot may still be visually occupied by a survivor easing upward, so
     ' the entrance starts below the column as drawn, not just the model:
-    ' one full pitch under the lowest live toast when that is deeper than
-    ' the default hop.
-    Dim occupiedTop As Double
+    ' a gap under the lowest live toast when that is deeper than the
+    ' default hop.
+    Dim occupiedBottom As Double
     mSlideRemaining = 14
     mToastExiting = False
     mExitRemaining = 0
-    occupiedTop = hostApp.MaxToastVisualTop(mComponentId)
-    If occupiedTop >= 0 Then
-        If occupiedTop + mHeight + 6 - mTop > mSlideRemaining Then
-            mSlideRemaining = occupiedTop + mHeight + 6 - mTop
+    occupiedBottom = hostApp.MaxToastVisualBottom(mComponentId)
+    If occupiedBottom >= 0 Then
+        If occupiedBottom + TOAST_GAP - mTop > mSlideRemaining Then
+            mSlideRemaining = occupiedBottom + TOAST_GAP - mTop
         End If
     End If
     If ReDimUI.MotionReduced Then mSlideRemaining = 0
@@ -6599,22 +6700,23 @@ Friend Property Get IsToastExitDone() As Boolean
         And mExitRemaining <= 0)
 End Property
 
-' Moves this toast to a new slot, easing from wherever it currently sits
-' (including mid-entrance) to the new position without a visual jump.
-Friend Sub ReslotToast(ByVal newSlot As Long)
-    Dim slotPitch As Double
-    Dim originTop As Double
+' Moves this toast to a slot stackAbove points under the tray's top,
+' easing up from wherever it currently sits (including mid-entrance)
+' without a visual jump. A move down, when a toast above grew, lands at
+' once, as does every move with motion reduced.
+Friend Sub ReslotToast(ByVal newSlot As Long, ByVal stackAbove As Double)
     Dim visualTop As Double
+    Dim targetTop As Double
 
     If mKind <> KIND_TOAST Then Exit Sub
-    slotPitch = mHeight + 6
-    originTop = mTop - (CLng(mValue) - 1) * slotPitch
+    targetTop = mToastOriginTop + stackAbove
+    If newSlot = CLng(mValue) And Abs(targetTop - mTop) < 0.01 Then Exit Sub
     visualTop = mTop + mSlideRemaining
     mValue = newSlot
-    mTop = originTop + (newSlot - 1) * slotPitch
+    mTop = targetTop
     mSlideRemaining = visualTop - mTop
     If mSlideRemaining < 0 Then mSlideRemaining = 0
-    If ReDimUI.MotionReduced Then
+    If ReDimUI.MotionReduced Or mSlideRemaining = 0 Then
         ' No glide: the next apply moves the shape to its slot, and its
         ' buttons with it.
         mSlideRemaining = 0
@@ -6622,6 +6724,10 @@ Friend Sub ReslotToast(ByVal newSlot As Long)
     End If
     ReDimUI.RequestPump
 End Sub
+
+Friend Property Get ToastHeight() As Double
+    If mKind = KIND_TOAST Then ToastHeight = mHeight
+End Property
 
 ' A toast under the pointer holds its countdown before the check.
 Friend Function IsExpiredToast(ByVal nowMs As LongLong) As Boolean
@@ -7512,13 +7618,19 @@ Friend Sub RunClickBehavior()
             End If
             Exit Sub
         Case KIND_TOAST
-            ' Any click dismisses; the action button also runs its
-            ' handler, whose errors reach the app's error handler.
-            mExpiresAtMs = 1
-            ReDimUI.RequestPump
-            If ReDimUI.SenderPart = "ta" And LenB(mToastActionProc) > 0 Then
-                Application.Run mToastActionProc
-            End If
+            ' Any click puts the toast away at once, fading from here: a
+            ' dismissal left to the countdown was undone while the pointer
+            ' rested on the toast, which holds the countdown. The action
+            ' button runs its handler and the card runs OnClick; the close
+            ' button runs nothing. Handler errors reach the app's handler.
+            BeginToastExit
+            Select Case ReDimUI.SenderPart
+                Case "ta"
+                    If LenB(mToastActionProc) > 0 Then Application.Run mToastActionProc
+                Case "tx"
+                Case Else
+                    RunClickHandlers hostApp
+            End Select
             Exit Sub
     End Select
     RunClickHandlers hostApp
@@ -10461,9 +10573,10 @@ Private Function ToastToneColor(ByVal themeValue As ReDimUI) As Long
     End Select
 End Function
 
-' The tone's icon color and edge, the close button, and the action
-' button, placed at the toast's current visual top; the pump carries
-' them through the slide and the fade from there.
+' The card fitted to its message, the tone's icon color and edge, the
+' close button, and the action button, placed at the toast's current
+' visual top; the pump carries them through the slide and the fade from
+' there. The card fits first, so the buttons sit on its final edges.
 Private Sub ApplyToastParts( _
     ByVal mainShape As Shape, _
     ByVal hostSheet As Worksheet, _
@@ -10476,19 +10589,31 @@ Private Sub ApplyToastParts( _
     Dim resolvedSize As Double
 
     visualTop = mTop + mSlideRemaining
-    If ExtrasCurrent(PartsState(themeValue) & ":" & ToastIcon() & ":" & _
-        mToastActionLabel & ":" & CStr(visualTop)) Then Exit Sub
+    If ExtrasCurrent(ToastPartsKey(themeValue, visualTop)) Then Exit Sub
     resolvedSize = mFontSize
     If resolvedSize <= 0 Then resolvedSize = themeValue.BaseFontSize
+    ' Margins keep the words clear of the buttons; the icon's tab stop
+    ' is set before the fit, since it moves where the words begin.
+    mainShape.TextFrame2.MarginLeft = 8
+    If LenB(mToastActionLabel) > 0 Then
+        ' Sized from the label; ink in surface text, since the accent
+        ' does not reach 4.5:1 as text on every theme's surface.
+        actionWidth = Len(mToastActionLabel) * resolvedSize * 0.62 + 14
+        mainShape.TextFrame2.MarginRight = PAGER_TARGET + 11 + actionWidth
+    Else
+        mainShape.TextFrame2.MarginRight = PAGER_TARGET + 6
+    End If
+    If LenB(ToastIcon()) > 0 Then
+        With mainShape.TextFrame2.TextRange.ParagraphFormat.TabStops
+            If .Count = 0 Then .Add msoTabStopLeft, 18
+        End With
+    End If
+    FitToastCard mainShape
     If LenB(ToastIcon()) > 0 Then
         mainShape.Line.ForeColor.RGB = ToastToneColor(themeValue)
         mainShape.Line.Weight = 1.5
-        With mainShape.TextFrame2.TextRange
-            .Characters(1, 1).Font.Fill.ForeColor.RGB = ToastToneColor(themeValue)
-            With .ParagraphFormat.TabStops
-                If .Count = 0 Then .Add msoTabStopLeft, 18
-            End With
-        End With
+        mainShape.TextFrame2.TextRange.Characters(1, 1).Font.Fill.ForeColor.RGB = _
+            ToastToneColor(themeValue)
     End If
 
     Set closeButton = EnsurePartShape(hostSheet, "tx", msoShapeRectangle)
@@ -10505,9 +10630,6 @@ Private Sub ApplyToastParts( _
     closeButton.OnAction = mAppliedOnAction
 
     If LenB(mToastActionLabel) > 0 Then
-        ' Sized from the label; ink in surface text, since the accent
-        ' does not reach 4.5:1 as text on every theme's surface.
-        actionWidth = Len(mToastActionLabel) * resolvedSize * 0.62 + 14
         Set actionButton = EnsurePartShape( _
             hostSheet, "ta", msoShapeRoundedRectangle)
         actionButton.Left = mLeft + mWidth - PAGER_TARGET - 7 - actionWidth
@@ -10517,17 +10639,121 @@ Private Sub ApplyToastParts( _
         actionButton.Fill.Visible = msoTrue
         actionButton.Fill.ForeColor.RGB = ResolveSurfaceFill(themeValue)
         actionButton.Line.Visible = msoTrue
-        actionButton.Line.ForeColor.RGB = themeValue.PrimaryColor
+        If mToastActionBorder >= 0 Then
+            actionButton.Line.ForeColor.RGB = mToastActionBorder
+        Else
+            actionButton.Line.ForeColor.RGB = themeValue.PrimaryColor
+        End If
         actionButton.Line.Weight = 1
         StyleGlyphText actionButton, mToastActionLabel, _
             themeValue.OnSurfaceColor, resolvedSize - 1, themeValue
         actionButton.Visible = BoolToMso(mVisible)
         actionButton.OnAction = mAppliedOnAction
-        mainShape.TextFrame2.MarginRight = PAGER_TARGET + 11 + actionWidth
-    Else
-        mainShape.TextFrame2.MarginRight = PAGER_TARGET + 6
     End If
-    mainShape.TextFrame2.MarginLeft = 8
+    ' The fit may have resized the card: record the state the parts now
+    ' match, so the next apply skips them.
+    mAppliedExtrasSig = ToastPartsKey(themeValue, visualTop)
+End Sub
+
+Private Function ToastPartsKey(ByVal themeValue As ReDimUI, ByVal visualTop As Double) As String
+    ToastPartsKey = PartsState(themeValue) & ":" & ToastIcon() & ":" & mToastActionLabel & _
+        ":" & CStr(mToastActionBorder) & ":" & CStr(visualTop) & ":" & CStr(mToastMinWidth) & _
+        ":" & CStr(mToastMaxWidth) & ":" & CStr(mToastMaxHeight) & Chr$(2) & ResolveText(Nothing)
+End Function
+
+' The card fits its message: as wide as the words need between MinWidth
+' and MaxWidth, and no wider than the window's room to the right, then
+' as tall as the words wrapped at that width, from one line's height to
+' MaxHeight, where a longer message ends in an ellipsis. A change of
+' height restacks the tray once the flush ends.
+Private Sub FitToastCard(ByVal cardShape As Shape)
+    Dim minWide As Double
+    Dim maxWide As Double
+    Dim maxTall As Double
+    Dim fitWidth As Double
+    Dim fitHeight As Double
+    Dim viewLeft As Double
+    Dim viewTop As Double
+    Dim viewWidth As Double
+    Dim viewHeight As Double
+    Dim priorHeight As Double
+
+    minWide = mToastMinWidth
+    If minWide <= 0 Then minWide = TOAST_WIDTH
+    maxWide = mToastMaxWidth
+    If maxWide <= 0 Then maxWide = TOAST_WIDTH
+    OwnerApp.ResolveViewport viewLeft, viewTop, viewWidth, viewHeight
+    If mLeft + maxWide > viewLeft + viewWidth - 12 Then
+        maxWide = viewLeft + viewWidth - 12 - mLeft
+    End If
+    If maxWide < minWide Then maxWide = minWide
+    maxTall = mToastMaxHeight
+    If maxTall <= 0 Then maxTall = TOAST_MAX_HEIGHT
+    If maxTall < TOAST_MIN_HEIGHT Then maxTall = TOAST_MIN_HEIGHT
+    ' A rounded card lays its words out inside a frame inset by its corner
+    ' radius times 0.2929 (Office's preset geometry), and the radius is a
+    ' share of the shorter side, so the corner is held at TOAST_CORNER
+    ' points: the inset stays put however tall the card grows.
+    With cardShape.TextFrame2
+        .WordWrap = msoFalse
+        fitWidth = .TextRange.BoundWidth + .MarginLeft + .MarginRight + TOAST_TEXT_INSET * 2 + 1
+        If fitWidth < minWide Then fitWidth = minWide
+        If fitWidth > maxWide Then fitWidth = maxWide
+        cardShape.Width = fitWidth
+        HoldToastCorner cardShape
+        .WordWrap = msoTrue
+        fitHeight = .TextRange.BoundHeight + .MarginTop + .MarginBottom + TOAST_TEXT_INSET * 2 + 6
+        If fitHeight > maxTall Then
+            ShortenToastText cardShape, maxTall
+            fitHeight = maxTall
+        End If
+    End With
+    If fitHeight < TOAST_MIN_HEIGHT Then fitHeight = TOAST_MIN_HEIGHT
+    priorHeight = mHeight
+    mWidth = fitWidth
+    mHeight = fitHeight
+    cardShape.Height = fitHeight
+    HoldToastCorner cardShape
+    If Abs(fitHeight - priorHeight) > 0.01 Then OwnerApp.NoteToastResized
+End Sub
+
+Private Sub HoldToastCorner(ByVal cardShape As Shape)
+    Dim shortSide As Double
+
+    shortSide = cardShape.Width
+    If cardShape.Height < shortSide Then shortSide = cardShape.Height
+    If shortSide <= 0 Then Exit Sub
+    On Error Resume Next
+    cardShape.Adjustments(1) = TOAST_CORNER / shortSide
+    On Error GoTo 0
+End Sub
+
+' Cuts a message that runs past MaxHeight back to the lines that fit,
+' the last word giving way to an ellipsis. The words keep their ink.
+Private Sub ShortenToastText(ByVal cardShape As Shape, ByVal maxTall As Double)
+    Dim lineTotal As Long
+    Dim fitLines As Long
+    Dim keptWords As String
+    Dim cutAt As Long
+    Dim inkRgb As Long
+
+    With cardShape.TextFrame2
+        lineTotal = .TextRange.Lines.Count
+        If lineTotal < 2 Then Exit Sub
+        fitLines = Int((maxTall - .MarginTop - .MarginBottom - TOAST_TEXT_INSET * 2 - 6) / _
+            (.TextRange.BoundHeight / lineTotal))
+        If fitLines < 1 Then fitLines = 1
+        If fitLines >= lineTotal Then Exit Sub
+        keptWords = .TextRange.Text
+        With .TextRange.Lines(fitLines)
+            keptWords = RTrim$(Left$(keptWords, .Start + .Length - 1))
+        End With
+        cutAt = InStrRev(keptWords, " ")
+        If cutAt > Len(keptWords) \ 2 Then keptWords = RTrim$(Left$(keptWords, cutAt - 1))
+        inkRgb = .TextRange.Characters(.TextRange.Length, 1).Font.Fill.ForeColor.RGB
+        .TextRange.Text = keptWords & ChrW(8230)
+        .TextRange.Font.Fill.ForeColor.RGB = inkRgb
+    End With
 End Sub
 
 ' Carries the close and action buttons with the toast's slide and fade.
