@@ -464,6 +464,27 @@
   value, in its variant's color, and a spoken summary of the count, low,
   high, and last value. It redraws only when its values, place, or color
   change.
+- A click on an open drop list's pager could close the list instead
+  of paging it. The watch that closes a list, or ends a field's focus,
+  on a press off the control decided at the press, from a pointer
+  reading, before Excel delivered the click on the pager. A press
+  judged off now takes effect once the button is back up and a short
+  grace has passed, and a click on the control in between cancels it.
+- Performance, measured back to back against the build before these
+  additions. First draws on a sheet that held none of an app's shapes
+  skip the name lookups that could only miss: a missed Shapes(name)
+  scans the whole sheet and raises, 0.1 ms at 100 shapes and 0.8 ms at
+  1,000. A 100-control first render drops from 180 to 168 ms and a date
+  picker opens in 74 ms instead of 80. Every drawn control used to call
+  the tab-panel, caption, badge, focus-ring, and stack steps whether or
+  not it used them; VBA pays for a procedure's first call in a session,
+  so each call now waits on its feature. The UI text defaults moved from
+  a 54-case function to one constant. Animation checks ask one kind at a
+  time, where one expression asked Windows about motion for every
+  ticking control each frame, and the Windows motion setting is read at
+  most once a second. Switches and tab strips join the frame loop only
+  while they glide. The first render of a small form, cold, fell from
+  134 ms to 116 ms of the 99 it took before these additions.
 - The numeric keypad types into a focused field. Its digits and
   operators were never captured, so they went past the field to the
   grid, where a protected sheet refused them with a warning and an

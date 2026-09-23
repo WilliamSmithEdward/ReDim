@@ -147,6 +147,27 @@ def test_no_statement_ends_in_a_parenthesized_call():
     )
 
 
+def test_ui_text_table_follows_its_indexes():
+    """UI_TEXT_TABLE lists the UI texts in the order of their UI_ index
+    constants, one entry each: UI_NO_ROWS_MATCH is entry 2, NoRowsMatch.
+    A table out of step would give every text after the slip the wrong
+    words."""
+    text = REDIMUI.read_text(encoding="utf-8").replace("\r\n", "\n")
+    numbers = {
+        int(number): name
+        for name, number in re.findall(r"Private Const (UI_\w+) As Long = (\d+)", text)
+        if name != "UI_TEXT_COUNT"
+    }
+    count = int(re.search(r"Private Const UI_TEXT_COUNT As Long = (\d+)", text).group(1))
+    body = re.search(r"Private Const UI_TEXT_TABLE As String = _\n((?:.*\n)*?)(?!\s+\")",
+                     text).group(1)
+    table = "".join(re.findall(r'"((?:[^"]|"")*)"', body))
+    names = [entry.split("=", 1)[0] for entry in table.split("|")]
+    expected = [numbers[index] for index in range(1, count + 1)]
+    derived = ["UI_" + re.sub(r"(?<=[a-z])(?=[A-Z])", "_", name).upper() for name in names]
+    assert derived == expected, "UI_TEXT_TABLE is out of step with the UI_ constants"
+
+
 def test_release_sources_carry_license_and_version():
     """Every source a release ships opens with the version and release date,
     the repository, and the MIT license, built from REDIM_VERSION, the

@@ -1339,3 +1339,11 @@ def test_bool_binding(run_widgets):
     assert facts["clickWrites"] == "False/False", (
         "a click writes the store and the controls bound to it follow"
     )
+
+
+def test_press_off_release(run_widgets):
+    facts = parse_transcript(run_widgets("TestPressOffRelease"))
+    assert facts["held"] == "True", "a held press off the list closes nothing yet"
+    assert facts["clickKeeps"] == "True/A", "a click on the list's pager pages and keeps it open"
+    assert facts["waits"] == "True", "the close waits out the grace after the release"
+    assert facts["closes"] == "True", "a press off with no click closes the list"

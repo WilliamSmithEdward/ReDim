@@ -152,7 +152,10 @@ All fluent, all return the component:
   filter or "No items" in an empty select. A list that would run past the bottom of the
   visible window opens upward when there is more room above. One list is open per app:
   opening one closes the others, and so does a click on another control, a press anywhere
-  off the face and rows, or a move of the grid selection.
+  off the face, rows, and pagers once the button comes back up, or a move of the grid
+  selection. A click Excel delivers on the list itself after such a press keeps it open,
+  so a pointer reading that lands just off the list never closes it under a click on
+  its own pager.
 - Bindings: `BindText(key, template)` where `{0}` is the value, `BindValue(key)`,
   `BindVisible(key, invert)`, `BindEnabled(key, invert)`, `WritesTo(key)`. The invert flag
   serves the disable-while-busy pattern: `BindEnabled "anyRunning", True`. A `Toggle`,
@@ -719,9 +722,10 @@ keep the keys.
 - A focused control wears an accent ring three points outside its bounds; a text field
   shows focus on its own border. A check list or transfer list also shows a dotted cursor
   on the row its arrow keys have reached.
-- Focus ends on Esc, on a click on another control, on a press anywhere off the control,
-  or when the grid selection moves: the watch that ends a text field's focus, for every
-  kind. A control that turns hidden or disabled gives focus up.
+- Focus ends on Esc, on a click on another control, on a press anywhere off the control
+  once the button comes back up, or when the grid selection moves: the watch that ends a
+  text field's focus, for every kind. A control that turns hidden or disabled gives focus
+  up.
 - Enter on a control with no use for it clicks the app's default button,
   `ui.DefaultButton "save"`. A focused button takes Enter itself.
 - Modals trap focus. `Confirm` puts focus on OK, Tab stays among the dialog's buttons,

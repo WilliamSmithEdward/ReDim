@@ -4648,6 +4648,8 @@ Public Function TestGlide() As String
     Dim frameNo As Long
 
     ReDimUI.AutoPump False
+    ' Full motion whatever the machine's Windows animation setting.
+    ReDimUI.ReduceMotion False
     Set host = NewCanvas()
     Set app = ReDimUI.Mount(host, "wid68")
     app.Toggle("sw").AtRect 24, 24, 44, 22
@@ -4737,4 +4739,50 @@ Public Function TestBoolBinding() As String
         CStr(app.TickBox("tick").IsChecked)
     ReDimUI.AutoPump True
     TestBoolBinding = transcript
+End Function
+
+' A press read as off an open list closes it once the button is back up
+' and the grace for a click has passed. A click Excel delivers on the
+' list's own pager in the meantime keeps it open, as happens when the
+' pointer read lands just off the list, and a press off with no click
+' still closes it.
+Public Function TestPressOffRelease() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim transcript As String
+
+    ReDimUI.AutoPump False
+    ReDimUI.OverridePointer 900, 5, False
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "wid71")
+    app.SelectBox("pick").AtRect(24, 24, 140, 22).Items "A", "B", "C", "D", "E", "F", _
+        "G", "H", "I", "J", "K", "L"
+    app.Render
+    ReDimUI.DispatchShape "rdm_wid71_pick"
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid71_pick__optd"
+
+    ReDimUI.OverridePointer 600, 400, True
+    ReDimUI.PumpOnce
+    transcript = "held=" & CStr(ShapeExists(host, "rdm_wid71_pick__opt1"))
+    ReDimUI.OverridePointer 600, 400, False
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid71_pick__optu"
+    ReDimUI.PumpOnce
+    Sleep 150
+    ReDimUI.PumpOnce
+    transcript = transcript & "|clickKeeps=" & CStr(ShapeExists(host, "rdm_wid71_pick__opt1")) & _
+        "/" & Trim$(Mid$(host.Shapes("rdm_wid71_pick__opt1").TextFrame2.TextRange.Text, 2))
+
+    ReDimUI.OverridePointer 600, 400, True
+    ReDimUI.PumpOnce
+    ReDimUI.OverridePointer 600, 400, False
+    ReDimUI.PumpOnce
+    transcript = transcript & "|waits=" & CStr(ShapeExists(host, "rdm_wid71_pick__opt1"))
+    Sleep 150
+    ReDimUI.PumpOnce
+    transcript = transcript & "|closes=" & CStr(Not ShapeExists(host, "rdm_wid71_pick__opt1"))
+    ReDimUI.ClearPointerOverride
+    ReDimUI.AutoPump True
+    TestPressOffRelease = transcript
 End Function

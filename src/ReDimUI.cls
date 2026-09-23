@@ -203,6 +203,10 @@ Private Const SPARK_DOT As Double = 5
 ' hover fill, and an expander header's, in points.
 Private Const ROW_CORNER As Double = 4
 
+' How long after the release of a press off a field or open list the
+' close waits for Excel to deliver a click to the control itself.
+Private Const OFF_PRESS_GRACE_MS As Long = 120
+
 ' A gliding knob or tab bar keeps this share of its distance per 50 ms,
 ' so a glide across a switch settles in about 200 ms at any frame rate.
 Private Const GLIDE_DECAY As Double = 0.4
@@ -212,7 +216,7 @@ Private Const GLIDE_DECAY As Double = 0.4
 Private Const IMAGE_MISSING As String = "?missing?"
 
 ' The words ReDim draws or announces on its own, by index. SetUIText
-' replaces them by name; UITextDefinition holds each name and default.
+' replaces them by name; UI_TEXT_TABLE holds each name and default.
 Private Const UI_NO_ROWS As Long = 1
 Private Const UI_NO_ROWS_MATCH As Long = 2
 Private Const UI_NO_ITEMS As Long = 3
@@ -269,6 +273,34 @@ Private Const UI_ALT_SPARKLINE As Long = 53
 Private Const UI_ALT_SPARKLINE_EMPTY As Long = 54
 Private Const UI_TEXT_COUNT As Long = 54
 
+' Each UI text's name and English default, "name=words", in index
+' order and joined by bars; EnsureUIWords splits it once. One constant
+' rather than a Select Case: VBA pays for a procedure's first call by
+' its size, and this table sits on every first draw.
+Private Const UI_TEXT_TABLE As String = _
+    "NoRows=No rows|NoRowsMatch=No rows match|NoItems=No items|NoMatches=No matches|" & _
+    "RowRange={0}-{1} of {2}|RowRangeEmpty=0 of 0|FilterNote=Filter ""{0}"": {1}|" & _
+    "SelectAll=Select all ({0}/{1})|SelectAllFiltered=Select all ""{0}"" ({1}/{2})|" & _
+    "Available=Available|Selected=Selected|PanelFiltered={0} ""{1}"" ({2} of {3})|" & _
+    "MoreItems={0} more|TypeCommand=Type a command|Working=Working...|" & _
+    "Required=Required|OK=OK|Cancel=Cancel|Column=Column {0}|" & _
+    "ImageNotFound=(image not found)|AltButton={0}, button|AltBusy=busy|" & _
+    "AltProgress=Progress, {0} percent|AltSpinner=Busy|AltSwitchOn=Switch, on|" & _
+    "AltSwitchOff=Switch, off|AltEditField=Edit field|AltMasked=masked|" & _
+    "AltComboBox=Combo box|AltMenuButton={0}, menu button|AltDropDown=Drop-down, {0}|" & _
+    "AltChecked={0}, checkbox, checked|AltNotChecked={0}, checkbox, not checked|" & _
+    "AltRadioGroup=Radio group|AltItemSelected={0} selected|AltStepper=Stepper, {0}|" & _
+    "AltSlider=Slider, {0}|AltTransferList=Transfer list|" & _
+    "AltCheckList=Checklist, {0} of {1} checked|AltImage=Image|AltLoading=Loading|" & _
+    "AltExpanded={0}, expander, expanded|AltCollapsed={0}, expander, collapsed|" & _
+    "AltTable=Table, {0} rows|AltTableOneRow=Table, 1 row|" & _
+    "AltSortedAscending=sorted by {0}, ascending|" & _
+    "AltSortedDescending=sorted by {0}, descending|AltShown={0} shown|" & _
+    "AltDatePicker=Date picker, {0}|AltTabs=Tabs|" & _
+    "AltTabSelected={0} selected, tab {1} of {2}|AltUnavailable=unavailable|" & _
+    "AltSparkline=Trend, {0} values, low {1}, high {2}, last {3}|" & _
+    "AltSparklineEmpty=Trend, no values"
+
 Private Const VARIANT_PRIMARY As Long = 0
 Private Const VARIANT_SECONDARY As Long = 1
 Private Const VARIANT_SUCCESS As Long = 2
@@ -319,8 +351,11 @@ Private mFramePointerY As Double
 ' The caret blink interval Windows reported when a field last took
 ' focus; 0 when the user turned blinking off.
 Private mCaretBlinkMs As Long
-' Motion preference: follow Windows (0), reduced (1), or full (2).
+' Motion preference: follow Windows (0), reduced (1), or full (2); and
+' the Windows setting as last read, with when.
 Private mMotionChoice As Long
+Private mMotionOffWindows As Boolean
+Private mMotionReadMs As LongLong
 ' The UI text table: each entry's name and the words it holds now.
 Private mUITextNames() As String
 Private mUIWords() As String
@@ -352,6 +387,13 @@ Private mStateValues As Collection
 ' The state keys in the order they were first set; a Collection keeps
 ' no key list of its own.
 Private mStateKeys As Collection
+' Whether the app's sheet held none of its shapes when it mounted, and
+' the shape names it has drawn since. On such a sheet a name it never
+' drew cannot exist, so the lookup that would miss is skipped: a missed
+' Shapes(name) scans the whole sheet and raises, 0.1 ms at 100 shapes
+' and 0.8 ms at 1,000.
+Private mSurfaceFresh As Boolean
+Private mDrawnShapes As Collection
 Private mStateHandlers As Collection
 Private mDirtyIds As Collection
 Private mBatchDepth As Long
@@ -696,6 +738,10 @@ Private mTableEmptyText As String
 Private mRowOpenProc As String
 ' A float TextInput that shows dots for its characters.
 Private mMasked As Boolean
+' A press judged off the field or open list, waiting for its release,
+' and when the release was seen.
+Private mOffPressPending As Boolean
+Private mOffPressUpMs As LongLong
 ' A part gliding to its place, a switch's knob or a tab strip's bar: the
 ' part, where it is headed, and how far it still is from there, which
 ' the frames close. The state and tab it last glided from.
@@ -1028,6 +1074,8 @@ Friend Sub DispatchShape(ByVal clickedName As String)
     End If
     If Not TryGetObject(mApps, targetAppId, appValue) Then Exit Sub
     If Not appValue.TryGetComponent(targetComponentId, componentValue) Then Exit Sub
+    ' A click on the control: the press that led to it was on it.
+    componentValue.CancelOffPress
     If targetPart = "tt" Then
         appValue.DismissTooltip
         Exit Sub
@@ -1554,9 +1602,11 @@ Public Sub ReduceMotion(Optional ByVal motionOff As Variant)
 End Sub
 
 ' True when animations should not play: the ReduceMotion override when
-' set, else the Windows setting, read each time since users change it.
+' set, else the Windows setting, read again at most once a second since
+' users change it while frames ask many times a second.
 Public Property Get MotionReduced() As Boolean
     Dim animationsOn As Long
+    Dim nowMs As LongLong
 
     If Not IsFactory(Me) Then
         MotionReduced = ReDimUI.MotionReduced
@@ -1568,11 +1618,17 @@ Public Property Get MotionReduced() As Boolean
         Case 2
             MotionReduced = False
         Case Else
-            animationsOn = 1
-            If SystemParametersInfo(SPI_GETCLIENTAREAANIMATION, 0, _
-                animationsOn, 0) <> 0 Then
-                MotionReduced = (animationsOn = 0)
+            nowMs = GetTickCount64()
+            If mMotionReadMs = 0 Or nowMs - mMotionReadMs >= 1000 Then
+                animationsOn = 1
+                mMotionOffWindows = False
+                If SystemParametersInfo(SPI_GETCLIENTAREAANIMATION, 0, _
+                    animationsOn, 0) <> 0 Then
+                    mMotionOffWindows = (animationsOn = 0)
+                End If
+                mMotionReadMs = nowMs
             End If
+            MotionReduced = mMotionOffWindows
     End Select
 End Property
 
@@ -1628,14 +1684,16 @@ End Function
 
 Private Sub EnsureUIWords()
     Dim textIndex As Long
+    Dim tableEntries() As String
     Dim definedAs As String
     Dim splitAt As Long
 
     If mUIWordsReady Then Exit Sub
+    tableEntries = Split(UI_TEXT_TABLE, "|")
     ReDim mUITextNames(1 To UI_TEXT_COUNT)
     ReDim mUIWords(1 To UI_TEXT_COUNT)
     For textIndex = 1 To UI_TEXT_COUNT
-        definedAs = UITextDefinition(textIndex)
+        definedAs = tableEntries(textIndex - 1)
         splitAt = InStr(definedAs, "=")
         mUITextNames(textIndex) = Left$(definedAs, splitAt - 1)
         mUIWords(textIndex) = Mid$(definedAs, splitAt + 1)
@@ -1656,120 +1714,6 @@ Private Function UITextIndex(ByVal textKey As String, ByVal memberName As String
     Next textIndex
     RaiseError ERROR_INVALID_ARGUMENT, memberName, _
         "No UI text is named '" & textKey & "'; UITextKeys lists the names."
-End Function
-
-' Each UI text's name and English default, split at the first "=".
-Private Function UITextDefinition(ByVal textIndex As Long) As String
-    Select Case textIndex
-        Case UI_NO_ROWS
-            UITextDefinition = "NoRows=No rows"
-        Case UI_NO_ROWS_MATCH
-            UITextDefinition = "NoRowsMatch=No rows match"
-        Case UI_NO_ITEMS
-            UITextDefinition = "NoItems=No items"
-        Case UI_NO_MATCHES
-            UITextDefinition = "NoMatches=No matches"
-        Case UI_ROW_RANGE
-            UITextDefinition = "RowRange={0}-{1} of {2}"
-        Case UI_ROW_RANGE_EMPTY
-            UITextDefinition = "RowRangeEmpty=0 of 0"
-        Case UI_FILTER_NOTE
-            UITextDefinition = "FilterNote=Filter ""{0}"": {1}"
-        Case UI_SELECT_ALL
-            UITextDefinition = "SelectAll=Select all ({0}/{1})"
-        Case UI_SELECT_ALL_FILTERED
-            UITextDefinition = "SelectAllFiltered=Select all ""{0}"" ({1}/{2})"
-        Case UI_AVAILABLE
-            UITextDefinition = "Available=Available"
-        Case UI_SELECTED
-            UITextDefinition = "Selected=Selected"
-        Case UI_PANEL_FILTERED
-            UITextDefinition = "PanelFiltered={0} ""{1}"" ({2} of {3})"
-        Case UI_MORE_ITEMS
-            UITextDefinition = "MoreItems={0} more"
-        Case UI_TYPE_COMMAND
-            UITextDefinition = "TypeCommand=Type a command"
-        Case UI_WORKING
-            UITextDefinition = "Working=Working..."
-        Case UI_REQUIRED
-            UITextDefinition = "Required=Required"
-        Case UI_OK
-            UITextDefinition = "OK=OK"
-        Case UI_CANCEL
-            UITextDefinition = "Cancel=Cancel"
-        Case UI_COLUMN
-            UITextDefinition = "Column=Column {0}"
-        Case UI_IMAGE_NOT_FOUND
-            UITextDefinition = "ImageNotFound=(image not found)"
-        Case UI_ALT_BUTTON
-            UITextDefinition = "AltButton={0}, button"
-        Case UI_ALT_BUSY
-            UITextDefinition = "AltBusy=busy"
-        Case UI_ALT_PROGRESS
-            UITextDefinition = "AltProgress=Progress, {0} percent"
-        Case UI_ALT_SPINNER
-            UITextDefinition = "AltSpinner=Busy"
-        Case UI_ALT_SWITCH_ON
-            UITextDefinition = "AltSwitchOn=Switch, on"
-        Case UI_ALT_SWITCH_OFF
-            UITextDefinition = "AltSwitchOff=Switch, off"
-        Case UI_ALT_EDIT_FIELD
-            UITextDefinition = "AltEditField=Edit field"
-        Case UI_ALT_MASKED
-            UITextDefinition = "AltMasked=masked"
-        Case UI_ALT_COMBO_BOX
-            UITextDefinition = "AltComboBox=Combo box"
-        Case UI_ALT_MENU_BUTTON
-            UITextDefinition = "AltMenuButton={0}, menu button"
-        Case UI_ALT_DROP_DOWN
-            UITextDefinition = "AltDropDown=Drop-down, {0}"
-        Case UI_ALT_CHECKED
-            UITextDefinition = "AltChecked={0}, checkbox, checked"
-        Case UI_ALT_NOT_CHECKED
-            UITextDefinition = "AltNotChecked={0}, checkbox, not checked"
-        Case UI_ALT_RADIO_GROUP
-            UITextDefinition = "AltRadioGroup=Radio group"
-        Case UI_ALT_ITEM_SELECTED
-            UITextDefinition = "AltItemSelected={0} selected"
-        Case UI_ALT_STEPPER
-            UITextDefinition = "AltStepper=Stepper, {0}"
-        Case UI_ALT_SLIDER
-            UITextDefinition = "AltSlider=Slider, {0}"
-        Case UI_ALT_TRANSFER_LIST
-            UITextDefinition = "AltTransferList=Transfer list"
-        Case UI_ALT_CHECK_LIST
-            UITextDefinition = "AltCheckList=Checklist, {0} of {1} checked"
-        Case UI_ALT_IMAGE
-            UITextDefinition = "AltImage=Image"
-        Case UI_ALT_LOADING
-            UITextDefinition = "AltLoading=Loading"
-        Case UI_ALT_EXPANDED
-            UITextDefinition = "AltExpanded={0}, expander, expanded"
-        Case UI_ALT_COLLAPSED
-            UITextDefinition = "AltCollapsed={0}, expander, collapsed"
-        Case UI_ALT_TABLE
-            UITextDefinition = "AltTable=Table, {0} rows"
-        Case UI_ALT_TABLE_ONE_ROW
-            UITextDefinition = "AltTableOneRow=Table, 1 row"
-        Case UI_ALT_SORTED_ASCENDING
-            UITextDefinition = "AltSortedAscending=sorted by {0}, ascending"
-        Case UI_ALT_SORTED_DESCENDING
-            UITextDefinition = "AltSortedDescending=sorted by {0}, descending"
-        Case UI_ALT_SHOWN
-            UITextDefinition = "AltShown={0} shown"
-        Case UI_ALT_DATE_PICKER
-            UITextDefinition = "AltDatePicker=Date picker, {0}"
-        Case UI_ALT_TABS
-            UITextDefinition = "AltTabs=Tabs"
-        Case UI_ALT_TAB_SELECTED
-            UITextDefinition = "AltTabSelected={0} selected, tab {1} of {2}"
-        Case UI_ALT_UNAVAILABLE
-            UITextDefinition = "AltUnavailable=unavailable"
-        Case UI_ALT_SPARKLINE
-            UITextDefinition = "AltSparkline=Trend, {0} values, low {1}, high {2}, last {3}"
-        Case UI_ALT_SPARKLINE_EMPTY
-            UITextDefinition = "AltSparklineEmpty=Trend, no values"
-    End Select
 End Function
 
 ' The UI text at textIndex with each "{n}" in it replaced by the nth
@@ -2449,6 +2393,8 @@ Friend Sub ConfigureApp(ByVal targetAppId As String, ByVal hostSheet As Workshee
     Set mStateKeys = New Collection
     Set mStateHandlers = New Collection
     Set mDirtyIds = New Collection
+    Set mDrawnShapes = New Collection
+    mSurfaceFresh = Not SheetHoldsPrefix(hostSheet, SHAPE_PREFIX & targetAppId & "_")
     Set mAsyncOps = New Collection
     Set mJobs = New Collection
     Set mTheme = ReDimUI.ThemeLight
@@ -3915,7 +3861,7 @@ Private Sub TickComponentsSection( _
     For Each componentValue In Tickables()
         componentValue.TickAnimation mSheet, elapsedMs
         componentValue.TickPressDrag Me, leftButtonDown
-        componentValue.TickListWatch pressEdge, runWork
+        componentValue.TickListWatch pressEdge, runWork, anyButtonDown
         If runWork Then
             If componentValue.IsExpiredToast(nowMs) Then
                 componentValue.BeginToastExit
@@ -3931,7 +3877,7 @@ Private Sub TickComponentsSection( _
     ' press elsewhere or a moved selection.
     If ReDimUI.IsComponentFocused(mAppId, ReDimUI.FocusedComponentId) Then
         If TryGetComponent(ReDimUI.FocusedComponentId, componentValue) Then
-            componentValue.TickFocusWatch Me, pressEdge, runWork
+            componentValue.TickFocusWatch Me, pressEdge, runWork, anyButtonDown
         End If
     End If
     For Each expiredId In expiredIds
@@ -4461,9 +4407,11 @@ End Property
 Friend Property Get IsTickable() As Boolean
     Select Case mKind
         Case KIND_SPINNER, KIND_TOAST, KIND_SLIDEBAR, KIND_INPUT, KIND_COMBO, _
-            KIND_SELECT, KIND_STEPPER, KIND_TRANSFER, KIND_SKELETON, _
-            KIND_TOGGLE, KIND_TABS
+            KIND_SELECT, KIND_STEPPER, KIND_TRANSFER, KIND_SKELETON
             IsTickable = True
+        Case KIND_TOGGLE, KIND_TABS
+            ' Only while a knob or a tab bar glides.
+            IsTickable = (LenB(mGlidePart) > 0)
     End Select
 End Property
 
@@ -6691,6 +6639,44 @@ Friend Sub ForgetComponent(ByVal targetComponentId As String)
     mTickablesStale = True
 End Sub
 
+' True when a shape of this app's surely does not exist: the sheet held
+' none of the app's shapes at mount and the app never drew this one.
+' False only means the lookup has to be made.
+Friend Function ShapeSurelyAbsent(ByVal drawnName As String) As Boolean
+    Dim drawnMark As Variant
+
+    If Not mSurfaceFresh Then Exit Function
+    ShapeSurelyAbsent = Not TryGetItem(mDrawnShapes, drawnName, drawnMark)
+End Function
+
+Friend Sub NoteShapeDrawn(ByVal drawnName As String)
+    Dim drawnMark As Variant
+
+    If Not mSurfaceFresh Then Exit Sub
+    If TryGetItem(mDrawnShapes, drawnName, drawnMark) Then Exit Sub
+    mDrawnShapes.Add True, drawnName
+End Sub
+
+' Whether any shape on the sheet has a name starting with namePrefix.
+Private Function SheetHoldsPrefix(ByVal hostSheet As Worksheet, ByVal namePrefix As String) As Boolean
+    Dim candidateShape As Shape
+    Dim prefixLength As Long
+
+    prefixLength = Len(namePrefix)
+    For Each candidateShape In hostSheet.Shapes
+        If Left$(candidateShape.Name, prefixLength) = namePrefix Then
+            SheetHoldsPrefix = True
+            Exit Function
+        End If
+    Next candidateShape
+End Function
+
+' A control started or stopped needing frames: the ticking list is built
+' again the next time a frame asks for it.
+Friend Sub TickablesChanged()
+    mTickablesStale = True
+End Sub
+
 Private Function Tickables() As Collection
     Dim componentValue As ReDimUI
 
@@ -7551,7 +7537,12 @@ Friend Sub Apply( _
 
     RequireRole ROLE_COMPONENT, "Apply"
     ResolveBindings hostApp
-    RefreshTabShut hostApp
+    ' Feature steps run only for controls that use the feature: VBA pays
+    ' for each procedure's first call in a session, and a cold build
+    ' paid for steps that had nothing to do.
+    If LenB(mTabOwnerId) > 0 Or LenB(mStackId) > 0 Or mTabShut Then
+        RefreshTabShut hostApp
+    End If
     If mKind = KIND_EXPANDER Then
         If mChecked Then
             mIconGlyph = ReDimUI.IconGlyph("ChevronDown")
@@ -7572,9 +7563,17 @@ Friend Sub Apply( _
         ApplyClearButton mainShape, hostSheet, themeValue
         ApplyFieldNotes hostSheet, themeValue
     End If
-    ApplyAdornments hostSheet, themeValue
-    ApplyBadgePart hostSheet, themeValue
-    ApplyFocusRing hostSheet, themeValue
+    If LenB(mCaptionText) > 0 Or LenB(mAppliedCaptionSig) > 0 _
+        Or LenB(mHintText) > 0 Or LenB(mAppliedHintSig) > 0 Then
+        ApplyAdornments hostSheet, themeValue
+    End If
+    If LenB(mBadgeText) > 0 Or LenB(mAppliedBadgeSig) > 0 Then
+        ApplyBadgePart hostSheet, themeValue
+    End If
+    If LenB(mAppliedRingSig) > 0 _
+        Or ReDimUI.IsComponentFocused(mOwnerAppId, mComponentId) Then
+        ApplyFocusRing hostSheet, themeValue
+    End If
     ApplyAltText mainShape
     mAppliedValid = True
     ' A field that grew or shrank since it was drawn moves what is placed
@@ -7790,7 +7789,10 @@ End Function
 ' A control's rectangle: its stack's slot for it, or its own placement;
 ' then a stack lays its members out, which sizes it.
 Private Sub ResolveGeometry(ByVal hostSheet As Worksheet)
-    If Not PlaceInStack(hostSheet) Then ResolvePlacement hostSheet
+    Dim stacked As Boolean
+
+    If LenB(mStackId) > 0 Then stacked = PlaceInStack(hostSheet)
+    If Not stacked Then ResolvePlacement hostSheet
     If mKind = KIND_STACK Then ArrangeStack
 End Sub
 
@@ -7931,10 +7933,14 @@ End Function
 
 Private Function EnsureShape(ByVal hostSheet As Worksheet) As Shape
     Dim mainShape As Shape
+    Dim hostApp As ReDimUI
 
-    On Error Resume Next
-    Set mainShape = hostSheet.Shapes(ShapeName)
-    On Error GoTo 0
+    Set hostApp = OwnerApp
+    If Not hostApp.ShapeSurelyAbsent(ShapeName) Then
+        On Error Resume Next
+        Set mainShape = hostSheet.Shapes(ShapeName)
+        On Error GoTo 0
+    End If
     If Not mainShape Is Nothing Then
         ' An adopted shape from an earlier framework version can carry the
         ' wrong geometry type; rebuild it rather than styling the wrong form.
@@ -7948,6 +7954,7 @@ Private Function EnsureShape(ByVal hostSheet As Worksheet) As Shape
     If mainShape Is Nothing Then
         Set mainShape = CreateShapeForKind(hostSheet)
         mainShape.Name = ShapeName
+        hostApp.NoteShapeDrawn ShapeName
         mAppliedValid = False
         ForgetPartSignatures
     End If
@@ -8078,20 +8085,37 @@ Private Function EnsurePartShape( _
 ) As Shape
     Dim partShape As Shape
     Dim partShapeName As String
+    Dim hostApp As ReDimUI
 
     partShapeName = ShapeName & PART_SEPARATOR & partName
-    On Error Resume Next
-    Set partShape = hostSheet.Shapes(partShapeName)
-    On Error GoTo 0
+    Set hostApp = OwnerApp
+    If Not hostApp.ShapeSurelyAbsent(partShapeName) Then
+        On Error Resume Next
+        Set partShape = hostSheet.Shapes(partShapeName)
+        On Error GoTo 0
+    End If
     wasCreated = (partShape Is Nothing)
     If wasCreated Then
         Set partShape = hostSheet.Shapes.AddShape(shapeType, mLeft, mTop, 8, 8)
         partShape.Name = partShapeName
         partShape.Placement = xlFreeFloating
         partShape.Line.Visible = msoFalse
+        hostApp.NoteShapeDrawn partShapeName
     End If
     Set EnsurePartShape = partShape
 End Function
+
+' Deletes a part that may exist. One this app never drew on a sheet that
+' held none of its shapes cannot, and looking for it would cost a miss.
+Private Sub DropPart(ByVal hostSheet As Worksheet, ByVal partName As String)
+    Dim partShapeName As String
+
+    partShapeName = ShapeName & PART_SEPARATOR & partName
+    If OwnerApp.ShapeSurelyAbsent(partShapeName) Then Exit Sub
+    On Error Resume Next
+    hostSheet.Shapes(partShapeName).Delete
+    On Error GoTo 0
+End Sub
 
 Private Function IsCompositeDrawnKind() As Boolean
     IsCompositeDrawnKind = (mKind = KIND_TICKBOX Or mKind = KIND_RADIO _
@@ -9467,9 +9491,7 @@ Private Sub ApplyClearButton( _
             IIf(mKind = KIND_COMBO, 16, 0)
     ElseIf LenB(mAppliedClearSig) > 0 Then
         mAppliedClearSig = vbNullString
-        On Error Resume Next
-        hostSheet.Shapes(ShapeName & PART_SEPARATOR & "cx").Delete
-        On Error GoTo 0
+        DropPart hostSheet, "cx"
         mainShape.TextFrame2.MarginRight = 6
     End If
 End Sub
@@ -9524,9 +9546,7 @@ Private Sub ApplyBadgePart(ByVal hostSheet As Worksheet, ByVal themeValue As ReD
     If badgeKey = mAppliedBadgeSig Then Exit Sub
     mAppliedBadgeSig = badgeKey
     If LenB(badgeKey) = 0 Then
-        On Error Resume Next
-        hostSheet.Shapes(ShapeName & PART_SEPARATOR & "bd").Delete
-        On Error GoTo 0
+        DropPart hostSheet, "bd"
         Exit Sub
     End If
     badgeSpanNow = Len(mBadgeText) * 9 * 0.62 + 10
@@ -9601,9 +9621,7 @@ Private Sub SyncFieldCaption( _
     If captionKey = mAppliedCaptionSig Then Exit Sub
     mAppliedCaptionSig = captionKey
     If LenB(captionKey) = 0 Then
-        On Error Resume Next
-        hostSheet.Shapes(ShapeName & PART_SEPARATOR & "fc").Delete
-        On Error GoTo 0
+        DropPart hostSheet, "fc"
         Exit Sub
     End If
     captionWords = mCaptionText
@@ -9681,9 +9699,7 @@ Private Sub ApplySkeletonBars(ByVal hostSheet As Worksheet, ByVal themeValue As 
     Next barNo
     ' Bars past the count are leftovers of a longer skeleton.
     For barNo = mSkeletonLines + 1 To mAppliedOptionCount
-        On Error Resume Next
-        hostSheet.Shapes(ShapeName & PART_SEPARATOR & "sk" & barNo).Delete
-        On Error GoTo 0
+        DropPart hostSheet, "sk" & barNo
     Next barNo
     mAppliedOptionCount = mSkeletonLines
 End Sub
@@ -9705,9 +9721,7 @@ Private Sub SyncFieldNote( _
     If noteKey = appliedKey Then Exit Sub
     If LenB(noteKey) = 0 Then
         appliedKey = vbNullString
-        On Error Resume Next
-        hostSheet.Shapes(ShapeName & PART_SEPARATOR & partName).Delete
-        On Error GoTo 0
+        DropPart hostSheet, partName
         Exit Sub
     End If
     appliedKey = noteKey
@@ -10082,9 +10096,7 @@ Private Sub ApplyFocusRing(ByVal hostSheet As Worksheet, ByVal themeValue As ReD
         ringShape.OnAction = mAppliedOnAction
     ElseIf LenB(mAppliedRingSig) > 0 Then
         mAppliedRingSig = vbNullString
-        On Error Resume Next
-        hostSheet.Shapes(ShapeName & PART_SEPARATOR & "fr").Delete
-        On Error GoTo 0
+        DropPart hostSheet, "fr"
     End If
 End Sub
 
@@ -10123,9 +10135,7 @@ Private Sub SyncKeyCursor( _
         cursorShape.ZOrder msoBringToFront
     ElseIf LenB(mAppliedKeyCursorSig) > 0 Then
         mAppliedKeyCursorSig = vbNullString
-        On Error Resume Next
-        hostSheet.Shapes(ShapeName & PART_SEPARATOR & "kr").Delete
-        On Error GoTo 0
+        DropPart hostSheet, "kr"
     End If
 End Sub
 
@@ -10249,11 +10259,11 @@ Private Sub ApplySparkline(ByVal hostSheet As Worksheet, ByVal themeValue As ReD
     sparkKey = PartsState(themeValue) & ":" & CStr(mSparkVersion) & ":" & CStr(inkRgb)
     If sparkKey = mAppliedSparkSig Then Exit Sub
     mAppliedSparkSig = sparkKey
-    On Error Resume Next
-    hostSheet.Shapes(ShapeName & PART_SEPARATOR & "sl").Delete
-    If mSparkCount = 0 Then hostSheet.Shapes(ShapeName & PART_SEPARATOR & "sd").Delete
-    On Error GoTo 0
-    If mSparkCount = 0 Then Exit Sub
+    DropPart hostSheet, "sl"
+    If mSparkCount = 0 Then
+        DropPart hostSheet, "sd"
+        Exit Sub
+    End If
     SparkRange lowValue, highValue
     ReDim coords(1 To mSparkCount, 1 To 2)
     For pointNo = 1 To mSparkCount
@@ -10273,6 +10283,7 @@ Private Sub ApplySparkline(ByVal hostSheet As Worksheet, ByVal themeValue As ReD
     If mSparkCount > 1 Then
         Set lineShape = hostSheet.Shapes.AddPolyline(coords)
         lineShape.Name = ShapeName & PART_SEPARATOR & "sl"
+        OwnerApp.NoteShapeDrawn lineShape.Name
         lineShape.Placement = xlFreeFloating
         lineShape.Fill.Visible = msoFalse
         lineShape.Line.Visible = msoTrue
@@ -10718,17 +10729,13 @@ Private Sub ApplyTabs( _
         accentBar.Visible = BoolToMso(mVisible)
         accentBar.OnAction = mAppliedOnAction
     Else
-        On Error Resume Next
-        hostSheet.Shapes(ShapeName & PART_SEPARATOR & "ti").Delete
-        On Error GoTo 0
+        DropPart hostSheet, "ti"
         If mGlidePart = "ti" Then mGlidePart = vbNullString
         mAppliedIndicatorTab = 0
     End If
     ' Tabs past the count are leftovers of a longer strip.
     For idx = tabTotal + 1 To mAppliedOptionCount
-        On Error Resume Next
-        hostSheet.Shapes(ShapeName & PART_SEPARATOR & "tb" & idx).Delete
-        On Error GoTo 0
+        DropPart hostSheet, "tb" & idx
     Next idx
     mAppliedOptionCount = tabTotal
 End Sub
@@ -11209,9 +11216,7 @@ Private Sub ApplyTable(ByVal hostSheet As Worksheet, ByVal themeValue As ReDimUI
             mColumnNumeric(colNo), headFill, headInk, True, textSize
     Next colNo
     For colNo = mTableCols + 1 To mAppliedTableColsDrawn
-        On Error Resume Next
-        hostSheet.Shapes(ShapeName & PART_SEPARATOR & "th" & colNo).Delete
-        On Error GoTo 0
+        DropPart hostSheet, "th" & colNo
     Next colNo
     mAppliedTableColsDrawn = mTableCols
     layoutKey = mColumnLayoutKey & ":" & CStr(mLeft) & ":" & CStr(mTop)
@@ -11247,9 +11252,7 @@ Private Sub ApplyTable(ByVal hostSheet As Worksheet, ByVal themeValue As ReDimUI
             rowInk, rowPitch, textSize, (displayNo = 1 And mTableShownCount = 0)
     Next slotNo
     For slotNo = slotTotal + 1 To mAppliedTableSlotsDrawn
-        On Error Resume Next
-        hostSheet.Shapes(ShapeName & PART_SEPARATOR & "tr" & slotNo).Delete
-        On Error GoTo 0
+        DropPart hostSheet, "tr" & slotNo
     Next slotNo
     mAppliedTableSlotsDrawn = slotTotal
     SyncTableFooter hostSheet, themeValue, rowPitch, textSize
@@ -11350,9 +11353,7 @@ Private Sub SyncTableRow( _
     If LenB(rowWords) = 0 Then
         If LenB(mAppliedTableRowStates(slotNo)) > 0 Then
             mAppliedTableRowStates(slotNo) = vbNullString
-            On Error Resume Next
-            hostSheet.Shapes(ShapeName & PART_SEPARATOR & "tr" & slotNo).Delete
-            On Error GoTo 0
+            DropPart hostSheet, "tr" & slotNo
         End If
         Exit Sub
     End If
@@ -11449,11 +11450,9 @@ Private Sub SyncTableFooter( _
     If footKey = mAppliedTableFootSig Then Exit Sub
     mAppliedTableFootSig = footKey
     If LenB(footKey) = 0 Then
-        On Error Resume Next
-        hostSheet.Shapes(ShapeName & PART_SEPARATOR & "tf").Delete
-        hostSheet.Shapes(ShapeName & PART_SEPARATOR & "tp").Delete
-        hostSheet.Shapes(ShapeName & PART_SEPARATOR & "tn").Delete
-        On Error GoTo 0
+        DropPart hostSheet, "tf"
+        DropPart hostSheet, "tp"
+        DropPart hostSheet, "tn"
         Exit Sub
     End If
     footTop = mTop + mHeight - 1 - rowPitch
@@ -12431,13 +12430,13 @@ Private Sub DeleteCalendarParts(ByVal hostSheet As Worksheet)
     On Error GoTo 0
     If Not partHeld Then Exit Sub
     On Error Resume Next
-    hostSheet.Shapes(ShapeName & PART_SEPARATOR & "cb").Delete
-    hostSheet.Shapes(ShapeName & PART_SEPARATOR & "ch").Delete
-    hostSheet.Shapes(ShapeName & PART_SEPARATOR & "cp").Delete
-    hostSheet.Shapes(ShapeName & PART_SEPARATOR & "cn").Delete
-    hostSheet.Shapes(ShapeName & PART_SEPARATOR & "cw").Delete
+    DropPart hostSheet, "cb"
+    DropPart hostSheet, "ch"
+    DropPart hostSheet, "cp"
+    DropPart hostSheet, "cn"
+    DropPart hostSheet, "cw"
     For partNo = 1 To 42
-        hostSheet.Shapes(ShapeName & PART_SEPARATOR & "cd" & partNo).Delete
+        DropPart hostSheet, "cd" & partNo
     Next partNo
     On Error GoTo 0
     Erase mAppliedRowStates
@@ -12606,11 +12605,9 @@ Private Sub ApplyRadioGroup( _
     Next idx
     ' Rows beyond the current item count are leftovers from a longer list.
     For idx = rowTotal + 1 To mAppliedOptionCount
-        On Error Resume Next
-        hostSheet.Shapes(ShapeName & PART_SEPARATOR & "c" & idx).Delete
-        hostSheet.Shapes(ShapeName & PART_SEPARATOR & "d" & idx).Delete
-        hostSheet.Shapes(ShapeName & PART_SEPARATOR & "t" & idx).Delete
-        On Error GoTo 0
+        DropPart hostSheet, "c" & idx
+        DropPart hostSheet, "d" & idx
+        DropPart hostSheet, "t" & idx
     Next idx
     mAppliedOptionCount = rowTotal
     mAppliedValue = mValue
@@ -12733,10 +12730,8 @@ Private Sub ApplyCheckListParts( _
             End If
         End If
     ElseIf fullPass Then
-        On Error Resume Next
-        hostSheet.Shapes(ShapeName & PART_SEPARATOR & "mb").Delete
-        hostSheet.Shapes(ShapeName & PART_SEPARATOR & "mt").Delete
-        On Error GoTo 0
+        DropPart hostSheet, "mb"
+        DropPart hostSheet, "mt"
     End If
 
     For idx = 1 To rowTotal
@@ -12802,10 +12797,8 @@ Private Sub ApplyCheckListParts( _
     Next idx
     If fullPass Then
         For idx = rowTotal + 1 To mAppliedOptionCount
-            On Error Resume Next
-            hostSheet.Shapes(ShapeName & PART_SEPARATOR & "b" & idx).Delete
-            hostSheet.Shapes(ShapeName & PART_SEPARATOR & "t" & idx).Delete
-            On Error GoTo 0
+            DropPart hostSheet, "b" & idx
+            DropPart hostSheet, "t" & idx
         Next idx
         mAppliedOptionCount = rowTotal
     End If
@@ -13026,9 +13019,11 @@ Private Sub PlaceGliding( _
         If Abs(mGlideTargetLeft - targetLeft) < 0.01 _
             And Abs(mGlideTargetWidth - targetWidth) < 0.01 Then Exit Sub
     End If
-    If (glides Or alreadyGliding) And Not ReDimUI.MotionReduced Then
-        leftGap = partShape.Left - targetLeft
-        widthGap = partShape.Width - targetWidth
+    If glides Or alreadyGliding Then
+        If Not ReDimUI.MotionReduced Then
+            leftGap = partShape.Left - targetLeft
+            widthGap = partShape.Width - targetWidth
+        End If
     End If
     If Abs(leftGap) < 0.75 And Abs(widthGap) < 0.75 Then
         partShape.Left = targetLeft
@@ -13036,6 +13031,8 @@ Private Sub PlaceGliding( _
         If mGlidePart = partName Then mGlidePart = vbNullString
         Exit Sub
     End If
+    ' A switch or tab strip ticks only while it glides.
+    If Not alreadyGliding Then OwnerApp.TickablesChanged
     mGlidePart = partName
     mGlideTargetLeft = targetLeft
     mGlideTargetWidth = targetWidth
@@ -13057,8 +13054,11 @@ Private Sub TickGlide(ByVal hostSheet As Worksheet, ByVal elapsedMs As Long)
     If Abs(mGlideGapLeft) < 0.75 Then mGlideGapLeft = 0
     If Abs(mGlideGapWidth) < 0.75 Then mGlideGapWidth = 0
     ' Landed: cleared before the write, so a part gone missing cannot
-    ' keep the frames coming.
-    If mGlideGapLeft = 0 And mGlideGapWidth = 0 Then mGlidePart = vbNullString
+    ' keep the frames coming, and the control leaves the ticking list.
+    If mGlideGapLeft = 0 And mGlideGapWidth = 0 Then
+        mGlidePart = vbNullString
+        OwnerApp.TickablesChanged
+    End If
     With hostSheet.Shapes(ShapeName & PART_SEPARATOR & partName)
         .Left = mGlideTargetLeft + mGlideGapLeft
         .Width = mGlideTargetWidth + mGlideGapWidth
@@ -13286,10 +13286,8 @@ Private Sub ApplyTransferScroller( _
         If firstDraw Then scrollButton.ZOrder msoBringToFront
     ElseIf LenB(appliedKey) > 0 Then
         appliedKey = vbNullString
-        On Error Resume Next
-        hostSheet.Shapes(ShapeName & PART_SEPARATOR & upPart).Delete
-        hostSheet.Shapes(ShapeName & PART_SEPARATOR & downPart).Delete
-        On Error GoTo 0
+        DropPart hostSheet, upPart
+        DropPart hostSheet, downPart
     End If
 End Sub
 
@@ -13311,10 +13309,8 @@ Private Sub SyncReorderButtons( _
     If reorderKey = mAppliedReorderSig Then Exit Sub
     mAppliedReorderSig = reorderKey
     If LenB(reorderKey) = 0 Then
-        On Error Resume Next
-        hostSheet.Shapes(ShapeName & PART_SEPARATOR & "mvu").Delete
-        hostSheet.Shapes(ShapeName & PART_SEPARATOR & "mvd").Delete
-        On Error GoTo 0
+        DropPart hostSheet, "mvu"
+        DropPart hostSheet, "mvd"
         Exit Sub
     End If
     For partNo = 0 To 1
@@ -13873,10 +13869,7 @@ Private Sub SyncTransferRows( _
     EnsureRowStates rowStates, appliedRows
     For idx = wanted + 1 To appliedRows
         rowStates(idx) = vbNullString
-        On Error Resume Next
-        hostSheet.Shapes( _
-            ShapeName & PART_SEPARATOR & partPrefix & idx).Delete
-        On Error GoTo 0
+        DropPart hostSheet, partPrefix & idx
     Next idx
     appliedRows = wanted
 End Sub
@@ -14004,9 +13997,7 @@ Private Sub SyncSlideBubble( _
     If Not bubbleOn Then
         If mAppliedBubble Then
             mAppliedBubble = False
-            On Error Resume Next
-            hostSheet.Shapes(ShapeName & PART_SEPARATOR & "vb").Delete
-            On Error GoTo 0
+            DropPart hostSheet, "vb"
         End If
         Exit Sub
     End If
@@ -15178,9 +15169,7 @@ Private Sub SyncDropList( _
     mAppliedListSig = listSig
     If Not mAppliedValid Then
         ' The 0.17.0 inert indicator row is superseded by the pagers.
-        On Error Resume Next
-        hostSheet.Shapes(ShapeName & PART_SEPARATOR & "optm").Delete
-        On Error GoTo 0
+        DropPart hostSheet, "optm"
     End If
     SyncListPager hostSheet, themeValue, "optu", ChrW(9650), _
         aboveCount, listTopAt, resolvedSize, mAppliedPagerUpSig
@@ -15304,9 +15293,7 @@ Private Sub SyncDropList( _
     EnsureRowStates mAppliedRowStates, mAppliedOptionCount
     For idx = wanted + 1 To mAppliedOptionCount
         mAppliedRowStates(idx) = vbNullString
-        On Error Resume Next
-        hostSheet.Shapes(ShapeName & PART_SEPARATOR & "opt" & idx).Delete
-        On Error GoTo 0
+        DropPart hostSheet, "opt" & idx
     Next idx
     mAppliedOptionCount = wanted
     SyncListPager hostSheet, themeValue, "optd", ChrW(9660), _
@@ -15422,9 +15409,7 @@ Private Sub SyncEmptyRow( _
         emptyShape.ZOrder msoBringToFront
     ElseIf LenB(mAppliedEmptyRowSig) > 0 Then
         mAppliedEmptyRowSig = vbNullString
-        On Error Resume Next
-        hostSheet.Shapes(ShapeName & PART_SEPARATOR & "optn").Delete
-        On Error GoTo 0
+        DropPart hostSheet, "optn"
     End If
 End Sub
 
@@ -15659,9 +15644,7 @@ Private Sub SyncListPager( _
         If firstDraw Then pagerShape.ZOrder msoBringToFront
     ElseIf LenB(appliedKey) > 0 Then
         appliedKey = vbNullString
-        On Error Resume Next
-        hostSheet.Shapes(ShapeName & PART_SEPARATOR & partName).Delete
-        On Error GoTo 0
+        DropPart hostSheet, partName
     End If
 End Sub
 
@@ -15789,6 +15772,7 @@ End Sub
 
 Friend Sub FocusField(ByVal hostApp As ReDimUI, Optional ByVal openList As Boolean = True)
     If Not IsFloatField() Then Exit Sub
+    mOffPressPending = False
     mFieldTextAtFocus = mText
     mFieldSelAtFocus = CurrentSelectionKey()
     mCaretPos = Len(mText)
@@ -16424,7 +16408,8 @@ End Sub
 Friend Sub TickFocusWatch( _
     ByVal hostApp As ReDimUI, _
     ByVal pressEdge As Boolean, _
-    ByVal pollSelection As Boolean _
+    ByVal pollSelection As Boolean, _
+    ByVal buttonDown As Boolean _
 )
     If Not ReDimUI.IsComponentFocused(hostApp.AppId, mComponentId) Then Exit Sub
     ' A modal's buttons keep focus until the dialog closes.
@@ -16438,9 +16423,42 @@ Friend Sub TickFocusWatch( _
             Exit Sub
         End If
     End If
-    If Not pressEdge Then Exit Sub
-    If CursorOverField() Then Exit Sub
-    LeaveFocus hostApp, True
+    If PressedOffUntilRelease(pressEdge, buttonDown) Then LeaveFocus hostApp, True
+End Sub
+
+' A press off the control ends its focus or closes its list once the
+' button is back up and no click has landed on the control meanwhile.
+' Deciding at the press closed a list under a click on its own pager
+' whenever the pointer read landed just off the list, and Excel delivers
+' that click only on the release. An edge that comes with the button
+' already up, as the test seam's does, counts at once.
+Private Function PressedOffUntilRelease( _
+    ByVal pressEdge As Boolean, _
+    ByVal buttonDown As Boolean _
+) As Boolean
+    If pressEdge Then
+        If CursorOverField() Then
+            mOffPressPending = False
+        ElseIf buttonDown Then
+            mOffPressPending = True
+            mOffPressUpMs = 0
+        Else
+            mOffPressPending = False
+            PressedOffUntilRelease = True
+            Exit Function
+        End If
+    End If
+    If Not mOffPressPending Or buttonDown Then Exit Function
+    If mOffPressUpMs = 0 Then mOffPressUpMs = GetTickCount64()
+    If GetTickCount64() - mOffPressUpMs < OFF_PRESS_GRACE_MS Then Exit Function
+    mOffPressPending = False
+    PressedOffUntilRelease = True
+End Function
+
+' A click on the control itself: whatever press came before it was on
+' the control, however the pointer read.
+Friend Sub CancelOffPress()
+    mOffPressPending = False
 End Sub
 
 ' An open list that no field watch covers (a SelectBox, or a cell-backed
@@ -16454,7 +16472,11 @@ Friend Function NeedsListWatch() As Boolean
         Or (mKind = KIND_COMBO And Not IsFloatField())
 End Function
 
-Friend Sub TickListWatch(ByVal pressEdge As Boolean, ByVal pollSelection As Boolean)
+Friend Sub TickListWatch( _
+    ByVal pressEdge As Boolean, _
+    ByVal pollSelection As Boolean, _
+    ByVal buttonDown As Boolean _
+)
     If Not NeedsListWatch() Then Exit Sub
     If pollSelection Then
         If LenB(mListSelAtOpen) = 0 Then
@@ -16464,9 +16486,7 @@ Friend Sub TickListWatch(ByVal pressEdge As Boolean, ByVal pollSelection As Bool
             Exit Sub
         End If
     End If
-    If pressEdge Then
-        If Not CursorOverField() Then CloseDropList
-    End If
+    If PressedOffUntilRelease(pressEdge, buttonDown) Then CloseDropList
 End Sub
 
 ' Closes an open list without picking anything.
@@ -16482,6 +16502,7 @@ End Sub
 ' sees presses elsewhere.
 Private Sub NoteListOpened()
     mListSelAtOpen = vbNullString
+    mOffPressPending = False
     mListFlipped = ListOpensUpward()
     OwnerApp.CloseListsExcept mComponentId
     ReDimUI.RequestPump
@@ -16739,13 +16760,24 @@ Private Sub DeleteShapesNamed( _
     On Error GoTo 0
 End Sub
 
+' Asked of every ticking control each frame, one kind at a time: VBA
+' evaluates every term of an Or, so a single expression asked Windows
+' about motion and the factory about focus for each control each frame.
 Friend Function NeedsAnimation() As Boolean
-    NeedsAnimation = (mKind = KIND_SPINNER And mVisible) _
-        Or (mKind = KIND_SKELETON And mVisible And Not ReDimUI.MotionReduced) _
-        Or (mKind = KIND_TOAST And (mSlideRemaining > 0 Or mToastExiting)) _
-        Or LenB(mGlidePart) > 0 _
-        Or (IsFloatField() And _
-            ReDimUI.IsComponentFocused(mOwnerAppId, mComponentId))
+    Select Case mKind
+        Case KIND_SPINNER
+            NeedsAnimation = mVisible
+        Case KIND_SKELETON
+            If mVisible Then NeedsAnimation = Not ReDimUI.MotionReduced
+        Case KIND_TOAST
+            NeedsAnimation = (mSlideRemaining > 0 Or mToastExiting)
+        Case KIND_TOGGLE, KIND_TABS
+            NeedsAnimation = (LenB(mGlidePart) > 0)
+        Case KIND_INPUT, KIND_COMBO
+            If IsFloatField() Then
+                NeedsAnimation = ReDimUI.IsComponentFocused(mOwnerAppId, mComponentId)
+            End If
+    End Select
 End Function
 
 ' Animation bypasses the diff cache: rotation and the toast slide are
