@@ -153,6 +153,8 @@ Private Const KIND_TABS As Long = 23
 Private Const KIND_DATE As Long = 24
 Private Const KIND_TABLE As Long = 25
 Private Const KIND_BADGE As Long = 26
+Private Const KIND_STACK As Long = 27
+Private Const KIND_EXPANDER As Long = 28
 
 ' Option rows a SelectBox or ComboBox drop list draws at once unless
 ' ListRows says otherwise; longer lists window behind pager rows.
@@ -302,6 +304,9 @@ Private mNavBarTabHeight As Double
 ' Whether the app follows the Windows look, and the look it last took.
 Private mFollowSystem As Boolean
 Private mAppliedSystemLook As String
+' Stacks whose members' flow changed during a flush, laid out again when
+' the flush ends.
+Private mPendingReflows As Collection
 
 ' Component fields.
 Private mComponentId As String
@@ -599,6 +604,31 @@ Private mAppliedIconGlyph As String
 ' signature it was drawn with.
 Private mBadgeText As String
 Private mAppliedBadgeSig As String
+' Stack: its members in the order they joined, the gap between them, the
+' padding inside it, whether they run across instead of down, and whether
+' they take its width; a count of flow changes, and the layout last
+' made from them with the count, place, and width it was made under;
+' and whether the stack was shown when its members last applied.
+Private mStackMembers As Collection
+Private mStackGap As Double
+Private mStackPadding As Double
+Private mStackAcross As Boolean
+Private mStackStretch As Boolean
+Private mStackGen As Long
+Private mStackLaidGen As Long
+Private mStackLaidLeft As Double
+Private mStackLaidTop As Double
+Private mStackLaidWidth As Double
+Private mStackSlotIds() As String
+Private mStackSlotLefts() As Double
+Private mStackSlotTops() As Double
+Private mStackSlotSpans() As Double
+Private mStackSlotCount As Long
+Private mAppliedStackShown As Boolean
+Private mStackAutoWidth As Boolean
+' A control in a stack: the stack, and the flow it last took there.
+Private mStackId As String
+Private mAppliedFlowSig As String
 ' AutoGrow: the line cap (0 for off) and how far the field has grown past
 ' the height it was given; the geometry setters start that over.
 Private mAutoGrowLines As Long
@@ -2146,6 +2176,22 @@ Public Function Badge(ByVal targetComponentId As String) As ReDimUI
     Set Badge = GetOrCreateComponent(targetComponentId, KIND_BADGE)
 End Function
 
+' A layout container: controls that join it with InStack flow down it in
+' the order they joined, or across it with Across, Gap points apart, and
+' one that hides gives its place to the next. A caption above a control
+' and the note row under a field count in the flow. The stack's height
+' follows its content, and so does its width across or when it is 0.
+Public Function Stack(ByVal targetComponentId As String) As ReDimUI
+    Set Stack = GetOrCreateComponent(targetComponentId, KIND_STACK)
+End Function
+
+' A collapsible section: a header whose chevron opens and closes the
+' controls that join it with InExpander. Closed, they hide, and in a
+' stack the controls after them move up.
+Public Function Expander(ByVal targetComponentId As String) As ReDimUI
+    Set Expander = GetOrCreateComponent(targetComponentId, KIND_EXPANDER)
+End Function
+
 ' Drawn single-select option rows. Items supplies the rows, Value the
 ' selected index, and WritesTo receives the selected item's text.
 Public Function RadioGroup(ByVal targetComponentId As String) As ReDimUI
@@ -2484,6 +2530,61 @@ Friend Sub ReapplyTabMembers(ByVal tabsId As String, ByVal panelNow As Long)
     Next componentValue
 End Sub
 
+' A stack member changed: the stack lays out again when next asked.
+Friend Sub NoteStackTouched(ByVal stackId As String)
+    Dim stackValue As ReDimUI
+
+    If TryGetComponent(stackId, stackValue) Then
+        stackValue.MarkStackStale
+    End If
+End Sub
+
+' Whether a stack hides its members: it exists and is hidden.
+Friend Function StackHidden(ByVal stackId As String) As Boolean
+    Dim stackValue As ReDimUI
+
+    If TryGetComponent(stackId, stackValue) Then
+        StackHidden = Not stackValue.IsVisible
+    End If
+End Function
+
+Friend Sub QueueReflow(ByVal stackId As String)
+    Dim existing As Variant
+
+    If mPendingReflows Is Nothing Then Set mPendingReflows = New Collection
+    If TryGetItem(mPendingReflows, stackId, existing) Then Exit Sub
+    mPendingReflows.Add stackId, stackId
+End Sub
+
+' The stacks whose members' flow changed lay out again once the flush has
+' drawn everything, each moving only the members whose place changed; a
+' stack that grew queues the stack it sits in.
+Private Sub ProcessPendingReflows()
+    Dim stackId As String
+    Dim stackValue As ReDimUI
+    Dim roundNo As Long
+
+    If mPendingReflows Is Nothing Then Exit Sub
+    Do While mPendingReflows.Count > 0 And roundNo < 100
+        roundNo = roundNo + 1
+        stackId = CStr(mPendingReflows.Item(1))
+        mPendingReflows.Remove 1
+        If TryGetComponent(stackId, stackValue) Then
+            stackValue.ReflowMembers mSheet, mTheme, Me
+        End If
+    Loop
+End Sub
+
+' A reflow outside a flush, for a member removed from its stack.
+Friend Sub ReflowStackNow(ByVal stackId As String)
+    Dim stackValue As ReDimUI
+
+    If TryGetComponent(stackId, stackValue) Then
+        stackValue.LeaveStack vbNullString
+        stackValue.ReflowMembers mSheet, mTheme, Me
+    End If
+End Sub
+
 Friend Sub ReapplyDependents(ByVal anchorId As String)
     Dim componentValue As ReDimUI
 
@@ -2796,6 +2897,7 @@ Public Sub FlushDirty()
         End If
     Next dirtyId
     Set mDirtyIds = New Collection
+    ProcessPendingReflows
     If toggledScreen Then Application.ScreenUpdating = priorScreenUpdating
     Exit Sub
 
@@ -3722,6 +3824,15 @@ Friend Sub ConfigureComponent( _
             mWidth = 420: mHeight = 200
         Case KIND_BADGE
             mWidth = 0: mHeight = 18
+        Case KIND_STACK
+            mWidth = 300: mHeight = 0
+            mStackGap = 8
+            mStackLaidGen = -1
+            mAppliedStackShown = True
+        Case KIND_EXPANDER
+            mWidth = 300: mHeight = 28
+            mFontBold = True
+            mAppliedPanelTab = -2
         Case KIND_TABS
             mWidth = 360: mHeight = 32
             mValue = 1
@@ -3777,6 +3888,10 @@ Public Function AtRect( _
     mHeight = heightPoints
     mGrowAdded = 0
     mHasRect = True
+    If mKind = KIND_STACK Then
+        mStackAutoWidth = (widthPoints <= 0)
+        MarkStackStale
+    End If
     Touch
     Set AtRect = Me
 End Function
@@ -3819,6 +3934,10 @@ Public Function Sized( _
     mWidth = widthPoints
     mHeight = heightPoints
     mGrowAdded = 0
+    If mKind = KIND_STACK Then
+        mStackAutoWidth = (widthPoints <= 0)
+        MarkStackStale
+    End If
     Touch
     Set Sized = Me
 End Function
@@ -4465,6 +4584,114 @@ Public Function BadgeText(ByVal badgeWords As String) As ReDimUI
     Touch
     Set BadgeText = Me
 End Function
+
+' Puts the control in a stack, after the members already there. The
+' stack places it from then on, so its own position no longer counts;
+' its size still does. InStack "" takes it out where it stands.
+Public Function InStack(ByVal stackId As String) As ReDimUI
+    Dim hostApp As ReDimUI
+    Dim stackValue As ReDimUI
+
+    RequireRole ROLE_COMPONENT, "InStack"
+    Set InStack = Me
+    If StrComp(stackId, mStackId, vbTextCompare) = 0 Then Exit Function
+    Set hostApp = OwnerApp
+    If LenB(stackId) > 0 Then
+        If Not hostApp.TryGetComponent(stackId, stackValue) Then
+            RaiseError ERROR_NOT_FOUND, "InStack", _
+                "No stack named '" & stackId & "' is in this app; create it first."
+        End If
+        If stackValue.ComponentKind <> KIND_STACK Then
+            RaiseError ERROR_INVALID_ARGUMENT, "InStack", _
+                "'" & stackId & "' is not a Stack."
+        End If
+    End If
+    If LenB(mStackId) > 0 Then
+        If hostApp.TryGetComponent(mStackId, stackValue) Then
+            stackValue.LeaveStack mComponentId
+        End If
+    End If
+    mStackId = stackId
+    mAppliedFlowSig = vbNullString
+    If LenB(stackId) > 0 Then
+        If hostApp.TryGetComponent(stackId, stackValue) Then
+            stackValue.JoinStack mComponentId
+        End If
+        mAnchor = vbNullString
+        mRelMode = REL_NONE
+    End If
+    Touch
+End Function
+
+' Puts the control in an expander's panel: it shows only while the
+' expander is open. The same as OnTab expanderId, 1.
+Public Function InExpander(ByVal expanderId As String) As ReDimUI
+    RequireRole ROLE_COMPONENT, "InExpander"
+    Set InExpander = OnTab(expanderId, 1)
+End Function
+
+' The points between a stack's members.
+Public Function Gap(ByVal gapPoints As Double) As ReDimUI
+    RequireStackKind "Gap"
+    mStackGap = gapPoints
+    MarkStackStale
+    Touch
+    Set Gap = Me
+End Function
+
+' The points between a stack's edges and its members.
+Public Function Padding(ByVal paddingPoints As Double) As ReDimUI
+    RequireStackKind "Padding"
+    mStackPadding = paddingPoints
+    MarkStackStale
+    Touch
+    Set Padding = Me
+End Function
+
+' Runs the members left to right instead of top to bottom, their tops
+' aligned below the tallest caption among them.
+Public Function Across(Optional ByVal acrossOn As Boolean = True) As ReDimUI
+    RequireStackKind "Across"
+    mStackAcross = acrossOn
+    MarkStackStale
+    Touch
+    Set Across = Me
+End Function
+
+' A stack running down gives its members its own width, less padding.
+Public Function Stretch(Optional ByVal stretchOn As Boolean = True) As ReDimUI
+    RequireStackKind "Stretch"
+    mStackStretch = stretchOn
+    MarkStackStale
+    Touch
+    Set Stretch = Me
+End Function
+
+' Opens or closes an expander from code: its panel shows or hides, and
+' nothing is written or fired.
+Public Function Expanded(Optional ByVal expandedOn As Boolean = True) As ReDimUI
+    RequireRole ROLE_COMPONENT, "Expanded"
+    If mKind <> KIND_EXPANDER Then
+        RaiseError ERROR_INVALID_OPERATION, "Expanded", _
+            "Expanded applies to Expander only."
+    End If
+    mChecked = expandedOn
+    Touch
+    Set Expanded = Me
+End Function
+
+Public Property Get IsExpanded() As Boolean
+    RequireRole ROLE_COMPONENT, "IsExpanded"
+    IsExpanded = (mKind = KIND_EXPANDER And mChecked)
+End Property
+
+Private Sub RequireStackKind(ByVal memberName As String)
+    RequireRole ROLE_COMPONENT, memberName
+    If mKind <> KIND_STACK Then
+        RaiseError ERROR_INVALID_OPERATION, memberName, _
+            memberName & " applies to Stack only."
+    End If
+End Sub
 
 Public Function AltText(ByVal altDescription As String) As ReDimUI
     RequireRole ROLE_COMPONENT, "AltText"
@@ -5597,7 +5824,11 @@ Public Sub Remove()
     DeleteOwnShapes hostApp.Sheet
     hostApp.ForgetComponent mComponentId
     ' Its panels show again, ungated.
-    If mKind = KIND_TABS Then hostApp.ReapplyTabMembers mComponentId, -1
+    If mKind = KIND_TABS Or mKind = KIND_EXPANDER Then
+        hostApp.ReapplyTabMembers mComponentId, -1
+    End If
+    ' The members after it in its stack close the gap.
+    If LenB(mStackId) > 0 Then hostApp.ReflowStackNow mStackId
 End Sub
 
 Friend Sub ForgetComponent(ByVal targetComponentId As String)
@@ -6281,6 +6512,8 @@ Friend Sub RunClickBehavior()
             If Not ClickCalendar(hostApp, ReDimUI.SenderPart) Then Exit Sub
         Case KIND_TABLE
             If Not ClickTable(hostApp, ReDimUI.SenderPart) Then Exit Sub
+        Case KIND_EXPANDER
+            ToggleExpander hostApp
         Case KIND_TABS
             Dim tabPicked As Long
             If Left$(ReDimUI.SenderPart, 2) = "tb" _
@@ -6402,6 +6635,9 @@ Private Sub Touch()
     If LenB(mOwnerAppId) = 0 Then Exit Sub
     If Not ReDimUI.HasApp(mOwnerAppId) Then Exit Sub
     Set hostApp = ReDimUI.App(mOwnerAppId)
+    ' A member's change may move the members after it: its stack lays
+    ' out again the next time any of them asks for a slot.
+    If LenB(mStackId) > 0 Then hostApp.NoteStackTouched mStackId
     hostApp.NotifyComponentTouched mComponentId
 End Sub
 
@@ -6425,6 +6661,13 @@ Friend Sub Apply( _
     RequireRole ROLE_COMPONENT, "Apply"
     ResolveBindings hostApp
     RefreshTabShut hostApp
+    If mKind = KIND_EXPANDER Then
+        If mChecked Then
+            mIconGlyph = ReDimUI.IconGlyph("ChevronDown")
+        Else
+            mIconGlyph = ReDimUI.IconGlyph("ChevronRight")
+        End If
+    End If
     wasApplied = mAppliedValid
     growBefore = mGrowAdded
     EnsureGeometryResolved hostSheet
@@ -6448,7 +6691,9 @@ Friend Sub Apply( _
     If wasApplied And Abs(mGrowAdded - growBefore) > 0.01 Then
         hostApp.ReapplyDependents mComponentId
     End If
-    If mKind = KIND_TABS Then SyncTabPanels hostApp
+    If mKind = KIND_TABS Or mKind = KIND_EXPANDER Then SyncTabPanels hostApp
+    If mKind = KIND_STACK Then MoveStackMembers hostSheet, themeValue, hostApp
+    If LenB(mStackId) > 0 Then NoteFlow hostApp, themeValue
 End Sub
 
 Private Sub ApplyAltText(ByVal mainShape As Shape)
@@ -6525,6 +6770,8 @@ Private Function AccessibleDescription() As String
             described = "Image"
         Case KIND_SKELETON
             described = "Loading"
+        Case KIND_EXPANDER
+            described = mText & ", expander, " & IIf(mChecked, "expanded", "collapsed")
         Case KIND_TABLE
             described = "Table, " & mTableRows & IIf(mTableRows = 1, " row", " rows")
             If mSortColumn > 0 Then
@@ -6616,7 +6863,33 @@ Private Function FormatBoundText(ByVal boundValue As Variant) As String
     End If
 End Function
 
+' A control's rectangle: its stack's slot for it, or its own placement;
+' then a stack lays its members out, which sizes it.
 Private Sub ResolveGeometry(ByVal hostSheet As Worksheet)
+    If Not PlaceInStack(hostSheet) Then ResolvePlacement hostSheet
+    If mKind = KIND_STACK Then ArrangeStack
+End Sub
+
+' True when the control's stack placed it: at its slot, or where it stood
+' while hidden. A stack that no longer exists places nothing.
+Private Function PlaceInStack(ByVal hostSheet As Worksheet) As Boolean
+    Dim stackValue As ReDimUI
+    Dim slotLeft As Double
+    Dim slotTop As Double
+    Dim slotSpan As Double
+
+    If LenB(mStackId) = 0 Then Exit Function
+    If Not OwnerApp.TryGetComponent(mStackId, stackValue) Then Exit Function
+    stackValue.EnsureGeometryResolved hostSheet
+    If stackValue.StackSlot(mComponentId, slotLeft, slotTop, slotSpan) Then
+        mLeft = slotLeft
+        mTop = slotTop
+        If slotSpan > 0 Then mWidth = slotSpan
+    End If
+    PlaceInStack = True
+End Function
+
+Private Sub ResolvePlacement(ByVal hostSheet As Worksheet)
     Dim anchorRange As Range
     Dim relTarget As ReDimUI
 
@@ -6839,6 +7112,12 @@ Private Function CreateShapeForKind(ByVal hostSheet As Worksheet) As Shape
             Set mainShape = hostSheet.Shapes.AddShape( _
                 msoShapeRoundedRectangle, mLeft, mTop, BadgeSpan(), mHeight)
             mainShape.Adjustments(1) = 0.5
+        Case KIND_STACK
+            ' Behind the controls it holds, whenever it was made.
+            Set mainShape = hostSheet.Shapes.AddShape( _
+                msoShapeRectangle, mLeft, mTop, IIf(mWidth > 0, mWidth, 1), _
+                IIf(mHeight > 0, mHeight, 1))
+            mainShape.ZOrder msoSendToBack
         Case KIND_TABS
             ' The rule along the strip's foot; the tabs are parts.
             Set mainShape = hostSheet.Shapes.AddShape( _
@@ -6918,6 +7197,24 @@ Private Sub ApplyStyle(ByVal mainShape As Shape, ByVal themeValue As ReDimUI)
             If Not mAppliedValid Or mAppliedFill <> resolvedFill Then
                 mainShape.Fill.Visible = msoTrue
                 mainShape.Fill.ForeColor.RGB = ResolveSpinnerColor(themeValue)
+                mainShape.Line.Visible = msoFalse
+                mAppliedFill = resolvedFill
+            End If
+        Case KIND_STACK
+            ' A stack is clear unless given a fill, and has no edge.
+            If Not mAppliedValid Or mAppliedFill <> mFillColor Then
+                mainShape.Fill.Visible = BoolToMso(mFillColor >= 0)
+                If mFillColor >= 0 Then mainShape.Fill.ForeColor.RGB = mFillColor
+                mainShape.Line.Visible = msoFalse
+                mAppliedFill = mFillColor
+            End If
+        Case KIND_EXPANDER
+            ' A header row, clear until the pointer tints it.
+            resolvedFill = PointerTint(themeValue.SurfaceColor, themeValue.OnSurfaceColor)
+            If resolvedFill = themeValue.SurfaceColor Then resolvedFill = -1
+            If Not mAppliedValid Or mAppliedFill <> resolvedFill Then
+                mainShape.Fill.Visible = BoolToMso(resolvedFill >= 0)
+                If resolvedFill >= 0 Then mainShape.Fill.ForeColor.RGB = resolvedFill
                 mainShape.Line.Visible = msoFalse
                 mAppliedFill = resolvedFill
             End If
@@ -7163,7 +7460,7 @@ Private Function ResolveTextColor(ByVal themeValue As ReDimUI) As Long
     End If
     Select Case mKind
         Case KIND_LABEL, KIND_CARD, KIND_SELECT, KIND_TOAST, _
-            KIND_INPUT, KIND_COMBO, KIND_DATE
+            KIND_INPUT, KIND_COMBO, KIND_DATE, KIND_EXPANDER
             ' Surface-filled kinds read in surface ink regardless of variant;
             ' the variant fall-through below is for filled buttons only.
             ' Float fields especially: their implicit variant is primary,
@@ -7449,7 +7746,7 @@ Private Sub ApplyText(ByVal mainShape As Shape, ByVal themeValue As ReDimUI)
 
     If mKind = KIND_SPINNER Or mKind = KIND_TOGGLE Or mKind = KIND_OVERLAY _
         Or mKind = KIND_IMAGE Or mKind = KIND_SKELETON Or mKind = KIND_TABLE _
-        Or IsCompositeDrawnKind() Then Exit Sub
+        Or mKind = KIND_STACK Or IsCompositeDrawnKind() Then Exit Sub
     If (mKind = KIND_INPUT Or mKind = KIND_COMBO) And Not IsFloatField() Then
         Exit Sub
     End If
@@ -7633,6 +7930,14 @@ Private Sub HandleControlKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
             HandleDateKey hostApp, keyText
         Case KIND_TABLE
             HandleTableKey hostApp, keyText
+        Case KIND_EXPANDER
+            If keyText = " " Or keyText = "{ENTER}" Then
+                ActivateByKey
+            ElseIf (keyText = "{RIGHT}" And Not mChecked) _
+                Or (keyText = "{LEFT}" And mChecked) Then
+                ToggleExpander hostApp
+                RunClickHandlers hostApp
+            End If
         Case KIND_STEPPER
             HandleStepperKey hostApp, keyText
         Case KIND_SLIDEBAR
@@ -10053,6 +10358,309 @@ Private Sub HandleTableKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
     End If
 End Sub
 
+Friend Sub JoinStack(ByVal memberId As String)
+    If mStackMembers Is Nothing Then Set mStackMembers = New Collection
+    mStackMembers.Add memberId
+    MarkStackStale
+End Sub
+
+' Drops a member from the order; "" drops only members that no longer
+' exist.
+Friend Sub LeaveStack(ByVal memberId As String)
+    Dim idx As Long
+    Dim hostApp As ReDimUI
+    Dim memberValue As ReDimUI
+
+    If mStackMembers Is Nothing Then Exit Sub
+    Set hostApp = OwnerApp
+    For idx = mStackMembers.Count To 1 Step -1
+        If LenB(memberId) = 0 Then
+            If Not hostApp.TryGetComponent(CStr(mStackMembers.Item(idx)), memberValue) Then
+                mStackMembers.Remove idx
+            End If
+        ElseIf StrComp(CStr(mStackMembers.Item(idx)), memberId, vbTextCompare) = 0 Then
+            mStackMembers.Remove idx
+        End If
+    Next idx
+    MarkStackStale
+End Sub
+
+Friend Sub MarkStackStale()
+    mStackGen = mStackGen + 1
+End Sub
+
+' The room a control takes in its stack's flow: nothing while hidden;
+' otherwise its size, with the caption row above it and the note row
+' under a field that keeps one. A stack measures its members.
+Friend Sub MeasureFlow( _
+    ByVal themeValue As ReDimUI, _
+    ByRef flowShown As Boolean, _
+    ByRef flowWidth As Double, _
+    ByRef flowHeight As Double, _
+    ByRef rowAbove As Double, _
+    ByRef rowBelow As Double _
+)
+    flowShown = mVisible
+    If Not flowShown Then Exit Sub
+    If mKind = KIND_STACK Then
+        LayOutStack themeValue, 0, 0, False, flowWidth, flowHeight
+    ElseIf mKind = KIND_BADGE Then
+        flowWidth = BadgeSpan()
+        flowHeight = mHeight
+    Else
+        flowWidth = mWidth
+        flowHeight = mHeight
+    End If
+    rowAbove = CaptionRoom(themeValue)
+    rowBelow = NoteRoom(themeValue)
+End Sub
+
+' The caption's row: a point smaller than the control's text, and its gap.
+Private Function CaptionRoom(ByVal themeValue As ReDimUI) As Double
+    If LenB(mCaptionText) = 0 Then Exit Function
+    CaptionRoom = mFontSize
+    If CaptionRoom <= 0 Then CaptionRoom = themeValue.BaseFontSize
+    CaptionRoom = CaptionRoom + 7
+End Function
+
+' The note row under a field that keeps one: a hint, or a check, rule,
+' or cap whose message or count shows there. Reserving it for the rule
+' rather than the message keeps the stack still while a message comes
+' and goes.
+Private Function NoteRoom(ByVal themeValue As ReDimUI) As Double
+    If LenB(mHintText) = 0 Then
+        If Not IsFloatField() Then Exit Function
+        If LenB(mValidateProc) = 0 And Not mRequired And LenB(mErrorText) = 0 _
+            And mMaxLength = 0 Then Exit Function
+    End If
+    NoteRoom = mFontSize
+    If NoteRoom <= 0 Then NoteRoom = themeValue.BaseFontSize
+    NoteRoom = NoteRoom + 5
+End Function
+
+' Lays the members out from an origin: down, each shown member at the
+' padding's left edge below the one before, or across, their tops below
+' the tallest caption. With fillSlots the slots are kept for the
+' members; the content's extent comes back either way, measured from
+' the members' sizes alone, so a stack inside another measures without
+' a place.
+Private Sub LayOutStack( _
+    ByVal themeValue As ReDimUI, _
+    ByVal originLeft As Double, _
+    ByVal originTop As Double, _
+    ByVal fillSlots As Boolean, _
+    ByRef contentWidth As Double, _
+    ByRef contentHeight As Double _
+)
+    Dim hostApp As ReDimUI
+    Dim memberValue As ReDimUI
+    Dim memberId As Variant
+    Dim flowShown As Boolean
+    Dim flowWidth As Double
+    Dim flowHeight As Double
+    Dim rowAbove As Double
+    Dim rowBelow As Double
+    Dim maxAbove As Double
+    Dim rowReach As Double
+    Dim cursorAt As Double
+    Dim innerWidth As Double
+    Dim shownCount As Long
+
+    contentWidth = 0
+    contentHeight = 0
+    If fillSlots Then mStackSlotCount = 0
+    If mStackMembers Is Nothing Then
+        contentWidth = 2 * mStackPadding
+        contentHeight = 2 * mStackPadding
+        Exit Sub
+    End If
+    Set hostApp = OwnerApp
+    If fillSlots Then
+        ReDim mStackSlotIds(1 To mStackMembers.Count + 1)
+        ReDim mStackSlotLefts(1 To mStackMembers.Count + 1)
+        ReDim mStackSlotTops(1 To mStackMembers.Count + 1)
+        ReDim mStackSlotSpans(1 To mStackMembers.Count + 1)
+    End If
+    If mStackAcross Then
+        For Each memberId In mStackMembers
+            If hostApp.TryGetComponent(CStr(memberId), memberValue) Then
+                memberValue.MeasureFlow themeValue, flowShown, flowWidth, flowHeight, _
+                    rowAbove, rowBelow
+                If flowShown And rowAbove > maxAbove Then maxAbove = rowAbove
+            End If
+        Next memberId
+        cursorAt = originLeft + mStackPadding
+    Else
+        cursorAt = originTop + mStackPadding
+        innerWidth = mWidth - 2 * mStackPadding
+    End If
+    For Each memberId In mStackMembers
+        If hostApp.TryGetComponent(CStr(memberId), memberValue) Then
+            memberValue.MeasureFlow themeValue, flowShown, flowWidth, flowHeight, _
+                rowAbove, rowBelow
+            If flowShown Then
+                shownCount = shownCount + 1
+                If mStackAcross Then
+                    If fillSlots Then
+                        mStackSlotIds(shownCount) = CStr(memberId)
+                        mStackSlotLefts(shownCount) = cursorAt
+                        mStackSlotTops(shownCount) = originTop + mStackPadding + maxAbove
+                    End If
+                    cursorAt = cursorAt + flowWidth + mStackGap
+                    If flowHeight + rowBelow > rowReach Then rowReach = flowHeight + rowBelow
+                Else
+                    ' Stretch widens controls; a stack inside keeps its own
+                    ' width, which its content sets across.
+                    If mStackStretch And innerWidth > 0 And Not mStackAutoWidth _
+                        And memberValue.ComponentKind <> KIND_STACK Then
+                        flowWidth = innerWidth
+                        If fillSlots Then mStackSlotSpans(shownCount) = innerWidth
+                    End If
+                    If fillSlots Then
+                        mStackSlotIds(shownCount) = CStr(memberId)
+                        mStackSlotLefts(shownCount) = originLeft + mStackPadding
+                        mStackSlotTops(shownCount) = cursorAt + rowAbove
+                    End If
+                    cursorAt = cursorAt + rowAbove + flowHeight + rowBelow + mStackGap
+                    If flowWidth > rowReach Then rowReach = flowWidth
+                End If
+            End If
+        End If
+    Next memberId
+    If fillSlots Then mStackSlotCount = shownCount
+    If mStackAcross Then
+        contentWidth = cursorAt - originLeft + mStackPadding
+        If shownCount > 0 Then contentWidth = contentWidth - mStackGap
+        contentHeight = maxAbove + rowReach + 2 * mStackPadding
+    Else
+        contentHeight = cursorAt - originTop + mStackPadding
+        If shownCount > 0 Then contentHeight = contentHeight - mStackGap
+        contentWidth = rowReach + 2 * mStackPadding
+        If Not mStackAutoWidth And mWidth > 0 Then contentWidth = mWidth
+    End If
+End Sub
+
+' Lays the stack out at its place when a member, the stack, or its
+' place changed since the last layout, and sizes the stack to the
+' content: its height, and its width across or when given 0.
+Private Sub ArrangeStack()
+    Dim contentWidth As Double
+    Dim contentHeight As Double
+
+    If mStackLaidGen = mStackGen And mStackLaidLeft = mLeft And mStackLaidTop = mTop _
+        And mStackLaidWidth = mWidth Then Exit Sub
+    LayOutStack OwnerApp.Theme, mLeft, mTop, True, contentWidth, contentHeight
+    If contentHeight < 1 Then contentHeight = 1
+    mHeight = contentHeight
+    If mStackAcross Or mStackAutoWidth Then
+        If contentWidth < 1 Then contentWidth = 1
+        mWidth = contentWidth
+    End If
+    mStackLaidGen = mStackGen
+    mStackLaidLeft = mLeft
+    mStackLaidTop = mTop
+    mStackLaidWidth = mWidth
+End Sub
+
+' A member's slot from the last layout, with the width a stretching
+' stack gives it (0 for its own); False while the member is hidden.
+Friend Function StackSlot( _
+    ByVal memberId As String, _
+    ByRef slotLeft As Double, _
+    ByRef slotTop As Double, _
+    ByRef slotSpan As Double _
+) As Boolean
+    Dim slotNo As Long
+
+    For slotNo = 1 To mStackSlotCount
+        If StrComp(mStackSlotIds(slotNo), memberId, vbTextCompare) = 0 Then
+            slotLeft = mStackSlotLefts(slotNo)
+            slotTop = mStackSlotTops(slotNo)
+            slotSpan = mStackSlotSpans(slotNo)
+            StackSlot = True
+            Exit Function
+        End If
+    Next slotNo
+End Function
+
+' Whether a member stands somewhere other than the slot given.
+Friend Function SlotMoved( _
+    ByVal slotLeft As Double, _
+    ByVal slotTop As Double, _
+    ByVal slotSpan As Double _
+) As Boolean
+    SlotMoved = Abs(mLeft - slotLeft) > 0.01 Or Abs(mTop - slotTop) > 0.01
+    If slotSpan > 0 Then SlotMoved = SlotMoved Or Abs(mWidth - slotSpan) > 0.01
+End Function
+
+' After a stack draws: members whose slot changed apply at it, and when
+' the stack showed or hid, every member applies to follow it.
+Private Sub MoveStackMembers( _
+    ByVal hostSheet As Worksheet, _
+    ByVal themeValue As ReDimUI, _
+    ByVal hostApp As ReDimUI _
+)
+    Dim memberValue As ReDimUI
+    Dim memberId As Variant
+    Dim slotNo As Long
+
+    If mStackMembers Is Nothing Then Exit Sub
+    If mVisible <> mAppliedStackShown Then
+        mAppliedStackShown = mVisible
+        For Each memberId In mStackMembers
+            If hostApp.TryGetComponent(CStr(memberId), memberValue) Then
+                memberValue.Apply hostSheet, themeValue, hostApp
+            End If
+        Next memberId
+        Exit Sub
+    End If
+    For slotNo = 1 To mStackSlotCount
+        If hostApp.TryGetComponent(mStackSlotIds(slotNo), memberValue) Then
+            If memberValue.SlotMoved(mStackSlotLefts(slotNo), mStackSlotTops(slotNo), _
+                mStackSlotSpans(slotNo)) Then
+                memberValue.Apply hostSheet, themeValue, hostApp
+            End If
+        End If
+    Next slotNo
+End Sub
+
+' A queued reflow: the stack lays out again and draws, which moves the
+' members whose place changed.
+Friend Sub ReflowMembers( _
+    ByVal hostSheet As Worksheet, _
+    ByVal themeValue As ReDimUI, _
+    ByVal hostApp As ReDimUI _
+)
+    MarkStackStale
+    Apply hostSheet, themeValue, hostApp
+End Sub
+
+' After a member draws: when the room it takes changed, its stack
+' queues a reflow for the end of the flush.
+Private Sub NoteFlow(ByVal hostApp As ReDimUI, ByVal themeValue As ReDimUI)
+    Dim flowShown As Boolean
+    Dim flowWidth As Double
+    Dim flowHeight As Double
+    Dim rowAbove As Double
+    Dim rowBelow As Double
+    Dim flowKey As String
+
+    MeasureFlow themeValue, flowShown, flowWidth, flowHeight, rowAbove, rowBelow
+    flowKey = CStr(flowShown) & ":" & CStr(flowWidth) & ":" & CStr(flowHeight) & _
+        ":" & CStr(rowAbove) & ":" & CStr(rowBelow)
+    If flowKey = mAppliedFlowSig Then Exit Sub
+    mAppliedFlowSig = flowKey
+    hostApp.QueueReflow mStackId
+End Sub
+
+' Opens or closes an expander from a click or a key: its panel follows,
+' and WritesTo takes the new state.
+Private Sub ToggleExpander(ByVal hostApp As ReDimUI)
+    mChecked = Not mChecked
+    If LenB(mWritesToKey) > 0 Then hostApp.SetState mWritesToKey, mChecked
+    Touch
+End Sub
+
 ' A date without its time of day.
 Private Function DayOnly(ByVal anyDate As Date) As Date
     DayOnly = DateSerial(Year(anyDate), Month(anyDate), Day(anyDate))
@@ -10506,10 +11114,13 @@ End Function
 ' For the panels: the tab shown, 0 while the Tabs control is hidden, and
 ' -1 for any other kind.
 Friend Property Get PanelTab() As Long
-    If mKind <> KIND_TABS Then
+    If mKind = KIND_TABS Then
+        If mVisible Then PanelTab = ShownTab()
+    ElseIf mKind = KIND_EXPANDER Then
+        ' An open expander shows its one panel.
+        If mVisible And mChecked Then PanelTab = 1
+    Else
         PanelTab = -1
-    ElseIf mVisible Then
-        PanelTab = ShownTab()
     End If
 End Property
 
@@ -10534,9 +11145,13 @@ End Function
 Private Sub RefreshTabShut(ByVal hostApp As ReDimUI)
     Dim shutNow As Boolean
 
-    If LenB(mTabOwnerId) = 0 And Not mTabShut Then Exit Sub
+    If LenB(mTabOwnerId) = 0 And LenB(mStackId) = 0 And Not mTabShut Then Exit Sub
     If LenB(mTabOwnerId) > 0 Then
         shutNow = TabShutUnder(hostApp.ShownTabOf(mTabOwnerId))
+    End If
+    ' A hidden stack hides its members as a hidden tab does.
+    If Not shutNow And LenB(mStackId) > 0 Then
+        shutNow = hostApp.StackHidden(mStackId)
     End If
     If shutNow = mTabShut Then Exit Sub
     If shutNow Then
@@ -12201,7 +12816,7 @@ End Function
 
 ' True when this visible control's rectangle holds the point.
 Friend Function CoversPoint(ByVal pointsX As Double, ByVal pointsY As Double) As Boolean
-    If Not mVisible Then Exit Function
+    If Not mVisible Or mKind = KIND_STACK Then Exit Function
     CoversPoint = (pointsX >= mLeft And pointsX <= mLeft + mWidth _
         And pointsY >= mTop And pointsY <= mTop + mHeight)
 End Function
@@ -12793,7 +13408,7 @@ Friend Sub SetPointerLook( _
         Select Case mKind
             Case KIND_BUTTON, KIND_TOGGLE, KIND_TICKBOX, KIND_RADIO, _
                 KIND_STEPPER, KIND_SLIDEBAR, KIND_SELECT, KIND_CHECKLIST, _
-                KIND_TRANSFER, KIND_TABS, KIND_DATE, KIND_TABLE
+                KIND_TRANSFER, KIND_TABS, KIND_DATE, KIND_TABLE, KIND_EXPANDER
             Case KIND_INPUT, KIND_COMBO
                 If Not IsFloatField() Then Exit Sub
             Case Else
@@ -13649,7 +14264,7 @@ Friend Function IsFocusable() As Boolean
     Select Case mKind
         Case KIND_BUTTON, KIND_TOGGLE, KIND_TICKBOX, KIND_RADIO, _
             KIND_STEPPER, KIND_SLIDEBAR, KIND_SELECT, KIND_CHECKLIST, _
-            KIND_TRANSFER, KIND_TABS, KIND_DATE, KIND_TABLE
+            KIND_TRANSFER, KIND_TABS, KIND_DATE, KIND_TABLE, KIND_EXPANDER
             IsFocusable = True
         Case KIND_INPUT, KIND_COMBO
             IsFocusable = IsFloatField()

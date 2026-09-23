@@ -49,9 +49,9 @@ demo is the working reference.
 
 Component factories, get-or-create by id: `Button`, `Label`, `Card`, `Spinner`, `ProgressBar`,
 `Skeleton`, `Toggle`, `TickBox`, `RadioGroup`, `Stepper`, `SlideBar`, `SelectBox`, `ComboBox`,
-`TransferList`, `CheckList`, `TextInput`, `DatePicker`, `Image`, `Tabs`, `Table`, and
-`Badge`. Every control is drawn from shapes and fully themed; there are no native form
-controls in the framework. Also:
+`TransferList`, `CheckList`, `TextInput`, `DatePicker`, `Image`, `Tabs`, `Table`, `Badge`,
+`Expander`, and the `Stack` layout container (see [Layout](#layout)). Every control is drawn
+from shapes and fully themed; there are no native form controls in the framework. Also:
 
 | Member | Purpose |
 |---|---|
@@ -85,7 +85,8 @@ All fluent, all return the component:
 - Geometry: `At("B2:D3")` anchors to a range and follows column widths on re-render;
   `AtRect(left, top, width, height)` uses points; `Below(otherId, gap)` and
   `RightOf(otherId, gap)` place relative to another component with `Sized(w, h)` for
-  dimensions. Circular relative chains raise a clear error.
+  dimensions. Circular relative chains raise a clear error. `InStack(stackId)` hands the
+  position to a `Stack` (see [Layout](#layout)).
 - Content: `Text`, `FontSize`, `Bold`, `BusyText`.
 - Style: `Primary`, `Secondary`, `Success`, `Warning`, `Danger`, `Fill(color)`,
   `TextColor(color)`. `Warning` is amber, dark on light surfaces and bright on dark ones
@@ -283,6 +284,13 @@ dependencies:
   even after its source file goes away.
 - `Toggle`: the pill switch for booleans. Switched on, the knob takes the theme's
   `OnPrimary` ink, as Windows draws it, so it stays visible on every accent track.
+- `Expander`: a collapsible section. Its header shows a chevron and its `Text` in bold;
+  a click, or Space and Enter while it has the keys, opens and closes it, and Right opens
+  and Left closes. Controls join its panel with `InExpander "adv"`, the same as
+  `OnTab "adv", 1`, and show only while it is open, under the same rules as a tab's
+  panel. It starts closed; `Expanded True` opens it from code, and `IsExpanded` reads it.
+  A user's toggle writes `True` or `False` to `WritesTo` and fires `OnChange`. In a
+  `Stack`, what follows the panel moves down when it opens and back up when it closes.
 - `Badge`: a small pill holding a count or a status word, such as "3" or "Overdue". It
   takes the primary color unless a variant says otherwise (`Success`, `Warning`,
   `Danger`, `Secondary`), and widens to its text: the rectangle's left and top place it,
@@ -495,6 +503,43 @@ ui.TextInput("find").DebounceMs 250
 ui.ComboBox("fruit").AtRect(24, 162, 220, 22).Items("Apple", "Banana").RestrictToItems
 ```
 
+## Layout
+
+A `Stack` places the controls that join it with `InStack`, so a form needs no
+coordinates past the stack's own. Members flow down it in the order they joined, `Gap`
+points apart (8 by default), from its top-left corner inside `Padding` (0 by default).
+The flow counts what a control carries outside its rectangle: the row a `Caption` takes
+above it, and the note row under a field that keeps one, which is any field with a
+`Hint`, `Validates`, `Required`, `ErrorText`, or `MaxLength`. The row stays reserved while
+no message shows, so a message that comes and goes moves nothing.
+
+- A member keeps its own size, from `Sized(w, h)` or its defaults; its position is the
+  stack's from then on. `InStack ""` takes it out where it stands.
+- A hidden member gives its place to the next, whether `Visible False`, a
+  `BindVisible`, a hidden tab, or a closed `Expander` hid it. When a member grows,
+  shrinks, gains a caption, or hides, the members after it move once the change has
+  drawn. Only members whose place changed are redrawn.
+- `Stretch` gives the controls the stack's width, less padding.
+- `Across` runs the members left to right, their tops level below the tallest caption
+  among them.
+- The stack's height follows its content, and so does its width when it runs across or
+  was given a width of 0.
+- A stack can sit in another, such as a row of buttons across at the foot of a form.
+- A stack is clear and takes no clicks; `Fill(color)` paints it as a panel. It is drawn
+  behind its members. `Visible False` hides it with every member, and a member's own
+  `Visible` still applies inside.
+
+```vba
+ui.Stack("form").AtRect(24, 24, 280, 0).Gap(10).Stretch
+ui.TextInput("name").Sized(100, 22).Caption("Name").Required.InStack "form"
+ui.TextInput("email").Sized(100, 22).Caption("Email").Hint("We never share it").InStack "form"
+ui.Expander("more").Sized(280, 28).Text("More options").InStack "form"
+ui.TickBox("news").Sized(200, 18).Text("Newsletter").InExpander("more").InStack "form"
+ui.Stack("buttons").Across.Gap(8).InStack "form"
+ui.Button("ok").Sized(90, 30).Text("Save").Primary.InStack "buttons"
+ui.Button("cancel").Sized(90, 30).Text("Cancel").Secondary.InStack "buttons"
+```
+
 ## Icons
 
 `Icon("Save")` on a `Button` or `Label` draws a Windows icon before the control's text, two
@@ -595,6 +640,7 @@ keep the keys.
 | Toggle, TickBox | Space toggles. |
 | RadioGroup | Arrows move the selection, wrapping at the ends; Home and End jump. Each move fires `OnChange`. |
 | Tabs | Left and Right show the tab beside, wrapping at the ends; Home and End jump. Each move fires `OnChange`. |
+| Expander | Space or Enter opens or closes it; Right opens and Left closes. Each change fires `OnChange`. |
 | Table | Up and Down move the selection a row in the order shown, Page Up and Page Down a page, Home and End to the first and last row; the rows scroll to keep it in view, and each move fires `OnChange`. |
 | DatePicker | Closed: Alt+Down, F4, Space, or Down opens the calendar on the date held, or today. Open: Left and Right move a day, Up and Down a week, Page Up and Page Down a month, Home and End to the month's first and last day; Enter or Space picks the day reached, and Esc, F4, or Alt+Up closes. A dashed ring marks the day reached. |
 | Stepper | Up and Right step up, Down and Left step down, Page Up and Page Down step ten times, Home and End jump to the range ends. |

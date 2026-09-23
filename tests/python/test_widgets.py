@@ -1187,3 +1187,30 @@ def test_badges(run_widgets):
     assert facts["cornerBadge"] == "True"
     assert facts["hidesWith"] == "True"
     assert facts["removed"] == "True"
+
+
+def test_stack(run_widgets):
+    facts = parse_transcript(run_widgets("TestStack"))
+    assert facts["tops"] == "42,92,140,168", (
+        "members flow down with caption rows above and note rows below counted"
+    )
+    assert facts["stretched"] == "260,168", "Stretch widens controls, not a stack inside"
+    assert facts["across"] == "24,112"
+    assert facts["height"] == "172"
+    assert facts["collapsed"] == "74,102,106", "a hidden member gives its place away"
+    assert facts["restored"] == "140,168"
+    assert facts["grew"] == "110,158", "a member that grows moves the ones after it"
+    assert facts["stackHidden"] == "True,152"
+    assert facts["stackShown"] == "True"
+    assert facts["removed"] == "158"
+
+
+def test_expander(run_widgets):
+    facts = parse_transcript(run_widgets("TestExpander"))
+    assert facts["closed"] == "True,60"
+    assert facts["opens"] == "True,90", (
+        "opening must show the panel, write, fire once, and move what follows down"
+    )
+    assert facts["alt"] == "True"
+    assert facts["keyCloses"] == "True,60"
+    assert facts["keyOpens"] == "True"

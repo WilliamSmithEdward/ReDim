@@ -63,8 +63,10 @@ user keeps working in the workbook.
   the store, save it wherever fits (ROneCOne's JSON serializer is on board), and reseed on
   build with `SetStateDefault`, which never clobbers a value already in play.
 - **Composable layout.** Anchor to ranges with `At`, to points with `AtRect`, or to other
-  components with `Below` and `RightOf`. Render prunes shapes orphaned by renamed components,
-  so iterating on app code never litters the sheet.
+  components with `Below` and `RightOf`, or let a `Stack` flow controls down or across,
+  closing the gap when one hides and making room for an `Expander` as it opens. Render
+  prunes shapes orphaned by renamed components, so iterating on app code never litters the
+  sheet.
 - **Windows.** Sheets as forms: `AsWindow` registers a window, `Navigate` shows one at a time
   (others go very-hidden), `NavigateBack` walks the stack, `OnShow` and `OnHide` fire like
   form lifecycle events, a button becomes a nav link with `NavigatesTo`, and `NavBar` renders

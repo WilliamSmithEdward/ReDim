@@ -413,6 +413,17 @@
 - `Badge` is a pill for a count or a status word that widens to its
   text. `BadgeText` puts one on any control's top-right corner, such as
   the unread count on an Inbox button.
+- `Stack` lays out the controls that join it with `InStack`: down or
+  `Across`, a `Gap` apart, inside a `Padding`, with `Stretch` to give
+  them its width. It counts a caption's row above a field and the note
+  row under one, and grows to its content. A member that hides,
+  grows, or gains a caption moves the members after it once the flush
+  ends, and only members whose place changed redraw. Stacks nest, and
+  a hidden stack hides its members.
+- `Expander` is a collapsible section: a header with a chevron, and a
+  panel of controls that join it with `InExpander`, shown while it is
+  open. In a stack, what follows moves down as it opens and back up as
+  it closes.
 
 ## 0.19.2 - 2026-08-02
 

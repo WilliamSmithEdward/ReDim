@@ -4073,3 +4073,106 @@ Public Function TestBadges() As String
     ReDimUI.AutoPump True
     TestBadges = transcript
 End Function
+
+' Stack: members flow down in join order a gap apart, the caption row
+' above a field and its note row below counted, and the stack grows to
+' its content. A hidden member gives its place to the next and a shown
+' one takes it back; a member that grows moves the ones after it. A stack
+' across lines its members up left to right; Stretch widens the controls
+' but not a stack inside. A hidden stack hides its members, and removing
+' a member closes its gap.
+Public Function TestStack() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim transcript As String
+
+    ReDimUI.AutoPump False
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "wid59")
+    app.Stack("form").AtRect(24, 24, 260, 0).Gap(10).Stretch
+    app.TextInput("name").Sized(100, 22).Caption("Name").InStack "form"
+    app.TextInput("email").Sized(100, 22).Caption("Email").Hint("We never share it") _
+        .InStack "form"
+    app.Label("news").Sized(160, 18).Text("Newsletter").InStack "form"
+    app.Stack("row").Across.Gap(8).InStack "form"
+    app.Button("ok").Sized(80, 28).Text("OK").InStack "row"
+    app.Button("cancel").Sized(80, 28).Text("Cancel").InStack "row"
+    app.Render
+
+    transcript = "tops=" & host.Shapes("rdm_wid59_name").Top & "," & _
+        host.Shapes("rdm_wid59_email").Top & "," & host.Shapes("rdm_wid59_news").Top & _
+        "," & host.Shapes("rdm_wid59_ok").Top
+    transcript = transcript & "|stretched=" & host.Shapes("rdm_wid59_name").Width & "," & _
+        host.Shapes("rdm_wid59_row").Width
+    transcript = transcript & "|across=" & host.Shapes("rdm_wid59_ok").Left & "," & _
+        host.Shapes("rdm_wid59_cancel").Left
+    transcript = transcript & "|height=" & host.Shapes("rdm_wid59_form").Height
+
+    app.TextInput("email").Visible False
+    transcript = transcript & "|collapsed=" & host.Shapes("rdm_wid59_news").Top & "," & _
+        host.Shapes("rdm_wid59_ok").Top & "," & host.Shapes("rdm_wid59_form").Height
+    app.TextInput("email").Visible True
+    transcript = transcript & "|restored=" & host.Shapes("rdm_wid59_news").Top & "," & _
+        host.Shapes("rdm_wid59_ok").Top
+
+    app.TextInput("name").Sized 100, 40
+    transcript = transcript & "|grew=" & host.Shapes("rdm_wid59_email").Top & "," & _
+        host.Shapes("rdm_wid59_news").Top
+
+    app.Stack("row").Visible False
+    transcript = transcript & "|stackHidden=" & CStr( _
+        host.Shapes("rdm_wid59_ok").Visible = msoFalse _
+        And host.Shapes("rdm_wid59_cancel").Visible = msoFalse) & "," & _
+        host.Shapes("rdm_wid59_form").Height
+    app.Stack("row").Visible True
+    transcript = transcript & "|stackShown=" & CStr(host.Shapes("rdm_wid59_ok").Visible = msoTrue)
+
+    app.Label("news").Remove
+    transcript = transcript & "|removed=" & host.Shapes("rdm_wid59_ok").Top
+    ReDimUI.AutoPump True
+    TestStack = transcript
+End Function
+
+' Expander: closed by default with its panel hidden under a right-pointing
+' chevron. A click opens it, shows the panel, writes the state, and fires
+' OnChange, and in a stack the controls after it move down to make room;
+' Left closes it and Right opens it from the keys.
+Public Function TestExpander() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim transcript As String
+
+    gChangeCount = 0
+    ReDimUI.AutoPump False
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "wid60")
+    app.Stack("page").AtRect(24, 24, 260, 0).Gap 8
+    app.Expander("adv").Sized(260, 28).Text("Advanced").WritesTo("advOpen").InStack "page"
+    app.Expander("adv").OnChange "TestReDimWidgets.RecordChange"
+    app.TextInput("proxy").Sized(200, 22).InExpander("adv").InStack "page"
+    app.Label("after").Sized(200, 18).Text("After").InStack "page"
+    app.Render
+
+    transcript = "closed=" & CStr(host.Shapes("rdm_wid60_proxy").Visible = msoFalse _
+        And Left$(host.Shapes("rdm_wid60_adv").TextFrame2.TextRange.Text, 1) _
+            = ReDimUI.IconGlyph("ChevronRight")) & "," & host.Shapes("rdm_wid60_after").Top
+    ReDimUI.DispatchShape "rdm_wid60_adv"
+    transcript = transcript & "|opens=" & CStr( _
+        host.Shapes("rdm_wid60_proxy").Visible = msoTrue _
+        And app.State("advOpen") = True And gChangeCount = 1 _
+        And app.Expander("adv").IsExpanded _
+        And Left$(host.Shapes("rdm_wid60_adv").TextFrame2.TextRange.Text, 1) _
+            = ReDimUI.IconGlyph("ChevronDown")) & "," & host.Shapes("rdm_wid60_after").Top
+    transcript = transcript & "|alt=" & CStr(InStr(1, _
+        host.Shapes("rdm_wid60_adv").AlternativeText, "Advanced, expander, expanded") > 0)
+    app.Expander("adv").Focus
+    RdxKeyChar "{LEFT}"
+    transcript = transcript & "|keyCloses=" & CStr( _
+        host.Shapes("rdm_wid60_proxy").Visible = msoFalse And gChangeCount = 2) & "," & _
+        host.Shapes("rdm_wid60_after").Top
+    RdxKeyChar "{RIGHT}"
+    transcript = transcript & "|keyOpens=" & CStr(host.Shapes("rdm_wid60_proxy").Visible = msoTrue)
+    RdxReleaseKeys
+    ReDimUI.AutoPump True
+    TestExpander = transcript
+End Function
