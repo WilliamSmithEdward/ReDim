@@ -1152,3 +1152,38 @@ def test_table(run_widgets):
     assert facts["keyUp"] == "Item 2/4"
     assert facts["fromRange"] == "Name/3/85"
     assert facts["blanksLast"] == "Bob 85,Cy"
+
+
+def test_icons(run_widgets):
+    facts = parse_transcript(run_widgets("TestIcons"))
+    assert facts["iconText"] == "True", (
+        "the icon must lead the text in the icon font, the text in the theme font"
+    )
+    assert facts["iconAlone"] == "True", "an icon-only button reads as its icon's name"
+    assert facts["labelIcon"] == "True"
+    assert facts["glyph"] == "59152/True"
+    assert facts["unknownRefused"] == "True"
+    assert facts["iconOff"] == "True", "Icon \"\" must give the text its font back"
+    assert facts["iconFont"] in ("Segoe Fluent Icons", "Segoe MDL2 Assets")
+
+
+def test_system_theme(run_widgets):
+    facts = parse_transcript(run_widgets("TestSystemTheme"))
+    assert facts["darkSurface"] == "True"
+    assert facts["accentReads"] == "True", (
+        "the accent must clear 3:1 on the surface and 4.5:1 under its ink"
+    )
+    assert facts["lightNoAccent"] == "True"
+    assert facts["followsLight"] == "True"
+    assert facts["switchesDark"] == "True", "a following app must re-theme on a change"
+    assert facts["stopsFollowing"] == "True"
+    assert facts["realRead"] == "True"
+
+
+def test_badges(run_widgets):
+    facts = parse_transcript(run_widgets("TestBadges"))
+    assert facts["widens"] == "True"
+    assert facts["tones"] == "True"
+    assert facts["cornerBadge"] == "True"
+    assert facts["hidesWith"] == "True"
+    assert facts["removed"] == "True"

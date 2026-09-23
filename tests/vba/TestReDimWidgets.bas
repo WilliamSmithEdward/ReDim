@@ -3939,3 +3939,137 @@ End Function
 Private Function TableRowShown(ByVal host As Worksheet, ByVal shapeName As String) As String
     TableRowShown = Trim$(Replace(host.Shapes(shapeName).TextFrame2.TextRange.Text, vbTab, " "))
 End Function
+
+' Icons: a button's icon leads its text in the icon font while the text
+' keeps the theme font; an icon alone names the button for screen
+' readers; a label takes one too. IconGlyph maps names, passes one
+' character through, and refuses an unknown name; Icon "" takes the icon
+' off and gives the text its font back.
+Public Function TestIcons() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim transcript As String
+    Dim refused As Boolean
+
+    ReDimUI.AutoPump False
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "wid56")
+    app.Button("save").AtRect(24, 24, 120, 30).Icon("Save").Text "Save"
+    app.Button("trash").AtRect(160, 24, 40, 30).Icon "Delete"
+    app.Label("note").AtRect(24, 70, 200, 20).Icon("Info").Text "Saved drafts"
+    app.Render
+
+    With host.Shapes("rdm_wid56_save").TextFrame2.TextRange
+        transcript = "iconText=" & CStr(.Text = ReDimUI.IconGlyph("Save") & "  Save" _
+            And .Characters(1, 1).Font.Name = ReDimUI.IconFont _
+            And .Characters(4, 4).Font.Name = app.Theme.FontName)
+    End With
+    transcript = transcript & "|iconAlone=" & CStr( _
+        host.Shapes("rdm_wid56_trash").TextFrame2.TextRange.Text = ReDimUI.IconGlyph("Delete") _
+        And host.Shapes("rdm_wid56_trash").AlternativeText = "Delete, button")
+    transcript = transcript & "|labelIcon=" & CStr( _
+        host.Shapes("rdm_wid56_note").TextFrame2.TextRange.Characters(1, 1).Font.Name _
+            = ReDimUI.IconFont)
+    transcript = transcript & "|glyph=" & CStr(AscW(ReDimUI.IconGlyph("Add")) And &HFFFF&) & _
+        "/" & CStr(ReDimUI.IconGlyph("x") = "x")
+    On Error Resume Next
+    ReDimUI.IconGlyph "NoSuchIcon"
+    refused = (Err.Number <> 0)
+    Err.Clear
+    On Error GoTo 0
+    transcript = transcript & "|unknownRefused=" & CStr(refused)
+    app.Button("save").Icon ""
+    With host.Shapes("rdm_wid56_save").TextFrame2.TextRange
+        transcript = transcript & "|iconOff=" & CStr(.Text = "Save" _
+            And .Characters(1, 1).Font.Name = app.Theme.FontName)
+    End With
+    transcript = transcript & "|iconFont=" & ReDimUI.IconFont
+    ReDimUI.AutoPump True
+    TestIcons = transcript
+End Function
+
+' The Windows look: ThemeSystem takes the dark theme under dark mode with
+' the accent made readable, and the light one with its own primary when
+' there is no accent. An app that follows the look re-themes when it
+' changes, and one that stops keeps its theme. Reading the real registry
+' works too.
+Public Function TestSystemTheme() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim themeValue As ReDimUI
+    Dim transcript As String
+
+    ReDimUI.AutoPump False
+    ReDimUI.OverrideSystemLook True, RGB(0, 120, 212)
+    Set themeValue = ReDimUI.ThemeSystem
+    transcript = "darkSurface=" & CStr(themeValue.SurfaceColor = ReDimUI.ThemeDark.SurfaceColor)
+    transcript = transcript & "|accentReads=" & CStr( _
+        ReDimUI.ContrastRatio(themeValue.PrimaryColor, themeValue.SurfaceColor) >= 3 _
+        And ReDimUI.ContrastRatio(themeValue.OnPrimaryColor, themeValue.PrimaryColor) >= 4.5 _
+        And themeValue.PrimaryColor <> ReDimUI.ThemeDark.PrimaryColor)
+    ReDimUI.OverrideSystemLook False, -1
+    Set themeValue = ReDimUI.ThemeSystem
+    transcript = transcript & "|lightNoAccent=" & CStr( _
+        themeValue.PrimaryColor = ReDimUI.ThemeLight.PrimaryColor _
+        And themeValue.SurfaceColor = ReDimUI.ThemeLight.SurfaceColor)
+
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "wid57")
+    app.Button("go").AtRect(24, 24, 100, 30).Text "Go"
+    app.FollowSystemTheme
+    app.Render
+    transcript = transcript & "|followsLight=" & _
+        CStr(app.Theme.SurfaceColor = ReDimUI.ThemeLight.SurfaceColor)
+    ReDimUI.OverrideSystemLook True, RGB(0, 120, 212)
+    ReDimUI.CheckSystemLook True
+    transcript = transcript & "|switchesDark=" & CStr( _
+        app.Theme.SurfaceColor = ReDimUI.ThemeDark.SurfaceColor _
+        And host.Shapes("rdm_wid57_go").Fill.ForeColor.RGB = app.Theme.PrimaryColor)
+    app.FollowSystemTheme False
+    ReDimUI.OverrideSystemLook False, -1
+    ReDimUI.CheckSystemLook True
+    transcript = transcript & "|stopsFollowing=" & _
+        CStr(app.Theme.SurfaceColor = ReDimUI.ThemeDark.SurfaceColor)
+    ReDimUI.ClearSystemLookOverride
+    Set themeValue = ReDimUI.ThemeSystem
+    transcript = transcript & "|realRead=" & CStr(Not themeValue Is Nothing)
+    ReDimUI.AutoPump True
+    TestSystemTheme = transcript
+End Function
+
+' Badges: a Badge pill widens to its text and takes its variant's fill.
+' BadgeText puts a danger pill on a control's top-right corner, hides with
+' the control, and "" takes it off.
+Public Function TestBadges() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim transcript As String
+    Dim shortWidth As Double
+
+    ReDimUI.AutoPump False
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "wid58")
+    app.Badge("count").AtRect(24, 24, 0, 18).Text "3"
+    app.Badge("status").AtRect(24, 60, 0, 18).Text("Overdue").Danger
+    app.Button("inbox").AtRect(120, 24, 100, 30).Text("Inbox").BadgeText "12"
+    app.Render
+    shortWidth = host.Shapes("rdm_wid58_count").Width
+    transcript = "widens=" & CStr(host.Shapes("rdm_wid58_status").Width > shortWidth _
+        And shortWidth >= 18)
+    transcript = transcript & "|tones=" & CStr( _
+        host.Shapes("rdm_wid58_count").Fill.ForeColor.RGB = app.Theme.PrimaryColor _
+        And host.Shapes("rdm_wid58_status").Fill.ForeColor.RGB = app.Theme.DangerColor)
+    With host.Shapes("rdm_wid58_inbox__bd")
+        transcript = transcript & "|cornerBadge=" & CStr(.TextFrame2.TextRange.Text = "12" _
+            And .Left > host.Shapes("rdm_wid58_inbox").Left + 60 _
+            And .Top < host.Shapes("rdm_wid58_inbox").Top _
+            And .Fill.ForeColor.RGB = app.Theme.DangerColor)
+    End With
+    app.Button("inbox").Visible False
+    transcript = transcript & "|hidesWith=" & CStr(Not ShapeExists(host, "rdm_wid58_inbox__bd"))
+    app.Button("inbox").Visible True
+    app.Button("inbox").BadgeText ""
+    transcript = transcript & "|removed=" & CStr(Not ShapeExists(host, "rdm_wid58_inbox__bd"))
+    ReDimUI.AutoPump True
+    TestBadges = transcript
+End Function

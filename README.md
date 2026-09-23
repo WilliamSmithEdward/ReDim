@@ -42,10 +42,11 @@ user keeps working in the workbook.
   RadioGroup, Stepper, SlideBar (press-drag), SelectBox, ComboBox (editable, filtering live
   as you type), TransferList (dual listbox with move buttons), CheckList (checkbox list
   with a tri-state select-all header), DatePicker (month calendar), Table (sortable,
-  paged), Tabs (with panels of controls), Skeleton (loading placeholder), Image (embedded
-  picture fills), TextInput with captions, hints, and validation, Toast, and a
-  shapes-based modal overlay with Confirm - every
-  control drawn from shapes and fully themed, with light and dark presets, no native form
+  paged), Tabs (with panels of controls), Skeleton (loading placeholder), Badge, Image
+  (embedded picture fills), TextInput with captions, hints, and validation, Toast, and a
+  shapes-based modal overlay with Confirm, plus 71 Windows icons for buttons and labels -
+  every control drawn from shapes and fully themed, with light, dark, and high-contrast
+  presets and a theme that follows Windows dark mode and accent color, no native form
   controls anywhere, no cells required (text fields float free of the grid via a keyboard
   focus layer, or anchor to a cell if you want one), and no dependencies beyond a stock
   Excel 365 install.

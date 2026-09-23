@@ -17,6 +17,8 @@ only the members of its role and raises a clear error otherwise.
 | `ReDimUI.AutoPump pumpOn` | Turn the wall-clock timer off for deterministic runs. |
 | `ReDimUI.Shutdown` | Kill the pump and forget every app, with its window registration and the back stack. Shapes stay. |
 | `ReDimUI.ThemeLight`, `ThemeDark`, `ThemeHighContrast` | Theme presets; customize with `WithPrimary`, `WithFont`. High contrast is white and yellow on black, and every pairing the controls draw passes WCAG AA. |
+| `ReDimUI.ThemeSystem` | The Windows look: `ThemeDark` while Windows apps use dark mode and `ThemeLight` otherwise, with the Windows accent color as the primary. The accent moves toward black on the light theme, or white on the dark one, until it clears 3:1 against the surface and 4.5:1 under its ink. Pair it with `ui.FollowSystemTheme` to keep up with changes. |
+| `ReDimUI.IconGlyph(name)` / `IconNames` / `IconFont` | The character that draws a named icon, for text of your own; the list of names (see [Icons](#icons)); and the Windows icon font they draw in, Segoe Fluent Icons where Windows 11 installed it and Segoe MDL2 Assets otherwise. |
 | `theme.ContrastReport` / `ReDimUI.ContrastRatio(foreRgb, backRgb)` | The report lists every color pairing the controls draw with its WCAG ratio, what it needs (4.5:1 for text, 3:1 for edges and the accent), and pass or fail; `ContrastRatio` computes one pair. |
 | `ReDimUI.ReduceMotion motionOff` / `ReDimUI.MotionReduced` | Reduced motion follows the Windows "Show animations" setting; `True` or `False` overrides it and no argument follows Windows again. Reduced, toasts appear, move, and leave without sliding or fading. |
 
@@ -47,9 +49,9 @@ demo is the working reference.
 
 Component factories, get-or-create by id: `Button`, `Label`, `Card`, `Spinner`, `ProgressBar`,
 `Skeleton`, `Toggle`, `TickBox`, `RadioGroup`, `Stepper`, `SlideBar`, `SelectBox`, `ComboBox`,
-`TransferList`, `CheckList`, `TextInput`, `DatePicker`, `Image`, `Tabs`, and `Table`. Every
-control is drawn from shapes and fully themed; there are no native form controls in the
-framework. Also:
+`TransferList`, `CheckList`, `TextInput`, `DatePicker`, `Image`, `Tabs`, `Table`, and
+`Badge`. Every control is drawn from shapes and fully themed; there are no native form
+controls in the framework. Also:
 
 | Member | Purpose |
 |---|---|
@@ -67,6 +69,7 @@ framework. Also:
 | `Confirm titleText, messageText, okProc, cancelProc, okText, cancelText` | Shapes-based modal. It takes keyboard focus: Enter confirms, Esc cancels, and Tab stays among its buttons. |
 | `FocusFirst` / `DefaultButton componentId` | Keyboard focus to the first control in Tab order; the button Enter clicks from controls that do not use Enter themselves. |
 | `PointerEffects effectsOn` | Hover and press looks for the app's controls, and an open list whose highlight follows the pointer (see [Pointer](#pointer)). Off by default. |
+| `FollowSystemTheme followOn` | The app takes `ReDimUI.ThemeSystem` now, and again whenever Windows switches between light and dark mode or changes its accent. The app notices as its sheets activate, the selection moves, or the pump runs, reading the registry at most every two seconds. Called before `Render`, it sets the theme without rendering early. `False` stops following and keeps the theme in place. |
 | `CloseModal` | Hide the modal set. |
 | `Async(opId)` / `CancelAsync opId` / `AsyncError(opId)` | Async ops (see [async.md](async.md)). |
 | `Job(jobId)` / `CancelJob jobId` | Chunked or paced background work. |
@@ -92,6 +95,12 @@ All fluent, all return the component:
   `OnTab "", 0` takes it off.
 - Accessibility: `AltText(text)` replaces the alternative text ReDim writes on the
   control's shape (see [Accessibility](#accessibility)); an empty string restores it.
+- Icons (`Button`, `Label`): `Icon("Save")` draws a Windows icon before the text, or
+  alone when there is none (see [Icons](#icons)).
+- Badges (any control): `BadgeText("3")` puts a count or short note in a danger-colored
+  pill on the control's top-right corner, such as the unread count on an Inbox button;
+  it hides with the control, a click on it acts as a click on the control, and `""`
+  takes it off.
 - Tooltips: `Tooltip(text)` shows a note under a resting pointer, and
   `DisabledReason(text)` says why a disabled control is disabled (see [Pointer](#pointer)).
 - Values: `Value(number)` (progress, slider, picker index), `Checked(flag)`,
@@ -274,6 +283,11 @@ dependencies:
   even after its source file goes away.
 - `Toggle`: the pill switch for booleans. Switched on, the knob takes the theme's
   `OnPrimary` ink, as Windows draws it, so it stays visible on every accent track.
+- `Badge`: a small pill holding a count or a status word, such as "3" or "Overdue". It
+  takes the primary color unless a variant says otherwise (`Success`, `Warning`,
+  `Danger`, `Secondary`), and widens to its text: the rectangle's left and top place it,
+  its height sets the pill's, and its width is a minimum, so `AtRect(24, 24, 0, 18)`
+  fits the text exactly.
 - `Skeleton`: a loading placeholder in the muted color. On its own it is one rounded
   block; `SkeletonLines 3` draws the bars of three text lines instead, the last at 60
   percent of the width. It pulses toward the surface color and back every 1.4 seconds,
@@ -479,6 +493,31 @@ ui.TextInput("qty").AtRect(24, 70, 80, 22).Numeric allowDecimal:=False
 ui.TextInput("find").AtRect(24, 116, 220, 22).OnInput "Search.Refilter"
 ui.TextInput("find").DebounceMs 250
 ui.ComboBox("fruit").AtRect(24, 162, 220, 22).Items("Apple", "Banana").RestrictToItems
+```
+
+## Icons
+
+`Icon("Save")` on a `Button` or `Label` draws a Windows icon before the control's text, two
+spaces ahead of it, or alone when the control has no text. The icon draws in
+`ReDimUI.IconFont` and the text keeps the theme's font. An icon-only button reads to screen
+readers as its icon's name, "Delete, button", unless `AltText` says otherwise. `Icon ""`
+takes the icon off.
+
+Names, case aside: Add, Remove, Delete, Edit, Save, Search, Filter, Sort, Settings, Refresh,
+Sync, Close, Check, More, Menu, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, ArrowUp,
+ArrowDown, Back, Forward, Home, Calendar, Clock, Info, Warning, Error, Help, Download,
+Upload, Share, Send, Mail, Phone, Person, People, Lock, Unlock, Star, StarFill, Heart,
+HeartFill, Flag, Tag, Pin, View, Copy, Paste, Cut, Undo, Redo, Play, Pause, Stop, Folder,
+Document, Print, Attach, Link, Globe, Cloud, Camera, Library, Shop, ZoomIn, ZoomOut, List,
+Keyboard, and Power. `ReDimUI.IconNames` returns the same list. Any other character of the
+icon font works too, passed as one character: `Icon(ChrW(&HE8B7&))`.
+`ReDimUI.IconGlyph("Mail")` returns a named icon's character for text of your own, which
+needs the icon font on that character.
+
+```vba
+ui.Button("save").AtRect(24, 24, 110, 30).Icon("Save").Text "Save"
+ui.Button("trash").AtRect(140, 24, 36, 30).Icon("Delete").Danger
+ui.Button("inbox").AtRect(24, 70, 110, 30).Icon("Mail").Text("Inbox").BadgeText "3"
 ```
 
 ## Pointer

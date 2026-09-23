@@ -91,6 +91,11 @@ Private Declare PtrSafe Function lstrlenW Lib "kernel32" ( _
 Private Declare PtrSafe Sub CopyMemory Lib "kernel32" Alias "RtlMoveMemory" ( _
     ByVal toAddress As LongPtr, ByVal fromAddress As LongPtr, _
     ByVal byteCount As LongPtr)
+Private Declare PtrSafe Function RegGetValueW Lib "advapi32" ( _
+    ByVal rootKey As LongPtr, ByVal subKeyPath As LongPtr, _
+    ByVal entryName As LongPtr, ByVal typeFlags As Long, _
+    ByVal typeOut As LongPtr, ByVal dataOut As LongPtr, _
+    ByVal sizeOut As LongPtr) As Long
 
 Private Const LOGPIXELSX As Long = 88
 Private Const LOGPIXELSY As Long = 90
@@ -101,6 +106,12 @@ Private Const SPI_GETKEYBOARDDELAY As Long = &H16
 Private Const SPI_GETKEYBOARDSPEED As Long = &HA
 Private Const CF_UNICODETEXT As Long = 13
 Private Const GMEM_MOVEABLE_ZEROED As Long = &H42
+Private Const REG_ROOT_USER As Long = &H80000001
+Private Const REG_ROOT_MACHINE As Long = &H80000002
+Private Const REG_TYPE_DWORD As Long = &H10
+Private Const REG_TYPE_ANY As Long = &HFFFF&
+' Apps that follow the Windows look compare it at most this often.
+Private Const SYSTEM_LOOK_CHECK_MS As Long = 2000
 
 Private Const SHAPE_PREFIX As String = "rdm_"
 Private Const PART_SEPARATOR As String = "__"
@@ -141,6 +152,7 @@ Private Const KIND_SKELETON As Long = 22
 Private Const KIND_TABS As Long = 23
 Private Const KIND_DATE As Long = 24
 Private Const KIND_TABLE As Long = 25
+Private Const KIND_BADGE As Long = 26
 
 ' Option rows a SelectBox or ComboBox drop list draws at once unless
 ' ListRows says otherwise; longer lists window behind pager rows.
@@ -235,6 +247,13 @@ Private mMotionChoice As Long
 ' Guarded-swallow observability: every silently trapped tick or key
 ' dispatch fault counts here, so tests can prove a run was clean.
 Private mTickFaults As Long
+' The Windows icon font, found once. The Windows look ThemeSystem reads,
+' overridden as a test seam (0 reads Windows, 1 light, 2 dark) with its
+' accent (-1 for none), and when the apps that follow it last compared.
+Private mIconFontName As String
+Private mSystemLookOverride As Long
+Private mSystemAccentOverride As Long
+Private mSystemLookCheckedMs As LongLong
 Private WithEvents mExcelApp As Excel.Application
 Attribute mExcelApp.VB_VarHelpID = -1
 
@@ -280,6 +299,9 @@ Private mNavBarLeft As Double
 Private mNavBarTop As Double
 Private mNavBarTabWidth As Double
 Private mNavBarTabHeight As Double
+' Whether the app follows the Windows look, and the look it last took.
+Private mFollowSystem As Boolean
+Private mAppliedSystemLook As String
 
 ' Component fields.
 Private mComponentId As String
@@ -568,6 +590,15 @@ Private mAppliedTableHeadStates() As String
 Private mAppliedTableFootSig As String
 Private mAppliedTableColsDrawn As Long
 Private mAppliedTableSlotsDrawn As Long
+' An icon before the control's text: its name, its character, and the
+' character the text was last styled with.
+Private mIconName As String
+Private mIconGlyph As String
+Private mAppliedIconGlyph As String
+' A count or note in a pill on the control's top-right corner, and the
+' signature it was drawn with.
+Private mBadgeText As String
+Private mAppliedBadgeSig As String
 ' AutoGrow: the line cap (0 for off) and how far the field has grown past
 ' the height it was given; the geometry setters start that over.
 Private mAutoGrowLines As Long
@@ -756,11 +787,17 @@ End Sub
 Private Sub mExcelApp_SheetActivate(ByVal Sh As Object)
     RefreshAccessKeys
     If HasPendingWork() Then RequestPump
+    CheckSystemLook
 End Sub
 
 Private Sub mExcelApp_WorkbookActivate(ByVal Wb As Workbook)
     RefreshAccessKeys
     If HasPendingWork() Then RequestPump
+    CheckSystemLook
+End Sub
+
+Private Sub mExcelApp_SheetSelectionChange(ByVal Sh As Object, ByVal Target As Range)
+    CheckSystemLook
 End Sub
 
 Private Function FindApp(ByVal targetAppId As String) As ReDimUI
@@ -1310,6 +1347,15 @@ Friend Sub TickAll(Optional ByVal forceWork As Boolean = False)
         End If
         On Error GoTo 0
     Next appValue
+    If runWork Then
+        On Error Resume Next
+        CheckSystemLook
+        If Err.Number <> 0 Then
+            Err.Clear
+            NoteTickFault
+        End If
+        On Error GoTo 0
+    End If
     mInPumpTick = False
 End Sub
 
@@ -1697,6 +1743,280 @@ Public Function ThemeDark() As ReDimUI
     Set ThemeDark = themeValue
 End Function
 
+' The Windows look: the dark theme while Windows apps use dark mode and
+' the light one otherwise, with the Windows accent color as the primary,
+' moved until it reads, 3:1 against the surface and 4.5:1 under its ink.
+Public Function ThemeSystem() As ReDimUI
+    Dim darkOn As Boolean
+    Dim accentRgb As Long
+    Dim themeValue As ReDimUI
+
+    If Not IsFactory(Me) Then
+        Set ThemeSystem = ReDimUI.ThemeSystem
+        Exit Function
+    End If
+    ReadSystemLook darkOn, accentRgb
+    If darkOn Then
+        Set themeValue = ThemeDark
+    Else
+        Set themeValue = ThemeLight
+    End If
+    If accentRgb >= 0 Then
+        themeValue.WithPrimary ReadableAccent(accentRgb, themeValue.SurfaceColor, _
+            themeValue.OnPrimaryColor, darkOn), themeValue.OnPrimaryColor
+    End If
+    Set ThemeSystem = themeValue
+End Function
+
+' The accent moved toward black on a light surface, or white on a dark
+' one, a tenth at a time, until it clears 3:1 against the surface and
+' 4.5:1 under its ink.
+Private Function ReadableAccent( _
+    ByVal accentRgb As Long, _
+    ByVal surfaceRgb As Long, _
+    ByVal inkRgb As Long, _
+    ByVal darkOn As Boolean _
+) As Long
+    Dim stepNo As Long
+    Dim towardRgb As Long
+
+    If darkOn Then
+        towardRgb = RGB(255, 255, 255)
+    Else
+        towardRgb = RGB(0, 0, 0)
+    End If
+    ReadableAccent = accentRgb
+    For stepNo = 1 To 20
+        If ContrastRatio(ReadableAccent, surfaceRgb) >= 3 _
+            And ContrastRatio(inkRgb, ReadableAccent) >= 4.5 Then Exit Function
+        ReadableAccent = BlendRgb(ReadableAccent, towardRgb, 0.1)
+    Next stepNo
+End Function
+
+' Dark mode and the accent from the user's Windows settings: light with no
+' accent where the registry holds neither.
+Private Sub ReadSystemLook(ByRef darkOn As Boolean, ByRef accentRgb As Long)
+    Dim lightFlag As Long
+    Dim accentValue As Long
+
+    If mSystemLookOverride <> 0 Then
+        darkOn = (mSystemLookOverride = 2)
+        accentRgb = mSystemAccentOverride
+        Exit Sub
+    End If
+    darkOn = False
+    If RegistryDword(REG_ROOT_USER, _
+        "Software\Microsoft\Windows\CurrentVersion\Themes\Personalize", _
+        "AppsUseLightTheme", lightFlag) Then darkOn = (lightFlag = 0)
+    accentRgb = -1
+    If RegistryDword(REG_ROOT_USER, "Software\Microsoft\Windows\DWM", _
+        "AccentColor", accentValue) Then accentRgb = accentValue And &HFFFFFF
+End Sub
+
+Private Function RegistryDword( _
+    ByVal rootKey As Long, _
+    ByVal subKeyPath As String, _
+    ByVal entryName As String, _
+    ByRef dwordValue As Long _
+) As Boolean
+    Dim readValue As Long
+    Dim dataSize As Long
+
+    dataSize = 4
+    RegistryDword = (RegGetValueW(CLngPtr(rootKey), StrPtr(subKeyPath), _
+        StrPtr(entryName), REG_TYPE_DWORD, 0, VarPtr(readValue), VarPtr(dataSize)) = 0)
+    If RegistryDword Then dwordValue = readValue
+End Function
+
+Private Function RegistryValueExists( _
+    ByVal rootKey As Long, _
+    ByVal subKeyPath As String, _
+    ByVal entryName As String _
+) As Boolean
+    RegistryValueExists = (RegGetValueW(CLngPtr(rootKey), StrPtr(subKeyPath), _
+        StrPtr(entryName), REG_TYPE_ANY, 0, 0, 0) = 0)
+End Function
+
+' Test seam: the look ThemeSystem reads in place of Windows until
+' cleared, with accentRgb -1 for no accent.
+Friend Sub OverrideSystemLook(ByVal darkOn As Boolean, ByVal accentRgb As Long)
+    If Not IsFactory(Me) Then
+        ReDimUI.OverrideSystemLook darkOn, accentRgb
+        Exit Sub
+    End If
+    If darkOn Then
+        mSystemLookOverride = 2
+    Else
+        mSystemLookOverride = 1
+    End If
+    mSystemAccentOverride = accentRgb
+End Sub
+
+Friend Sub ClearSystemLookOverride()
+    If Not IsFactory(Me) Then
+        ReDimUI.ClearSystemLookOverride
+        Exit Sub
+    End If
+    mSystemLookOverride = 0
+End Sub
+
+' Re-themes the apps that follow the Windows look when it changed, dark
+' mode or the accent. The registry is read at most every two seconds
+' unless forced, and only while some app follows.
+Friend Sub CheckSystemLook(Optional ByVal forceRead As Boolean = False)
+    Dim appValue As ReDimUI
+    Dim nowMs As LongLong
+    Dim lookKey As String
+    Dim darkOn As Boolean
+    Dim accentRgb As Long
+
+    If Not IsFactory(Me) Then
+        ReDimUI.CheckSystemLook forceRead
+        Exit Sub
+    End If
+    If mApps Is Nothing Then Exit Sub
+    nowMs = GetTickCount64()
+    If Not forceRead Then
+        If nowMs - mSystemLookCheckedMs < SYSTEM_LOOK_CHECK_MS Then Exit Sub
+    End If
+    mSystemLookCheckedMs = nowMs
+    For Each appValue In mApps
+        If appValue.FollowsSystemTheme Then
+            If LenB(lookKey) = 0 Then
+                ReadSystemLook darkOn, accentRgb
+                lookKey = CStr(darkOn) & ":" & CStr(accentRgb)
+            End If
+            appValue.MatchSystemLook lookKey
+        End If
+    Next appValue
+End Sub
+
+' The Windows icon font: Segoe Fluent Icons where Windows 11 installed
+' it, and Segoe MDL2 Assets, which Windows 10 and 11 both carry,
+' otherwise.
+Public Property Get IconFont() As String
+    If Not IsFactory(Me) Then
+        IconFont = ReDimUI.IconFont
+        Exit Property
+    End If
+    If LenB(mIconFontName) = 0 Then
+        If RegistryValueExists(REG_ROOT_MACHINE, _
+            "SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts", _
+            "Segoe Fluent Icons (TrueType)") Then
+            mIconFontName = "Segoe Fluent Icons"
+        Else
+            mIconFontName = "Segoe MDL2 Assets"
+        End If
+    End If
+    IconFont = mIconFontName
+End Property
+
+' The character that draws a named icon in IconFont, for text of your
+' own; one character passes through as itself.
+Public Function IconGlyph(ByVal iconName As String) As String
+    Dim codePoint As Long
+
+    If Len(iconName) = 1 Then
+        IconGlyph = iconName
+        Exit Function
+    End If
+    codePoint = IconCodePoint(iconName)
+    If codePoint = 0 Then
+        RaiseError ERROR_INVALID_ARGUMENT, "IconGlyph", _
+            "No icon is named '" & iconName & "'; IconNames lists them."
+    End If
+    IconGlyph = ChrW(codePoint)
+End Function
+
+' Every icon name, in the order the API guide lists them.
+Public Function IconNames() As String
+    IconNames = "Add, Remove, Delete, Edit, Save, Search, Filter, Sort, Settings, " & _
+        "Refresh, Sync, Close, Check, More, Menu, ChevronDown, ChevronUp, " & _
+        "ChevronLeft, ChevronRight, ArrowUp, ArrowDown, Back, Forward, Home, " & _
+        "Calendar, Clock, Info, Warning, Error, Help, Download, Upload, Share, " & _
+        "Send, Mail, Phone, Person, People, Lock, Unlock, Star, StarFill, " & _
+        "Heart, HeartFill, Flag, Tag, Pin, View, Copy, Paste, Cut, Undo, Redo, " & _
+        "Play, Pause, Stop, Folder, Document, Print, Attach, Link, Globe, " & _
+        "Cloud, Camera, Library, Shop, ZoomIn, ZoomOut, List, Keyboard, Power"
+End Function
+
+' Code points in Segoe MDL2 Assets, which Segoe Fluent Icons keeps.
+Private Function IconCodePoint(ByVal iconName As String) As Long
+    Select Case LCase$(iconName)
+        Case "add": IconCodePoint = &HE710&
+        Case "remove": IconCodePoint = &HE738&
+        Case "delete": IconCodePoint = &HE74D&
+        Case "edit": IconCodePoint = &HE70F&
+        Case "save": IconCodePoint = &HE74E&
+        Case "search": IconCodePoint = &HE721&
+        Case "filter": IconCodePoint = &HE71C&
+        Case "sort": IconCodePoint = &HE8CB&
+        Case "settings": IconCodePoint = &HE713&
+        Case "refresh": IconCodePoint = &HE72C&
+        Case "sync": IconCodePoint = &HE895&
+        Case "close": IconCodePoint = &HE711&
+        Case "check": IconCodePoint = &HE73E&
+        Case "more": IconCodePoint = &HE712&
+        Case "menu": IconCodePoint = &HE700&
+        Case "chevrondown": IconCodePoint = &HE70D&
+        Case "chevronup": IconCodePoint = &HE70E&
+        Case "chevronleft": IconCodePoint = &HE76B&
+        Case "chevronright": IconCodePoint = &HE76C&
+        Case "arrowup": IconCodePoint = &HE74A&
+        Case "arrowdown": IconCodePoint = &HE74B&
+        Case "back": IconCodePoint = &HE72B&
+        Case "forward": IconCodePoint = &HE72A&
+        Case "home": IconCodePoint = &HE80F&
+        Case "calendar": IconCodePoint = &HE787&
+        Case "clock": IconCodePoint = &HE823&
+        Case "info": IconCodePoint = &HE946&
+        Case "warning": IconCodePoint = &HE7BA&
+        Case "error": IconCodePoint = &HE783&
+        Case "help": IconCodePoint = &HE897&
+        Case "download": IconCodePoint = &HE896&
+        Case "upload": IconCodePoint = &HE898&
+        Case "share": IconCodePoint = &HE72D&
+        Case "send": IconCodePoint = &HE724&
+        Case "mail": IconCodePoint = &HE715&
+        Case "phone": IconCodePoint = &HE717&
+        Case "person": IconCodePoint = &HE77B&
+        Case "people": IconCodePoint = &HE716&
+        Case "lock": IconCodePoint = &HE72E&
+        Case "unlock": IconCodePoint = &HE785&
+        Case "star": IconCodePoint = &HE734&
+        Case "starfill": IconCodePoint = &HE735&
+        Case "heart": IconCodePoint = &HEB51&
+        Case "heartfill": IconCodePoint = &HEB52&
+        Case "flag": IconCodePoint = &HE7C1&
+        Case "tag": IconCodePoint = &HE8EC&
+        Case "pin": IconCodePoint = &HE718&
+        Case "view": IconCodePoint = &HE890&
+        Case "copy": IconCodePoint = &HE8C8&
+        Case "paste": IconCodePoint = &HE77F&
+        Case "cut": IconCodePoint = &HE8C6&
+        Case "undo": IconCodePoint = &HE7A7&
+        Case "redo": IconCodePoint = &HE7A6&
+        Case "play": IconCodePoint = &HE768&
+        Case "pause": IconCodePoint = &HE769&
+        Case "stop": IconCodePoint = &HE71A&
+        Case "folder": IconCodePoint = &HE8B7&
+        Case "document": IconCodePoint = &HE8A5&
+        Case "print": IconCodePoint = &HE749&
+        Case "attach": IconCodePoint = &HE723&
+        Case "link": IconCodePoint = &HE71B&
+        Case "globe": IconCodePoint = &HE774&
+        Case "cloud": IconCodePoint = &HE753&
+        Case "camera": IconCodePoint = &HE722&
+        Case "library": IconCodePoint = &HE8F1&
+        Case "shop": IconCodePoint = &HE719&
+        Case "zoomin": IconCodePoint = &HE8A3&
+        Case "zoomout": IconCodePoint = &HE71F&
+        Case "list": IconCodePoint = &HE8FD&
+        Case "keyboard": IconCodePoint = &HE765&
+        Case "power": IconCodePoint = &HE7E8&
+    End Select
+End Function
+
 ' =====================================================================
 ' App configuration and surface
 ' =====================================================================
@@ -1818,6 +2138,12 @@ End Function
 ' page within the table's height, and one selected row.
 Public Function Table(ByVal targetComponentId As String) As ReDimUI
     Set Table = GetOrCreateComponent(targetComponentId, KIND_TABLE)
+End Function
+
+' A small pill holding a count or a status word, in the primary color
+' unless a variant says otherwise; it widens to its text.
+Public Function Badge(ByVal targetComponentId As String) As ReDimUI
+    Set Badge = GetOrCreateComponent(targetComponentId, KIND_BADGE)
 End Function
 
 ' Drawn single-select option rows. Items supplies the rows, Value the
@@ -2516,6 +2842,40 @@ Public Function PointerEffects(Optional ByVal effectsOn As Boolean = True) As Re
     If mRendered And HasAppWork() Then ReDimUI.RequestPump
     Set PointerEffects = Me
 End Function
+
+' Follows the Windows look: the app takes ThemeSystem now, and again
+' when Windows switches between light and dark mode or changes its
+' accent, which the app notices as its sheets activate, the selection
+' moves, or the pump runs, at most every two seconds.
+Public Function FollowSystemTheme(Optional ByVal followOn As Boolean = True) As ReDimUI
+    RequireRole ROLE_APP, "FollowSystemTheme"
+    mFollowSystem = followOn
+    mAppliedSystemLook = vbNullString
+    If followOn Then ReDimUI.CheckSystemLook True
+    Set FollowSystemTheme = Me
+End Function
+
+Friend Property Get FollowsSystemTheme() As Boolean
+    FollowsSystemTheme = mFollowSystem
+End Property
+
+' Takes the Windows look when it differs from the one the app last took.
+' Before the first Render the theme is only recorded, so following the
+' look during a build does not render early.
+Friend Sub MatchSystemLook(ByVal lookKey As String)
+    If lookKey = mAppliedSystemLook Then Exit Sub
+    mAppliedSystemLook = lookKey
+    If mRendered Then
+        SetTheme ReDimUI.ThemeSystem
+        Exit Sub
+    End If
+    Set mTheme = ReDimUI.ThemeSystem
+    If mCanvasPainted Then
+        On Error Resume Next
+        mSheet.Cells.Interior.Color = mTheme.CanvasColor
+        On Error GoTo 0
+    End If
+End Sub
 
 ' Registers this app as a window: its sheet participates in Navigate and
 ' NavigateBack, shown alone among registered windows like a form.
@@ -3360,6 +3720,8 @@ Friend Sub ConfigureComponent( _
             mWidth = 130: mHeight = 24
         Case KIND_TABLE
             mWidth = 420: mHeight = 200
+        Case KIND_BADGE
+            mWidth = 0: mHeight = 18
         Case KIND_TABS
             mWidth = 360: mHeight = 32
             mValue = 1
@@ -4074,6 +4436,36 @@ End Property
 ' writes one from the kind, text, and state ("Save, button", "Agree,
 ' checkbox, checked", ", unavailable" when disabled); AltText replaces
 ' it, and an empty string restores the generated one.
+' An icon from the Windows icon font before the control's text, or alone
+' when it has none: a name from ReDimUI.IconNames, such as "Save" or
+' "Delete", or one character of IconFont; "" takes it off. An icon
+' button without text takes the icon's name for screen readers.
+Public Function Icon(ByVal iconName As String) As ReDimUI
+    RequireRole ROLE_COMPONENT, "Icon"
+    If mKind <> KIND_BUTTON And mKind <> KIND_LABEL Then
+        RaiseError ERROR_INVALID_OPERATION, "Icon", _
+            "Icon applies to Button and Label."
+    End If
+    If LenB(iconName) = 0 Then
+        mIconGlyph = vbNullString
+    Else
+        mIconGlyph = ReDimUI.IconGlyph(iconName)
+    End If
+    mIconName = iconName
+    Touch
+    Set Icon = Me
+End Function
+
+' A count or short note in a pill on the control's top-right corner, in
+' the danger color, such as the unread count on an Inbox button; ""
+' takes it off. A click on it acts as a click on the control.
+Public Function BadgeText(ByVal badgeWords As String) As ReDimUI
+    RequireRole ROLE_COMPONENT, "BadgeText"
+    mBadgeText = badgeWords
+    Touch
+    Set BadgeText = Me
+End Function
+
 Public Function AltText(ByVal altDescription As String) As ReDimUI
     RequireRole ROLE_COMPONENT, "AltText"
     mAltText = altDescription
@@ -6047,6 +6439,7 @@ Friend Sub Apply( _
         ApplyFieldNotes hostSheet, themeValue
     End If
     ApplyAdornments hostSheet, themeValue
+    ApplyBadgePart hostSheet, themeValue
     ApplyFocusRing hostSheet, themeValue
     ApplyAltText mainShape
     mAppliedValid = True
@@ -6086,7 +6479,11 @@ Private Function AccessibleDescription() As String
     End If
     Select Case mKind
         Case KIND_BUTTON
-            described = mText & ", button"
+            If LenB(mText) = 0 And Len(mIconName) > 1 Then
+                described = mIconName & ", button"
+            Else
+                described = mText & ", button"
+            End If
             If mBusy Then described = described & ", busy"
         Case KIND_PROGRESS
             described = "Progress, " & CStr(CLng(mValue / 5) * 5) & " percent"
@@ -6438,6 +6835,10 @@ Private Function CreateShapeForKind(ByVal hostSheet As Worksheet) As Shape
             Set mainShape = hostSheet.Shapes.AddShape( _
                 msoShapeRoundedRectangle, mLeft, mTop, mWidth, mHeight)
             mainShape.Adjustments(1) = 0.1
+        Case KIND_BADGE
+            Set mainShape = hostSheet.Shapes.AddShape( _
+                msoShapeRoundedRectangle, mLeft, mTop, BadgeSpan(), mHeight)
+            mainShape.Adjustments(1) = 0.5
         Case KIND_TABS
             ' The rule along the strip's foot; the tabs are parts.
             Set mainShape = hostSheet.Shapes.AddShape( _
@@ -6490,7 +6891,11 @@ Private Sub ApplyGeometry(ByVal mainShape As Shape)
     If IsCompositeDrawnKind() Then Exit Sub
     If Abs(mainShape.Left - mLeft) > 0.01 Then mainShape.Left = mLeft
     If Abs(mainShape.Top - mTop) > 0.01 Then mainShape.Top = mTop
-    If Abs(mainShape.Width - mWidth) > 0.01 Then mainShape.Width = mWidth
+    If mKind = KIND_BADGE Then
+        If Abs(mainShape.Width - BadgeSpan()) > 0.01 Then mainShape.Width = BadgeSpan()
+    ElseIf Abs(mainShape.Width - mWidth) > 0.01 Then
+        mainShape.Width = mWidth
+    End If
     If Abs(mainShape.Height - mHeight) > 0.01 Then mainShape.Height = mHeight
     If Not mAppliedValid Or mAppliedVisible <> mVisible Then
         mainShape.Visible = BoolToMso(mVisible)
@@ -6513,6 +6918,13 @@ Private Sub ApplyStyle(ByVal mainShape As Shape, ByVal themeValue As ReDimUI)
             If Not mAppliedValid Or mAppliedFill <> resolvedFill Then
                 mainShape.Fill.Visible = msoTrue
                 mainShape.Fill.ForeColor.RGB = ResolveSpinnerColor(themeValue)
+                mainShape.Line.Visible = msoFalse
+                mAppliedFill = resolvedFill
+            End If
+        Case KIND_BADGE
+            If Not mAppliedValid Or mAppliedFill <> resolvedFill Then
+                mainShape.Fill.Visible = msoTrue
+                mainShape.Fill.ForeColor.RGB = resolvedFill
                 mainShape.Line.Visible = msoFalse
                 mAppliedFill = resolvedFill
             End If
@@ -7042,9 +7454,20 @@ Private Sub ApplyText(ByVal mainShape As Shape, ByVal themeValue As ReDimUI)
         Exit Sub
     End If
     shownText = ResolveText(Nothing)
+    ' An icon leads the text, or stands alone.
+    If LenB(mIconGlyph) > 0 Then
+        If LenB(shownText) > 0 Then
+            shownText = mIconGlyph & "  " & shownText
+        Else
+            shownText = mIconGlyph
+        End If
+    End If
     resolvedColor = ResolveTextColor(themeValue)
     resolvedSize = mFontSize
-    If resolvedSize <= 0 Then resolvedSize = themeValue.BaseFontSize
+    If resolvedSize <= 0 Then
+        resolvedSize = themeValue.BaseFontSize
+        If mKind = KIND_BADGE Then resolvedSize = resolvedSize - 2
+    End If
     ' Shape text cannot scroll, so a focused field renders a window of
     ' its buffer that follows the caret. The full text stays in the
     ' buffer and commits intact.
@@ -7072,7 +7495,14 @@ Private Sub ApplyText(ByVal mainShape As Shape, ByVal themeValue As ReDimUI)
         mainShape.TextFrame2.MarginBottom = 3
         mainShape.TextFrame2.VerticalAnchor = msoAnchorMiddle
         mainShape.TextFrame2.WordWrap = msoTrue
-        If mKind = KIND_BUTTON Then
+        If mKind = KIND_BADGE Then
+            mainShape.TextFrame2.MarginLeft = 4
+            mainShape.TextFrame2.MarginRight = 4
+            mainShape.TextFrame2.MarginTop = 0
+            mainShape.TextFrame2.MarginBottom = 0
+            mainShape.TextFrame2.WordWrap = msoFalse
+        End If
+        If mKind = KIND_BUTTON Or mKind = KIND_BADGE Then
             mainShape.TextFrame2.TextRange.ParagraphFormat.Alignment = msoAlignCenter
         Else
             mainShape.TextFrame2.TextRange.ParagraphFormat.Alignment = msoAlignLeft
@@ -7090,10 +7520,14 @@ Private Sub ApplyText(ByVal mainShape As Shape, ByVal themeValue As ReDimUI)
     mustRestyle = (Not mAppliedValid) _
         Or mAppliedTextColor <> resolvedColor _
         Or mAppliedFontSize <> resolvedSize _
-        Or mAppliedFontBold <> mFontBold
+        Or mAppliedFontBold <> mFontBold _
+        Or mAppliedIconGlyph <> mIconGlyph
     textChanged = (Not mAppliedValid) Or (mAppliedText <> shownText)
     If textChanged Then
-        If LenB(mAppliedText) = 0 Or LenB(shownText) = 0 Then
+        ' Replaced text takes its first character's font, which an icon
+        ' holds in the icon font.
+        If LenB(mAppliedText) = 0 Or LenB(shownText) = 0 _
+            Or LenB(mIconGlyph) > 0 Then
             mustRestyle = True
         End If
         mainShape.TextFrame2.TextRange.Text = shownText
@@ -7103,12 +7537,19 @@ Private Sub ApplyText(ByVal mainShape As Shape, ByVal themeValue As ReDimUI)
         With mainShape.TextFrame2.TextRange.Font
             .Name = themeValue.FontName
             .Size = resolvedSize
-            .Bold = BoolToMso(mFontBold Or mKind = KIND_BUTTON)
+            .Bold = BoolToMso(mFontBold Or mKind = KIND_BUTTON Or mKind = KIND_BADGE)
             .Fill.ForeColor.RGB = resolvedColor
         End With
+        If LenB(mIconGlyph) > 0 Then
+            With mainShape.TextFrame2.TextRange.Characters(1, 1).Font
+                .Name = ReDimUI.IconFont
+                .Bold = msoFalse
+            End With
+        End If
         mAppliedTextColor = resolvedColor
         mAppliedFontSize = resolvedSize
         mAppliedFontBold = mFontBold
+        mAppliedIconGlyph = mIconGlyph
     End If
     If IsFloatField() Then
         PaintFieldMarks mainShape, themeValue, resolvedColor, focusedField, _
@@ -7761,6 +8202,72 @@ Private Sub ApplyFieldNotes(ByVal hostSheet As Worksheet, ByVal themeValue As Re
     SyncFieldNote hostSheet, themeValue, "mc", noteKey, _
         Len(mText) & "/" & mMaxLength, themeValue.OnMutedColor, msoAlignRight, _
         noteSize, mAppliedCountSig
+End Sub
+
+' The width a badge takes: its text and a little room, never narrower
+' than it is tall or than the width it was given.
+Private Function BadgeSpan() As Double
+    Dim textSize As Double
+
+    textSize = mFontSize
+    If textSize <= 0 Then textSize = 9
+    BadgeSpan = Len(mText) * textSize * 0.62 + 12
+    If BadgeSpan < mHeight Then BadgeSpan = mHeight
+    If BadgeSpan < mWidth Then BadgeSpan = mWidth
+End Function
+
+' BadgeText's pill: danger-colored on the top-right corner, ringed in the
+' canvas color so it reads apart from the control under it.
+Private Sub ApplyBadgePart(ByVal hostSheet As Worksheet, ByVal themeValue As ReDimUI)
+    Dim badgeKey As String
+    Dim badgeShape As Shape
+    Dim badgeSpanNow As Double
+
+    If LenB(mBadgeText) = 0 And LenB(mAppliedBadgeSig) = 0 Then Exit Sub
+    If LenB(mBadgeText) > 0 And mVisible Then
+        badgeKey = PartsState(themeValue) & ":" & mBadgeText
+    End If
+    If badgeKey = mAppliedBadgeSig Then Exit Sub
+    mAppliedBadgeSig = badgeKey
+    If LenB(badgeKey) = 0 Then
+        On Error Resume Next
+        hostSheet.Shapes(ShapeName & PART_SEPARATOR & "bd").Delete
+        On Error GoTo 0
+        Exit Sub
+    End If
+    badgeSpanNow = Len(mBadgeText) * 9 * 0.62 + 10
+    If badgeSpanNow < 16 Then badgeSpanNow = 16
+    Set badgeShape = EnsurePartShape(hostSheet, "bd", msoShapeRoundedRectangle)
+    On Error Resume Next
+    badgeShape.Adjustments(1) = 0.5
+    On Error GoTo 0
+    badgeShape.Left = mLeft + mWidth - badgeSpanNow + 6
+    badgeShape.Top = mTop - 7
+    badgeShape.Width = badgeSpanNow
+    badgeShape.Height = 16
+    badgeShape.Fill.Visible = msoTrue
+    badgeShape.Fill.ForeColor.RGB = themeValue.DangerColor
+    badgeShape.Line.Visible = msoTrue
+    badgeShape.Line.ForeColor.RGB = themeValue.CanvasColor
+    badgeShape.Line.Weight = 1.5
+    With badgeShape.TextFrame2
+        .MarginLeft = 0
+        .MarginRight = 0
+        .MarginTop = 0
+        .MarginBottom = 0
+        .VerticalAnchor = msoAnchorMiddle
+        .WordWrap = msoFalse
+        .TextRange.Text = mBadgeText
+        .TextRange.ParagraphFormat.Alignment = msoAlignCenter
+        With .TextRange.Font
+            .Name = themeValue.FontName
+            .Size = 9
+            .Bold = msoTrue
+            .Fill.ForeColor.RGB = themeValue.OnPrimaryColor
+        End With
+    End With
+    badgeShape.Visible = msoTrue
+    badgeShape.OnAction = mAppliedOnAction
 End Sub
 
 ' The caption above the control and the hint below it, small text; the

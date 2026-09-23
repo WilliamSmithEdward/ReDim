@@ -399,6 +399,20 @@
   check, a date picker, and a grouped select; a sortable table that
   pages; and a skeleton that a button swaps for its content. It turns
   on `PointerEffects`.
+- `Icon("Save")` draws a Windows icon on a button or label, before its
+  text or alone. There are 71 named icons, drawn in Segoe Fluent Icons,
+  or Segoe MDL2 Assets where Windows lacks it. An icon-only button
+  reads to screen readers as its icon's name. `ReDimUI.IconGlyph` and
+  `IconFont` give the character and the font for text of your own.
+- `ReDimUI.ThemeSystem` takes the Windows look: the dark theme under
+  dark mode, and the Windows accent color as the primary, moved until
+  it reads against the surface and under its ink. `ui.FollowSystemTheme`
+  keeps an app on it. Switching Windows to dark mode or to another
+  accent re-themes the app the next time a sheet activates, the
+  selection moves, or the pump runs.
+- `Badge` is a pill for a count or a status word that widens to its
+  text. `BadgeText` puts one on any control's top-right corner, such as
+  the unread count on an Inbox button.
 
 ## 0.19.2 - 2026-08-02
 
