@@ -850,6 +850,7 @@ def test_field_rules(run_widgets):
     assert facts["numeric"] == "True", (
         "Numeric must keep digits, one separator, and a leading minus"
     )
+    assert facts["keypadDecimal"] == "True", "the keypad's decimal key types the separator"
     assert facts["maxLength"] == "abcde"
     assert facts["counter"] == "5/5"
     assert facts["invalid"] == "Needs an @"
@@ -1329,3 +1330,12 @@ def test_state_keys(run_widgets):
     assert facts["empty"] == "0"
     assert facts["keys"] == "user,count,darkMode", "each key once, in first-set order"
     assert facts["from"] == "0"
+
+
+def test_bool_binding(run_widgets):
+    facts = parse_transcript(run_widgets("TestBoolBinding"))
+    assert facts["start"] == "False/False/False"
+    assert facts["follows"] == "True/True/True", "bound switches follow the store"
+    assert facts["clickWrites"] == "False/False", (
+        "a click writes the store and the controls bound to it follow"
+    )

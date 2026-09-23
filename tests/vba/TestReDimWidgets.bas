@@ -2797,6 +2797,13 @@ Public Function TestFieldRules() As String
     End If
     transcript = transcript & "|numeric=" & _
         CStr(app.TextInput("qty").InputValue = "-12" & separatorChar & "34")
+    ' The keypad's decimal key types the separator Excel uses.
+    app.TextInput("qty").InputValue = "7"
+    RdxKeyChar "{TEXTEND}"
+    RdxKeyChar "{DECIMAL}"
+    RdxKeyChar "5"
+    transcript = transcript & "|keypadDecimal=" & _
+        CStr(app.TextInput("qty").InputValue = "7" & separatorChar & "5")
 
     ReDimUI.DispatchShape "rdm_wid40_code"
     TypeText "abcdefg"
@@ -4702,4 +4709,32 @@ Public Function TestStateKeys() As String
     transcript = transcript & "|keys=" & Join(keyList, ",") & "|from=" & LBound(keyList)
     ReDimUI.AutoPump True
     TestStateKeys = transcript
+End Function
+
+' A Toggle, TickBox, or Expander bound with BindValue follows True and
+' False from the store, and with WritesTo on the same key a click and the
+' store stay in step.
+Public Function TestBoolBinding() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim transcript As String
+
+    ReDimUI.AutoPump False
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "wid70")
+    app.SetState "on", False
+    app.Toggle("sw").AtRect(24, 24, 44, 22).WritesTo("on").BindValue "on"
+    app.TickBox("tick").AtRect(24, 60, 120, 18).Text("Tick").BindValue "on"
+    app.Expander("more").AtRect(24, 90, 200, 28).Text("More").BindValue "on"
+    app.Render
+    transcript = "start=" & CStr(app.Toggle("sw").IsChecked) & "/" & _
+        CStr(app.TickBox("tick").IsChecked) & "/" & CStr(app.Expander("more").IsExpanded)
+    app.SetState "on", True
+    transcript = transcript & "|follows=" & CStr(app.Toggle("sw").IsChecked) & "/" & _
+        CStr(app.TickBox("tick").IsChecked) & "/" & CStr(app.Expander("more").IsExpanded)
+    ReDimUI.DispatchShape "rdm_wid70_sw"
+    transcript = transcript & "|clickWrites=" & CStr(app.State("on")) & "/" & _
+        CStr(app.TickBox("tick").IsChecked)
+    ReDimUI.AutoPump True
+    TestBoolBinding = transcript
 End Function

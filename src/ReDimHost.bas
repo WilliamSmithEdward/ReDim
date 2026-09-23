@@ -103,6 +103,17 @@ Private Function CapturedKeys() As Collection
     For code = Asc("0") To Asc("9")
         keyTable.Add Array(Chr$(code), Chr$(code))
     Next code
+    ' The numeric keypad, by virtual-key code: without these its digits
+    ' and operators went past a focused field to the grid. The decimal
+    ' key travels as a name and types the separator Excel uses.
+    For code = 0 To 9
+        keyTable.Add Array("{" & CStr(96 + code) & "}", CStr(code))
+    Next code
+    keyTable.Add Array("{106}", "*")
+    keyTable.Add Array("{107}", "+")
+    keyTable.Add Array("{109}", "-")
+    keyTable.Add Array("{110}", "{DECIMAL}")
+    keyTable.Add Array("{111}", "/")
     keyTable.Add Array(" ", " ")
     keyTable.Add Array("-", "-")
     keyTable.Add Array(".", ".")

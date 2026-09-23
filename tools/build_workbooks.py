@@ -87,6 +87,7 @@ DEMOS = {
     "ReDim_Snake.xlsm": "SnakeGame",
     "ReDim_Navigator.xlsm": "Navigator",
     "ReDim_ReDex.xlsm": "PokeDex",
+    "ReDim_Expense_Tracker.xlsm": "ExpenseTracker",
 }
 
 

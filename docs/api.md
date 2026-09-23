@@ -155,7 +155,10 @@ All fluent, all return the component:
   off the face and rows, or a move of the grid selection.
 - Bindings: `BindText(key, template)` where `{0}` is the value, `BindValue(key)`,
   `BindVisible(key, invert)`, `BindEnabled(key, invert)`, `WritesTo(key)`. The invert flag
-  serves the disable-while-busy pattern: `BindEnabled "anyRunning", True`.
+  serves the disable-while-busy pattern: `BindEnabled "anyRunning", True`. A `Toggle`,
+  `TickBox`, or `Expander` bound with `BindValue` follows `True` and `False`, so
+  `WritesTo "darkMode"` with `BindValue "darkMode"` keeps a switch and its state in step
+  whichever side changes.
 - Behavior: `OnClick "Module.Proc"`, `OnClickAsync "Module.Proc"`, `OnChange "Module.Proc"`.
 - Keyboard: `TabIndex(n)` orders Tab, `Focus` gives the control keyboard focus,
   `AccessKey(letter)` binds Alt+letter for a button or tick box, and `Clearable` gives a
@@ -492,6 +495,8 @@ A focused float field edits the way a Windows text box does.
 
 - The selection shows in the accent color with accent ink. Typing, a delete, or a paste
   replaces it, and Left or Right without Shift collapses it to its start or end.
+- The numeric keypad types into a focused field as the top row does, its decimal key
+  typing the decimal separator Excel uses.
 - A word is a run of letters, digits, underscores, and characters past ASCII.
 - A paste keeps what the field takes: a single-line field turns line breaks and tabs into
   spaces, a trailing line break (a copied cell brings one) is dropped, and `Numeric` and

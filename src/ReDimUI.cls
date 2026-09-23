@@ -199,6 +199,10 @@ Private Const TABLE_CELL_PAD As Double = 6
 ' of it clear at every edge so the dot stays inside the rectangle.
 Private Const SPARK_DOT As Double = 5
 
+' The corner radius of a list row's hover and selection fill, a tab's
+' hover fill, and an expander header's, in points.
+Private Const ROW_CORNER As Double = 4
+
 ' A gliding knob or tab bar keeps this share of its distance per 50 ms,
 ' so a glide across a switch settles in about 200 ms at any frame rate.
 Private Const GLIDE_DECAY As Double = 0.4
@@ -1088,6 +1092,8 @@ Friend Sub DispatchKey(ByVal keyText As String)
     End If
     EnsureFactory
     If LenB(mFocusComponentId) = 0 Then Exit Sub
+    ' The keypad's decimal key types the separator Excel would.
+    If keyText = "{DECIMAL}" Then keyText = DecimalMark()
     Set appValue = FindApp(mFocusAppId)
     If appValue Is Nothing Then
         ClearKeyboardFocus
@@ -7741,6 +7747,11 @@ Private Sub ResolveBindings(ByVal hostApp As ReDimUI)
                 If IsDate(bound) Or IsNumeric(bound) Then
                     mValue = CDbl(DayOnly(CDate(bound)))
                 End If
+            ElseIf mKind = KIND_TOGGLE Or mKind = KIND_TICKBOX Or mKind = KIND_EXPANDER Then
+                ' A switch, a tick box, or an expander follows True or False.
+                If VarType(bound) = vbBoolean Or IsNumeric(bound) Then
+                    mChecked = CBool(bound)
+                End If
             ElseIf IsNumeric(bound) Then
                 mValue = CDbl(bound)
             End If
@@ -8035,6 +8046,10 @@ Private Function CreateShapeForKind(ByVal hostSheet As Worksheet) As Shape
             ' The rule along the strip's foot; the tabs are parts.
             Set mainShape = hostSheet.Shapes.AddShape( _
                 msoShapeRectangle, mLeft, mTop + mHeight - 1, mWidth, 1)
+        Case KIND_EXPANDER
+            ' A header whose hover fill rounds its corners.
+            Set mainShape = hostSheet.Shapes.AddShape( _
+                msoShapeRoundedRectangle, mLeft, mTop, mWidth, mHeight)
         Case Else
             Set mainShape = hostSheet.Shapes.AddShape( _
                 msoShapeRectangle, mLeft, mTop, mWidth, mHeight)
@@ -8042,6 +8057,16 @@ Private Function CreateShapeForKind(ByVal hostSheet As Worksheet) As Shape
     mainShape.Placement = xlFreeFloating
     Set CreateShapeForKind = mainShape
 End Function
+
+' Gives a part the rounded corners of a list row or hover fill, a radius
+' of ROW_CORNER points on a part partHeight tall. A plain rectangle left
+' by a build before rounded rows turns rounded here.
+Private Sub RoundCorners(ByVal partShape As Shape, ByVal partHeight As Double)
+    If partShape.AutoShapeType <> msoShapeRoundedRectangle Then
+        partShape.AutoShapeType = msoShapeRoundedRectangle
+    End If
+    If partHeight > 0 Then partShape.Adjustments(1) = ROW_CORNER / partHeight
+End Sub
 
 ' The named part, created when missing; wasCreated says which, so a row
 ' updater that writes only what changed knows to style a fresh shape.
@@ -8125,6 +8150,7 @@ Private Sub ApplyStyle(ByVal mainShape As Shape, ByVal themeValue As ReDimUI)
             ' A header row, clear until the pointer tints it.
             resolvedFill = PointerTint(themeValue.SurfaceColor, themeValue.OnSurfaceColor)
             If resolvedFill = themeValue.SurfaceColor Then resolvedFill = -1
+            If Not mAppliedValid Then RoundCorners mainShape, mHeight
             If Not mAppliedValid Or mAppliedFill <> resolvedFill Then
                 mainShape.Fill.Visible = BoolToMso(resolvedFill >= 0)
                 If resolvedFill >= 0 Then mainShape.Fill.ForeColor.RGB = resolvedFill
@@ -10081,11 +10107,12 @@ Private Sub SyncKeyCursor( _
             CStr(cursorTop) & ":" & CStr(cursorWidth) & ":" & CStr(cursorHeight)
         If cursorKey = mAppliedKeyCursorSig Then Exit Sub
         mAppliedKeyCursorSig = cursorKey
-        Set cursorShape = EnsurePartShape(hostSheet, "kr", msoShapeRectangle)
+        Set cursorShape = EnsurePartShape(hostSheet, "kr", msoShapeRoundedRectangle)
         cursorShape.Left = cursorLeft
         cursorShape.Top = cursorTop
         cursorShape.Width = cursorWidth
         cursorShape.Height = cursorHeight
+        RoundCorners cursorShape, cursorHeight
         cursorShape.Fill.Visible = msoFalse
         cursorShape.Line.Visible = msoTrue
         cursorShape.Line.ForeColor.RGB = themeValue.OnSurfaceColor
@@ -10592,6 +10619,7 @@ Private Sub ApplyTabs( _
     Dim barMade As Boolean
     Dim barWidth As Double
     Dim glideBase As String
+    Dim tabMade As Boolean
 
     tabTotal = ItemCount
     tabNow = ShownTab()
@@ -10623,12 +10651,13 @@ Private Sub ApplyTabs( _
     End If
     tabLeft = mLeft
     For idx = 1 To tabTotal
-        Set tabShape = EnsurePartShape(hostSheet, "tb" & idx, msoShapeRectangle)
+        Set tabShape = EnsurePartShape(hostSheet, "tb" & idx, msoShapeRoundedRectangle, tabMade)
         tabShape.Left = tabLeft
         tabShape.Top = mTop
         tabShape.Width = tabWidths(idx)
         ' The foot stays clear for the rule and the accent bar.
         tabShape.Height = mHeight - 3
+        If tabMade Or Not mAppliedValid Then RoundCorners tabShape, mHeight - 3
         tabFill = PointerTint(themeValue.SurfaceColor, themeValue.OnSurfaceColor, _
             "tab" & idx)
         tabShape.Fill.Visible = BoolToMso(tabFill <> themeValue.SurfaceColor)
@@ -13798,7 +13827,7 @@ Private Sub SyncTransferRows( _
         If rowKey <> priorKey Then
             rowStates(idx) = rowKey
             Set rowShape = EnsurePartShape( _
-                hostSheet, partPrefix & idx, msoShapeRectangle, partCreated)
+                hostSheet, partPrefix & idx, msoShapeRoundedRectangle, partCreated)
             If KeyFrame(priorKey) = layoutKey And Not partCreated Then
                 ' Same frame: only the fill, the text, and the ink move.
                 rowShape.Fill.ForeColor.RGB = rowFill
@@ -13807,6 +13836,9 @@ Private Sub SyncTransferRows( _
                     .Font.Fill.ForeColor.RGB = rowInk
                 End With
             Else
+                ' The hover and selection fills round their corners inside
+                ' the rounded panel.
+                RoundCorners rowShape, TRANSFER_ROW_H
                 rowShape.Left = panelX + 3
                 rowShape.Top = panelTop + 3 + (idx - 1) * TRANSFER_ROW_H
                 rowShape.Width = rowWidth
@@ -16119,6 +16151,16 @@ Private Function FieldAdmits( _
     FieldAdmits = givenText
 End Function
 
+' The decimal separator Excel types: its own when set apart from the
+' system's, else the system's.
+Private Function DecimalMark() As String
+    If Application.UseSystemSeparators Then
+        DecimalMark = Application.International(xlDecimalSeparator)
+    Else
+        DecimalMark = Application.DecimalSeparator
+    End If
+End Function
+
 ' Numeric's filter: digits, one decimal separator (either . or , types
 ' the locale's), and a minus only at the very start.
 Private Function NumericAdmits( _
@@ -16131,11 +16173,7 @@ Private Function NumericAdmits( _
     Dim idx As Long
     Dim oneChar As String
 
-    If Application.UseSystemSeparators Then
-        separatorChar = Application.International(xlDecimalSeparator)
-    Else
-        separatorChar = Application.DecimalSeparator
-    End If
+    separatorChar = DecimalMark()
     hasSeparator = InStr(keptBefore & keptAfter, separatorChar) > 0
     For idx = 1 To Len(givenText)
         oneChar = Mid$(givenText, idx, 1)

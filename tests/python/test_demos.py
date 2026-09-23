@@ -325,6 +325,66 @@ End Function
 """
 
 
+SMOKE_EXPENSES = """
+Public Function SmokeExpenses() As String
+    Dim app As ReDimUI
+    Dim transcript As String
+    Dim rowsBefore As Long
+
+    ReDimUI.AutoPump False
+    BuildExpenseTracker
+    Set app = ExpenseApp()
+    transcript = "components=" & app.ComponentCount
+    rowsBefore = app.Table("list").RowCount
+    transcript = transcript & "|seeded=" & CStr(rowsBefore >= 30)
+    transcript = transcript & "|trend=" & _
+        Left$(app.Sheet.Shapes("rdm_expenses_trend").AlternativeText, 15)
+    transcript = transcript & "|dataHidden=" & _
+        CStr(ThisWorkbook.Worksheets("ExpenseData").Visible = xlSheetHidden)
+
+    HandleAdd
+    transcript = transcript & "|blocked=" & _
+        CStr(app.Table("list").RowCount = rowsBefore) & "/" & _
+        app.TextInput("amount").ValidationError
+    app.TextInput("amount").InputValue = "42.5"
+    app.TextInput("note").InputValue = "Smoke lunch"
+    app.SelectBox("category").Value 2
+    HandleAdd
+    transcript = transcript & "|added=" & _
+        CStr(app.Table("list").RowCount = rowsBefore + 1) & "/" & _
+        app.TextInput("amount").InputValue & "/" & _
+        CStr(ReDimUI.IsComponentFocused("expenses", "amount"))
+
+    app.Table("list").FilterRows "smoke lunch"
+    transcript = transcript & "|found=" & app.Table("list").ShownRowCount
+    HandleExport
+    With ThisWorkbook.Worksheets("ExpenseExport")
+        transcript = transcript & "|exported=" & .Range("A1").Value & "," & _
+            .Range("B2").Value & "," & .Range("D2").Value & "," & _
+            CStr(IsEmpty(.Range("A3").Value))
+    End With
+    transcript = transcript & "|stayed=" & CStr(ActiveSheet.Name = "Expenses")
+    app.Table("list").FilterRows ""
+
+    RequestDelete rowsBefore + 1
+    ReDimUI.DispatchShape "rdm_expenses_mdl_ok"
+    transcript = transcript & "|deleted=" & CStr(app.Table("list").RowCount = rowsBefore)
+    UndoDelete
+    transcript = transcript & "|restored=" & _
+        CStr(app.Table("list").RowCount = rowsBefore + 1)
+
+    FlipDarkMode
+    transcript = transcript & "|dark=" & CStr(app.Theme.SurfaceColor = _
+        ReDimUI.ThemeDark.SurfaceColor And app.Toggle("dark").IsChecked)
+    transcript = transcript & "|protected=" & CStr(app.Sheet.ProtectContents)
+    RdxReleaseKeys
+    RdxStopPump
+    ReDimUI.AutoPump True
+    SmokeExpenses = transcript
+End Function
+"""
+
+
 def open_demo(excel, demo_paths, name):
     excel.open_workbook(str(demo_paths[name]))
 
@@ -445,6 +505,33 @@ def test_pokedex_smoke(demo_paths):
         assert facts["spriteIdle"] == "True", (
             "no sprite download may be in flight before any species loads"
         )
+
+
+def test_expense_tracker_smoke(demo_paths):
+    with ExcelSession() as excel:
+        open_demo(excel, demo_paths, "ReDim_Expense_Tracker.xlsm")
+        result = excel.run_vba(SMOKE_EXPENSES, proc="SmokeExpenses", timeout=120)
+        assert result.outcome == "passed", result.error
+        facts = dict(t.split("=", 1) for t in result.value.split("|"))
+        assert int(facts["components"]) >= 20
+        assert facts["seeded"] == "True", "a first build seeds six months of samples"
+        assert facts["trend"] == "Trend, 6 values"
+        assert facts["dataHidden"] == "True"
+        assert facts["blocked"] == "True/Required", (
+            "an empty amount holds the form back with its message"
+        )
+        assert facts["added"] == "True//True", (
+            "an add clears the amount and puts focus back on it"
+        )
+        assert facts["found"] == "1"
+        assert facts["exported"] == "Date,Dining,Smoke lunch,True", (
+            "the export writes the filtered view under its header"
+        )
+        assert facts["stayed"] == "True", "the export leaves the tracker in front"
+        assert facts["deleted"] == "True"
+        assert facts["restored"] == "True"
+        assert facts["dark"] == "True", "the palette's command flips the theme and the switch"
+        assert facts["protected"] == "True"
 
 
 def test_snake_smoke(demo_paths):

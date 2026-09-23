@@ -464,6 +464,30 @@
   value, in its variant's color, and a spoken summary of the count, low,
   high, and last value. It redraws only when its values, place, or color
   change.
+- The numeric keypad types into a focused field. Its digits and
+  operators were never captured, so they went past the field to the
+  grid, where a protected sheet refused them with a warning and an
+  unprotected one started editing the active cell. The decimal key
+  types the separator Excel uses.
+- A transfer list's hover and selection fills, the keyboard cursor on
+  a list row, a tab's hover fill, and an expander's header round their
+  corners, 4 points, inside their rounded panels. Rectangles left by an
+  older build round on their next full draw.
+- A `Toggle`, `TickBox`, or `Expander` bound with `BindValue` follows
+  `True` and `False` in the store. `BindValue` set a number these
+  controls never read, so a switch bound to a state that code changed
+  stayed where the user left it.
+- A new demo, `ReDim_Expense_Tracker.xlsm` (`BuildExpenseTracker`), is
+  a small bookkeeping app built from the 1.0 controls: a stacked form
+  checked by `ValidateAll`, a table that filters as you type and
+  deletes behind a confirm with an Undo toast, a sparkline and a badge
+  over six months, a budget meter, an Actions menu, the command
+  palette, and a dark mode switch bound both ways. It keeps its
+  expenses on a hidden sheet and seeds six months of samples on first
+  open.
+- A source guard fails on a statement whose last call wraps several
+  arguments in parentheses, `ui.Card("c").AtRect(0, 0, 9, 9)` for one,
+  which only a compile in Excel reported before.
 - `ui.StateKeys` lists the state store's keys in the order first set,
   so a host can save the whole store without keeping its own list.
 - A guard test fails when a public member ships without a mention in
