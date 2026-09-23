@@ -101,6 +101,16 @@ All fluent, all return the component:
   and unrelated removals; removing it clears the selection to the placeholder.
   Programmatic mutations re-render but do not write `WritesTo` state or fire `OnChange`;
   those belong to user interaction and explicit `SetState`.
+- Item values: an item can carry a value apart from its text, `AddItem("Medium", , 20)` or
+  `ItemsFrom(texts, values)` with the values in a source of the same shape (a range of
+  items with gaps pairs with its range of values cell by cell). A pick then writes the
+  value to `WritesTo` instead of the text, with the value's own type, and a check list or
+  transfer list joins the values of its checked or chosen items. `ItemValueAt(position)`
+  and `ChosenValueAt(position)` read a value, or the text for an item without one. Values
+  belong to item texts, without case, so they follow items between transfer panels and
+  two items with one text share a value. A combo's free text writes the text. Replacing
+  the list with `Items`, `ItemsFrom`, or `ClearItems` drops its values; a transfer list's
+  chosen items keep theirs, and `ChosenFrom(texts, values)` sets them.
 - Placeholder (`SelectBox`): `Text` is the placeholder the face shows while nothing is
   selected, and `Value(0)` clears the selection back to it. Like the item mutations, the
   clear writes no `WritesTo` state and fires no `OnChange`.
@@ -165,7 +175,14 @@ dependencies:
   clickable pager rows at the list edges (arrow plus the count beyond that edge) page the
   window, appearing only when something lies beyond them. Picking a new item writes the
   `WritesTo` state and fires `OnChange`; re-picking the selected item only closes the
-  list, the same rule `RadioGroup` follows for its selected row.
+  list, the same rule `RadioGroup` follows for its selected row. `ItemEnabled(position,
+  False)` leaves an item showing but out of reach: it reads muted, a click on it does
+  nothing, and the keys and type-ahead pass over it; a selection already on it stays, and
+  `IsItemEnabled` reads it. `AddGroup "Fruit"` appends a group header, a bold, muted row
+  flush left that labels the items after it. A header takes a place in the item list, so
+  `ItemCount` counts it and later item numbers count past it, and it is never picked,
+  selected by `Value`, or reached by the keys. Both marks follow their items through
+  inserts and removals.
 - `TransferList`: a dual listbox - two panels with counted headers, selectable rows, and
   four move buttons (`>`, `>>`, `<`, `<<`). `Items`/`ItemsFrom` and the item APIs feed the
   available side, `ChosenFrom` seeds the chosen side, `Captions` names the headers, and
@@ -178,7 +195,17 @@ dependencies:
   fires nothing. A selected row shows a check as well as the accent fill. Rows render up
   to the panel's height; when a list outgrows its panel, paging arrows appear on the
   panel's right edge, 18-point targets, and move the window a page at a time, and the
-  header counts stay honest about totals.
+  header counts stay honest about totals. `Reorderable` adds up and down arrows at the
+  right end of the chosen panel's header: they move the chosen side's selected rows one
+  place as a block, stopping at the ends, and Alt+Up and Alt+Down do the same from its
+  rows (the cursor's row when nothing is selected). The chosen order is part of the
+  value, so a move writes `WritesTo` and fires `OnChange`. Typing while the list has
+  the keys filters the panel its cursor is in: the header shows the filter in quotes and
+  how many rows show (`Available "ap" (2 of 5)`), the keys walk the rows that show,
+  Backspace takes a letter off, and Esc clears the filter before it leaves. Moves under
+  a filter take only rows that show: `>` leaves selected rows the filter hides where
+  they are, still selected, and `>>` moves every row that shows. Space still toggles the
+  cursor's row, so a filter cannot hold a space.
 - `ComboBox`: an editable combo with a caret and a filtered drop list, sharing the item
   APIs. Place it with `AtRect` (or `Below`/`RightOf`) and it is a float field: click to
   focus, type, and the list re-filters on every keystroke. Anchoring to a cell with `At`
@@ -212,7 +239,12 @@ dependencies:
   toggle their row. `CheckedFrom` seeds by text; `SetItemChecked`/`IsItemChecked`/
   `CheckedCount` are the silent programmatic surface; checks follow their items through
   `AddItem`/`RemoveItem`. `WritesTo` carries checked items joined with ", "; `OnChange`
-  fires once per toggle, select-all included.
+  fires once per toggle, select-all included. Typing while the list has the keys filters
+  it: rows the filter excludes hide and the rest close up, the select-all caption shows
+  the filter and counts the rows that show (`Select all "gr" (1/2)`), select-all checks
+  or unchecks only those rows, Backspace takes a letter off, and Esc clears the filter
+  before it leaves. Hidden rows keep their checks, and `WritesTo` still carries every
+  checked item. Without the select-all header nothing shows the filter.
 - `Image`: a picture as a control - a rounded rectangle whose fill is the picture, so it
   clicks, adopts, and snaps back like everything else, and the picture embeds in the
   workbook. `Source(path)` takes a file path (no URLs) and loads once per distinct path;
@@ -436,9 +468,9 @@ keep the keys.
 | RadioGroup | Arrows move the selection, wrapping at the ends; Home and End jump. Each move fires `OnChange`. |
 | Stepper | Up and Right step up, Down and Left step down, Page Up and Page Down step ten times, Home and End jump to the range ends. |
 | SlideBar | Arrows move a step, Page Up and Page Down a tenth of the range in whole steps, Home and End go to the ends. |
-| SelectBox | Closed: arrows, Home, End, Page Up, and Page Down change the selection, and Space, Alt+Down, or F4 opens the list. Open: they move the highlight; Enter, Space, or Alt+Up takes it, Tab takes it and moves on, and Esc or F4 closes. Letters jump to the next item that starts with them, open or closed: letters typed within a second build a prefix, and one letter typed again steps through its items. |
-| CheckList | Up and Down move the row cursor, the select-all header included; Home and End jump; Space toggles the cursor's row. |
-| TransferList | Up and Down move the row cursor, Left and Right switch panels, Space toggles the cursor's row in the selection, and Enter moves the panel's selection across, or the cursor's row when nothing is selected. |
+| SelectBox | Closed: arrows, Home, End, Page Up, and Page Down change the selection, and Space, Alt+Down, or F4 opens the list. Open: they move the highlight; Enter, Space, or Alt+Up takes it, Tab takes it and moves on, and Esc or F4 closes. Letters jump to the next item that starts with them, open or closed: letters typed within a second build a prefix, and one letter typed again steps through its items. Every move passes over disabled items and group headers. |
+| CheckList | Up and Down move the row cursor, the select-all header included; Home and End jump; Space toggles the cursor's row. Other characters filter the list, Backspace takes one off, and Esc clears the filter. |
+| TransferList | Up and Down move the row cursor, Left and Right switch panels, Space toggles the cursor's row in the selection, and Enter moves the panel's selection across, or the cursor's row when nothing is selected. Other characters filter the cursor's panel, Backspace takes one off, and Esc clears the filter. With `Reorderable`, Alt+Up and Alt+Down move the chosen side's selection. |
 | TextInput, ComboBox | The editing keys under [Text editing](#text-editing); a combo also opens with Alt+Down or F4, closes with Alt+Up, pages its list with Page Up and Page Down, and takes its suggestion with Right at the end of the text or Tab. |
 
 ## Accessibility

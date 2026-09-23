@@ -364,6 +364,24 @@ Private mRowDragMode As Long
 Private mRowDragPrevDown As Boolean
 Private mDropPanel As Long
 Private mAppliedDropPanel As Long
+' Transfer reorder: whether the chosen panel shows its up and down
+' arrows, and the signature they were drawn with.
+Private mReorderable As Boolean
+Private mAppliedReorderSig As String
+' Type-to-filter while a transfer or check list has the keys: each
+' transfer panel's filter and the check list's; a counter every item
+' change bumps; and the item numbers each filtered transfer panel
+' shows, with the key they were read under.
+Private mFilterLeft As String
+Private mFilterRight As String
+Private mFilterCheck As String
+Private mItemsVersion As Long
+Private mShownLeft() As Long
+Private mShownRight() As Long
+Private mShownLeftCount As Long
+Private mShownRightCount As Long
+Private mShownLeftKey As String
+Private mShownRightKey As String
 Private mItems As Collection
 ' Transfer list: the right-hand (chosen) side and its selections. mItems
 ' carries the left-hand (available) side, so the item APIs work unchanged.
@@ -376,6 +394,15 @@ Private mSelRight As Collection
 ' Checkbox list: the set of checked row indices, and whether the
 ' select-all header row renders (on by default).
 Private mCheckedSet As Collection
+' Item values by item text, for items that carry one: WritesTo writes
+' the value and ItemValueAt reads it. Keyed by text, without case, so a
+' value follows its item between transfer panels.
+Private mItemValueMap As Collection
+' SelectBox items that cannot be picked: disabled ones and group
+' headers, as sets of item numbers that inserts and removals keep in
+' step.
+Private mDisabledItems As Collection
+Private mGroupHeaders As Collection
 Private mSelectAllRow As Boolean
 ' Image control: the source file path, its optional state binding, and
 ' the last source actually painted (so files load once, not per flush).
@@ -3593,6 +3620,10 @@ End Function
 
 Public Function Value(ByVal newNumber As Double) As ReDimUI
     RequireRole ROLE_COMPONENT, "Value"
+    ' A group header is a label, never a selection.
+    If mKind = KIND_SELECT Then
+        If IsGroupHeader(CLng(newNumber)) Then newNumber = 0
+    End If
     mValue = newNumber
     Touch
     Set Value = Me
@@ -3712,6 +3743,8 @@ Public Function Items(ParamArray listItems() As Variant) As ReDimUI
     For idx = LBound(listItems) To UBound(listItems)
         mItems.Add CStr(listItems(idx))
     Next idx
+    ResetItemValues
+    ForgetItemMarks
     ItemsChanged
     ClampItemSelection
     Touch
@@ -3720,10 +3753,19 @@ End Function
 
 ' Replaces the item list from a 1D array, a Collection, a Range (one
 ' item per non-empty cell), or a ROneCOne sequence, so pickers can be
-' fed straight from data.
-Public Function ItemsFrom(ByVal itemSource As Variant) As ReDimUI
+' fed straight from data. A value source of the same shape pairs each
+' item with the value WritesTo writes for it.
+Public Function ItemsFrom( _
+    ByVal itemSource As Variant, _
+    Optional ByVal valueSource As Variant _
+) As ReDimUI
     RequireRole ROLE_COMPONENT, "ItemsFrom"
     Set mItems = ReadItemSource(itemSource, "ItemsFrom")
+    ResetItemValues
+    ForgetItemMarks
+    If Not IsMissing(valueSource) Then
+        PairItemValues itemSource, valueSource, "ItemsFrom"
+    End If
     ItemsChanged
     ClampItemSelection
     If Not mCheckedSet Is Nothing Then Set mCheckedSet = New Collection
@@ -3733,10 +3775,16 @@ End Function
 
 ' Fills the transfer list's chosen (right-hand) side from a 1D array, a
 ' Collection, a Range, or a ROneCOne sequence, mirroring ItemsFrom for
-' the available side.
-Public Function ChosenFrom(ByVal itemSource As Variant) As ReDimUI
+' the available side, values included.
+Public Function ChosenFrom( _
+    ByVal itemSource As Variant, _
+    Optional ByVal valueSource As Variant _
+) As ReDimUI
     RequireRole ROLE_COMPONENT, "ChosenFrom"
     Set mChosenItems = ReadItemSource(itemSource, "ChosenFrom")
+    If Not IsMissing(valueSource) Then
+        PairItemValues itemSource, valueSource, "ChosenFrom"
+    End If
     Set mSelRight = New Collection
     Touch
     Set ChosenFrom = Me
@@ -3895,6 +3943,21 @@ Public Function Captions( _
     Set Captions = Me
 End Function
 
+' Up and down arrows in the chosen panel's header move the chosen side's
+' selected rows one place, as Alt+Up and Alt+Down do from its rows. The
+' chosen order is part of the value, so a move writes WritesTo and
+' fires OnChange.
+Public Function Reorderable(Optional ByVal reorderOn As Boolean = True) As ReDimUI
+    RequireRole ROLE_COMPONENT, "Reorderable"
+    If mKind <> KIND_TRANSFER Then
+        RaiseError ERROR_INVALID_OPERATION, "Reorderable", _
+            "Reorderable applies to TransferList only."
+    End If
+    mReorderable = reorderOn
+    Touch
+    Set Reorderable = Me
+End Function
+
 Public Property Get ChosenCount() As Long
     RequireRole ROLE_COMPONENT, "ChosenCount"
     If Not mChosenItems Is Nothing Then ChosenCount = mChosenItems.Count
@@ -3909,17 +3972,22 @@ End Property
 
 ' Appends, or inserts at a 1-based position. The selected item stays
 ' selected, and checked rows stay checked: an insert at or before them
-' shifts their indices along with them.
+' shifts their indices along with them. itemValue is what WritesTo
+' writes when the item is picked; without one it writes the text.
 Public Function AddItem( _
     ByVal itemText As String, _
-    Optional ByVal atPosition As Long = 0 _
+    Optional ByVal atPosition As Long = 0, _
+    Optional ByVal itemValue As Variant _
 ) As ReDimUI
     RequireRole ROLE_COMPONENT, "AddItem"
     If mItems Is Nothing Then Set mItems = New Collection
+    If Not IsMissing(itemValue) Then StoreItemValue itemText, itemValue
     If atPosition >= 1 And atPosition <= mItems.Count Then
         mItems.Add itemText, Before:=atPosition
         If CLng(mValue) >= atPosition Then mValue = mValue + 1
-        ShiftCheckedForInsert atPosition
+        ShiftIndexesForInsert mCheckedSet, atPosition
+        ShiftIndexesForInsert mDisabledItems, atPosition
+        ShiftIndexesForInsert mGroupHeaders, atPosition
     Else
         mItems.Add itemText
     End If
@@ -3928,30 +3996,32 @@ Public Function AddItem( _
     Set AddItem = Me
 End Function
 
-Private Sub ShiftCheckedForInsert(ByVal atPosition As Long)
+' A set of item numbers (checked rows, disabled items, group headers)
+' follows its items through an insert or a removal.
+Private Sub ShiftIndexesForInsert(ByVal indexSet As Collection, ByVal atPosition As Long)
     Dim idx As Long
 
-    If mCheckedSet Is Nothing Then Exit Sub
-    For idx = 1 To mCheckedSet.Count
-        If CLng(mCheckedSet.Item(idx)) >= atPosition Then
-            mCheckedSet.Add CLng(mCheckedSet.Item(idx)) + 1, _
+    If indexSet Is Nothing Then Exit Sub
+    For idx = 1 To indexSet.Count
+        If CLng(indexSet.Item(idx)) >= atPosition Then
+            indexSet.Add CLng(indexSet.Item(idx)) + 1, _
                 Before:=idx
-            mCheckedSet.Remove idx + 1
+            indexSet.Remove idx + 1
         End If
     Next idx
 End Sub
 
-Private Sub ShiftCheckedForRemove(ByVal removedAt As Long)
+Private Sub ShiftIndexesForRemove(ByVal indexSet As Collection, ByVal removedAt As Long)
     Dim idx As Long
 
-    If mCheckedSet Is Nothing Then Exit Sub
-    For idx = mCheckedSet.Count To 1 Step -1
-        If CLng(mCheckedSet.Item(idx)) = removedAt Then
-            mCheckedSet.Remove idx
-        ElseIf CLng(mCheckedSet.Item(idx)) > removedAt Then
-            mCheckedSet.Add CLng(mCheckedSet.Item(idx)) - 1, _
+    If indexSet Is Nothing Then Exit Sub
+    For idx = indexSet.Count To 1 Step -1
+        If CLng(indexSet.Item(idx)) = removedAt Then
+            indexSet.Remove idx
+        ElseIf CLng(indexSet.Item(idx)) > removedAt Then
+            indexSet.Add CLng(indexSet.Item(idx)) - 1, _
                 Before:=idx
-            mCheckedSet.Remove idx + 1
+            indexSet.Remove idx + 1
         End If
     Next idx
 End Sub
@@ -3983,6 +4053,9 @@ Public Function RemoveItem(ByVal indexOrText As Variant) As ReDimUI
         Set RemoveItem = Me
         Exit Function
     End If
+    ' Read from the collection, not the snapshot: a removal leaves the
+    ' snapshot stale, and rebuilding it for one text would walk the list.
+    If Not mItemValueMap Is Nothing Then ForgetItemValue CStr(mItems.Item(idx))
     mItems.Remove idx
     ItemsChanged
     If CLng(mValue) = idx Then
@@ -3990,7 +4063,9 @@ Public Function RemoveItem(ByVal indexOrText As Variant) As ReDimUI
     ElseIf CLng(mValue) > idx Then
         mValue = mValue - 1
     End If
-    ShiftCheckedForRemove idx
+    ShiftIndexesForRemove mCheckedSet, idx
+    ShiftIndexesForRemove mDisabledItems, idx
+    ShiftIndexesForRemove mGroupHeaders, idx
     Touch
     Set RemoveItem = Me
 End Function
@@ -3998,6 +4073,8 @@ End Function
 Public Function ClearItems() As ReDimUI
     RequireRole ROLE_COMPONENT, "ClearItems"
     Set mItems = New Collection
+    ResetItemValues
+    ForgetItemMarks
     ItemsChanged
     mValue = 0
     If Not mCheckedSet Is Nothing Then Set mCheckedSet = New Collection
@@ -4010,10 +4087,277 @@ Public Property Get ItemCount() As Long
     If Not mItems Is Nothing Then ItemCount = mItems.Count
 End Property
 
+' A SelectBox item that shows but cannot be picked: it reads muted, the
+' keys pass over it, and a click on it does nothing. A selection
+' already on it stays.
+Public Function ItemEnabled(ByVal itemNumber As Long, ByVal enabledFlag As Boolean) As ReDimUI
+    RequireRole ROLE_COMPONENT, "ItemEnabled"
+    RequireSelectKind "ItemEnabled"
+    If itemNumber >= 1 And itemNumber <= ItemCount Then
+        If mDisabledItems Is Nothing Then Set mDisabledItems = New Collection
+        If TransferSelectionHas(mDisabledItems, itemNumber) = enabledFlag Then
+            TransferSelectionToggle mDisabledItems, itemNumber
+        End If
+        Touch
+    End If
+    Set ItemEnabled = Me
+End Function
+
+Public Property Get IsItemEnabled(ByVal itemNumber As Long) As Boolean
+    RequireRole ROLE_COMPONENT, "IsItemEnabled"
+    IsItemEnabled = ItemPickable(itemNumber)
+End Property
+
+' Appends a group header to a SelectBox: a bold, muted row that labels
+' the items after it. It takes a place in the item list, so ItemCount
+' counts it and later item numbers count past it, and it cannot be
+' picked.
+Public Function AddGroup(ByVal groupCaption As String) As ReDimUI
+    RequireRole ROLE_COMPONENT, "AddGroup"
+    RequireSelectKind "AddGroup"
+    If mItems Is Nothing Then Set mItems = New Collection
+    mItems.Add groupCaption
+    If mGroupHeaders Is Nothing Then Set mGroupHeaders = New Collection
+    mGroupHeaders.Add mItems.Count
+    ItemsChanged
+    Touch
+    Set AddGroup = Me
+End Function
+
+Private Sub RequireSelectKind(ByVal memberName As String)
+    If mKind <> KIND_SELECT Then
+        RaiseError ERROR_INVALID_OPERATION, memberName, _
+            memberName & " applies to SelectBox only."
+    End If
+End Sub
+
+Private Sub ForgetItemMarks()
+    Set mDisabledItems = Nothing
+    Set mGroupHeaders = Nothing
+End Sub
+
+' True for an item that can be picked: in the list, and neither a
+' disabled item nor a group header.
+Private Function ItemPickable(ByVal itemNumber As Long) As Boolean
+    If itemNumber < 1 Or itemNumber > ItemCount Then Exit Function
+    If Not mDisabledItems Is Nothing Then
+        If TransferSelectionHas(mDisabledItems, itemNumber) Then Exit Function
+    End If
+    If Not mGroupHeaders Is Nothing Then
+        If TransferSelectionHas(mGroupHeaders, itemNumber) Then Exit Function
+    End If
+    ItemPickable = True
+End Function
+
+Private Function IsGroupHeader(ByVal itemNumber As Long) As Boolean
+    If mGroupHeaders Is Nothing Then Exit Function
+    IsGroupHeader = TransferSelectionHas(mGroupHeaders, itemNumber)
+End Function
+
+' The pickable item nearest a target in one direction, else in the
+' other; 0 when nothing in the list can be picked.
+Private Function PickableNear(ByVal aimItem As Long, ByVal stepDirection As Long) As Long
+    Dim itemTotal As Long
+    Dim probe As Long
+
+    itemTotal = ItemCount
+    If itemTotal = 0 Then Exit Function
+    If aimItem < 1 Then aimItem = 1
+    If aimItem > itemTotal Then aimItem = itemTotal
+    If stepDirection = 0 Then stepDirection = 1
+    For probe = aimItem To IIf(stepDirection > 0, itemTotal, 1) Step stepDirection
+        If ItemPickable(probe) Then
+            PickableNear = probe
+            Exit Function
+        End If
+    Next probe
+    For probe = aimItem To IIf(stepDirection > 0, 1, itemTotal) Step -stepDirection
+        If ItemPickable(probe) Then
+            PickableNear = probe
+            Exit Function
+        End If
+    Next probe
+End Function
+
 Public Property Get ItemTextAt(ByVal itemNumber As Long) As String
     RequireRole ROLE_COMPONENT, "ItemTextAt"
     ItemTextAt = ItemAt(itemNumber)
 End Property
+
+' The item's value, or its text when it has none.
+Public Property Get ItemValueAt(ByVal itemNumber As Long) As Variant
+    Dim stateValue As Variant
+
+    RequireRole ROLE_COMPONENT, "ItemValueAt"
+    AssignVariant stateValue, ItemStateValue(ItemAt(itemNumber))
+    If IsObject(stateValue) Then
+        Set ItemValueAt = stateValue
+    Else
+        ItemValueAt = stateValue
+    End If
+End Property
+
+' A transfer list's chosen item's value, or its text when it has none.
+Public Property Get ChosenValueAt(ByVal itemNumber As Long) As Variant
+    Dim stateValue As Variant
+
+    RequireRole ROLE_COMPONENT, "ChosenValueAt"
+    If mChosenItems Is Nothing Then Exit Property
+    If itemNumber < 1 Or itemNumber > mChosenItems.Count Then Exit Property
+    AssignVariant stateValue, ItemStateValue(CStr(mChosenItems.Item(itemNumber)))
+    If IsObject(stateValue) Then
+        Set ChosenValueAt = stateValue
+    Else
+        ChosenValueAt = stateValue
+    End If
+End Property
+
+' What WritesTo writes for an item text: its value when it has one,
+' else the text.
+Private Function ItemStateValue(ByVal itemText As String) As Variant
+    Dim found As Variant
+
+    If Not mItemValueMap Is Nothing And LenB(itemText) > 0 Then
+        If TryGetItem(mItemValueMap, itemText, found) Then
+            If IsObject(found) Then
+                Set ItemStateValue = found
+            Else
+                ItemStateValue = found
+            End If
+            Exit Function
+        End If
+    End If
+    ItemStateValue = itemText
+End Function
+
+' An item's value as text, for the joined WritesTo of multi-pick lists;
+' a value that has no text form writes the item's text.
+Private Function ItemStateText(ByVal itemText As String) As String
+    Dim stateValue As Variant
+
+    If mItemValueMap Is Nothing Then
+        ItemStateText = itemText
+        Exit Function
+    End If
+    AssignVariant stateValue, ItemStateValue(itemText)
+    ItemStateText = itemText
+    If IsObject(stateValue) Or IsNull(stateValue) Then Exit Function
+    On Error Resume Next
+    ItemStateText = CStr(stateValue)
+    On Error GoTo 0
+End Function
+
+Private Sub StoreItemValue(ByVal itemText As String, ByVal itemValue As Variant)
+    If LenB(itemText) = 0 Then Exit Sub
+    If mItemValueMap Is Nothing Then Set mItemValueMap = New Collection
+    ForgetItemValue itemText
+    mItemValueMap.Add itemValue, itemText
+End Sub
+
+Private Sub ForgetItemValue(ByVal itemText As String)
+    If mItemValueMap Is Nothing Or LenB(itemText) = 0 Then Exit Sub
+    On Error Resume Next
+    mItemValueMap.Remove itemText
+    On Error GoTo 0
+End Sub
+
+' A replaced item list drops its values, except those of a transfer
+' list's chosen items, which the replacement leaves in place.
+Private Sub ResetItemValues()
+    Dim keptMap As Collection
+    Dim entry As Variant
+    Dim found As Variant
+
+    If mItemValueMap Is Nothing Then Exit Sub
+    If Not mChosenItems Is Nothing Then
+        For Each entry In mChosenItems
+            If TryGetItem(mItemValueMap, CStr(entry), found) Then
+                If keptMap Is Nothing Then Set keptMap = New Collection
+                On Error Resume Next
+                keptMap.Add found, CStr(entry)
+                On Error GoTo 0
+            End If
+        Next entry
+    End If
+    Set mItemValueMap = keptMap
+End Sub
+
+' Pairs item texts with values position by position, before empty
+' entries are skipped, so a range of items with gaps still lines up
+' with its range of values.
+Private Sub PairItemValues( _
+    ByVal itemSource As Variant, _
+    ByVal valueSource As Variant, _
+    ByVal memberName As String _
+)
+    Dim rawTexts As Collection
+    Dim rawValues As Collection
+    Dim pairedValues() As Variant
+    Dim entry As Variant
+    Dim idx As Long
+
+    Set rawTexts = ReadRawSource(itemSource, memberName)
+    Set rawValues = ReadRawSource(valueSource, memberName)
+    If rawTexts.Count <> rawValues.Count Then
+        RaiseError ERROR_INVALID_ARGUMENT, memberName, memberName & _
+            " needs as many values as items."
+    End If
+    If rawTexts.Count = 0 Then Exit Sub
+    ' Collection reads by index walk from the start; one pass each.
+    ReDim pairedValues(1 To rawValues.Count)
+    For Each entry In rawValues
+        idx = idx + 1
+        AssignVariant pairedValues(idx), entry
+    Next entry
+    idx = 0
+    For Each entry In rawTexts
+        idx = idx + 1
+        If Not IsObject(entry) Then StoreItemValue CStr(entry), pairedValues(idx)
+    Next entry
+End Sub
+
+' Every entry of a source, empty ones included, with its own type: the
+' shape ReadItemSource reads, before it keeps only non-empty text.
+Private Function ReadRawSource( _
+    ByVal anySource As Variant, _
+    ByVal memberName As String _
+) As Collection
+    Dim gathered As Collection
+    Dim entry As Variant
+    Dim area As Range
+    Dim cellValues As Variant
+    Dim rowIdx As Long
+    Dim colIdx As Long
+    Dim idx As Long
+
+    Set gathered = New Collection
+    If TypeName(anySource) = "Range" Then
+        For Each area In anySource.Areas
+            If area.CountLarge = 1 Then
+                gathered.Add area.Value
+            Else
+                cellValues = area.Value
+                For rowIdx = 1 To UBound(cellValues, 1)
+                    For colIdx = 1 To UBound(cellValues, 2)
+                        gathered.Add cellValues(rowIdx, colIdx)
+                    Next colIdx
+                Next rowIdx
+            End If
+        Next area
+    ElseIf TypeName(anySource) = "Collection" Or TypeName(anySource) = "ROneCOne" Then
+        For Each entry In anySource
+            gathered.Add entry
+        Next entry
+    ElseIf IsArrayValue(anySource) Then
+        For idx = LBound(anySource) To UBound(anySource)
+            gathered.Add anySource(idx)
+        Next idx
+    Else
+        RaiseError ERROR_INVALID_ARGUMENT, memberName, memberName & _
+            " accepts an array, a Collection, a Range, or a ROneCOne sequence."
+    End If
+    Set ReadRawSource = gathered
+End Function
 
 Private Sub ClampItemSelection()
     If mItems Is Nothing Then
@@ -4091,7 +4435,13 @@ Public Property Let InputValue(ByVal assignedText As String)
         InputCell(OwnerApp.Sheet).Value = assignedText
         Application.EnableEvents = priorEvents
     End If
-    If LenB(mWritesToKey) > 0 Then OwnerApp.SetState mWritesToKey, assignedText
+    If LenB(mWritesToKey) > 0 Then
+        If mKind = KIND_COMBO Then
+            OwnerApp.SetState mWritesToKey, ItemStateValue(assignedText)
+        Else
+            OwnerApp.SetState mWritesToKey, assignedText
+        End If
+    End If
 End Property
 
 Friend Function InputCell(ByVal hostSheet As Worksheet) As Range
@@ -4129,7 +4479,13 @@ Friend Sub SyncInputFromSheet(ByVal hostApp As ReDimUI, ByVal changed As Range)
     If cell Is Nothing Then Exit Sub
     If Application.Intersect(cell, changed) Is Nothing Then Exit Sub
     cellText = CStr(cell.Value)
-    If LenB(mWritesToKey) > 0 Then hostApp.SetState mWritesToKey, cellText
+    If LenB(mWritesToKey) > 0 Then
+        If mKind = KIND_COMBO Then
+            hostApp.SetState mWritesToKey, ItemStateValue(cellText)
+        Else
+            hostApp.SetState mWritesToKey, cellText
+        End If
+    End If
     If LenB(mClickProc) > 0 Then
         On Error Resume Next
         Application.Run mClickProc
@@ -4635,6 +4991,29 @@ End Function
 ' A collection's values joined in order: one For Each into an array and
 ' one Join, where indexed reads and repeated concatenation both went
 ' quadratic on long lists.
+' A list's item values in order, joined for a WritesTo state; texts for
+' items without a value.
+Private Function JoinedValues( _
+    ByVal store As Collection, _
+    ByVal joinWith As String _
+) As String
+    Dim parts() As String
+    Dim entry As Variant
+    Dim idx As Long
+
+    If mItemValueMap Is Nothing Then
+        JoinedValues = JoinedText(store, joinWith)
+        Exit Function
+    End If
+    If store.Count = 0 Then Exit Function
+    ReDim parts(1 To store.Count)
+    For Each entry In store
+        idx = idx + 1
+        parts(idx) = ItemStateText(CStr(entry))
+    Next entry
+    JoinedValues = Join(parts, joinWith)
+End Function
+
 Private Function JoinedText( _
     ByVal store As Collection, _
     ByVal joinWith As String _
@@ -4652,7 +5031,8 @@ Private Function JoinedText( _
     JoinedText = Join(parts, joinWith)
 End Function
 
-' Checked item texts in list order, joined for the WritesTo state value.
+' Checked items' values (or texts) in list order, joined for the
+' WritesTo state value.
 Private Function CheckedJoined() As String
     Dim parts() As String
     Dim selectedFlags() As Boolean
@@ -4673,7 +5053,7 @@ Private Function CheckedJoined() As String
     For idx = 1 To mItems.Count
         If selectedFlags(idx) Then
             takenCount = takenCount + 1
-            parts(takenCount) = mItemTexts(idx)
+            parts(takenCount) = ItemStateText(mItemTexts(idx))
         End If
     Next idx
     If takenCount = 0 Then Exit Function
@@ -4732,6 +5112,10 @@ Private Sub TransferSelected(ByVal hostApp As ReDimUI, ByVal rightward As Boolea
     Dim selectionSet As Collection
     Dim kept As Collection
     Dim selectedFlags() As Boolean
+    Dim movingFlags() As Boolean
+    Dim shownItems() As Long
+    Dim shownTotal As Long
+    Dim keptSelection As Collection
     Dim entry As Variant
     Dim idx As Long
     Dim anySelected As Boolean
@@ -4747,31 +5131,43 @@ Private Sub TransferSelected(ByVal hostApp As ReDimUI, ByVal rightward As Boolea
     End If
     If sourceItems.Count = 0 Or selectionSet.Count = 0 Then Exit Sub
     ReDim selectedFlags(1 To sourceItems.Count)
+    ReDim movingFlags(1 To sourceItems.Count)
     For Each entry In selectionSet
         If CLng(entry) >= 1 And CLng(entry) <= sourceItems.Count Then
             selectedFlags(CLng(entry)) = True
-            anySelected = True
         End If
     Next entry
+    ' A row the filter hides keeps its selection but stays put.
+    shownTotal = TransferShownRows(IIf(rightward, 0, 1), shownItems)
+    For idx = 1 To shownTotal
+        If selectedFlags(shownItems(idx)) Then
+            movingFlags(shownItems(idx)) = True
+            anySelected = True
+        End If
+    Next idx
+    idx = 0
     If Not anySelected Then Exit Sub
     ' One pass moves the selected rows to the target in their list order
     ' and rebuilds the source without them; removing by index would walk
-    ' the list once per row.
+    ' the list once per row. Selected rows the filter hid stay
+    ' selected, renumbered.
     Set kept = New Collection
+    Set keptSelection = New Collection
     For Each entry In sourceItems
         idx = idx + 1
-        If selectedFlags(idx) Then
+        If movingFlags(idx) Then
             targetItems.Add CStr(entry)
         Else
             kept.Add CStr(entry)
+            If selectedFlags(idx) Then keptSelection.Add kept.Count
         End If
     Next entry
     If rightward Then
         Set mItems = kept
-        Set mSelLeft = New Collection
+        Set mSelLeft = keptSelection
     Else
         Set mChosenItems = kept
-        Set mSelRight = New Collection
+        Set mSelRight = keptSelection
     End If
     ItemsChanged
     Touch
@@ -4780,7 +5176,28 @@ End Sub
 
 Private Sub TransferAll(ByVal hostApp As ReDimUI, ByVal rightward As Boolean)
     Dim entry As Variant
+    Dim shownItems() As Long
+    Dim shownTotal As Long
+    Dim idx As Long
 
+    ' A filtered side moves every row it shows, as a selection would.
+    If LenB(PanelFilter(IIf(rightward, 0, 1))) > 0 Then
+        shownTotal = TransferShownRows(IIf(rightward, 0, 1), shownItems)
+        If shownTotal = 0 Then Exit Sub
+        If rightward Then
+            Set mSelLeft = New Collection
+            For idx = 1 To shownTotal
+                mSelLeft.Add shownItems(idx)
+            Next idx
+        Else
+            Set mSelRight = New Collection
+            For idx = 1 To shownTotal
+                mSelRight.Add shownItems(idx)
+            Next idx
+        End If
+        TransferSelected hostApp, rightward
+        Exit Sub
+    End If
     If rightward Then
         If mItems.Count = 0 Then Exit Sub
         For Each entry In mItems
@@ -4805,7 +5222,7 @@ End Sub
 ' to state and fires OnChange once. Selection clicks fire nothing.
 Private Sub CommitTransferChange(ByVal hostApp As ReDimUI)
     If LenB(mWritesToKey) > 0 Then
-        hostApp.SetState mWritesToKey, JoinedText(mChosenItems, ", ")
+        hostApp.SetState mWritesToKey, JoinedValues(mChosenItems, ", ")
     End If
     If LenB(mClickProc) > 0 Then
         On Error Resume Next
@@ -4902,7 +5319,7 @@ Friend Sub RunClickBehavior()
                 And IsNumeric(Mid$(ReDimUI.SenderPart, 4)) Then
                 Dim pickedItem As Long
                 pickedItem = ListItemAtRow(CLng(Mid$(ReDimUI.SenderPart, 4)))
-                If pickedItem = 0 Then Exit Sub
+                If Not ItemPickable(pickedItem) Then Exit Sub
                 ' Re-picking the selection only closes the list: nothing
                 ' changed, so nothing is written and no handler runs.
                 If Not PickSelectItem(hostApp, pickedItem) Then Exit Sub
@@ -4941,8 +5358,10 @@ Friend Sub RunClickBehavior()
                 PageTransferPanel transferPart
             ElseIf Left$(transferPart, 2) = "al" Then
                 If IsNumeric(Mid$(transferPart, 3)) Then
-                    ' Window rows map through the scroll offset.
-                    transferRow = mLeftOffset + CLng(Mid$(transferPart, 3))
+                    ' Window rows map through the scroll offset and the
+                    ' filter.
+                    transferRow = TransferShownItem(0, mLeftOffset + CLng(Mid$(transferPart, 3)))
+                    If transferRow = 0 Then Exit Sub
                     If RowDoubleClicked(transferPart) Then
                         MoveTransferRow hostApp, True, transferRow
                     Else
@@ -4953,7 +5372,8 @@ Friend Sub RunClickBehavior()
                 End If
             ElseIf Left$(transferPart, 2) = "cl" Then
                 If IsNumeric(Mid$(transferPart, 3)) Then
-                    transferRow = mRightOffset + CLng(Mid$(transferPart, 3))
+                    transferRow = TransferShownItem(1, mRightOffset + CLng(Mid$(transferPart, 3)))
+                    If transferRow = 0 Then Exit Sub
                     If RowDoubleClicked(transferPart) Then
                         MoveTransferRow hostApp, False, transferRow
                     Else
@@ -4970,6 +5390,8 @@ Friend Sub RunClickBehavior()
                 TransferAll hostApp, True
             ElseIf transferPart = "mval" Then
                 TransferAll hostApp, False
+            ElseIf transferPart = "mvu" Or transferPart = "mvd" Then
+                ReorderChosen hostApp, (transferPart = "mvu")
             End If
             Exit Sub
         Case KIND_RADIO
@@ -5039,6 +5461,7 @@ End Function
 Private Sub ItemsChanged()
     mItemTextsCurrent = False
     Set mListMatches = Nothing
+    mItemsVersion = mItemsVersion + 1
 End Sub
 
 Private Sub EnsureItemTexts()
@@ -6161,7 +6584,9 @@ Private Sub HandleControlKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
             End If
             Exit Sub
         Case "{ESC}"
-            If mSelectOpen Then
+            If ClearListFilter() Then
+                Exit Sub
+            ElseIf mSelectOpen Then
                 CloseDropList
             ElseIf hostApp.ModalUp Then
                 hostApp.CancelModal
@@ -6233,7 +6658,7 @@ Private Function SelectRadioRow(ByVal hostApp As ReDimUI, ByVal rowNumber As Lon
     If rowNumber = CLng(mValue) Then Exit Function
     mValue = rowNumber
     If LenB(mWritesToKey) > 0 Then
-        hostApp.SetState mWritesToKey, ItemAt(rowNumber)
+        hostApp.SetState mWritesToKey, ItemStateValue(ItemAt(rowNumber))
     End If
     Touch
     SelectRadioRow = True
@@ -6324,28 +6749,35 @@ Private Sub HandleSelectKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
     Dim itemTotal As Long
     Dim aimRow As Long
     Dim anchorItem As Long
+    Dim stepDirection As Long
 
     itemTotal = ItemCount
     If itemTotal = 0 Then
         If keyText = "{ENTER}" Then hostApp.ClickDefaultButton
         Exit Sub
     End If
+    ' Moves land on items that can be picked, passing over disabled
+    ' items and group headers in the direction of travel.
     If mSelectOpen Then
         anchorItem = mListHighlight
         If anchorItem < 1 Then anchorItem = CLng(mValue)
+        stepDirection = 1
         Select Case keyText
             Case "{UP}"
                 aimRow = anchorItem - 1
+                stepDirection = -1
             Case "{DOWN}"
                 aimRow = anchorItem + 1
             Case "{PGUP}"
                 aimRow = anchorItem - mListRows
+                stepDirection = -1
             Case "{PGDN}"
                 aimRow = anchorItem + mListRows
             Case "{HOME}"
                 aimRow = 1
             Case "{END}"
                 aimRow = itemTotal
+                stepDirection = -1
             Case "{ENTER}", " ", "{ALTUP}"
                 If mListHighlight >= 1 Then
                     If PickSelectItem(hostApp, mListHighlight) Then
@@ -6362,28 +6794,33 @@ Private Sub HandleSelectKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
                 aimRow = TypeAheadItem(keyText, anchorItem)
                 If aimRow = 0 Then Exit Sub
         End Select
-        If aimRow < 1 Then aimRow = 1
-        If aimRow > itemTotal Then aimRow = itemTotal
+        aimRow = PickableNear(aimRow, stepDirection)
+        If aimRow = 0 Then Exit Sub
         HighlightListItem aimRow
         Exit Sub
     End If
     anchorItem = CLng(mValue)
+    stepDirection = 1
     Select Case keyText
         Case "{UP}", "{LEFT}"
             aimRow = anchorItem - 1
+            stepDirection = -1
         Case "{DOWN}", "{RIGHT}"
             aimRow = anchorItem + 1
         Case "{PGUP}"
             aimRow = anchorItem - mListRows
+            stepDirection = -1
         Case "{PGDN}"
             aimRow = anchorItem + mListRows
         Case "{HOME}"
             aimRow = 1
         Case "{END}"
             aimRow = itemTotal
+            stepDirection = -1
         Case " ", "{ALTDOWN}", "{F4}"
             OpenDropList hostApp.Sheet
-            HighlightListItem IIf(anchorItem >= 1, anchorItem, 1)
+            aimRow = PickableNear(IIf(anchorItem >= 1, anchorItem, 1), 1)
+            If aimRow > 0 Then HighlightListItem aimRow
             Exit Sub
         Case "{ENTER}"
             hostApp.ClickDefaultButton
@@ -6392,8 +6829,8 @@ Private Sub HandleSelectKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
             aimRow = TypeAheadItem(keyText, anchorItem)
             If aimRow = 0 Then Exit Sub
     End Select
-    If aimRow < 1 Then aimRow = 1
-    If aimRow > itemTotal Then aimRow = itemTotal
+    aimRow = PickableNear(aimRow, stepDirection)
+    If aimRow = 0 Then Exit Sub
     If PickSelectItem(hostApp, aimRow) Then RunClickHandlers hostApp
 End Sub
 
@@ -6421,7 +6858,7 @@ Private Function PickSelectItem(ByVal hostApp As ReDimUI, ByVal itemIndex As Lon
     End If
     mValue = itemIndex
     If LenB(mWritesToKey) > 0 Then
-        hostApp.SetState mWritesToKey, ItemAt(itemIndex)
+        hostApp.SetState mWritesToKey, ItemStateValue(ItemAt(itemIndex))
     End If
     Touch
     PickSelectItem = True
@@ -6459,7 +6896,8 @@ Private Function TypeAheadItem(ByVal keyText As String, ByVal fromItem As Long) 
     If startAt < 1 Then startAt = 1
     For stepCount = 0 To itemTotal - 1
         candidate = (startAt - 1 + stepCount) Mod itemTotal + 1
-        If LCase$(Left$(ItemAt(candidate), Len(typedPrefix))) = typedPrefix Then
+        If ItemPickable(candidate) _
+            And LCase$(Left$(ItemAt(candidate), Len(typedPrefix))) = typedPrefix Then
             TypeAheadItem = candidate
             Exit Function
         End If
@@ -6471,18 +6909,24 @@ End Function
 Private Sub HandleCheckListKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
     Dim firstRow As Long
     Dim aimRow As Long
+    Dim shownTotal As Long
 
     If ItemCount = 0 Then Exit Sub
+    If TypeListFilter(keyText) Then Exit Sub
     firstRow = IIf(mSelectAllRow, 0, 1)
+    shownTotal = CheckShownCount()
+    ' The cursor walks shown rows (0 is select-all); aimRow is a shown
+    ' position until the end, where it turns back into an item.
+    aimRow = CheckShownPosition(mKeyRow)
     Select Case keyText
         Case "{UP}"
-            aimRow = mKeyRow - 1
+            aimRow = aimRow - 1
         Case "{DOWN}"
-            aimRow = mKeyRow + 1
+            aimRow = aimRow + 1
         Case "{HOME}", "{PGUP}"
             aimRow = firstRow
         Case "{END}", "{PGDN}"
-            aimRow = ItemCount
+            aimRow = shownTotal
         Case " "
             If ToggleCheckRow(hostApp, mKeyRow) Then RunClickHandlers hostApp
             Exit Sub
@@ -6493,8 +6937,8 @@ Private Sub HandleCheckListKey(ByVal hostApp As ReDimUI, ByVal keyText As String
             Exit Sub
     End Select
     If aimRow < firstRow Then aimRow = firstRow
-    If aimRow > ItemCount Then aimRow = ItemCount
-    PlaceKeyCursor 0, aimRow
+    If aimRow > shownTotal Then aimRow = shownTotal
+    PlaceKeyCursor 0, IIf(aimRow = 0, 0, CheckShownItem(aimRow))
     Touch
 End Sub
 
@@ -6502,6 +6946,30 @@ End Sub
 ' none it checks everything, from all it clears. Writes the state and
 ' moves the keyboard cursor there. True when anything toggled; the
 ' caller runs the handlers.
+' Select-all under a filter: unchecks the rows that show when all of
+' them are checked, else checks them; hidden rows keep their checks.
+Private Sub ToggleShownChecks()
+    Dim idx As Long
+    Dim allChecked As Boolean
+    Dim anyShown As Boolean
+
+    allChecked = True
+    For idx = 1 To ItemCount
+        If InStr(1, ItemAt(idx), mFilterCheck, vbTextCompare) > 0 Then
+            anyShown = True
+            If Not TransferSelectionHas(mCheckedSet, idx) Then allChecked = False
+        End If
+    Next idx
+    If Not anyShown Then Exit Sub
+    For idx = 1 To ItemCount
+        If InStr(1, ItemAt(idx), mFilterCheck, vbTextCompare) > 0 Then
+            If TransferSelectionHas(mCheckedSet, idx) = allChecked Then
+                TransferSelectionToggle mCheckedSet, idx
+            End If
+        End If
+    Next idx
+End Sub
+
 Private Function ToggleCheckRow(ByVal hostApp As ReDimUI, ByVal checkRow As Long) As Boolean
     Dim rowNumber As Long
 
@@ -6509,7 +6977,9 @@ Private Function ToggleCheckRow(ByVal hostApp As ReDimUI, ByVal checkRow As Long
     If ItemCount = 0 Then Exit Function
     If checkRow = 0 Then
         If Not mSelectAllRow Then Exit Function
-        If mCheckedSet.Count = ItemCount Then
+        If LenB(mFilterCheck) > 0 Then
+            ToggleShownChecks
+        ElseIf mCheckedSet.Count = ItemCount Then
             Set mCheckedSet = New Collection
         Else
             Set mCheckedSet = New Collection
@@ -6545,21 +7015,30 @@ Private Sub HandleTransferKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
     Dim rowsShown As Long
 
     EnsureTransferCollections
+    If TypeListFilter(keyText) Then Exit Sub
     rowsShown = TransferRowCapacity()
-    aimRow = mKeyRow
+    ' The cursor walks the rows the panel shows; aimRow is a shown
+    ' position until the end, where it turns back into an item.
+    aimRow = TransferShownPosition(mKeyPanel, mKeyRow)
     Select Case keyText
+        Case "{ALTUP}", "{ALTDOWN}"
+            ' Alt+Up and Alt+Down reorder the chosen side from its rows,
+            ' and the window follows the cursor's row.
+            If Not mReorderable Or mKeyPanel <> 1 Then Exit Sub
+            ReorderChosen hostApp, (keyText = "{ALTUP}")
+            aimRow = TransferShownPosition(mKeyPanel, mKeyRow)
         Case "{UP}"
-            aimRow = mKeyRow - 1
+            aimRow = aimRow - 1
         Case "{DOWN}"
-            aimRow = mKeyRow + 1
+            aimRow = aimRow + 1
         Case "{HOME}"
             aimRow = 1
         Case "{END}"
-            aimRow = TransferPanelCount(mKeyPanel)
+            aimRow = TransferShownCount(mKeyPanel)
         Case "{PGUP}"
-            aimRow = mKeyRow - rowsShown
+            aimRow = aimRow - rowsShown
         Case "{PGDN}"
-            aimRow = mKeyRow + rowsShown
+            aimRow = aimRow + rowsShown
         Case "{LEFT}"
             mKeyPanel = 0
         Case "{RIGHT}"
@@ -6586,10 +7065,10 @@ Private Sub HandleTransferKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
         Case Else
             Exit Sub
     End Select
-    rowTotal = TransferPanelCount(mKeyPanel)
+    rowTotal = TransferShownCount(mKeyPanel)
     If aimRow > rowTotal Then aimRow = rowTotal
     If aimRow < 1 Then aimRow = IIf(rowTotal > 0, 1, 0)
-    PlaceKeyCursor mKeyPanel, aimRow
+    PlaceKeyCursor mKeyPanel, TransferShownItem(mKeyPanel, aimRow)
     ' The panel window follows the cursor.
     If mKeyPanel = 0 Then
         If aimRow > mLeftOffset + rowsShown Then mLeftOffset = aimRow - rowsShown
@@ -7489,6 +7968,9 @@ Private Sub ApplyCheckListParts( _
     Dim captionCreated As Boolean
     Dim fullPass As Boolean
     Dim checkedFlags() As Boolean
+    Dim shownAt() As Long
+    Dim shownTotal As Long
+    Dim cursorAt As Long
     Dim entry As Variant
 
     EnsureCheckedSet
@@ -7498,8 +7980,9 @@ Private Sub ApplyCheckListParts( _
         Exit Sub
     End If
     PruneTransferSelection mCheckedSet, rowTotal
+    ' A filter lays the rows out anew: it is part of the layout.
     layoutKey = PartsState(themeValue) & ":" & CStr(mSelectAllRow) & _
-        ":" & CStr(rowTotal)
+        ":" & CStr(rowTotal) & Chr$(1) & mFilterCheck
     fullPass = Not (mAppliedValid And layoutKey = mAppliedCheckSig)
     If fullPass Then
         mAppliedCheckSig = layoutKey
@@ -7510,7 +7993,25 @@ Private Sub ApplyCheckListParts( _
     For Each entry In mCheckedSet
         checkedFlags(CLng(entry)) = True
     Next entry
-    checkedTotal = mCheckedSet.Count
+    ' Each item's row under the filter, 0 when hidden; the header counts
+    ' the rows that show.
+    ReDim shownAt(1 To rowTotal)
+    For idx = 1 To rowTotal
+        If LenB(mFilterCheck) = 0 Then
+            shownAt(idx) = idx
+        ElseIf InStr(1, ItemAt(idx), mFilterCheck, vbTextCompare) > 0 Then
+            shownTotal = shownTotal + 1
+            shownAt(idx) = shownTotal
+        End If
+    Next idx
+    If LenB(mFilterCheck) = 0 Then
+        shownTotal = rowTotal
+        checkedTotal = mCheckedSet.Count
+    Else
+        For idx = 1 To rowTotal
+            If shownAt(idx) > 0 And checkedFlags(idx) Then checkedTotal = checkedTotal + 1
+        Next idx
+    End If
     headerRows = 0
     If mSelectAllRow Then headerRows = 1
     rowPitch = mHeight / (rowTotal + headerRows)
@@ -7519,8 +8020,8 @@ Private Sub ApplyCheckListParts( _
     If boxSize < 10 Then boxSize = 10
 
     If mSelectAllRow Then
-        headerKey = CStr(checkedTotal) & "/" & CStr(rowTotal) & _
-            IIf(PointerOn("row0"), "h", vbNullString)
+        headerKey = CStr(checkedTotal) & "/" & CStr(shownTotal) & _
+            IIf(PointerOn("row0"), "h", vbNullString) & Chr$(1) & mFilterCheck
         priorKey = mAppliedCheckHeaderSig
         If headerKey <> priorKey Then
             mAppliedCheckHeaderSig = headerKey
@@ -7528,17 +8029,24 @@ Private Sub ApplyCheckListParts( _
                 hostSheet, "mb", msoShapeRoundedRectangle, boxCreated)
             Set captionShape = EnsurePartShape( _
                 hostSheet, "mt", msoShapeRectangle, captionCreated)
-            headerText = "Select all (" & checkedTotal & "/" & rowTotal & ")"
+            If LenB(mFilterCheck) = 0 Then
+                headerText = "Select all (" & checkedTotal & "/" & shownTotal & ")"
+            Else
+                headerText = "Select all """ & mFilterCheck & """ (" & _
+                    checkedTotal & "/" & shownTotal & ")"
+            End If
             If LenB(priorKey) > 0 And Not (boxCreated Or captionCreated) Then
                 StyleCheckBoxState box, boxSize, themeValue, _
-                    (checkedTotal = rowTotal), (checkedTotal > 0), PointerOn("row0")
+                    (checkedTotal = shownTotal And shownTotal > 0), (checkedTotal > 0), _
+                    PointerOn("row0")
                 captionShape.TextFrame2.TextRange.Text = headerText
             Else
                 On Error Resume Next
                 box.Adjustments(1) = 0.2
                 On Error GoTo 0
                 StyleCheckBoxFace box, boxSize, mTop, rowPitch, themeValue, _
-                    (checkedTotal = rowTotal), (checkedTotal > 0), PointerOn("row0")
+                    (checkedTotal = shownTotal And shownTotal > 0), (checkedTotal > 0), _
+                    PointerOn("row0")
                 captionShape.Left = mLeft + boxSize + 8
                 captionShape.Top = mTop
                 captionShape.Width = mWidth - boxSize - 8
@@ -7557,13 +8065,27 @@ Private Sub ApplyCheckListParts( _
 
     For idx = 1 To rowTotal
         ' The first character carries the box state: checked adds 1 and
-        ' the pointer adds 2.
-        rowKey = CStr(IIf(checkedFlags(idx), 1, 0) + _
-            IIf(PointerOn("row" & idx), 2, 0)) & ItemAt(idx)
+        ' the pointer adds 2. A row the filter hides keys as "~".
+        If shownAt(idx) = 0 Then
+            rowKey = "~"
+        Else
+            rowKey = CStr(IIf(checkedFlags(idx), 1, 0) + _
+                IIf(PointerOn("row" & idx), 2, 0)) & ItemAt(idx)
+        End If
         priorKey = mAppliedRowStates(idx)
-        If rowKey <> priorKey Then
+        If rowKey = "~" And priorKey <> "~" Then
             mAppliedRowStates(idx) = rowKey
-            rowTop = mTop + (idx - 1 + headerRows) * rowPitch
+            On Error Resume Next
+            If idx = 1 Then
+                mainShape.Visible = msoFalse
+            Else
+                hostSheet.Shapes(ShapeName & PART_SEPARATOR & "b" & idx).Visible = msoFalse
+            End If
+            hostSheet.Shapes(ShapeName & PART_SEPARATOR & "t" & idx).Visible = msoFalse
+            On Error GoTo 0
+        ElseIf rowKey <> priorKey And rowKey <> "~" Then
+            mAppliedRowStates(idx) = rowKey
+            rowTop = mTop + (shownAt(idx) - 1 + headerRows) * rowPitch
             boxCreated = False
             If idx = 1 Then
                 Set box = mainShape
@@ -7573,7 +8095,8 @@ Private Sub ApplyCheckListParts( _
             End If
             Set captionShape = EnsurePartShape( _
                 hostSheet, "t" & idx, msoShapeRectangle, captionCreated)
-            If LenB(priorKey) > 0 And Not (boxCreated Or captionCreated) Then
+            If LenB(priorKey) > 0 And priorKey <> "~" _
+                And Not (boxCreated Or captionCreated) Then
                 ' Drawn under this layout: rewrite only the box state or the
                 ' caption text, whichever moved.
                 If Left$(priorKey, 1) <> Left$(rowKey, 1) Then
@@ -7612,9 +8135,12 @@ Private Sub ApplyCheckListParts( _
     End If
     If mKeyRow > rowTotal Then mKeyRow = rowTotal
     If mKeyRow < 1 - headerRows Then mKeyRow = 1
+    cursorAt = 0
+    If mKeyRow >= 1 Then cursorAt = shownAt(mKeyRow)
     SyncKeyCursor hostSheet, themeValue, _
-        ReDimUI.IsComponentFocused(mOwnerAppId, mComponentId) And mVisible, _
-        mLeft - 2, mTop + (mKeyRow - 1 + headerRows) * rowPitch, _
+        ReDimUI.IsComponentFocused(mOwnerAppId, mComponentId) And mVisible _
+            And (mKeyRow = 0 Or cursorAt > 0), _
+        mLeft - 2, mTop + (cursorAt - 1 + headerRows) * rowPitch, _
         mWidth + 4, rowPitch
 End Sub
 
@@ -7843,12 +8369,12 @@ Private Sub ApplyTransferParts( _
     EnsureTransferCollections
     PruneTransferSelection mSelLeft, mItems.Count
     PruneTransferSelection mSelRight, mChosenItems.Count
-    If mLeftOffset > mItems.Count - TransferRowCapacity() Then
-        mLeftOffset = mItems.Count - TransferRowCapacity()
+    If mLeftOffset > TransferShownCount(0) - TransferRowCapacity() Then
+        mLeftOffset = TransferShownCount(0) - TransferRowCapacity()
     End If
     If mLeftOffset < 0 Then mLeftOffset = 0
-    If mRightOffset > mChosenItems.Count - TransferRowCapacity() Then
-        mRightOffset = mChosenItems.Count - TransferRowCapacity()
+    If mRightOffset > TransferShownCount(1) - TransferRowCapacity() Then
+        mRightOffset = TransferShownCount(1) - TransferRowCapacity()
     End If
     If mRightOffset < 0 Then mRightOffset = 0
     TransferLayout panelW, panelTop, panelH, rightX, btnX, btnTop
@@ -7900,31 +8426,31 @@ Private Sub ApplyTransferParts( _
     SyncTransferDropTarget mainShape, hostSheet, themeValue
 
     ApplyTransferHeader hostSheet, themeValue, "hl", mLeft, panelW, TRANSFER_HEADER_H, _
-        IIf(LenB(mCaptionLeft) > 0, mCaptionLeft, "Available") & _
-        " (" & mItems.Count & ")", mAppliedHeaderLeftSig
+        TransferHeaderText(0), mAppliedHeaderLeftSig
     ApplyTransferHeader hostSheet, themeValue, "hr", rightX, panelW, TRANSFER_HEADER_H, _
-        IIf(LenB(mCaptionRight) > 0, mCaptionRight, "Selected") & _
-        " (" & mChosenItems.Count & ")", mAppliedHeaderRightSig
-    SyncTransferRows hostSheet, themeValue, mItems, "al", _
+        TransferHeaderText(1), mAppliedHeaderRightSig
+    SyncTransferRows hostSheet, themeValue, 0, mItems, "al", _
         mLeft, panelTop, panelW, panelH, mSelLeft, mLeftOffset, _
         mAppliedLeftRows, mAppliedLeftRowStates
-    SyncTransferRows hostSheet, themeValue, mChosenItems, "cl", _
+    SyncTransferRows hostSheet, themeValue, 1, mChosenItems, "cl", _
         rightX, panelTop, panelW, panelH, mSelRight, mRightOffset, _
         mAppliedRightRows, mAppliedRightRowStates
     ApplyTransferScroller hostSheet, themeValue, "alu", "ald", _
-        mLeft, panelTop, panelW, panelH, mItems.Count, mAppliedScrollLeftSig
+        mLeft, panelTop, panelW, panelH, TransferShownCount(0), mAppliedScrollLeftSig
     ApplyTransferScroller hostSheet, themeValue, "clu", "cld", _
-        rightX, panelTop, panelW, panelH, mChosenItems.Count, _
+        rightX, panelTop, panelW, panelH, TransferShownCount(1), _
         mAppliedScrollRightSig
+    SyncReorderButtons hostSheet, themeValue, rightX, panelW
     SyncTransferPartTint hostSheet, themeValue
 
     ' The keyboard cursor, while the list holds focus.
     Dim cursorItems As Long
     Dim cursorRow As Long
     Dim cursorWidth As Double
-    cursorItems = TransferPanelCount(mKeyPanel)
-    If mKeyRow > cursorItems Then mKeyRow = cursorItems
-    cursorRow = mKeyRow - IIf(mKeyPanel = 0, mLeftOffset, mRightOffset)
+    If mKeyRow > TransferPanelCount(mKeyPanel) Then mKeyRow = TransferPanelCount(mKeyPanel)
+    cursorItems = TransferShownCount(mKeyPanel)
+    cursorRow = TransferShownPosition(mKeyPanel, mKeyRow)
+    If cursorRow > 0 Then cursorRow = cursorRow - IIf(mKeyPanel = 0, mLeftOffset, mRightOffset)
     cursorWidth = panelW - 6
     If cursorItems > TransferRowCapacity() Then
         cursorWidth = cursorWidth - PAGER_TARGET - 2
@@ -8024,6 +8550,408 @@ Private Sub ApplyTransferScroller( _
     End If
 End Sub
 
+' The chosen panel's reorder arrows, square pointer targets at the right
+' end of its header.
+Private Sub SyncReorderButtons( _
+    ByVal hostSheet As Worksheet, _
+    ByVal themeValue As ReDimUI, _
+    ByVal rightX As Double, _
+    ByVal panelW As Double _
+)
+    Dim reorderKey As String
+    Dim arrowShape As Shape
+    Dim partNo As Long
+
+    If mReorderable And mVisible Then
+        reorderKey = PartsState(themeValue) & ":" & CStr(rightX) & ":" & CStr(panelW)
+    End If
+    If reorderKey = mAppliedReorderSig Then Exit Sub
+    mAppliedReorderSig = reorderKey
+    If LenB(reorderKey) = 0 Then
+        On Error Resume Next
+        hostSheet.Shapes(ShapeName & PART_SEPARATOR & "mvu").Delete
+        hostSheet.Shapes(ShapeName & PART_SEPARATOR & "mvd").Delete
+        On Error GoTo 0
+        Exit Sub
+    End If
+    For partNo = 0 To 1
+        Set arrowShape = EnsurePartShape(hostSheet, IIf(partNo = 0, "mvu", "mvd"), _
+            msoShapeRoundedRectangle)
+        arrowShape.Width = PAGER_TARGET
+        arrowShape.Height = PAGER_TARGET
+        arrowShape.Left = ReorderArrowLeft(rightX, panelW, partNo)
+        arrowShape.Top = mTop - 1
+        arrowShape.Fill.Visible = msoTrue
+        arrowShape.Fill.ForeColor.RGB = themeValue.MutedColor
+        arrowShape.Line.Visible = msoFalse
+        StyleGlyphText arrowShape, IIf(partNo = 0, ChrW(9650), ChrW(9660)), _
+            ResolveDrawnInk(themeValue), 9, themeValue
+        arrowShape.Visible = msoTrue
+        arrowShape.OnAction = mAppliedOnAction
+        arrowShape.ZOrder msoBringToFront
+    Next partNo
+    mAppliedPartTint = vbNullString
+End Sub
+
+' The left edge of the up (0) or down (1) reorder arrow.
+Private Function ReorderArrowLeft( _
+    ByVal rightX As Double, _
+    ByVal panelW As Double, _
+    ByVal partNo As Long _
+) As Double
+    ReorderArrowLeft = rightX + panelW - (2 - partNo) * (PAGER_TARGET + 2)
+End Function
+
+' Moves the chosen side's selected rows one place up or down among the
+' rows the panel shows, a block at a time, stopping at the ends. With
+' nothing selected the keys move the cursor's row. The cursor goes with
+' its row.
+Private Sub ReorderChosen(ByVal hostApp As ReDimUI, ByVal upward As Boolean)
+    Dim itemTotal As Long
+    Dim texts() As String
+    Dim marked() As Boolean
+    Dim shownRows() As Long
+    Dim shownTotal As Long
+    Dim entry As Variant
+    Dim idx As Long
+    Dim upper As Long
+    Dim lower As Long
+    Dim cursorOnly As Boolean
+    Dim moved As Boolean
+    Dim rebuilt As Collection
+
+    EnsureTransferCollections
+    itemTotal = mChosenItems.Count
+    If itemTotal < 2 Then Exit Sub
+    ReDim texts(1 To itemTotal)
+    ReDim marked(1 To itemTotal)
+    For Each entry In mChosenItems
+        idx = idx + 1
+        texts(idx) = CStr(entry)
+    Next entry
+    For Each entry In mSelRight
+        If CLng(entry) >= 1 And CLng(entry) <= itemTotal Then marked(CLng(entry)) = True
+    Next entry
+    If mSelRight.Count = 0 Then
+        If mKeyPanel <> 1 Or mKeyRow < 1 Or mKeyRow > itemTotal Then Exit Sub
+        marked(mKeyRow) = True
+        cursorOnly = True
+    End If
+    shownTotal = TransferShownRows(1, shownRows)
+    If shownTotal < 2 Then Exit Sub
+    If upward Then
+        For idx = 2 To shownTotal
+            upper = shownRows(idx - 1)
+            lower = shownRows(idx)
+            If marked(lower) And Not marked(upper) Then
+                SwapChosenRows texts, marked, upper, lower
+                moved = True
+            End If
+        Next idx
+    Else
+        For idx = shownTotal - 1 To 1 Step -1
+            upper = shownRows(idx)
+            lower = shownRows(idx + 1)
+            If marked(upper) And Not marked(lower) Then
+                SwapChosenRows texts, marked, upper, lower
+                moved = True
+            End If
+        Next idx
+    End If
+    If Not moved Then Exit Sub
+    Set rebuilt = New Collection
+    For idx = 1 To itemTotal
+        rebuilt.Add texts(idx)
+    Next idx
+    Set mChosenItems = rebuilt
+    Set mSelRight = New Collection
+    For idx = 1 To itemTotal
+        If marked(idx) And Not cursorOnly Then mSelRight.Add idx
+    Next idx
+    Touch
+    CommitTransferChange hostApp
+End Sub
+
+' Two chosen rows trade places, marks and the key cursor with them.
+Private Sub SwapChosenRows( _
+    ByRef texts() As String, _
+    ByRef marked() As Boolean, _
+    ByVal upper As Long, _
+    ByVal lower As Long _
+)
+    Dim heldText As String
+    Dim heldMark As Boolean
+
+    heldText = texts(upper)
+    texts(upper) = texts(lower)
+    texts(lower) = heldText
+    heldMark = marked(upper)
+    marked(upper) = marked(lower)
+    marked(lower) = heldMark
+    If mKeyPanel = 1 Then
+        If mKeyRow = upper Then
+            mKeyRow = lower
+        ElseIf mKeyRow = lower Then
+            mKeyRow = upper
+        End If
+    End If
+End Sub
+
+' The item numbers a transfer panel shows, in order, into shownItems;
+' returns how many.
+Private Function TransferShownRows(ByVal panelIndex As Long, ByRef shownItems() As Long) As Long
+    Dim shownTotal As Long
+    Dim idx As Long
+
+    shownTotal = TransferShownCount(panelIndex)
+    If shownTotal = 0 Then Exit Function
+    ReDim shownItems(1 To shownTotal)
+    For idx = 1 To shownTotal
+        shownItems(idx) = TransferShownItem(panelIndex, idx)
+    Next idx
+    TransferShownRows = shownTotal
+End Function
+
+Private Function PanelFilter(ByVal panelIndex As Long) As String
+    If panelIndex = 0 Then
+        PanelFilter = mFilterLeft
+    Else
+        PanelFilter = mFilterRight
+    End If
+End Function
+
+' How many rows a transfer panel shows: all its items, or with a filter
+' those whose text holds it.
+Private Function TransferShownCount(ByVal panelIndex As Long) As Long
+    If LenB(PanelFilter(panelIndex)) = 0 Then
+        TransferShownCount = TransferPanelCount(panelIndex)
+        Exit Function
+    End If
+    EnsureShownRows panelIndex
+    If panelIndex = 0 Then
+        TransferShownCount = mShownLeftCount
+    Else
+        TransferShownCount = mShownRightCount
+    End If
+End Function
+
+' The item number at a shown position, 0 past the end.
+Private Function TransferShownItem(ByVal panelIndex As Long, ByVal shownPosition As Long) As Long
+    If shownPosition < 1 Then Exit Function
+    If LenB(PanelFilter(panelIndex)) = 0 Then
+        If shownPosition <= TransferPanelCount(panelIndex) Then
+            TransferShownItem = shownPosition
+        End If
+        Exit Function
+    End If
+    EnsureShownRows panelIndex
+    If panelIndex = 0 Then
+        If shownPosition <= mShownLeftCount Then TransferShownItem = mShownLeft(shownPosition)
+    Else
+        If shownPosition <= mShownRightCount Then TransferShownItem = mShownRight(shownPosition)
+    End If
+End Function
+
+' The shown position of an item, 0 when the filter hides it.
+Private Function TransferShownPosition(ByVal panelIndex As Long, ByVal itemIndex As Long) As Long
+    Dim shownTotal As Long
+    Dim idx As Long
+
+    If itemIndex < 1 Then Exit Function
+    If LenB(PanelFilter(panelIndex)) = 0 Then
+        If itemIndex <= TransferPanelCount(panelIndex) Then
+            TransferShownPosition = itemIndex
+        End If
+        Exit Function
+    End If
+    shownTotal = TransferShownCount(panelIndex)
+    For idx = 1 To shownTotal
+        If TransferShownItem(panelIndex, idx) = itemIndex Then
+            TransferShownPosition = idx
+            Exit Function
+        End If
+    Next idx
+End Function
+
+' A filtered panel's item numbers, read once per filter, item version,
+' and item list.
+Private Sub EnsureShownRows(ByVal panelIndex As Long)
+    Dim panelItems As Collection
+    Dim cacheKey As String
+    Dim filterText As String
+    Dim shownItems() As Long
+    Dim shownTotal As Long
+    Dim entry As Variant
+    Dim idx As Long
+
+    EnsureTransferCollections
+    If panelIndex = 0 Then
+        Set panelItems = mItems
+    Else
+        Set panelItems = mChosenItems
+    End If
+    filterText = PanelFilter(panelIndex)
+    cacheKey = filterText & Chr$(1) & CStr(mItemsVersion) & ":" & _
+        CStr(ObjPtr(panelItems)) & ":" & CStr(panelItems.Count)
+    If panelIndex = 0 Then
+        If cacheKey = mShownLeftKey Then Exit Sub
+    ElseIf cacheKey = mShownRightKey Then
+        Exit Sub
+    End If
+    ReDim shownItems(0 To panelItems.Count)
+    For Each entry In panelItems
+        idx = idx + 1
+        If InStr(1, CStr(entry), filterText, vbTextCompare) > 0 Then
+            shownTotal = shownTotal + 1
+            shownItems(shownTotal) = idx
+        End If
+    Next entry
+    If panelIndex = 0 Then
+        mShownLeft = shownItems
+        mShownLeftCount = shownTotal
+        mShownLeftKey = cacheKey
+    Else
+        mShownRight = shownItems
+        mShownRightCount = shownTotal
+        mShownRightKey = cacheKey
+    End If
+End Sub
+
+' A panel's header: its caption and count, and with a filter the
+' filter in quotes and how many of the items show.
+Private Function TransferHeaderText(ByVal panelIndex As Long) As String
+    Dim captionText As String
+
+    If panelIndex = 0 Then
+        captionText = IIf(LenB(mCaptionLeft) > 0, mCaptionLeft, "Available")
+    Else
+        captionText = IIf(LenB(mCaptionRight) > 0, mCaptionRight, "Selected")
+    End If
+    If LenB(PanelFilter(panelIndex)) = 0 Then
+        TransferHeaderText = captionText & " (" & TransferPanelCount(panelIndex) & ")"
+    Else
+        TransferHeaderText = captionText & " """ & PanelFilter(panelIndex) & _
+            """ (" & TransferShownCount(panelIndex) & " of " & _
+            TransferPanelCount(panelIndex) & ")"
+    End If
+End Function
+
+' Typing while a transfer or check list has the keys builds a filter:
+' a character adds to it, Backspace takes one off. True when the key
+' was the filter's. The transfer list filters the panel its cursor is
+' in, and the cursor moves to the first row left showing.
+Private Function TypeListFilter(ByVal keyText As String) As Boolean
+    Dim filterText As String
+
+    Select Case keyText
+        Case "{APOS}"
+            keyText = "'"
+        Case "{QUOTE}"
+            keyText = """"
+    End Select
+    If mKind = KIND_TRANSFER Then
+        filterText = PanelFilter(mKeyPanel)
+    Else
+        filterText = mFilterCheck
+    End If
+    If keyText = "{BS}" Then
+        If LenB(filterText) = 0 Then Exit Function
+        filterText = Left$(filterText, Len(filterText) - 1)
+    ElseIf Len(keyText) = 1 And keyText <> " " Then
+        filterText = filterText & keyText
+    Else
+        Exit Function
+    End If
+    SetListFilter filterText
+    TypeListFilter = True
+End Function
+
+' Sets the filter of the transfer panel the cursor is in, or of the
+' check list, and rewinds to its first row.
+Private Sub SetListFilter(ByVal filterText As String)
+    If mKind = KIND_TRANSFER Then
+        If mKeyPanel = 0 Then
+            mFilterLeft = filterText
+            mLeftOffset = 0
+        Else
+            mFilterRight = filterText
+            mRightOffset = 0
+        End If
+        PlaceKeyCursor mKeyPanel, TransferShownItem(mKeyPanel, 1)
+    Else
+        mFilterCheck = filterText
+        PlaceKeyCursor 0, CheckShownItem(1)
+    End If
+    Touch
+End Sub
+
+' Esc on a filtered list clears the filter first. True when it did.
+Private Function ClearListFilter() As Boolean
+    If mKind = KIND_TRANSFER Then
+        If LenB(PanelFilter(mKeyPanel)) = 0 Then Exit Function
+    ElseIf mKind = KIND_CHECKLIST Then
+        If LenB(mFilterCheck) = 0 Then Exit Function
+    Else
+        Exit Function
+    End If
+    SetListFilter vbNullString
+    ClearListFilter = True
+End Function
+
+' The item a check list shows at a row position, counting from 1 below
+' any select-all row; 0 past the end.
+Private Function CheckShownItem(ByVal shownPosition As Long) As Long
+    Dim idx As Long
+    Dim seen As Long
+
+    If shownPosition < 1 Then Exit Function
+    If LenB(mFilterCheck) = 0 Then
+        If shownPosition <= ItemCount Then CheckShownItem = shownPosition
+        Exit Function
+    End If
+    For idx = 1 To ItemCount
+        If InStr(1, ItemAt(idx), mFilterCheck, vbTextCompare) > 0 Then
+            seen = seen + 1
+            If seen = shownPosition Then
+                CheckShownItem = idx
+                Exit Function
+            End If
+        End If
+    Next idx
+End Function
+
+' How many rows a check list shows under its filter.
+Private Function CheckShownCount() As Long
+    Dim idx As Long
+
+    If LenB(mFilterCheck) = 0 Then
+        CheckShownCount = ItemCount
+        Exit Function
+    End If
+    For idx = 1 To ItemCount
+        If InStr(1, ItemAt(idx), mFilterCheck, vbTextCompare) > 0 Then
+            CheckShownCount = CheckShownCount + 1
+        End If
+    Next idx
+End Function
+
+' A check list item's row position under the filter, 0 when hidden.
+Private Function CheckShownPosition(ByVal itemIndex As Long) As Long
+    Dim idx As Long
+
+    If itemIndex < 1 Or itemIndex > ItemCount Then Exit Function
+    If LenB(mFilterCheck) = 0 Then
+        CheckShownPosition = itemIndex
+        Exit Function
+    End If
+    If InStr(1, ItemAt(itemIndex), mFilterCheck, vbTextCompare) = 0 Then Exit Function
+    For idx = 1 To itemIndex
+        If InStr(1, ItemAt(idx), mFilterCheck, vbTextCompare) > 0 Then
+            CheckShownPosition = CheckShownPosition + 1
+        End If
+    Next idx
+End Function
+
 ' The move button or paging arrow under the pointer takes the pointer
 ' tint; the one that had it goes back to its plain fill.
 Private Sub SyncTransferPartTint(ByVal hostSheet As Worksheet, ByVal themeValue As ReDimUI)
@@ -8031,7 +8959,8 @@ Private Sub SyncTransferPartTint(ByVal hostSheet As Worksheet, ByVal themeValue 
     Dim priorPart As String
 
     Select Case mHoveredPart
-        Case "mvr", "mvar", "mvl", "mval", "alu", "ald", "clu", "cld"
+        Case "mvr", "mvar", "mvl", "mval", "alu", "ald", "clu", "cld", _
+            "mvu", "mvd"
             If PointerOn(mHoveredPart) Then tintKey = PointerKey()
     End Select
     If tintKey = mAppliedPartTint Then Exit Sub
@@ -8086,6 +9015,7 @@ End Sub
 Private Sub SyncTransferRows( _
     ByVal hostSheet As Worksheet, _
     ByVal themeValue As ReDimUI, _
+    ByVal panelIndex As Long, _
     ByVal itemsRef As Collection, _
     ByVal partPrefix As String, _
     ByVal panelX As Double, _
@@ -8111,15 +9041,17 @@ Private Sub SyncTransferRows( _
     Dim rowInk As Long
     Dim partCreated As Boolean
     Dim layoutKey As String
+    Dim shownTotal As Long
 
-    wanted = itemsRef.Count - scrollOffset
+    shownTotal = TransferShownCount(panelIndex)
+    wanted = shownTotal - scrollOffset
     If wanted > Int((panelH - 6) / TRANSFER_ROW_H) Then
         wanted = Int((panelH - 6) / TRANSFER_ROW_H)
     End If
     If wanted < 0 Then wanted = 0
     If Not mVisible Then wanted = 0
     rowWidth = panelW - 6
-    If itemsRef.Count > Int((panelH - 6) / TRANSFER_ROW_H) Then
+    If shownTotal > Int((panelH - 6) / TRANSFER_ROW_H) Then
         ' Leave room for the paging arrows.
         rowWidth = rowWidth - PAGER_TARGET - 2
     End If
@@ -8129,7 +9061,7 @@ Private Sub SyncTransferRows( _
         CStr(panelTop) & ":" & CStr(rowWidth)
     EnsureRowStates rowStates, wanted
     For idx = 1 To wanted
-        itemIndex = scrollOffset + idx
+        itemIndex = TransferShownItem(panelIndex, scrollOffset + idx)
         rowSelected = TransferSelectionHas(selectionSet, itemIndex)
         If rowSelected Then
             rowFill = themeValue.PrimaryColor
@@ -8573,8 +9505,12 @@ Friend Function PartAtPoint(ByVal pointsX As Double, ByVal pointsY As Double) As
                 If mSelectAllRow Then headerRows = 1
                 slot = Int((pointsY - mTop) / (mHeight / (itemTotal + headerRows))) _
                     + 1 - headerRows
-                If slot >= 1 - headerRows And slot <= itemTotal Then
-                    PartAtPoint = "row" & slot
+                If slot = 0 And headerRows = 1 Then
+                    PartAtPoint = "row0"
+                ElseIf slot >= 1 Then
+                    ' Rows below the filter's last show nothing.
+                    slot = CheckShownItem(slot)
+                    If slot >= 1 Then PartAtPoint = "row" & slot
                 End If
             End If
         Case KIND_SELECT, KIND_COMBO
@@ -8623,6 +9559,18 @@ Private Function TransferPartAt(ByVal pointsX As Double, ByVal pointsY As Double
 
     If mItems Is Nothing Or mChosenItems Is Nothing Then Exit Function
     TransferLayout panelW, panelTop, panelH, rightX, btnX, btnTop
+    If mReorderable And pointsY >= mTop - 1 And pointsY < panelTop Then
+        If pointsX >= ReorderArrowLeft(rightX, panelW, 1) Then
+            If pointsX <= ReorderArrowLeft(rightX, panelW, 1) + PAGER_TARGET Then
+                TransferPartAt = "mvd"
+            End If
+        ElseIf pointsX >= ReorderArrowLeft(rightX, panelW, 0) Then
+            If pointsX <= ReorderArrowLeft(rightX, panelW, 0) + PAGER_TARGET Then
+                TransferPartAt = "mvu"
+            End If
+        End If
+        Exit Function
+    End If
     If pointsY < panelTop Or pointsY > panelTop + panelH Then Exit Function
     If pointsX >= btnX And pointsX <= btnX + TRANSFER_BUTTON_W Then
         slot = Int((pointsY - btnTop) / (TRANSFER_BUTTON_H + TRANSFER_GAP))
@@ -8641,10 +9589,10 @@ Private Function TransferPartAt(ByVal pointsX As Double, ByVal pointsY As Double
         End Select
     ElseIf pointsX >= mLeft And pointsX <= mLeft + panelW Then
         TransferPartAt = TransferPanelPartAt("al", mLeft, panelTop, panelW, _
-            panelH, mItems.Count, mLeftOffset, pointsX, pointsY)
+            panelH, TransferShownCount(0), mLeftOffset, pointsX, pointsY)
     ElseIf pointsX >= rightX And pointsX <= rightX + panelW Then
         TransferPartAt = TransferPanelPartAt("cl", rightX, panelTop, panelW, _
-            panelH, mChosenItems.Count, mRightOffset, pointsX, pointsY)
+            panelH, TransferShownCount(1), mRightOffset, pointsX, pointsY)
     End If
 End Function
 
@@ -8975,14 +9923,14 @@ Private Function TransferRowOf( _
     Select Case Left$(partName, 2)
         Case "al"
             panelAt = 0
-            rowAt = mLeftOffset + CLng(Mid$(partName, 3))
+            rowAt = TransferShownItem(0, mLeftOffset + CLng(Mid$(partName, 3)))
         Case "cl"
             panelAt = 1
-            rowAt = mRightOffset + CLng(Mid$(partName, 3))
+            rowAt = TransferShownItem(1, mRightOffset + CLng(Mid$(partName, 3)))
         Case Else
             Exit Function
     End Select
-    TransferRowOf = True
+    TransferRowOf = (rowAt > 0)
 End Function
 
 ' The panel under a point, rows and empty space alike: 0 left, 1 right,
@@ -9016,9 +9964,12 @@ Private Sub SelectTransferRange( _
     Dim stepDirection As Long
 
     Set rangeRows = New Collection
-    stepDirection = IIf(toRow >= fromRow, 1, -1)
-    For rowNo = fromRow To toRow Step stepDirection
-        rangeRows.Add rowNo
+    fromRow = TransferShownPosition(panelIndex, fromRow)
+    rowNo = TransferShownPosition(panelIndex, toRow)
+    If fromRow = 0 Or rowNo = 0 Then Exit Sub
+    stepDirection = IIf(rowNo >= fromRow, 1, -1)
+    For rowNo = fromRow To rowNo Step stepDirection
+        rangeRows.Add TransferShownItem(panelIndex, rowNo)
     Next rowNo
     If panelIndex = 0 Then
         Set mSelLeft = rangeRows
@@ -9132,6 +10083,9 @@ Friend Sub FollowListPointer(ByVal partName As String)
     If Left$(partName, 3) <> "opt" Then Exit Sub
     If Not IsNumeric(Mid$(partName, 4)) Then Exit Sub
     rowNumber = CLng(Mid$(partName, 4))
+    If mKind = KIND_SELECT Then
+        If Not ItemPickable(ListItemAtRow(rowNumber)) Then Exit Sub
+    End If
     If mListOffset + rowNumber = mListHighlight Then Exit Sub
     mListHighlight = mListOffset + rowNumber
     Touch
@@ -9394,6 +10348,7 @@ Private Sub SyncDropList( _
     Dim rowFrame As String
     Dim rowText As String
     Dim rowLook As String
+    Dim rowIsHeader As Boolean
     Dim boldAt As Long
     Dim boldLength As Long
     Dim priorKey As String
@@ -9467,15 +10422,26 @@ Private Sub SyncDropList( _
             rowFill = themeValue.SurfaceColor
             rowInk = themeValue.OnSurfaceColor
         End If
+        rowIsHeader = IsGroupHeader(itemIndex)
+        If rowIsHeader Or Not ItemPickable(itemIndex) Then
+            rowInk = themeValue.OnMutedColor
+        End If
         rowFrame = PartsState(themeValue) & ":" & CStr(rowTop) & ":" & _
             CStr(rowPitch) & ":" & CStr(resolvedSize)
         rowText = GutterText(itemIndex = CLng(mValue), ItemAt(itemIndex))
         ' A filtering combo bolds what the text matched in each row. The
         ' gutter leads every row and is never bold, so a text write
-        ' clears an older match.
+        ' clears an older match. A group header sits flush left, all
+        ' bold.
         boldAt = 0
         boldLength = 0
-        If LenB(mListMatchesFilter) > 0 Then
+        If rowIsHeader Then
+            rowText = ItemAt(itemIndex)
+            If LenB(rowText) > 0 Then
+                boldAt = 1
+                boldLength = Len(rowText)
+            End If
+        ElseIf LenB(mListMatchesFilter) > 0 Then
             boldAt = InStr(1, ItemAt(itemIndex), mListMatchesFilter, vbTextCompare)
             If boldAt > 0 Then
                 boldAt = boldAt + Len(rowText) - Len(ItemAt(itemIndex))
@@ -9499,10 +10465,13 @@ Private Sub SyncDropList( _
                     boldAt, boldLength
             ElseIf KeyFrame(priorKey) = rowFrame And Not partCreated Then
                 ' Same frame: only the fill, the text, and the ink move.
+                ' A group header's bold first letter would spread over
+                ' the text written after it, so grouped lists reset it.
                 optionShape.Fill.ForeColor.RGB = rowFill
                 With optionShape.TextFrame2.TextRange
                     .Text = rowText
                     .Font.Fill.ForeColor.RGB = rowInk
+                    If Not mGroupHeaders Is Nothing Then .Font.Bold = msoFalse
                     If boldAt > 0 Then
                         .Characters(boldAt, boldLength).Font.Bold = msoTrue
                     End If
@@ -10085,7 +11054,11 @@ Friend Sub BlurField(ByVal hostApp As ReDimUI, ByVal keepEdits As Boolean)
         RunValidation hostApp
         If mText <> mFieldTextAtFocus Then
             If LenB(mWritesToKey) > 0 Then
-                hostApp.SetState mWritesToKey, mText
+                If mKind = KIND_COMBO Then
+                    hostApp.SetState mWritesToKey, ItemStateValue(mText)
+                Else
+                    hostApp.SetState mWritesToKey, mText
+                End If
             End If
             If LenB(mClickProc) > 0 Then
                 On Error Resume Next
@@ -10866,7 +11839,7 @@ Friend Function PickComboItem( _
     mSelectOpen = False
     PickComboItem = (picked <> replacedText)
     If PickComboItem And LenB(mWritesToKey) > 0 Then
-        hostApp.SetState mWritesToKey, picked
+        hostApp.SetState mWritesToKey, ItemStateValue(picked)
     End If
     Touch
 End Function

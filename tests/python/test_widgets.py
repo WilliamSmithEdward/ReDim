@@ -990,3 +990,65 @@ def test_transfer_gestures(run_widgets):
         "a press dragged along a panel must select the rows it covers"
     )
     assert facts["rangeMoves"] == "B, A, C, D, E"
+
+
+def test_item_values(run_widgets):
+    facts = parse_transcript(run_widgets("TestItemValues"))
+    assert facts["selectValue"] == "20:Integer", (
+        "a pick must write the item's value, with its own type"
+    )
+    assert facts["itemValueAt"] == "30:"
+    assert facts["radioValue"] == "P"
+    assert facts["comboPick"] == "#f00"
+    assert facts["comboFreeText"] == "Blue"
+    assert facts["checkValues"] == "1, 3"
+    assert facts["transferValues"] == "y1:y1"
+    assert facts["replacedDropsValues"] == "One"
+    assert facts["chosenKeepValue"] == "y1"
+
+
+def test_select_groups(run_widgets):
+    facts = parse_transcript(run_widgets("TestSelectGroups"))
+    assert facts["headerLook"] == "True", "a group header must read bold and muted"
+    assert facts["disabledLook"] == "True"
+    assert facts["clicksIgnored"] == "True", (
+        "clicks on a header or a disabled item must do nothing"
+    )
+    assert facts["picked"] == "Apple"
+    assert facts["downSkips"] == "Carrot", "Down must pass over disabled items and headers"
+    assert facts["upSkips"] == "Apple"
+    assert facts["homeSkipsHeader"] == "2"
+    assert facts["typeAheadSkips"] == "Apple"
+    assert facts["headerNotValue"] == "0"
+    assert facts["marksShift"] == "True"
+
+
+def test_transfer_reorder(run_widgets):
+    facts = parse_transcript(run_widgets("TestTransferReorder"))
+    assert facts["arrowsDrawn"] == "True"
+    assert facts["upOnce"] == "A, C, D, B", "the selected rows must move up as a block"
+    assert facts["stopsAtTop"] == "C, D, A, B:2", (
+        "a move at the top must change nothing and fire nothing"
+    )
+    assert facts["selectionFollows"] == "True"
+    assert facts["downMoves"] == "A, C, D, B"
+    assert facts["altUpMovesCursorRow"] == "A, C, B, D"
+    assert facts["cursorFollows"] == "A, B, C, D"
+
+
+def test_list_filter(run_widgets):
+    facts = parse_transcript(run_widgets("TestListFilter"))
+    assert facts["headerShowsFilter"] == 'Available "ap" (2 of 5)', (
+        "typing while a transfer list has the keys must filter its panel"
+    )
+    assert facts["rowsFiltered"] == "Apple,Apricot:False"
+    assert facts["keysOnShownRows"] == "Apricot"
+    assert facts["backspaceWidens"] == 'Available "a" (2 of 4)'
+    assert facts["moveAllShown"] == "Apricot, Apple, Banana", (
+        "move-all under a filter must move only the rows that show"
+    )
+    assert facts["escClears"] == "Available (2):True"
+    assert facts["checkHeader"] == 'Select all "gr" (0/2)'
+    assert facts["checkRowsHidden"] == "True"
+    assert facts["selectAllShown"] == "Green, Gray"
+    assert facts["allBack"] == "True"

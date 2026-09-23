@@ -313,6 +313,26 @@
   whose track sat at the same position.
 - Copy, cut, and paste retry briefly when another program holds the
   clipboard open, instead of doing nothing.
+- Items can carry values apart from their text: `AddItem "Medium", ,
+  20` or `ItemsFrom texts, values`. A pick writes the value to
+  `WritesTo`, with its own type, instead of the text; check lists and
+  transfer lists join the values of what is checked or chosen, and
+  `ItemValueAt` and `ChosenValueAt` read them. A value belongs to its
+  item's text, so it follows the item between transfer panels.
+- A `SelectBox` can disable items and group them. `ItemEnabled n, False`
+  leaves an item showing, muted, but out of reach of clicks and keys.
+  `AddGroup "Fruit"` adds a bold, muted header row that labels the items
+  after it and is never picked; it takes a place in the item numbers.
+- `Reorderable` gives a transfer list up and down arrows in the chosen
+  panel's header, and Alt+Up and Alt+Down, which move the chosen side's
+  selected rows a place as a block. The chosen order is part of the
+  value, so a move writes `WritesTo` and fires `OnChange`.
+- Typing while a transfer list or check list has the keys filters it.
+  A transfer panel's header shows the filter and how many rows match; a
+  check list hides the rows that do not and its select-all works on the
+  rest; Backspace takes a letter off and Esc clears the filter. Moves
+  under a filter take only the rows that show, and hidden rows keep
+  their selection and their checks.
 
 ## 0.19.2 - 2026-08-02
 

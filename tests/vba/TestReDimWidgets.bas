@@ -3322,3 +3322,245 @@ Public Function TestTransferGestures() As String
     ReDimUI.AutoPump True
     TestTransferGestures = transcript
 End Function
+
+' Label/value items: a picked item writes its value to WritesTo from a
+' select, a radio group, a combo pick, a check list, and a transfer list,
+' while a combo's free text writes the text; ItemValueAt reads a value;
+' a replaced list drops its values, and chosen transfer items keep theirs.
+Public Function TestItemValues() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim transcript As String
+
+    ReDimUI.AutoPump False
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "wid48")
+    app.SelectBox("sz").AtRect(24, 24, 140, 22) _
+        .ItemsFrom(Array("Small", "Medium", "Large"), Array(10, 20, 30)).WritesTo "size"
+    app.RadioGroup("rg").AtRect(24, 60, 140, 40).WritesTo "tier"
+    app.RadioGroup("rg").AddItem "Free", , "F"
+    app.RadioGroup("rg").AddItem "Pro", , "P"
+    app.ComboBox("cb").AtRect(24, 120, 140, 22) _
+        .ItemsFrom(Array("Red", "Green"), Array("#f00", "#0f0")).WritesTo "hue"
+    app.CheckList("ck").AtRect(200, 24, 140, 80) _
+        .ItemsFrom(Array("A", "B", "C"), Array(1, 2, 3)).WritesTo "picked"
+    app.TransferList("tl").AtRect(200, 120, 300, 120) _
+        .ItemsFrom(Array("X", "Y"), Array("x1", "y1")).WritesTo "moved"
+    app.Render
+
+    ReDimUI.DispatchShape "rdm_wid48_sz"
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid48_sz__opt2"
+    transcript = "selectValue=" & app.State("size") & ":" & TypeName(app.State("size"))
+    transcript = transcript & "|itemValueAt=" & app.SelectBox("sz").ItemValueAt(3) & _
+        ":" & app.SelectBox("sz").ItemValueAt(9)
+
+    ReDimUI.DispatchShape "rdm_wid48_rg__t2"
+    transcript = transcript & "|radioValue=" & app.State("tier")
+
+    ReDimUI.DispatchShape "rdm_wid48_cb"
+    ReDimUI.DispatchShape "rdm_wid48_cb__opt1"
+    transcript = transcript & "|comboPick=" & app.State("hue")
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid48_cb"
+    BackspaceAll app.ComboBox("cb")
+    TypeText "Blue"
+    RdxKeyChar "{ENTER}"
+    transcript = transcript & "|comboFreeText=" & app.State("hue")
+
+    ReDimUI.DispatchShape "rdm_wid48_ck__t1"
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid48_ck__t3"
+    transcript = transcript & "|checkValues=" & app.State("picked")
+
+    ReDimUI.DispatchShape "rdm_wid48_tl__al2"
+    ReDimUI.DispatchShape "rdm_wid48_tl__mvr"
+    transcript = transcript & "|transferValues=" & app.State("moved") & ":" & _
+        app.TransferList("tl").ChosenValueAt(1)
+
+    app.SelectBox("sz").Items "One", "Two"
+    transcript = transcript & "|replacedDropsValues=" & app.SelectBox("sz").ItemValueAt(1)
+    app.TransferList("tl").ItemsFrom Array("Z")
+    transcript = transcript & "|chosenKeepValue=" & app.TransferList("tl").ChosenValueAt(1)
+    RdxReleaseKeys
+    ReDimUI.AutoPump True
+    TestItemValues = transcript
+End Function
+
+' SelectBox groups and disabled items: a header reads bold, muted, and
+' flush left, a disabled item reads muted, clicks on either do nothing,
+' the keys and type-ahead pass over both, a header is never the value,
+' and both marks follow their items through an insert.
+Public Function TestSelectGroups() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim transcript As String
+
+    ReDimUI.AutoPump False
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "wid49")
+    app.SelectBox("dish").AtRect(24, 24, 160, 22).AddGroup "Fruit"
+    app.SelectBox("dish").AddItem "Apple"
+    app.SelectBox("dish").AddItem "Banana"
+    app.SelectBox("dish").AddGroup "Vegetables"
+    app.SelectBox("dish").AddItem "Carrot"
+    app.SelectBox("dish").AddItem "Daikon"
+    app.SelectBox("dish").ItemEnabled(3, False).WritesTo "dish"
+    app.Render
+
+    ReDimUI.DispatchShape "rdm_wid49_dish"
+    With host.Shapes("rdm_wid49_dish__opt1").TextFrame2.TextRange
+        transcript = "headerLook=" & CStr(.Text = "Fruit" _
+            And .Characters(1, 1).Font.Bold = msoTrue _
+            And .Font.Fill.ForeColor.RGB = app.Theme.OnMutedColor)
+    End With
+    transcript = transcript & "|disabledLook=" & _
+        CStr(InkOf(host, "rdm_wid49_dish__opt3") = app.Theme.OnMutedColor _
+            And RowItem(host, "rdm_wid49_dish__opt3") = "Banana" _
+            And host.Shapes("rdm_wid49_dish__opt2").TextFrame2.TextRange _
+                .Characters(2, 1).Font.Bold = msoFalse)
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid49_dish__opt1"
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid49_dish__opt3"
+    transcript = transcript & "|clicksIgnored=" & _
+        CStr(ShapeExists(host, "rdm_wid49_dish__opt1") And Not app.HasState("dish"))
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid49_dish__opt2"
+    transcript = transcript & "|picked=" & app.State("dish")
+
+    app.SelectBox("dish").Focus
+    RdxKeyChar "{DOWN}"
+    transcript = transcript & "|downSkips=" & app.State("dish")
+    RdxKeyChar "{UP}"
+    transcript = transcript & "|upSkips=" & app.State("dish")
+    RdxKeyChar "{HOME}"
+    transcript = transcript & "|homeSkipsHeader=" & app.SelectBox("dish").CurrentValue
+    RdxKeyChar "b"
+    transcript = transcript & "|typeAheadSkips=" & app.State("dish")
+    RdxKeyChar "{ESC}"
+
+    app.SelectBox("dish").Value 1
+    transcript = transcript & "|headerNotValue=" & app.SelectBox("dish").CurrentValue
+    app.SelectBox("dish").AddItem "Avocado", 2
+    transcript = transcript & "|marksShift=" & _
+        CStr(app.SelectBox("dish").IsItemEnabled(3) _
+            And Not app.SelectBox("dish").IsItemEnabled(4) _
+            And Not app.SelectBox("dish").IsItemEnabled(5) _
+            And app.SelectBox("dish").ItemTextAt(5) = "Vegetables")
+    RdxReleaseKeys
+    ReDimUI.AutoPump True
+    TestSelectGroups = transcript
+End Function
+
+' Reorder: the chosen panel's arrows move its selected rows a place as a
+' block, the selection going with them, and stop at the ends without a
+' change; with nothing selected Alt+Up moves the cursor's row, and the
+' cursor goes with it. Each move writes the new order and fires OnChange.
+Public Function TestTransferReorder() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim transcript As String
+
+    gChangeCount = 0
+    ReDimUI.AutoPump False
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "wid50")
+    app.TransferList("tl").AtRect(24, 24, 300, 160) _
+        .ChosenFrom(Array("A", "B", "C", "D")).WritesTo("order") _
+        .OnChange "TestReDimWidgets.RecordChange"
+    app.TransferList("tl").Reorderable
+    app.Render
+    transcript = "arrowsDrawn=" & _
+        CStr(ShapeExists(host, "rdm_wid50_tl__mvu") And ShapeExists(host, "rdm_wid50_tl__mvd"))
+
+    ReDimUI.DispatchShape "rdm_wid50_tl__cl3"
+    ReDimUI.DispatchShape "rdm_wid50_tl__cl4"
+    ReDimUI.DispatchShape "rdm_wid50_tl__mvu"
+    transcript = transcript & "|upOnce=" & app.State("order")
+    ReDimUI.DispatchShape "rdm_wid50_tl__mvu"
+    ReDimUI.DispatchShape "rdm_wid50_tl__mvu"
+    transcript = transcript & "|stopsAtTop=" & app.State("order") & ":" & gChangeCount
+    transcript = transcript & "|selectionFollows=" & _
+        CStr(RowChecked(host, "rdm_wid50_tl__cl1") And RowChecked(host, "rdm_wid50_tl__cl2") _
+            And Not RowChecked(host, "rdm_wid50_tl__cl3"))
+    ReDimUI.DispatchShape "rdm_wid50_tl__mvd"
+    transcript = transcript & "|downMoves=" & app.State("order")
+
+    ReDimUI.DispatchShape "rdm_wid50_tl__cl2"
+    ReDimUI.DispatchShape "rdm_wid50_tl__cl3"
+    app.TransferList("tl").Focus
+    RdxKeyChar "{RIGHT}"
+    RdxKeyChar "{END}"
+    RdxKeyChar "{ALTUP}"
+    transcript = transcript & "|altUpMovesCursorRow=" & app.State("order")
+    RdxKeyChar "{ALTUP}"
+    transcript = transcript & "|cursorFollows=" & app.State("order")
+    RdxKeyChar "{ESC}"
+    RdxReleaseKeys
+    ReDimUI.AutoPump True
+    TestTransferReorder = transcript
+End Function
+
+' Type-to-filter: typing while a transfer list has the keys filters the
+' panel its cursor is in, the header shows the filter and the count, the
+' keys walk the rows that show, Backspace widens, move-all moves only the
+' rows that show, and Esc clears the filter before it leaves. A check
+' list hides the rows the filter excludes, and select-all checks only
+' the rows that show.
+Public Function TestListFilter() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim transcript As String
+
+    ReDimUI.AutoPump False
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "wid51")
+    app.TransferList("tl").AtRect(24, 24, 300, 160) _
+        .Items("Apple", "Apricot", "Banana", "Blueberry", "Cherry").WritesTo "chosen"
+    app.CheckList("ck").AtRect(360, 24, 160, 140) _
+        .Items("Red", "Green", "Blue", "Gray").WritesTo "colors"
+    app.Render
+
+    app.TransferList("tl").Focus
+    TypeText "ap"
+    transcript = "headerShowsFilter=" & _
+        host.Shapes("rdm_wid51_tl__hl").TextFrame2.TextRange.Text
+    transcript = transcript & "|rowsFiltered=" & RowItem(host, "rdm_wid51_tl__al1") & "," & _
+        RowItem(host, "rdm_wid51_tl__al2") & ":" & CStr(ShapeExists(host, "rdm_wid51_tl__al3"))
+    RdxKeyChar "{DOWN}"
+    RdxKeyChar " "
+    RdxKeyChar "{ENTER}"
+    transcript = transcript & "|keysOnShownRows=" & app.State("chosen")
+    RdxKeyChar "{BS}"
+    transcript = transcript & "|backspaceWidens=" & _
+        host.Shapes("rdm_wid51_tl__hl").TextFrame2.TextRange.Text
+    ReDimUI.DispatchShape "rdm_wid51_tl__mvar"
+    transcript = transcript & "|moveAllShown=" & app.State("chosen")
+    RdxKeyChar "{ESC}"
+    transcript = transcript & "|escClears=" & _
+        host.Shapes("rdm_wid51_tl__hl").TextFrame2.TextRange.Text & ":" & _
+        CStr(ReDimUI.HasKeyboardFocus)
+    RdxKeyChar "{ESC}"
+
+    app.CheckList("ck").Focus
+    TypeText "gr"
+    transcript = transcript & "|checkHeader=" & _
+        host.Shapes("rdm_wid51_ck__mt").TextFrame2.TextRange.Text
+    transcript = transcript & "|checkRowsHidden=" & _
+        CStr(host.Shapes("rdm_wid51_ck").Visible = msoFalse _
+            And host.Shapes("rdm_wid51_ck__b2").Visible = msoTrue _
+            And host.Shapes("rdm_wid51_ck__b3").Visible = msoFalse _
+            And host.Shapes("rdm_wid51_ck__b2").Top < host.Shapes("rdm_wid51_ck__b4").Top _
+            And host.Shapes("rdm_wid51_ck__b4").Top < host.Shapes("rdm_wid51_ck__b3").Top)
+    ReDimUI.DispatchShape "rdm_wid51_ck__mt"
+    transcript = transcript & "|selectAllShown=" & app.State("colors")
+    RdxKeyChar "{ESC}"
+    transcript = transcript & "|allBack=" & _
+        CStr(host.Shapes("rdm_wid51_ck").Visible = msoTrue _
+            And host.Shapes("rdm_wid51_ck__mt").TextFrame2.TextRange.Text = "Select all (2/4)")
+    RdxKeyChar "{ESC}"
+    RdxReleaseKeys
+    ReDimUI.AutoPump True
+    TestListFilter = transcript
+End Function
