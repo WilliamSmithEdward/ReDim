@@ -1,5 +1,5 @@
 Attribute VB_Name = "ReDimHost"
-' ReDim 1.0.0 (2026-09-23)
+' ReDim 1.0.1 (2026-09-23)
 ' https://github.com/WilliamSmithEdward/ReDim
 '
 ' MIT License
