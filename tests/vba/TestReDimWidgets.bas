@@ -317,6 +317,24 @@ Private Function ShapeExists(ByVal host As Worksheet, ByVal shapeName As String)
     ShapeExists = Not probe Is Nothing
 End Function
 
+' "1" when the probe button takes keyCode as its shortcut, "0" when
+' Shortcut refuses it.
+Private Function ShortcutAccepts(ByVal app As ReDimUI, ByVal keyCode As String) As String
+    On Error Resume Next
+    app.Button("probe").Shortcut keyCode
+    ShortcutAccepts = IIf(Err.Number = 0, "1", "0")
+    Err.Clear
+    On Error GoTo 0
+End Function
+
+' What the workbook name that outlives a reset lists of ReDim's bound
+' keys, or nothing when there is no such name.
+Private Function RecordedKeys() As String
+    On Error Resume Next
+    RecordedKeys = ThisWorkbook.Names("rdm_bound_keys").RefersTo
+    On Error GoTo 0
+End Function
+
 ' The text color a drawn shape shows.
 Private Function InkOf(ByVal host As Worksheet, ByVal shapeName As String) As Long
     InkOf = host.Shapes(shapeName).TextFrame2.TextRange.Font.Fill.ForeColor.RGB
@@ -2098,6 +2116,40 @@ Public Function TestListDismiss() As String
     ReDimUI.PumpOnce
     transcript = transcript & "|dateSelectionMoveCloses=" & _
         CStr(Not ShapeExists(host, "rdm_wid29_when__cb"))
+
+    ' A press and its release come apart, as a real click's do. A focused
+    ' picker's calendar closes and its focus ends on one press off it.
+    Sleep 200
+    app.Component("when").Focus
+    RdxKeyChar "{DOWN}"
+    ReDimUI.OverridePointer 420, 300, True
+    ReDimUI.ForcePressEdge
+    ReDimUI.PumpOnce
+    ReDimUI.OverridePointer 420, 300
+    ReDimUI.PumpOnce
+    Sleep 200
+    ReDimUI.PumpOnce
+    transcript = transcript & "|focusedPressOffEnds=" & _
+        CStr(Not ShapeExists(host, "rdm_wid29_when__cb") And _
+            LenB(ReDimUI.FocusedComponentId) = 0)
+    ' A press on another control that closed the calendar leaves nothing
+    ' behind: the picker focused afterwards keeps its focus.
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid29_when"
+    ReDimUI.OverridePointer 60, 210, True
+    ReDimUI.ForcePressEdge
+    ReDimUI.PumpOnce
+    ReDimUI.DispatchShape "rdm_wid29_go"
+    ReDimUI.OverridePointer 60, 210
+    ReDimUI.PumpOnce
+    app.Component("when").Focus
+    ReDimUI.PumpOnce
+    Sleep 200
+    ReDimUI.PumpOnce
+    transcript = transcript & "|laterFocusHolds=" & _
+        CStr(ReDimUI.FocusedComponentId = "when")
+    ReDimUI.ClearPointerOverride
+    ReDimUI.ClearKeyboardFocus
     ReDimUI.AutoPump True
     TestListDismiss = transcript
 End Function
@@ -2390,6 +2442,15 @@ Public Function TestToastConventions() As String
     ReDimUI.PumpOnce
     transcript = transcript & "|closeRunsNothing=" & _
         CStr(gToastClicks = 1 And Not ShapeExists(host, toastName))
+    ' A second click, landing while the toast is already on its way out,
+    ' runs nothing: the first click of a double-click ran the handler.
+    Set toastValue = app.Toast("Report ready.").OnClick("TestReDimWidgets.RecordToastClick")
+    toastName = "rdm_wid33_" & toastValue.ComponentId
+    ReDimUI.DispatchShape toastName
+    Sleep 200
+    ReDimUI.DispatchShape toastName
+    transcript = transcript & "|secondClickRunsNothing=" & CStr(gToastClicks = 2)
+    ReDimUI.PumpOnce
 
     ' ActionBorder colors the action button's border.
     Set toastValue = app.Toast("Moved to the archive.")
@@ -2414,6 +2475,8 @@ Public Function TestShortcuts() As String
     Dim host As Worksheet
     Dim transcript As String
     Dim refused As Boolean
+    Dim senderBefore As Long
+    Dim tempBound As Boolean
 
     gSenderCount = 0
     gLastSender = vbNullString
@@ -2456,13 +2519,61 @@ Public Function TestShortcuts() As String
     transcript = transcript & "|refusesTypingKey=" & CStr(refused _
         And InStr(ReDimUI.BoundShortcuts, Chr$(1) & "^s" & Chr$(1)) > 0)
 
+    ' A key that focus captured still reaches a shortcut: with a button
+    ' focused, Ctrl+Z arrives as {UNDO} and clicks the control declaring it.
+    app.Button("undo").AtRect(24, 150, 100, 30).Text("Undo").Shortcut("^z") _
+        .OnClick "TestReDimWidgets.RecordSender"
+    app.Component("new").Focus
+    RdxKeyChar "{UNDO}"
+    transcript = transcript & "|capturedChordClicks=" & gLastSender
+    ReDimUI.ClearKeyboardFocus
+
+    ' A shortcut goes on a control a click acts on: a slider has no one
+    ' click to give, and a label with OnClick takes one.
+    On Error Resume Next
+    app.SlideBar("vol").AtRect(300, 24, 120, 18).Shortcut "^m"
+    refused = (Err.Number <> 0)
+    Err.Clear
+    On Error GoTo 0
+    transcript = transcript & "|refusesSlider=" & CStr(refused)
+    app.Label("help").AtRect(24, 190, 100, 20).Text("Help").Shortcut("{F1}") _
+        .OnClick "TestReDimWidgets.RecordSender"
+    RdxShortcut "{F1}"
+    transcript = transcript & "|labelClicks=" & gLastSender
+
+    ' Codes OnKey refuses, and Ctrl+Alt with a character, are refused.
+    app.Button("probe").AtRect(300, 150, 60, 24).Text "Probe"
+    transcript = transcript & "|codeRules=" & ShortcutAccepts(app, "^{") & _
+        ShortcutAccepts(app, "^{Save}") & ShortcutAccepts(app, "{F16}") & _
+        ShortcutAccepts(app, "^%e") & ShortcutAccepts(app, "^ ") & _
+        ShortcutAccepts(app, "^%{DEL}") & ShortcutAccepts(app, "{F15}") & _
+        ShortcutAccepts(app, "^{(}")
+    app.Button("probe").Shortcut ""
+
+    ' Removing a control gives its key back, and the bound keys are kept
+    ' in a workbook name as well.
+    app.Button("temp").AtRect(300, 190, 60, 24).Text("Temp").Shortcut "^k"
+    tempBound = (InStr(ReDimUI.BoundShortcuts, Chr$(1) & "^k" & Chr$(1)) > 0)
+    app.Component("temp").Remove
+    transcript = transcript & "|removeReleases=" & CStr(tempBound _
+        And InStr(ReDimUI.BoundShortcuts, Chr$(1) & "^k" & Chr$(1)) = 0)
+    transcript = transcript & "|recorded=" & CStr(InStr(RecordedKeys(), "^s") > 0)
+
+    ' A key pressed on a sheet no app declares it on, which a sheet change
+    ' Excel did not report leaves bound, clicks nothing and goes back.
+    senderBefore = gSenderCount
     NewCanvas
+    RdxShortcut "^s"
+    transcript = transcript & "|strayReleases=" & CStr(gSenderCount = senderBefore _
+        And LenB(ReDimUI.BoundShortcuts) = 0)
     ReDimUI.RefreshAccessKeys
     transcript = transcript & "|leaveReleases=" & CStr(LenB(ReDimUI.BoundShortcuts) = 0)
     host.Activate
     ReDimUI.RefreshAccessKeys
     transcript = transcript & "|returnBinds=" & _
         CStr(InStr(ReDimUI.BoundShortcuts, Chr$(1) & "^s" & Chr$(1)) > 0)
+    ReDimUI.Shutdown
+    transcript = transcript & "|shutdownClearsRecord=" & CStr(LenB(RecordedKeys()) = 0)
     ReDimUI.AutoPump True
     TestShortcuts = transcript
 End Function
@@ -2482,6 +2593,7 @@ Public Function TestToastSize() As String
     Dim toastName As String
     Dim tallTop As Double
     Dim longWords As String
+    Dim needTall As Double
 
     ReDimUI.Shutdown
     ReDimUI.AutoPump False
@@ -2540,6 +2652,31 @@ Public Function TestToastSize() As String
     With host.Shapes(toastName)
         transcript = transcript & "|fitsWide=" & CStr(.Width > 240 And .Width <= 420 _
             And .Height = 40)
+    End With
+    ReDimUI.DispatchShape toastName & "__tx"
+    ReDimUI.PumpOnce
+
+    ' A message cut at the default cap gets its words back when a higher
+    ' MaxHeight follows, since a toast draws as soon as it is made.
+    Set toastValue = app.Toast(longWords & " " & longWords & " " & longWords).MaxHeight(400)
+    toastName = "rdm_wid72_" & toastValue.ComponentId
+    With host.Shapes(toastName)
+        transcript = transcript & "|raisedCapRestores=" & CStr(.Height > 160 _
+            And Right$(.TextFrame2.TextRange.Text, 1) <> ChrW(8230))
+    End With
+    ReDimUI.DispatchShape toastName & "__tx"
+    ReDimUI.PumpOnce
+    ' A long path with no space to cut at still ends in an ellipsis that
+    ' fits the capped card, by the card's own measure.
+    Set toastValue = app.Toast("C:\Reports\" & String$(300, "q") & ".xlsx").MaxHeight(70)
+    toastName = "rdm_wid72_" & toastValue.ComponentId
+    With host.Shapes(toastName)
+        With .TextFrame2
+            needTall = .TextRange.BoundHeight + .MarginTop + .MarginBottom + 2.35 * 2 + 6
+        End With
+        transcript = transcript & "|tokenFits=" & CStr(.Height <= 70.01 _
+            And Right$(.TextFrame2.TextRange.Text, 1) = ChrW(8230) _
+            And needTall <= .Height + 0.5)
     End With
     ReDimUI.DispatchShape toastName & "__tx"
     ReDimUI.PumpOnce
@@ -3436,6 +3573,7 @@ Public Function TestTooltips() As String
     Dim transcript As String
     Dim tipX As Double
     Dim tipY As Double
+    Dim viewBottom As Double
 
     ReDimUI.AutoPump False
     Set host = NewCanvas()
@@ -3526,6 +3664,46 @@ Public Function TestTooltips() As String
     With host.Shapes("rdm_wid45_long__tt")
         transcript = transcript & "|longWraps=" & CStr(.Width <= 241 And .Height > 30)
     End With
+
+    ' With no room below the pointer, a tall control's tip sits above it
+    ' as far clear as it would below, so a small move up keeps it.
+    viewBottom = ActiveWindow.VisibleRange.Top + ActiveWindow.VisibleRange.Height
+    app.Button("low").AtRect(150, viewBottom - 110, 100, 100).Text("Low") _
+        .Tooltip "Near the bottom"
+    ReDimUI.OverridePointer 200, 200
+    ReDimUI.PumpOnce
+    ReDimUI.OverridePointer 200, viewBottom - 20
+    ReDimUI.PumpOnce
+    Sleep restMs
+    ReDimUI.PumpOnce
+    With host.Shapes("rdm_wid45_low__tt")
+        transcript = transcript & "|flipClear=" & CStr(.Top + .Height <= viewBottom - 36)
+    End With
+    ReDimUI.OverridePointer 200, viewBottom - 24
+    ReDimUI.PumpOnce
+    transcript = transcript & "|flipHolds=" & CStr(ShapeExists(host, "rdm_wid45_low__tt"))
+
+    ' A label's tip goes with the label, and a tip showing at shutdown goes.
+    app.Label("note").AtRect(460, 240, 120, 20).Text("Note").Tooltip "A note"
+    ReDimUI.OverridePointer 200, 200
+    ReDimUI.PumpOnce
+    ReDimUI.OverridePointer 500, 250
+    ReDimUI.PumpOnce
+    Sleep restMs
+    ReDimUI.PumpOnce
+    transcript = transcript & "|labelTip=" & CStr(ShapeExists(host, "rdm_wid45_note__tt"))
+    app.Component("note").Remove
+    transcript = transcript & "|removeTakesTip=" & _
+        CStr(Not ShapeExists(host, "rdm_wid45_note__tt"))
+    ReDimUI.OverridePointer 74, 39
+    ReDimUI.PumpOnce
+    Sleep restMs
+    ReDimUI.PumpOnce
+    transcript = transcript & "|tipBeforeShutdown=" & _
+        CStr(ShapeExists(host, "rdm_wid45_save__tt"))
+    ReDimUI.Shutdown
+    transcript = transcript & "|shutdownTakesTip=" & _
+        CStr(Not ShapeExists(host, "rdm_wid45_save__tt"))
     ReDimUI.ClearPointerOverride
     ReDimUI.AutoPump True
     TestTooltips = transcript
@@ -4081,6 +4259,8 @@ Public Function TestDatePicker() As String
     Dim host As Worksheet
     Dim transcript As String
     Dim firstCell As Long
+    Dim pickedBefore As Date
+    Dim gridStart As Date
 
     gChangeCount = 0
     ReDimUI.AutoPump False
@@ -4167,6 +4347,21 @@ Public Function TestDatePicker() As String
     ReDimUI.ForcePressEdge
     ReDimUI.PumpOnce
     transcript = transcript & "|pressOffCloses=" & CStr(Not ShapeExists(host, "rdm_wid54_due__cr1"))
+
+    ' A click on a week line picks the day under the pointer. A week is one
+    ' shape, so this is the path a real click on a day takes.
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid54_due"
+    pickedBefore = app.DatePicker("due").PickedDate
+    gridStart = DateSerial(Year(pickedBefore), Month(pickedBefore), 1)
+    gridStart = gridStart - (Weekday(gridStart, vbUseSystemDayOfWeek) - 1)
+    ReDimUI.OverridePointer host.Shapes("rdm_wid54_due__cr2").Left + 2 * 26 + 13, _
+        host.Shapes("rdm_wid54_due__cr2").Top + 10
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid54_due__cr2"
+    transcript = transcript & "|weekClickPicks=" & CStr( _
+        app.DatePicker("due").PickedDate = gridStart + 9 _
+        And Not ShapeExists(host, "rdm_wid54_due__cr1"))
     ReDimUI.ClearPointerOverride
     ReDimUI.AutoPump True
     TestDatePicker = transcript
@@ -4565,6 +4760,9 @@ Public Function TestMenuButton() As String
     Dim transcript As String
     Dim farX As Double
     Dim farY As Double
+    Dim idx As Long
+    Dim narrowWidth As Double
+    Dim longRow As String
 
     gCommandCount = 0
     gLastCommand = vbNullString
@@ -4640,6 +4838,35 @@ Public Function TestMenuButton() As String
     transcript = transcript & "|farSideKeeps=" & _
         CStr(ShapeExists(host, "rdm_wid61_wide__opt1"))
     ReDimUI.ClearPointerOverride
+
+    ' A long command paged into view widens the open menu to fit it, and
+    ' an open menu follows its button when the button moves.
+    app.MenuButton("many").AtRect(260, 200, 80, 26).Text "Many"
+    For idx = 1 To 8
+        app.MenuButton("many").AddCommand "Cmd " & idx, "TestReDimWidgets.RecordCommand"
+    Next idx
+    app.MenuButton("many").AddCommand "Export this view to a new sheet", _
+        "TestReDimWidgets.RecordCommand"
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid61_many"
+    narrowWidth = host.Shapes("rdm_wid61_many__opt1").Width
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid61_many__optd"
+    For idx = 1 To 8
+        If ShapeExists(host, "rdm_wid61_many__opt" & idx) Then
+            If InStr(host.Shapes("rdm_wid61_many__opt" & idx).TextFrame2.TextRange.Text, _
+                "Export") > 0 Then longRow = "rdm_wid61_many__opt" & idx
+        End If
+    Next idx
+    With host.Shapes(longRow)
+        transcript = transcript & "|pagedWidens=" & CStr(narrowWidth = 80 And .Width > 80 _
+            And .TextFrame2.TextRange.BoundWidth + 12 <= .Width)
+    End With
+    app.MenuButton("many").AtRect 200, 200, 80, 26
+    With host.Shapes(longRow)
+        transcript = transcript & "|followsFace=" & CStr(Abs(.Left - 200) < 0.5 _
+            Or Abs(.Left + .Width - 280) < 0.5)
+    End With
     ReDimUI.AutoPump True
     TestMenuButton = transcript
 End Function

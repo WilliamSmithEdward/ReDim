@@ -8,6 +8,13 @@
   gives a picker focus, so a calendar opened with the mouse stayed open
   until another control was clicked. `TestListDismiss` now opens one by
   a click and dismisses it both ways.
+- One press off a focused SelectBox or DatePicker closes its list and
+  ends its focus; it took two. And a press that closed a list no longer
+  ends that control's focus later, when Tab or `Focus` gives it focus.
+  The watch for an open list and the watch for keyboard focus shared one
+  pending press, so the list's watch used up the press the focus needed,
+  and a press it recorded outlived the list. Each keeps its own now.
+  `TestListDismiss` presses and releases apart, as a real click does.
 - The calendar opens in about a fifth of the time: 13 ms instead of 73
   in the bench, 4 instead of 12 to pick a day and close, and 1.5
   instead of 6 to turn a month. A session's first opening, which also
@@ -46,25 +53,43 @@
   list or calendar shows no tip over its rows, where the owner's tip
   used to appear after a rest on a row. A tip is sized by Office to fit
   its words, replacing an estimate from the character count that could
-  cut a long tip short.
+  cut a long tip short. With no room below the pointer, the tip sits as
+  far above it as it would below, so a small move up keeps it.
+- A tooltip showing on a Label, Card, Spinner, or Overlay goes when the
+  control is removed, and a tooltip showing at `Shutdown` goes too. Both
+  stayed on the sheet over whatever lay under them, and a workbook
+  saved then kept the tip.
 - A MenuButton's menu runs as wide as its widest command needs. It took
   the button's width, so a longer command ran past the menu's edge. A
   menu that would pass the window's right edge ends at the button's
   right edge instead, and a press anywhere on the widened rows counts as
-  a press on the menu.
+  a press on the menu. A command paged into view widens the open menu
+  when it needs more room, and an open menu follows its button when the
+  button moves.
 - A click on a toast puts it away at once. The close button, the action
   button, and the card only set the toast to expire, and while the
   pointer rested on the toast (as it does for any click) the rest held
   the countdown and undid the dismissal, so the close button seemed to
-  do nothing. The close button now runs no handler.
+  do nothing. The close button now runs no handler, and a toast already
+  on its way out takes no more clicks, so a double-click on its action
+  runs the handler once.
 - `Shortcut "^s"` gives a control a keyboard shortcut: the key clicks it
   exactly as a mouse click does, while its sheet is in front. It needs
-  Ctrl or Alt, or is a function key, so it never takes a key a field
-  types; the tooltip and alternative text name it ("Saves the form
-  (Ctrl+S)"). A disabled or hidden control passes the key to the next
-  that declares it. A field that took a shortcut's key for editing
-  gives it back when it lets go. `ReDimHost.bas` gains `RdxShortcut`,
-  so import both files again.
+  Ctrl or Alt, or is a function key from F1 to F15, so it never takes a
+  key a field types; Ctrl+Alt takes only a named key such as Del, since
+  Windows sends AltGr as Ctrl+Alt. A code OnKey would refuse is refused
+  at once. The tooltip and alternative text name it ("Saves the form
+  (Ctrl+S)"). It goes on a control a click acts on as a whole, a label
+  or card only with a click handler, and a slider, list, or table
+  raises an error. A disabled or hidden control passes the key to the
+  next that declares it. A field that took a shortcut's key for editing
+  gives it back when it lets go, and any other focused control lets the
+  key through. Removing the control gives the key back. The keys ReDim
+  binds are also listed in a hidden workbook name, so a reset of the VBA
+  project cannot leave one bound past the workbook's close; a key left
+  bound by a reset goes back to Excel on its first press. Access keys
+  get the same care. `ReDimHost.bas` gains `RdxShortcut` and
+  `RdxCapturedCodes`, so import both files again.
 - `OnClick` on a toast runs when the card itself is clicked, with the
   toast as `ReDimUI.Sender`, before the toast goes.
 - `ActionBorder rgb` colors a toast's action button border, the theme's
@@ -75,13 +100,23 @@
   to 160 points, where the message ends in an ellipsis; `MaxHeight`
   moves that cap. `MinWidth` and `MaxWidth` let the card fit its words
   between them, 240 until set. Toasts stack by their heights, and the
-  corner radius holds at 8 points however tall a card grows.
+  corner radius holds at 8 points however tall a card grows. A limit set
+  after the toast drew, as `app.Toast(message).MaxHeight(300)` does,
+  brings back the words the default cap cut. A message with no space to
+  cut at, such as a long path, ends in an ellipsis inside the card.
 - The runtime no longer declares what it never reads: the constants
   `ROLE_UNSET` and `KIND_NONE` and the fields `mHasRect`,
   `mHoverSinceMs`, and `mAppliedValue`, which code inspections listed
   as unused. A click reads its part once instead of at every branch.
   The Widget Gallery and the pump and timer tests await their delays as
   statements rather than into a variable they never read.
+- A session's first build runs up to about 20 ms longer than with
+  1.0.0, from the runtime's size: VBA takes longer to run a class's
+  code the first time the more code the class holds, and adding as many
+  never-run lines to 1.0.0 costs it the same. Rebuilds and warm builds
+  are unchanged. An app with no shortcuts and no drop-downs skips their
+  bookkeeping at each render and flush.
+- Requires ROneCOne 1.9.1 or later, and is tested against 1.10.1.
 - CI's static gate runs pyvbaanalysis 2.2.0, which also fails on a
   variable or constant that is declared but never used or never read,
   and analyzes against the ROneCOne release ReDim ships instead of

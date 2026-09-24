@@ -116,6 +116,9 @@ Private Const SYSTEM_LOOK_CHECK_MS As Long = 2000
 ' from ending the field's focus.
 Private Const PALETTE_CARD_ID As String = "mdl_pal_card"
 Private Const PALETTE_FIELD_ID As String = "mdl_pal_field"
+' The workbook name that lists the keys ReDim has bound, as OnKey codes, so
+' a reset of the project cannot leave a key bound with no record of it.
+Private Const BOUND_KEYS_NAME As String = "rdm_bound_keys"
 
 Private Const SHAPE_PREFIX As String = "rdm_"
 Private Const PART_SEPARATOR As String = "__"
@@ -363,6 +366,12 @@ Private mForcePressEdge As Boolean
 Private mBoundAccessKeys As String
 ' The shortcut codes bound now, each followed by Chr$(1).
 Private mBoundShortcuts As String
+' Set once a control declares a shortcut; until then a refresh skips the
+' pass over every control that shortcuts take.
+Private mShortcutsDeclared As Boolean
+' What BOUND_KEYS_NAME lists, as mBoundAccessKeys, Chr$(2), and
+' mBoundShortcuts when it was written; empty while it lists nothing.
+Private mRecordedKeys As String
 ' Test seam: a fixed pointer position, in sheet points, that stands in
 ' for the cursor until cleared.
 Private mPointerOverridden As Boolean
@@ -409,6 +418,9 @@ Private mComponentOrder As Collection
 ' components come or go.
 Private mTickables As Collection
 Private mTickablesStale As Boolean
+' Set once the app has a SelectBox, ComboBox, MenuButton, or DatePicker,
+' the controls whose list or calendar a flush may paint all at once.
+Private mDropControls As Boolean
 Private mStateValues As Collection
 ' The state keys in the order they were first set; a Collection keeps
 ' no key list of its own.
@@ -512,6 +524,9 @@ Private mToastActionBorder As Long
 Private mToastMinWidth As Double
 Private mToastMaxWidth As Double
 Private mToastMaxHeight As Double
+' The card's words were cut to fit MaxHeight, so they show less than the
+' message holds.
+Private mToastTextCut As Boolean
 Private mToastOriginTop As Double
 Private mSlideRemaining As Double
 Private mToastExiting As Boolean
@@ -780,10 +795,14 @@ Private mTableEmptyText As String
 Private mRowOpenProc As String
 ' A float TextInput that shows dots for its characters.
 Private mMasked As Boolean
-' A press judged off the field or open list, waiting for its release,
-' and when the release was seen.
+' A press judged off the focused control, waiting for its release, and
+' when the release was seen; the same for an open list's watch, kept apart
+' so that neither watch takes a press the other needs, and a press one
+' recorded does not outlive the focus or the list that watched for it.
 Private mOffPressPending As Boolean
 Private mOffPressUpMs As LongLong
+Private mListPressPending As Boolean
+Private mListPressUpMs As LongLong
 ' A part gliding to its place, a switch's knob or a tab strip's bar: the
 ' part, where it is headed, and how far it still is from there, which
 ' the frames close. The state and tab it last glided from.
@@ -864,9 +883,12 @@ Private mListMatchesFilter As String
 ' Set when the list opened upward for want of room below the face.
 Private mListFlipped As Boolean
 ' A menu's rows run as wide as its widest command needs; 0 while the rows
-' take the face's span.
+' take the face's span. The fit holds for the rows paged into view and the
+' button's place and width when it was made.
 Private mListLeft As Double
 Private mListWidth As Double
+Private mListFitOffset As Long
+Private mListFitFace As String
 ' Items as a String array (1-based), rebuilt by one For Each after any
 ' change: a VBA Collection read by index walks the list, so loops that
 ' indexed mItems went quadratic on long lists.
@@ -1285,8 +1307,9 @@ End Sub
 
 ' Binds Alt plus each access key the active sheet's apps declare and
 ' releases the rest, so the chords belong to ReDim only while an app
-' sheet is in front.
-Friend Sub RefreshAccessKeys()
+' sheet is in front. Shortcuts follow once any control has declared one,
+' and what is bound is kept in a workbook name as well.
+Friend Sub RefreshAccessKeys(Optional ByVal shortcutDeclared As Boolean = False)
     Dim appValue As ReDimUI
     Dim wantedKeys As String
     Dim declaredKeys As String
@@ -1294,10 +1317,11 @@ Friend Sub RefreshAccessKeys()
     Dim keyLetter As String
 
     If Not IsFactory(Me) Then
-        ReDimUI.RefreshAccessKeys
+        ReDimUI.RefreshAccessKeys shortcutDeclared
         Exit Sub
     End If
     EnsureFactory
+    If shortcutDeclared Then mShortcutsDeclared = True
     On Error Resume Next
     For Each appValue In mApps
         If appValue.Sheet Is ActiveSheet Then
@@ -1322,8 +1346,71 @@ Friend Sub RefreshAccessKeys()
     Next idx
     On Error GoTo 0
     mBoundAccessKeys = wantedKeys
-    RefreshShortcuts
+    If mShortcutsDeclared Then RefreshShortcuts
+    If LenB(mRecordedKeys) > 0 Or LenB(mBoundAccessKeys) > 0 Or LenB(mBoundShortcuts) > 0 Then
+        If mRecordedKeys <> mBoundAccessKeys & Chr$(2) & mBoundShortcuts Then RecordBoundKeys
+    End If
 End Sub
+
+' Writes the keys bound now to the workbook name, each access key as its
+' Alt chord and each shortcut as its code, between spaces.
+Private Sub RecordBoundKeys()
+    Dim listed As String
+    Dim idx As Long
+
+    For idx = 1 To Len(mBoundAccessKeys)
+        listed = listed & " %" & Mid$(mBoundAccessKeys, idx, 1)
+    Next idx
+    listed = Trim$(listed & Replace(mBoundShortcuts, Chr$(1), " "))
+    On Error Resume Next
+    ThisWorkbook.Names(BOUND_KEYS_NAME).Delete
+    If LenB(listed) > 0 Then
+        ThisWorkbook.Names.Add BOUND_KEYS_NAME, "=""" & listed & """", False
+    End If
+    On Error GoTo 0
+    If LenB(listed) > 0 Then
+        mRecordedKeys = mBoundAccessKeys & Chr$(2) & mBoundShortcuts
+    Else
+        mRecordedKeys = vbNullString
+    End If
+End Sub
+
+' Releases each key the workbook name lists that ReDim has not bound now:
+' keys a session bound before a reset of the project lost its record of
+' them, which Excel would otherwise keep sending to ReDim, even after the
+' workbook closed.
+Private Sub ReleaseRecordedKeys()
+    Dim recorded As String
+    Dim listedCodes() As String
+    Dim idx As Long
+
+    On Error Resume Next
+    recorded = ThisWorkbook.Names(BOUND_KEYS_NAME).RefersTo
+    On Error GoTo 0
+    If Len(recorded) < 4 Then Exit Sub
+    listedCodes = Split(Mid$(recorded, 3, Len(recorded) - 3), " ")
+    On Error Resume Next
+    For idx = 0 To UBound(listedCodes)
+        If LenB(listedCodes(idx)) > 0 Then
+            If Not KeyBoundNow(listedCodes(idx)) Then Application.OnKey listedCodes(idx)
+        End If
+    Next idx
+    ThisWorkbook.Names(BOUND_KEYS_NAME).Delete
+    On Error GoTo 0
+    mRecordedKeys = vbNullString
+End Sub
+
+' Whether ReDim has an OnKey code bound now, as a shortcut or as the Alt
+' chord of an access key.
+Private Function KeyBoundNow(ByVal keyCode As String) As Boolean
+    KeyBoundNow = CodeListHas(mBoundShortcuts, keyCode) Or AccessChordBound(keyCode)
+End Function
+
+' Whether an OnKey code is the Alt chord of an access key bound now.
+Private Function AccessChordBound(ByVal keyCode As String) As Boolean
+    If Len(keyCode) <> 2 Or Left$(keyCode, 1) <> "%" Then Exit Function
+    AccessChordBound = (InStr(1, mBoundAccessKeys, Right$(keyCode, 1), vbTextCompare) > 0)
+End Function
 
 ' Binds each shortcut the active sheet's apps declare and releases the
 ' rest, as access keys are; a released key goes back to Excel.
@@ -1350,7 +1437,8 @@ Private Sub RefreshShortcuts()
     For idx = 0 To UBound(listedCodes)
         If LenB(listedCodes(idx)) > 0 Then
             If Not CodeListHas(wantedCodes, listedCodes(idx)) Then
-                Application.OnKey listedCodes(idx)
+                ' An access key bound a moment ago may use the same chord.
+                If Not AccessChordBound(listedCodes(idx)) Then Application.OnKey listedCodes(idx)
             End If
         End If
     Next idx
@@ -1412,7 +1500,51 @@ Friend Sub DispatchShortcut(ByVal keyCode As String)
             If appValue.ActivateShortcut(keyCode) Then Exit Sub
         End If
     Next appValue
+    ' Nothing on the sheet in front took the key. A binding left by a sheet
+    ' change Excel did not report, or by a reset of the project, is set
+    ' right, and a key that no control here declares goes back to Excel,
+    ' or to the access key whose chord it is.
+    RefreshAccessKeys
+    If CodeListHas(mBoundShortcuts, keyCode) Then Exit Sub
+    On Error Resume Next
+    If AccessChordBound(keyCode) Then
+        Application.OnKey keyCode, "'RdxAccessKey """ & Right$(keyCode, 1) & """'"
+    Else
+        Application.OnKey keyCode
+    End If
+    On Error GoTo 0
 End Sub
+
+' A key a focused control captured arrives by its name, such as {UNDO}. A
+' shortcut declared on a key that sends that name still clicks its
+' control, as it would with no control focused: only a field keeps its
+' editing keys. True when a shortcut took the key.
+Friend Function DispatchCapturedChord(ByVal keyText As String) As Boolean
+    Dim appValue As ReDimUI
+    Dim listedCodes() As String
+    Dim idx As Long
+
+    If Not IsFactory(Me) Then
+        DispatchCapturedChord = ReDimUI.DispatchCapturedChord(keyText)
+        Exit Function
+    End If
+    If LenB(mBoundShortcuts) = 0 Or Len(keyText) < 3 Then Exit Function
+    listedCodes = Split(RdxCapturedCodes(keyText), Chr$(1))
+    For idx = 0 To UBound(listedCodes)
+        If LenB(listedCodes(idx)) > 0 Then
+            If CodeListHas(mBoundShortcuts, listedCodes(idx)) Then
+                For Each appValue In mApps
+                    If appValue.Sheet Is ActiveSheet Then
+                        If appValue.ActivateShortcut(listedCodes(idx)) Then
+                            DispatchCapturedChord = True
+                            Exit Function
+                        End If
+                    End If
+                Next appValue
+            End If
+        End If
+    Next idx
+End Function
 
 ' Test seam: the shortcut codes bound now, in their Chr$(1)-marked list.
 Friend Property Get BoundShortcuts() As String
@@ -1438,6 +1570,18 @@ Friend Sub DispatchAccessKey(ByVal keyLetter As String)
             If appValue.ActivateAccessKey(LCase$(keyLetter)) Then Exit Sub
         End If
     Next appValue
+    ' As for a shortcut: the bindings are set right for the sheet in front,
+    ' and a chord that no control here declares goes back to Excel, or to
+    ' the shortcut that uses it.
+    RefreshAccessKeys
+    If InStr(1, mBoundAccessKeys, keyLetter, vbTextCompare) > 0 Then Exit Sub
+    On Error Resume Next
+    If CodeListHas(mBoundShortcuts, "%" & keyLetter) Then
+        BindShortcut "%" & keyLetter
+    Else
+        Application.OnKey "%" & keyLetter
+    End If
+    On Error GoTo 0
 End Sub
 
 ' Ends keyboard focus the way a click elsewhere does: a field commits,
@@ -1939,6 +2083,9 @@ Public Sub Shutdown()
     EnsureFactory
     RdxStopPump
     ClearKeyboardFocus
+    ' Keys bound before a reset of the project, which this session never
+    ' knew of, go back to Excel with the ones it bound itself.
+    ReleaseRecordedKeys
     On Error Resume Next
     For Each appValue In mApps
         appValue.ReleaseAppResources
@@ -3338,6 +3485,9 @@ Friend Function GetOrCreateComponent( _
     mComponents.Add componentValue, targetComponentId
     mComponentOrder.Add targetComponentId, targetComponentId
     mTickablesStale = True
+    If kindCode = KIND_SELECT Or kindCode = KIND_COMBO Or kindCode = KIND_DATE Then
+        mDropControls = True
+    End If
     Set GetOrCreateComponent = componentValue
 End Function
 
@@ -3595,8 +3745,10 @@ Public Sub FlushDirty()
     If Not ReDimUI.InPumpTick Then
         If mDirtyIds.Count > 1 Then
             toggledScreen = True
-        ElseIf TryGetComponent(CStr(mDirtyIds.Item(1)), componentValue) Then
-            toggledScreen = componentValue.DrawsManyParts
+        ElseIf mDropControls Then
+            If TryGetComponent(CStr(mDirtyIds.Item(1)), componentValue) Then
+                toggledScreen = componentValue.DrawsManyParts
+            End If
         End If
         If toggledScreen Then Application.ScreenUpdating = False
     End If
@@ -3910,6 +4062,8 @@ End Sub
 Friend Sub ReleaseAppResources()
     RequireRole ROLE_APP, "ReleaseAppResources"
     ClearHotKeys
+    ' A tooltip showing now would stay on the sheet, and be saved with it.
+    HideTooltip
 End Sub
 
 ' Removes every component shape and unregisters the app.
@@ -4983,17 +5137,30 @@ End Property
 ' front, as an Application.OnKey code: "^s" for Ctrl+S, "^+e" for
 ' Ctrl+Shift+E, "{F5}" for F5. It needs Ctrl or Alt, or is a function key,
 ' so it never takes a key a focused field types; "" removes it. The
-' control's tooltip and alternative text name it.
+' control's tooltip and alternative text name it. It goes on a control a
+' click acts on as a whole; a slider or a list has no one click to give.
 Public Function Shortcut(ByVal keyCode As String) As ReDimUI
     RequireRole ROLE_COMPONENT, "Shortcut"
-    If LenB(keyCode) > 0 And Not ShortcutCodeValid(keyCode) Then
-        RaiseError ERROR_INVALID_ARGUMENT, "Shortcut", "Shortcut takes an Application.OnKey " & _
-            "code with Ctrl or Alt, such as ""^s"", or a function key, such as ""{F5}""."
+    If LenB(keyCode) > 0 Then
+        Select Case mKind
+            Case KIND_BUTTON, KIND_TOGGLE, KIND_TICKBOX, KIND_EXPANDER, KIND_SELECT, _
+                KIND_COMBO, KIND_DATE, KIND_INPUT, KIND_IMAGE, KIND_LABEL, KIND_CARD
+            Case Else
+                RaiseError ERROR_INVALID_OPERATION, "Shortcut", "Shortcut applies to a " & _
+                    "control a click acts on: a Button, Toggle, TickBox, Expander, SelectBox, " & _
+                    "MenuButton, ComboBox, DatePicker, TextInput, Image, Label, or Card."
+        End Select
+        If Not ShortcutCodeValid(keyCode) Then
+            RaiseError ERROR_INVALID_ARGUMENT, "Shortcut", "Shortcut takes an " & _
+                "Application.OnKey code with Ctrl or Alt, such as ""^s"", or a function " & _
+                "key from ""{F1}"" to ""{F15}"". Ctrl+Alt takes only a named key, " & _
+                "such as ""^%{DEL}"", since many keyboards type characters with it."
+        End If
     End If
     mShortcut = keyCode
     If LenB(keyCode) > 0 Then OwnerApp.NoteTooltips
     Touch
-    ReDimUI.RefreshAccessKeys
+    ReDimUI.RefreshAccessKeys LenB(keyCode) > 0
     Set Shortcut = Me
 End Function
 
@@ -5001,29 +5168,55 @@ Friend Property Get ShortcutCode() As String
     ShortcutCode = mShortcut
 End Property
 
-' Ctrl or Alt with one key or a braced key name, or a bare function key.
-' A quote or an apostrophe would break the OnKey procedure string.
+' Ctrl or Alt with a key, or a function key from F1 to F15 alone. A key
+' is a character OnKey reads as itself, "~" for Enter, a key name OnKey
+' knows in braces, or one of OnKey's own signs in braces. Ctrl+Alt takes
+' only a named key: Windows sends AltGr as Ctrl+Alt, so on many layouts
+' Ctrl+Alt with a character types one. A quote or an apostrophe would
+' break the OnKey procedure string, and a space names no key.
 Private Function ShortcutCodeValid(ByVal keyCode As String) As Boolean
     Dim pos As Long
     Dim modifiers As String
     Dim keyPart As String
+    Dim keyName As String
+    Dim namedKey As Boolean
+    Dim functionKey As Boolean
 
     If InStr(keyCode, """") > 0 Or InStr(keyCode, "'") > 0 Then Exit Function
     pos = 1
     Do While pos <= Len(keyCode)
         If InStr("^%+", Mid$(keyCode, pos, 1)) = 0 Then Exit Do
+        If InStr(modifiers, Mid$(keyCode, pos, 1)) > 0 Then Exit Function
         modifiers = modifiers & Mid$(keyCode, pos, 1)
         pos = pos + 1
     Loop
     keyPart = Mid$(keyCode, pos)
-    If LenB(keyPart) = 0 Then Exit Function
-    If Len(keyPart) > 1 And Not (Left$(keyPart, 1) = "{" And Right$(keyPart, 1) = "}") Then
+    If Len(keyPart) = 1 Then
+        If InStr("(){}[] ", keyPart) > 0 Then Exit Function
+        namedKey = (keyPart = "~")
+    ElseIf Len(keyPart) > 2 And Left$(keyPart, 1) = "{" And Right$(keyPart, 1) = "}" Then
+        keyName = UCase$(Mid$(keyPart, 2, Len(keyPart) - 2))
+        Select Case keyName
+            Case "BACKSPACE", "BS", "BKSP", "BREAK", "CAPSLOCK", "CLEAR", "DELETE", "DEL", _
+                "DOWN", "END", "ENTER", "ESCAPE", "ESC", "HELP", "HOME", "INSERT", "INS", _
+                "LEFT", "NUMLOCK", "PGDN", "PGUP", "RETURN", "RIGHT", "SCROLLLOCK", "TAB", "UP"
+                namedKey = True
+            Case "+", "^", "%", "~", "(", ")", "{", "}", "[", "]"
+            Case Else
+                If Not (keyName Like "F#" Or keyName Like "F1#") Then Exit Function
+                If Val(Mid$(keyName, 2)) < 1 Or Val(Mid$(keyName, 2)) > 15 Then Exit Function
+                namedKey = True
+                functionKey = True
+        End Select
+    Else
         Exit Function
     End If
-    If InStr(modifiers, "^") > 0 Or InStr(modifiers, "%") > 0 Then
+    If functionKey Then
         ShortcutCodeValid = True
-    ElseIf UCase$(keyPart) Like "{F#}" Or UCase$(keyPart) Like "{F##}" Then
-        ShortcutCodeValid = True
+    ElseIf InStr(modifiers, "^") > 0 And InStr(modifiers, "%") > 0 Then
+        ShortcutCodeValid = namedKey
+    Else
+        ShortcutCodeValid = (InStr(modifiers, "^") > 0 Or InStr(modifiers, "%") > 0)
     End If
 End Function
 
@@ -6996,6 +7189,8 @@ Public Sub Remove()
     End If
     DeleteOwnShapes hostApp.Sheet
     hostApp.ForgetComponent mComponentId
+    ' A key it declared goes back to Excel, unless another control has it.
+    If LenB(mShortcut) > 0 Or LenB(mAccessKey) > 0 Then ReDimUI.RefreshAccessKeys
     ' Its panels show again, ungated.
     If mKind = KIND_TABS Or mKind = KIND_EXPANDER Then
         hostApp.ReapplyTabMembers mComponentId, -1
@@ -7304,7 +7499,7 @@ Friend Function ActivateShortcut(ByVal keyCode As String) As Boolean
     For Each orderedId In mComponentOrder
         If TryGetComponent(CStr(orderedId), componentValue) Then
             If StrComp(componentValue.ShortcutCode, keyCode, vbTextCompare) = 0 Then
-                If componentValue.IsFocusable Then
+                If componentValue.TakesShortcut Then
                     If Not trapped Or Left$(componentValue.ComponentId, 4) = "mdl_" Then
                         ReDimUI.DispatchShape componentValue.ShapeName
                         ActivateShortcut = True
@@ -7856,6 +8051,9 @@ Friend Sub RunClickBehavior()
             ' rested on the toast, which holds the countdown. The action
             ' button runs its handler and the card runs OnClick; the close
             ' button runs nothing. Handler errors reach the app's handler.
+            ' A toast already on its way out takes no more clicks, so the
+            ' second click of a double-click runs nothing twice.
+            If mToastExiting Then Exit Sub
             BeginToastExit
             Select Case clickedPart
                 Case "ta"
@@ -10915,7 +11113,19 @@ Private Sub FitToastCard(ByVal cardShape As Shape)
     Dim viewWidth As Double
     Dim viewHeight As Double
     Dim priorHeight As Double
+    Dim inkRgb As Long
 
+    ' A message an earlier fit cut short gets its words back before the
+    ' measure, so a cap raised or a card widened after the toast drew
+    ' shows the words there is now room for.
+    If mToastTextCut Then
+        With cardShape.TextFrame2.TextRange
+            inkRgb = .Characters(.Length, 1).Font.Fill.ForeColor.RGB
+            .Text = ResolveText(Nothing)
+            .Font.Fill.ForeColor.RGB = inkRgb
+        End With
+        mToastTextCut = False
+    End If
     minWide = mToastMinWidth
     If minWide <= 0 Then minWide = TOAST_WIDTH
     maxWide = mToastMaxWidth
@@ -10974,6 +11184,7 @@ Private Sub ShortenToastText(ByVal cardShape As Shape, ByVal maxTall As Double)
     Dim keptWords As String
     Dim cutAt As Long
     Dim inkRgb As Long
+    Dim trims As Long
 
     With cardShape.TextFrame2
         lineTotal = .TextRange.Lines.Count
@@ -10990,8 +11201,16 @@ Private Sub ShortenToastText(ByVal cardShape As Shape, ByVal maxTall As Double)
         If cutAt > Len(keptWords) \ 2 Then keptWords = RTrim$(Left$(keptWords, cutAt - 1))
         inkRgb = .TextRange.Characters(.TextRange.Length, 1).Font.Fill.ForeColor.RGB
         .TextRange.Text = keptWords & ChrW(8230)
+        ' With no word to give way, as in a long path, the ellipsis can
+        ' wrap to a line of its own; letters give way until it fits.
+        Do While .TextRange.Lines.Count > fitLines And Len(keptWords) > 1 And trims < 12
+            keptWords = Left$(keptWords, Len(keptWords) - 1)
+            .TextRange.Text = keptWords & ChrW(8230)
+            trims = trims + 1
+        Loop
         .TextRange.Font.Fill.ForeColor.RGB = inkRgb
     End With
+    mToastTextCut = True
 End Sub
 
 ' Carries the close and action buttons with the toast's slide and fade.
@@ -15383,9 +15602,11 @@ Friend Function DrawTooltip( _
             tipTop = spanTop - tipHeight - 4
         End If
     Else
+        ' Above the pointer when there is no room below, as far clear as it
+        ' would sit below, since the pointer reaching a tip puts it away.
         tipTop = pointsY + 18
         If tipTop + tipHeight > viewTop + viewHeight Then
-            tipTop = pointsY - tipHeight - 6
+            tipTop = pointsY - tipHeight - 18
         End If
     End If
     If tipTop < 0 Then tipTop = 0
@@ -16232,7 +16453,8 @@ Private Sub SyncDropList( _
     Next idx
     If wanted = 0 Then
         mListWidth = 0
-    ElseIf mIsMenu And mListWidth = 0 Then
+    ElseIf mIsMenu And (mListWidth = 0 Or mListFitOffset <> mListOffset _
+        Or mListFitFace <> CStr(mLeft) & ":" & CStr(mWidth)) Then
         FitMenuWidth hostSheet, wanted
         ' The up pager drew before the rows; it follows the fitted width.
         SyncListPager hostSheet, themeValue, "optu", ChrW(9650), _
@@ -16382,18 +16604,28 @@ End Function
 ' A menu runs as wide as its widest command needs, never narrower than
 ' its button, and ends at the button's right edge instead when it would
 ' pass the window's, as a native menu does. It measures the rows as they
-' first draw and gives them the width at once.
+' draw and gives them the width at once. Rows paged into view can widen
+' an open menu but never narrow it, so it holds still while paging; a
+' button that moved or resized fits it afresh.
 Private Sub FitMenuWidth(ByVal hostSheet As Worksheet, ByVal rowTotal As Long)
     Dim idx As Long
     Dim rowNeed As Double
     Dim fitWidth As Double
     Dim fitLeft As Double
+    Dim drawnLeft As Double
+    Dim drawnWidth As Double
+    Dim faceKey As String
     Dim viewLeft As Double
     Dim viewTop As Double
     Dim viewWidth As Double
     Dim viewHeight As Double
 
+    ' The rows drew at the span the menu had until now.
+    drawnLeft = ListSpanLeft()
+    drawnWidth = ListSpanWidth()
+    faceKey = CStr(mLeft) & ":" & CStr(mWidth)
     fitWidth = mWidth
+    If mListWidth > fitWidth And mListFitFace = faceKey Then fitWidth = mListWidth
     For idx = 1 To rowTotal
         With hostSheet.Shapes(ShapeName & PART_SEPARATOR & "opt" & idx).TextFrame2
             rowNeed = .TextRange.BoundWidth + .MarginLeft + .MarginRight + 6
@@ -16408,7 +16640,9 @@ Private Sub FitMenuWidth(ByVal hostSheet As Worksheet, ByVal rowTotal As Long)
     End If
     mListLeft = fitLeft
     mListWidth = fitWidth
-    If fitWidth = mWidth Then Exit Sub
+    mListFitOffset = mListOffset
+    mListFitFace = faceKey
+    If Abs(fitLeft - drawnLeft) < 0.01 And Abs(fitWidth - drawnWidth) < 0.01 Then Exit Sub
     For idx = 1 To rowTotal
         With hostSheet.Shapes(ShapeName & PART_SEPARATOR & "opt" & idx)
             .Left = fitLeft
@@ -16675,6 +16909,22 @@ Private Function FieldTextNow(ByVal hostSheet As Worksheet) As String
     On Error GoTo 0
 End Function
 
+' Whether a shortcut key can click the control now: shown, enabled, not
+' busy, and a control a click acts on as a whole. A field counts only as a
+' float field, and an image, label, or card only with a click to run.
+Friend Function TakesShortcut() As Boolean
+    If Not mVisible Or Not mEnabled Or mBusy Then Exit Function
+    Select Case mKind
+        Case KIND_BUTTON, KIND_TOGGLE, KIND_TICKBOX, KIND_EXPANDER, KIND_SELECT, KIND_DATE
+            TakesShortcut = True
+        Case KIND_INPUT, KIND_COMBO
+            TakesShortcut = IsFloatField()
+        Case KIND_IMAGE, KIND_LABEL, KIND_CARD
+            TakesShortcut = (LenB(mClickProc) > 0 Or LenB(mAsyncClickProc) > 0 _
+                Or LenB(mNavTargetId) > 0)
+    End Select
+End Function
+
 ' Kinds that take keyboard focus: every interactive control, a text
 ' field only when it floats (a cell-backed one lives in the grid), and
 ' an image only when it has a click handler.
@@ -16710,6 +16960,7 @@ Friend Sub TakeFocus(ByVal hostApp As ReDimUI, ByVal openList As Boolean)
         Exit Sub
     End If
     mFieldSelAtFocus = CurrentSelectionKey()
+    mOffPressPending = False
     mTypeAhead = vbNullString
     If Not mKeyCursorSet Then
         mKeyRow = 1
@@ -16864,6 +17115,8 @@ Friend Sub HandleKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
     Dim pastedText As String
 
     If Not IsFloatField() Then
+        ' A shortcut on the key goes first, as a menu accelerator does.
+        If ReDimUI.DispatchCapturedChord(keyText) Then Exit Sub
         HandleControlKey hostApp, keyText
         Exit Sub
     End If
@@ -17428,7 +17681,9 @@ Friend Sub TickFocusWatch( _
             Exit Sub
         End If
     End If
-    If PressedOffUntilRelease(pressEdge, buttonDown) Then LeaveFocus hostApp, True
+    If PressedOffUntilRelease(pressEdge, buttonDown, mOffPressPending, mOffPressUpMs) Then
+        LeaveFocus hostApp, True
+    End If
 End Sub
 
 ' A press off the control ends its focus or closes its list once the
@@ -17436,27 +17691,30 @@ End Sub
 ' Deciding at the press closed a list under a click on its own pager
 ' whenever the pointer read landed just off the list, and Excel delivers
 ' that click only on the release. An edge that comes with the button
-' already up, as the test seam's does, counts at once.
+' already up, as the test seam's does, counts at once. The focus watch and
+' the list watch each pass their own pending press.
 Private Function PressedOffUntilRelease( _
     ByVal pressEdge As Boolean, _
-    ByVal buttonDown As Boolean _
+    ByVal buttonDown As Boolean, _
+    ByRef pressPending As Boolean, _
+    ByRef pressUpMs As LongLong _
 ) As Boolean
     If pressEdge Then
         If CursorOverField() Then
-            mOffPressPending = False
+            pressPending = False
         ElseIf buttonDown Then
-            mOffPressPending = True
-            mOffPressUpMs = 0
+            pressPending = True
+            pressUpMs = 0
         Else
-            mOffPressPending = False
+            pressPending = False
             PressedOffUntilRelease = True
             Exit Function
         End If
     End If
-    If Not mOffPressPending Or buttonDown Then Exit Function
-    If mOffPressUpMs = 0 Then mOffPressUpMs = GetTickCount64()
-    If GetTickCount64() - mOffPressUpMs < OFF_PRESS_GRACE_MS Then Exit Function
-    mOffPressPending = False
+    If Not pressPending Or buttonDown Then Exit Function
+    If pressUpMs = 0 Then pressUpMs = GetTickCount64()
+    If GetTickCount64() - pressUpMs < OFF_PRESS_GRACE_MS Then Exit Function
+    pressPending = False
     PressedOffUntilRelease = True
 End Function
 
@@ -17464,6 +17722,7 @@ End Function
 ' the control, however the pointer read.
 Friend Sub CancelOffPress()
     mOffPressPending = False
+    mListPressPending = False
 End Sub
 
 ' An open list that no field watch covers (a SelectBox, or a cell-backed
@@ -17491,7 +17750,9 @@ Friend Sub TickListWatch( _
             Exit Sub
         End If
     End If
-    If PressedOffUntilRelease(pressEdge, buttonDown) Then CloseDropList
+    If PressedOffUntilRelease(pressEdge, buttonDown, mListPressPending, mListPressUpMs) Then
+        CloseDropList
+    End If
 End Sub
 
 ' True when the next apply draws or deletes a whole drop list or calendar:
@@ -17525,7 +17786,7 @@ End Sub
 ' open, so it joins the app's ticking controls here.
 Private Sub NoteListOpened()
     mListSelAtOpen = vbNullString
-    mOffPressPending = False
+    mListPressPending = False
     mListWidth = 0
     mListFlipped = ListOpensUpward()
     OwnerApp.CloseListsExcept mComponentId
@@ -17732,6 +17993,10 @@ Friend Sub DeleteOwnShapes(ByVal hostSheet As Worksheet)
         On Error Resume Next
         hostSheet.Shapes(ShapeName).Delete
         On Error GoTo 0
+        ' Its tooltip, the one part such a control can have, goes with it.
+        If LenB(mTooltip) > 0 Or LenB(mShortcut) > 0 Or LenB(mDisabledReason) > 0 Then
+            DropPart hostSheet, "tt"
+        End If
     End If
     mAppliedOptionCount = 0
     ForgetPartSignatures

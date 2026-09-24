@@ -214,6 +214,20 @@ Public Sub RdxBindKeys()
     gKeysBound = True
 End Sub
 
+' The OnKey codes capture binds to one key name, "^y" and "^+z" for
+' {REDO}, each followed by Chr$(1): the shortcuts a key sent to a focused
+' control could belong to.
+Public Function RdxCapturedCodes(ByVal keyText As String) As String
+    Dim binding As Variant
+
+    For Each binding In CapturedKeys()
+        If binding(1) = keyText Then
+            If LenB(RdxCapturedCodes) = 0 Then RdxCapturedCodes = Chr$(1)
+            RdxCapturedCodes = RdxCapturedCodes & binding(0) & Chr$(1)
+        End If
+    Next binding
+End Function
+
 ' Panic release: restores every key ReDim may have bound, whether or not
 ' any focus state survives. Safe to call at any time.
 Public Sub RdxReleaseKeys()

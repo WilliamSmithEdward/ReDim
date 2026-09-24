@@ -650,6 +650,12 @@ def test_list_dismiss(run_widgets):
     assert facts["dateSelectionMoveCloses"] == "True", (
         "moving the grid selection must close an open calendar"
     )
+    assert facts["focusedPressOffEnds"] == "True", (
+        "one press off a focused picker must close its calendar and end its focus"
+    )
+    assert facts["laterFocusHolds"] == "True", (
+        "a press that closed a calendar must not end the picker's later focus"
+    )
 
 
 def test_list_conventions(run_widgets):
@@ -721,8 +727,22 @@ def test_shortcuts(run_widgets):
     assert facts["alt"] == "True", "the alternative text must name the shortcut"
     assert facts["tip"] == "Saves the form (Ctrl+S)"
     assert facts["refusesTypingKey"] == "True", "a key a field types must be refused"
+    assert facts["capturedChordClicks"] == "undo", (
+        "a shortcut on a key that focus captured must still click its control"
+    )
+    assert facts["refusesSlider"] == "True", "a control with no one click must refuse a shortcut"
+    assert facts["labelClicks"] == "help", "a label with OnClick must take a shortcut"
+    assert facts["codeRules"] == "00000111", (
+        "codes OnKey refuses, and Ctrl+Alt with a character, must be refused"
+    )
+    assert facts["removeReleases"] == "True", "removing a control must give its key back"
+    assert facts["recorded"] == "True", "the bound keys must be kept in a workbook name"
+    assert facts["strayReleases"] == "True", (
+        "a key pressed where no control declares it must click nothing and go back"
+    )
     assert facts["leaveReleases"] == "True", "leaving the sheet must release the binding"
     assert facts["returnBinds"] == "True"
+    assert facts["shutdownClearsRecord"] == "True"
 
 
 def test_toast_size(run_widgets):
@@ -740,6 +760,12 @@ def test_toast_size(run_widgets):
     )
     assert facts["fitsNarrow"] == "True", "MinWidth must let a short toast go narrow"
     assert facts["fitsWide"] == "True", "MaxWidth must let a toast widen for its words"
+    assert facts["raisedCapRestores"] == "True", (
+        "a MaxHeight raised after the toast drew must bring back the words it cut"
+    )
+    assert facts["tokenFits"] == "True", (
+        "a message with no word to drop must end in an ellipsis inside the card"
+    )
 
 
 def test_toast_conventions(run_widgets):
@@ -771,6 +797,9 @@ def test_toast_conventions(run_widgets):
         "a click on the card must run OnClick with the toast as sender and dismiss it"
     )
     assert facts["closeRunsNothing"] == "True"
+    assert facts["secondClickRunsNothing"] == "True", (
+        "a click on a toast already leaving must not run its handler again"
+    )
     assert facts["actionBorder"] == "True", "ActionBorder must color the action button's border"
 
 
@@ -1022,6 +1051,14 @@ def test_tooltips(run_widgets):
     assert facts["staysAway"] == "True"
     assert facts["openListNoTip"] == "True", "an open list must show no tip over its rows"
     assert facts["longWraps"] == "True", "a long tip must wrap at its widest"
+    assert facts["flipClear"] == "True", (
+        "a tip with no room below the pointer must sit as far above it as below"
+    )
+    assert facts["flipHolds"] == "True", "a small move up must keep a tip above the pointer"
+    assert facts["labelTip"] == "True"
+    assert facts["removeTakesTip"] == "True", "removing a label must take its tip with it"
+    assert facts["tipBeforeShutdown"] == "True"
+    assert facts["shutdownTakesTip"] == "True", "Shutdown must take a showing tip away"
 
 
 def test_hold_repeat(run_widgets):
@@ -1192,6 +1229,9 @@ def test_date_picker(run_widgets):
     assert facts["pressOnKeeps"] == "True"
     assert facts["hoverTints"] == "True"
     assert facts["pressOffCloses"] == "True"
+    assert facts["weekClickPicks"] == "True", (
+        "a click on a week line must pick the day under the pointer"
+    )
 
 
 def test_table(run_widgets):
@@ -1296,6 +1336,10 @@ def test_menu_button(run_widgets):
     assert facts["fitsWords"] == "True", (
         "a menu must widen every row to fit its widest command"
     )
+    assert facts["pagedWidens"] == "True", (
+        "a long command paged into view must widen the open menu to fit it"
+    )
+    assert facts["followsFace"] == "True", "an open menu must follow its button when it moves"
     assert facts["farSideKeeps"] == "True", (
         "a press on a widened menu's far side must count as a press on the menu"
     )

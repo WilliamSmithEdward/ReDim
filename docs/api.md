@@ -747,15 +747,29 @@ keep the keys.
 - Shortcuts: `Shortcut "^s"` clicks the control on Ctrl+S while its sheet is in front,
   exactly as a mouse click does: the same handler, the control as `ReDimUI.Sender`, and
   nothing while it is disabled, busy, or hidden, when the next control declaring the key
-  takes it instead; while a modal is up, only its buttons do. The code is an
-  `Application.OnKey` code with Ctrl (`^`) or Alt (`%`), Shift (`+`) optional, such as
-  `"^+e"` for Ctrl+Shift+E, or a function key such as `"{F5}"`; a key a focused field
-  types is refused, and `""` removes the shortcut. A focused field keeps its own editing
-  chords (Ctrl+A, Ctrl+C, and the rest) while it has the keys, and the shortcut takes its
-  key back when the field lets go. The tooltip shows the shortcut, as "Saves the form
-  (Ctrl+S)" or alone, and the alternative text ends with it. Like access keys, shortcuts
-  bind only while their sheet is active and take the key from Excel while bound; a key
-  also bound with the app's `HotKey` goes to whichever bound it last.
+  takes it instead; while a modal is up, only its buttons do. It goes on a control a
+  click acts on as a whole: a Button, Toggle, TickBox, Expander, SelectBox, MenuButton,
+  ComboBox, DatePicker, float TextInput, or an Image, Label, or Card with a click handler.
+  Any other control raises an error, since a slider or a list has no one click to give.
+  The code is an `Application.OnKey` code with Ctrl (`^`) or Alt (`%`), Shift (`+`)
+  optional, such as `"^+e"` for Ctrl+Shift+E, or a function key from `"{F1}"` to
+  `"{F15}"`. The key is a character, `~` for Enter, or a key name OnKey knows, in braces,
+  such as `"^{DEL}"`. A key a focused field types is refused, and so is Ctrl+Alt with a
+  character: Windows sends AltGr as Ctrl+Alt, and many keyboards type characters with it.
+  `""` removes the shortcut. A focused field keeps its own editing chords (Ctrl+A,
+  Ctrl+C, and the rest) while it has the keys, and the shortcut takes its key back when
+  the field lets go; any other focused control lets a shortcut's key through, so Ctrl+Z
+  reaches an Undo button while a list has focus. The tooltip shows the shortcut, as
+  "Saves the form (Ctrl+S)" or alone, and the alternative text names it after the
+  control's role: "Save, button, Ctrl+S, Saves the form". Like access keys, shortcuts
+  bind only while their sheet is active and take the key from Excel while bound, and
+  removing the control gives its key back. Give each key one owner: a key that is also
+  the app's `HotKey` goes to whichever bound it last, and releasing either releases it.
+  Since the tooltip names it, a shortcut keeps the pump reading the pointer while its
+  sheet is in front, as a tooltip does. ReDim lists the keys it has bound in a hidden
+  workbook name, `rdm_bound_keys`, so `Shutdown`, which runs as the workbook closes,
+  releases them even after a reset of the VBA project lost ReDim's own record; a key left
+  bound by such a reset clicks nothing and goes back to Excel on its first press.
 
 | Control | Keys |
 |---|---|
