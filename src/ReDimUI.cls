@@ -527,6 +527,9 @@ Private mToastMaxHeight As Double
 ' The card's words were cut to fit MaxHeight, so they show less than the
 ' message holds.
 Private mToastTextCut As Boolean
+' The card was fitted while its sheet was behind another, with no window
+' to fit to, and fits again once its sheet is in front.
+Private mToastFitBlind As Boolean
 Private mToastOriginTop As Double
 Private mSlideRemaining As Double
 Private mToastExiting As Boolean
@@ -562,6 +565,8 @@ Private mHasTooltips As Boolean
 Private mTipTargetId As String
 Private mTipSinceMs As LongLong
 Private mTipShownId As String
+' The words the shown tip was drawn with, to catch a change of words.
+Private mTipShownText As String
 Private mTipSuppressed As Boolean
 ' Where the pointer came to rest, and the shown tip's edges, in points.
 Private mTipRestX As Double
@@ -3111,12 +3116,14 @@ Private Sub RaiseModalZOrder()
     Next modalId
 End Sub
 
-Friend Sub ResolveViewport( _
+' The part of the app's sheet its window shows. True when the window was
+' read; while the sheet is behind another, A1:P36 stands in for it.
+Friend Function ResolveViewport( _
     ByRef viewLeft As Double, _
     ByRef viewTop As Double, _
     ByRef viewWidth As Double, _
     ByRef viewHeight As Double _
-)
+) As Boolean
     Dim shownRange As Range
 
     On Error Resume Next
@@ -3125,12 +3132,13 @@ Friend Sub ResolveViewport( _
         Set shownRange = ActiveWindow.VisibleRange
     End If
     On Error GoTo 0
+    ResolveViewport = Not shownRange Is Nothing
     If shownRange Is Nothing Then Set shownRange = mSheet.Range("A1:P36")
     viewLeft = shownRange.Left
     viewTop = shownRange.Top
     viewWidth = shownRange.Width
     viewHeight = shownRange.Height
-End Sub
+End Function
 
 ' Paints the sheet background and hides gridlines so shapes sit on a clean
 ' canvas. Gridlines are window state, so they change only while this sheet
@@ -4326,6 +4334,11 @@ Private Sub TickTooltip( _
             If componentValue.ListIsOpen Then
                 HideTooltip
                 mTipSuppressed = True
+            ElseIf componentValue.TooltipWords <> mTipShownText Then
+                ' Its words changed while it showed, as when the control is
+                ' disabled under the pointer: it goes, and shows the new
+                ' words on the next frame.
+                HideTooltip
             End If
         End If
         Exit Sub
@@ -4339,7 +4352,10 @@ Private Sub TickTooltip( _
     If nowMs - mTipSinceMs < GetDoubleClickTime() Then Exit Sub
     If Not TryGetComponent(hitId, componentValue) Then Exit Sub
     If componentValue.DrawTooltip(pointsX, pointsY, mTipLeft, mTipTop, mTipRight, _
-        mTipBottom) Then mTipShownId = hitId
+        mTipBottom) Then
+        mTipShownId = hitId
+        mTipShownText = componentValue.TooltipWords
+    End If
 End Sub
 
 Private Sub HideTooltip()
@@ -7131,6 +7147,13 @@ Private Sub HoldToastUnderPointer(ByVal nowMs As LongLong)
     If Not SheetInFront(OwnerApp) Then
         mToastHeldMs = 0
         Exit Sub
+    End If
+    ' A card fitted while its sheet was behind another fits to the window
+    ' now that the sheet is in front.
+    If mToastFitBlind Then
+        mToastFitBlind = False
+        mAppliedExtrasSig = vbNullString
+        Touch
     End If
     If ReDimUI.FramePointer(pointsX, pointsY) Then
         If pointsX >= mLeft And pointsX <= mLeft + mWidth _
@@ -11045,6 +11068,11 @@ Private Sub ApplyToastParts( _
         End With
     End If
     FitToastCard mainShape
+    ' The fit lifts the tray when a tall top card would end below the window.
+    If Abs(mTop + mSlideRemaining - visualTop) > 0.01 Then
+        visualTop = mTop + mSlideRemaining
+        mainShape.Top = visualTop
+    End If
     If LenB(ToastIcon()) > 0 Then
         mainShape.Line.ForeColor.RGB = ToastToneColor(themeValue)
         mainShape.Line.Weight = 1.5
@@ -11114,6 +11142,10 @@ Private Sub FitToastCard(ByVal cardShape As Shape)
     Dim viewHeight As Double
     Dim priorHeight As Double
     Dim inkRgb As Long
+    Dim viewKnown As Boolean
+    Dim overflow As Double
+    Dim anchorLeft As Double
+    Dim anchorTop As Double
 
     ' A message an earlier fit cut short gets its words back before the
     ' measure, so a cap raised or a card widened after the toast drew
@@ -11130,8 +11162,11 @@ Private Sub FitToastCard(ByVal cardShape As Shape)
     If minWide <= 0 Then minWide = TOAST_WIDTH
     maxWide = mToastMaxWidth
     If maxWide <= 0 Then maxWide = TOAST_WIDTH
-    OwnerApp.ResolveViewport viewLeft, viewTop, viewWidth, viewHeight
-    If mLeft + maxWide > viewLeft + viewWidth - 12 Then
+    ' Behind another sheet the window is unknown: the card takes the width
+    ' it asks for, and fits again once its sheet is in front.
+    viewKnown = OwnerApp.ResolveViewport(viewLeft, viewTop, viewWidth, viewHeight)
+    mToastFitBlind = Not viewKnown
+    If viewKnown And mLeft + maxWide > viewLeft + viewWidth - 12 Then
         maxWide = viewLeft + viewWidth - 12 - mLeft
     End If
     If maxWide < minWide Then maxWide = minWide
@@ -11157,6 +11192,20 @@ Private Sub FitToastCard(ByVal cardShape As Shape)
         End If
     End With
     If fitHeight < TOAST_MIN_HEIGHT Then fitHeight = TOAST_MIN_HEIGHT
+    ' The tray's top card was placed for one line of text. A taller one
+    ' that would end below the window lifts the tray, unless a ToastTray
+    ' anchor holds it where it is.
+    If viewKnown And Abs(mTop - mToastOriginTop) < 0.01 Then
+        overflow = mToastOriginTop + fitHeight + 8 - (viewTop + viewHeight)
+        If overflow > 0.01 Then
+            If Not OwnerApp.ToastTrayOrigin(anchorLeft, anchorTop) Then
+                mToastOriginTop = mToastOriginTop - overflow
+                If mToastOriginTop < viewTop + 8 Then mToastOriginTop = viewTop + 8
+                mTop = mToastOriginTop
+                OwnerApp.RecordToastRail mLeft, mToastOriginTop
+            End If
+        End If
+    End If
     priorHeight = mHeight
     mWidth = fitWidth
     mHeight = fitHeight
@@ -13134,6 +13183,7 @@ Private Sub SyncCalendarMark( _
         Set markShape = EnsureCalendarMark(hostSheet, partName, markMade)
         markShape.Visible = msoFalse
         mAppliedRowStates(stateSlot) = "-"
+        If markMade And behindWeeks Then RestackCalendarFill hostSheet
         Exit Sub
     End If
     lookKey = CStr(ObjPtr(themeValue)) & ":" & CStr(fillRgb) & ":" & CStr(ringRgb) & ":" & _
@@ -13142,6 +13192,7 @@ Private Sub SyncCalendarMark( _
     If mAppliedRowStates(stateSlot) = lookKey & Chr$(3) & placeKey Then Exit Sub
     priorParts = Split(mAppliedRowStates(stateSlot) & Chr$(3), Chr$(3))
     Set markShape = EnsureCalendarMark(hostSheet, partName, markMade)
+    If markMade And behindWeeks Then RestackCalendarFill hostSheet
     If priorParts(0) = "-" Then markShape.Visible = msoTrue
     mAppliedRowStates(stateSlot) = lookKey & Chr$(3) & placeKey
     markShape.Left = mLeft + CAL_PAD + ((cellNo - 1) Mod 7) * CAL_CELL_W + 1
@@ -13151,6 +13202,24 @@ Private Sub SyncCalendarMark( _
     If fillRgb >= 0 Then markShape.Fill.ForeColor.RGB = fillRgb
     ApplyCalendarRing markShape, ringRgb, ringDashed
     markShape.OnAction = mAppliedOnAction
+End Sub
+
+' A fill made again after the weeks drew, as when a hand deleted it, lands
+' on top of them and hides a day's digits: the weeks and the rings go back
+' over it. On a calendar's first drawing the fills come first anyway.
+Private Sub RestackCalendarFill(ByVal hostSheet As Worksheet)
+    Dim weekNo As Long
+    Dim ringPart As Variant
+
+    If LenB(mAppliedRowStates(CAL_SLOT_WEEK1)) = 0 Then Exit Sub
+    On Error Resume Next
+    For weekNo = 1 To 6
+        hostSheet.Shapes(ShapeName & PART_SEPARATOR & "cr" & weekNo).ZOrder msoBringToFront
+    Next weekNo
+    For Each ringPart In Array("ct", "cc")
+        hostSheet.Shapes(ShapeName & PART_SEPARATOR & ringPart).ZOrder msoBringToFront
+    Next ringPart
+    On Error GoTo 0
 End Sub
 
 ' A day mark's shape: found, or made at a day cell's size.
@@ -15510,6 +15579,24 @@ Private Sub TransferLayout( _
     If btnTop < panelTop Then btnTop = panelTop
 End Sub
 
+' The words the control's tooltip shows: DisabledReason while it is
+' disabled and has one, else Tooltip, with the shortcut after it or alone,
+' as Office shows one.
+Friend Function TooltipWords() As String
+    If Not mEnabled And LenB(mDisabledReason) > 0 Then
+        TooltipWords = mDisabledReason
+    Else
+        TooltipWords = mTooltip
+        If LenB(mShortcut) > 0 Then
+            If LenB(TooltipWords) > 0 Then
+                TooltipWords = TooltipWords & " (" & ShortcutLabel(mShortcut) & ")"
+            Else
+                TooltipWords = ShortcutLabel(mShortcut)
+            End If
+        End If
+    End If
+End Function
+
 ' The tooltip, in inverse colors: DisabledReason while the control is
 ' disabled and has one, else Tooltip. It fits its words, wrapping past
 ' TIP_MAX_WIDTH. A control no taller than a field row keeps its whole
@@ -15541,19 +15628,7 @@ Friend Function DrawTooltip( _
     Dim viewHeight As Double
 
     If mSelectOpen Then Exit Function
-    If Not mEnabled And LenB(mDisabledReason) > 0 Then
-        tipText = mDisabledReason
-    Else
-        ' A shortcut shows with the tip, or as the tip, as Office does.
-        tipText = mTooltip
-        If LenB(mShortcut) > 0 Then
-            If LenB(tipText) > 0 Then
-                tipText = tipText & " (" & ShortcutLabel(mShortcut) & ")"
-            Else
-                tipText = ShortcutLabel(mShortcut)
-            End If
-        End If
-    End If
+    tipText = TooltipWords()
     If LenB(tipText) = 0 Then Exit Function
     Set hostApp = OwnerApp
     Set themeValue = hostApp.Theme

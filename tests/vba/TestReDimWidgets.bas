@@ -2594,6 +2594,10 @@ Public Function TestToastSize() As String
     Dim tallTop As Double
     Dim longWords As String
     Dim needTall As Double
+    Dim edgeHost As Worksheet
+    Dim edgeApp As ReDimUI
+    Dim viewBottom As Double
+    Dim viewRight As Double
 
     ReDimUI.Shutdown
     ReDimUI.AutoPump False
@@ -2680,6 +2684,37 @@ Public Function TestToastSize() As String
     End With
     ReDimUI.DispatchShape toastName & "__tx"
     ReDimUI.PumpOnce
+
+    ' A tray placed near the window's bottom for a one-line toast lifts
+    ' when its top toast runs taller, so the toast stays in the window.
+    Set edgeHost = NewCanvas()
+    Set edgeApp = ReDimUI.Mount(edgeHost, "wid74")
+    viewBottom = ActiveWindow.VisibleRange.Top + ActiveWindow.VisibleRange.Height
+    viewRight = ActiveWindow.VisibleRange.Left + ActiveWindow.VisibleRange.Width
+    edgeApp.Label("low").AtRect(24, viewBottom - 30, 200, 20).Text "Low"
+    edgeApp.Render
+    Set toastValue = edgeApp.Toast(longWords)
+    toastName = "rdm_wid74_" & toastValue.ComponentId
+    With edgeHost.Shapes(toastName)
+        transcript = transcript & "|tallLifts=" & CStr(.Height > 50 _
+            And .Top + .Height <= viewBottom - 7.5)
+    End With
+    ReDimUI.DispatchShape toastName & "__tx"
+    ReDimUI.PumpOnce
+
+    ' A toast shown while its sheet is behind another fits again once the
+    ' sheet is in front: as wide as the same toast shown there.
+    edgeApp.Label("edge").AtRect(viewRight - 320, 24, 120, 20).Text "Edge"
+    NewCanvas
+    Set toastValue = edgeApp.Toast("The quarterly report is ready to download " & _
+        "from the shared folder now").MinWidth(100).MaxWidth(420)
+    toastName = "rdm_wid74_" & toastValue.ComponentId
+    edgeHost.Activate
+    ReDimUI.PumpOnce
+    Set toastValue = edgeApp.Toast("The quarterly report is ready to download " & _
+        "from the shared folder now").MinWidth(100).MaxWidth(420)
+    transcript = transcript & "|offSheetRefits=" & CStr(Abs(edgeHost.Shapes(toastName).Width _
+        - edgeHost.Shapes("rdm_wid74_" & toastValue.ComponentId).Width) < 0.5)
     ReDimUI.ReduceMotion
     ReDimUI.AutoPump True
     TestToastSize = transcript
@@ -3664,6 +3699,14 @@ Public Function TestTooltips() As String
     With host.Shapes("rdm_wid45_long__tt")
         transcript = transcript & "|longWraps=" & CStr(.Width <= 241 And .Height > 30)
     End With
+    ' A tip whose words change while it shows, as when its control is
+    ' disabled under the pointer, shows the new words.
+    app.Button("long").DisabledReason("Not yet").Enabled False
+    ReDimUI.PumpOnce
+    ReDimUI.PumpOnce
+    transcript = transcript & "|tipFollowsWords=" & _
+        host.Shapes("rdm_wid45_long__tt").TextFrame2.TextRange.Text
+    app.Button("long").Enabled True
 
     ' With no room below the pointer, a tall control's tip sits above it
     ' as far clear as it would below, so a small move up keeps it.
@@ -4306,6 +4349,9 @@ Public Function TestDatePicker() As String
     transcript = transcript & "|partsReturn=" & CStr(ShapeExists(host, "rdm_wid54_due__cs") _
         And UBound(Split(host.Shapes("rdm_wid54_due__cr3").TextFrame2.TextRange.Text, _
             vbTab)) = 7)
+    transcript = transcript & "|fillBehindWeeks=" & CStr( _
+        host.Shapes("rdm_wid54_due__cs").ZOrderPosition _
+            < host.Shapes("rdm_wid54_due__cr1").ZOrderPosition)
     firstCell = Weekday(DateSerial(2026, 10, 1), vbUseSystemDayOfWeek)
     ReDimUI.DispatchShape "rdm_wid54_due__cd" & (firstCell + 14)
     transcript = transcript & "|dayPicks=" & CStr(Not ShapeExists(host, "rdm_wid54_due__cr1") _

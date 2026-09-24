@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.0.2 - 2026-09-23
+
+- A toast at the top of its tray that runs taller than the room below
+  the rail lifts the rail, so the whole card stays in the window. The
+  rail was placed for a one-line toast, so near the window's bottom a
+  three-line toast ended below it. A `ToastTray` anchor still holds the
+  tray exactly where it is pinned.
+- A toast shown while its sheet is behind another fits to the window
+  once the sheet is in front. Off its sheet the window cannot be read,
+  so the card was fitted to A1:P36 instead, and a `MaxWidth` toast could
+  come out wider than the window had room for, and stayed so.
+- A calendar highlight deleted by hand, and drawn again, goes back
+  behind the week's digits. It came back on top of them and hid the day
+  under it until the calendar closed.
+- A tooltip showing when its words change, as when its control is
+  disabled under the pointer and has a `DisabledReason`, shows the new
+  words. It kept the old ones until the pointer left and came back.
+
 ## 1.0.1 - 2026-09-23
 
 - A DatePicker's calendar opened by a click now closes on a press off

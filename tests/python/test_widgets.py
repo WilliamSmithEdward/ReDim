@@ -766,6 +766,12 @@ def test_toast_size(run_widgets):
     assert facts["tokenFits"] == "True", (
         "a message with no word to drop must end in an ellipsis inside the card"
     )
+    assert facts["tallLifts"] == "True", (
+        "a tall top toast must lift a tray placed near the window's bottom"
+    )
+    assert facts["offSheetRefits"] == "True", (
+        "a toast shown off its sheet must fit again once the sheet is in front"
+    )
 
 
 def test_toast_conventions(run_widgets):
@@ -1051,6 +1057,9 @@ def test_tooltips(run_widgets):
     assert facts["staysAway"] == "True"
     assert facts["openListNoTip"] == "True", "an open list must show no tip over its rows"
     assert facts["longWraps"] == "True", "a long tip must wrap at its widest"
+    assert facts["tipFollowsWords"] == "Not yet", (
+        "a showing tip must take its control's new words, as when it is disabled"
+    )
     assert facts["flipClear"] == "True", (
         "a tip with no room below the pointer must sit as far above it as below"
     )
@@ -1215,6 +1224,9 @@ def test_date_picker(run_widgets):
     assert facts["nextMonth"] == "True"
     assert facts["partsReturn"] == "True", (
         "a week or mark deleted by hand must come back with the next repaint"
+    )
+    assert facts["fillBehindWeeks"] == "True", (
+        "a fill mark made again must sit behind the weeks, not over the digits"
     )
     assert facts["dayPicks"] == "True", (
         "a day must write a Date, fire OnChange once, and close the calendar"
