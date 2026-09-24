@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.3 - 2026-09-23
+
+- CI's static gate runs pyvbaanalysis 2.2.1. Its Excel model now says
+  `Shape.Duplicate` returns a Shape, as Excel's type library does, so
+  the suppression 1.0.1 put on that line is gone.
+  `requirements-dev.txt` asks for 2.2.1 or later, since 2.2.0 still
+  reports the line.
+
 ## 1.0.2 - 2026-09-23
 
 - A toast at the top of its tray that runs taller than the room below

@@ -1,4 +1,4 @@
 pyopenvba>=3.1.0
 pyvbaharness>=1.0.0
-pyvbaanalysis>=2.2.0
+pyvbaanalysis>=2.2.1
 pytest>=8

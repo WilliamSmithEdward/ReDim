@@ -33,10 +33,11 @@ jobs:
           python-version: '3.12'
 
       # Only the analyzer: requirements-dev.txt also pulls the live-Excel
-      # harness, which has no meaning on a Linux runner. 2.2.0 also fails
-      # on variables and constants that are declared but never used or read.
+      # harness, which has no meaning on a Linux runner. From 2.2.0 on it
+      # also fails on variables and constants that are declared but never
+      # used or read.
       - name: Install the analyzer
-        run: pip install pyvbaanalysis==2.2.0
+        run: pip install pyvbaanalysis==2.2.1
 
       - name: Run the static gate
         env:
