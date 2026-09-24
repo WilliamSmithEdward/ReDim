@@ -17,6 +17,7 @@
 - A tooltip showing when its words change, as when its control is
   disabled under the pointer and has a `DisabledReason`, shows the new
   words. It kept the old ones until the pointer left and came back.
+- Requires ROneCOne 1.9.1 or later, and is tested against 1.10.1.
 
 ## 1.0.1 - 2026-09-23
 

@@ -8,7 +8,7 @@ Attribute VB_GlobalNameSpace = False
 Attribute VB_Creatable = False
 Attribute VB_PredeclaredId = True
 Attribute VB_Exposed = False
-' ReDim 1.0.1 (2026-09-23)
+' ReDim 1.0.2 (2026-09-23)
 ' https://github.com/WilliamSmithEdward/ReDim
 '
 ' MIT License
@@ -338,7 +338,7 @@ Private Const VARIANT_WARNING As Long = 5
 Private Const REL_NONE As Long = 0
 Private Const REL_BELOW As Long = 1
 Private Const REL_RIGHT_OF As Long = 2
-Private Const REDIM_VERSION As String = "1.0.1"
+Private Const REDIM_VERSION As String = "1.0.2"
 
 Private mRole As Long
 
