@@ -13019,10 +13019,13 @@ End Function
 ' and goes.
 Private Function NoteRoom(ByVal themeValue As ReDimUI) As Double
     If LenB(mHintText) = 0 Then
+        ' A required pick shows its message in the same row.
+        If ChecksPick() Then GoTo Reserve
         If Not IsFloatField() Then Exit Function
         If LenB(mValidateProc) = 0 And Not mRequired And LenB(mErrorText) = 0 _
             And mMaxLength = 0 Then Exit Function
     End If
+Reserve:
     NoteRoom = mFontSize
     If NoteRoom <= 0 Then NoteRoom = themeValue.BaseFontSize
     NoteRoom = NoteRoom + 5

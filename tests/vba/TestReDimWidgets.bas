@@ -5947,8 +5947,13 @@ Public Function TestRequiredPicks() As String
         .Required
     app.DatePicker("due").AtRect(24, 70, 140, 22).Required True, "Pick a due date"
     app.RadioGroup("tier").AtRect(24, 116, 140, 40).Items("Low", "High").Required
+    app.Stack("form").AtRect(300, 24, 200, 0).Gap 6
+    app.SelectBox("kind").Sized(150, 22).Items("A", "B").Required.InStack "form"
+    app.Label("after").Sized(150, 18).Text("Next").InStack "form"
     app.Render
-    transcript = "fails=" & CStr(Not app.ValidateAll)
+    transcript = "stackRoom=" & CStr(host.Shapes("rdm_wid82_after").Top >= _
+        host.Shapes("rdm_wid82_kind").Top + 22 + 6 + 12)
+    transcript = transcript & "|fails=" & CStr(Not app.ValidateAll)
     transcript = transcript & "|messages=" & _
         host.Shapes("rdm_wid82_size__me").TextFrame2.TextRange.Text & "/" & _
         host.Shapes("rdm_wid82_due__me").TextFrame2.TextRange.Text & "/" & _
@@ -5962,6 +5967,7 @@ Public Function TestRequiredPicks() As String
     transcript = transcript & "|pickClears=" & CStr(Not ShapeExists(host, "rdm_wid82_size__me"))
     app.DatePicker("due").PickDate DateSerial(2026, 10, 1)
     app.RadioGroup("tier").Value 1
+    app.SelectBox("kind").Value 1
     transcript = transcript & "|passes=" & CStr(app.ValidateAll)
     transcript = transcript & "|allClear=" & CStr(Not ShapeExists(host, "rdm_wid82_due__me") _
         And Not ShapeExists(host, "rdm_wid82_tier__me"))

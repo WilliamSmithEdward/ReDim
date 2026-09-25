@@ -1605,6 +1605,7 @@ def test_toggle_caption(run_widgets):
 
 def test_required_picks(run_widgets):
     facts = parse_transcript(run_widgets("TestRequiredPicks"))
+    assert facts["stackRoom"] == "True", "a required pick in a stack must get room for its message"
     assert facts["fails"] == "True", "ValidateAll must fail while a required pick is empty"
     assert facts["messages"] == "Required/Pick a due date/True", (
         "each required pick must show its message under it"

@@ -35,6 +35,7 @@
 - `Required` on a `SelectBox`, `DatePicker`, or `RadioGroup` is checked:
   `ValidateAll` fails while nothing is picked, shows the message under
   the control, and puts focus on it, and a pick takes the message down.
+  A `Stack` leaves room under the control for the message.
   It used to draw only the caption's asterisk, and `ValidateAll` passed
   a form with nothing picked.
 - `ItemEnabled` works on a `ComboBox` and a `RadioGroup`, where it used
