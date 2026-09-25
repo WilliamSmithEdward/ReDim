@@ -5728,6 +5728,79 @@ Public Function TestSelectionReaders() As String
     TestSelectionReaders = transcript
 End Function
 
+' A CheckList or RadioGroup whose rows would squeeze under 18 points
+' shows a window of rows with paging arrows at its right edge: the arrows
+' page it (muted at the ends, repeating while held), rows keep their
+' item numbers for clicks, and the keys move the window with the cursor
+' or selection. A list whose rows fit shows every row and no arrows.
+Public Function TestRowListWindow() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim transcript As String
+    Dim names(0 To 19) As String
+    Dim idx As Long
+
+    For idx = 0 To 19
+        names(idx) = "Item" & Format$(idx + 1, "00")
+    Next idx
+    gChangeCount = 0
+    ReDimUI.AutoPump False
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "wid84")
+    app.CheckList("tags").AtRect(24, 24, 170, 100).ItemsFrom(names) _
+        .OnChange "TestReDimWidgets.RecordChange"
+    app.RadioGroup("tier").AtRect(220, 24, 150, 60).ItemsFrom names
+    app.CheckList("short").AtRect(400, 24, 170, 100).Items "A", "B", "C"
+    app.Render
+    ' 100 points with a select-all header: 18-point rows fit four items.
+    transcript = "checkWindow=" & CStr(IsShown(host, "rdm_wid84_tags__t4") And _
+        Not IsShown(host, "rdm_wid84_tags__t5") And _
+        host.Shapes("rdm_wid84_tags__t2").Height >= 18)
+    transcript = transcript & "|arrowsAtTop=" & CStr( _
+        InkOf(host, "rdm_wid84_tags__lu") = app.Theme.OnMutedColor And _
+        InkOf(host, "rdm_wid84_tags__ld") = app.Theme.OnSurfaceColor)
+    transcript = transcript & "|shortHasNone=" & CStr(Not ShapeExists(host, "rdm_wid84_short__ld") _
+        And IsShown(host, "rdm_wid84_short__t3"))
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid84_tags__ld"
+    transcript = transcript & "|arrowPages=" & CStr(Not IsShown(host, "rdm_wid84_tags__t1") And _
+        IsShown(host, "rdm_wid84_tags__t4") And IsShown(host, "rdm_wid84_tags__t7") And _
+        host.Shapes("rdm_wid84_tags__t4").Top < host.Shapes("rdm_wid84_tags__t5").Top)
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid84_tags__t6"
+    transcript = transcript & "|rowClickMaps=" & CStr(app.CheckList("tags").IsItemChecked(6)) & _
+        "/" & gChangeCount
+    HoldOnPart host, "rdm_wid84_tags__ld"
+    transcript = transcript & "|holdPages=" & CStr(Not IsShown(host, "rdm_wid84_tags__t7"))
+    app.CheckList("tags").Focus
+    RdxKeyChar "{HOME}"
+    transcript = transcript & "|homeTop=" & CStr(IsShown(host, "rdm_wid84_tags__t1"))
+    RdxKeyChar "{END}"
+    transcript = transcript & "|endBottom=" & CStr(IsShown(host, "rdm_wid84_tags__t20") And _
+        InkOf(host, "rdm_wid84_tags__ld") = app.Theme.OnMutedColor)
+    RdxKeyChar "{HOME}"
+    RdxKeyChar "{DOWN}"
+    RdxKeyChar "{PGDN}"
+    transcript = transcript & "|pageDownKey=" & CStr(IsShown(host, "rdm_wid84_tags__t5") And _
+        Not IsShown(host, "rdm_wid84_tags__t1"))
+    app.RadioGroup("tier").Focus
+    RdxKeyChar "{HOME}"
+    RdxKeyChar "{DOWN}"
+    RdxKeyChar "{DOWN}"
+    RdxKeyChar "{DOWN}"
+    transcript = transcript & "|radioFollows=" & app.RadioGroup("tier").CurrentValue & "/" & _
+        CStr(IsShown(host, "rdm_wid84_tier__t4") And Not IsShown(host, "rdm_wid84_tier__t1"))
+    RdxReleaseKeys
+    ReDimUI.AutoPump True
+    TestRowListWindow = transcript
+End Function
+
+' True when a part exists and is visible.
+Private Function IsShown(ByVal host As Worksheet, ByVal shapeName As String) As Boolean
+    If Not ShapeExists(host, shapeName) Then Exit Function
+    IsShown = (host.Shapes(shapeName).Visible = msoTrue)
+End Function
+
 ' A Toggle's Text draws as a caption right of the switch, sized to its
 ' words; a click on it flips the switch, the alternative text leads with
 ' it, and Text "" takes it away.

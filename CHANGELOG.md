@@ -2,6 +2,16 @@
 
 ## 1.0.3 - 2026-09-25
 
+- A long `CheckList` or `RadioGroup` scrolls. Every row used to share
+  the control's height however many items there were, so 30 items in
+  150 points made rows under 5 points: boxes overlapped, captions could
+  not be read, and click targets fell far below 24 pixels. Rows now
+  never go under 18 points; a list whose rows would shows a window of
+  rows with paging arrows at its right edge, which page it, repeat
+  while held, and read muted at the ends. The keys move the window with
+  the cursor or selection, and Page Up and Page Down page a windowed
+  check list instead of jumping to its ends. Lists whose rows fit draw
+  as before.
 - A `Toggle`'s `Text` draws as a caption right of the switch that flips
   it when clicked and names it for screen readers ("Dark mode, Switch,
   on"). `Text` did nothing on a Toggle, so every demo placed a separate

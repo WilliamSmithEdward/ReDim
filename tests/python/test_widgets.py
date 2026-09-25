@@ -1550,6 +1550,24 @@ def test_selection_readers(run_widgets):
     assert facts["otherKindRefused"] == "True"
 
 
+def test_row_list_window(run_widgets):
+    facts = parse_transcript(run_widgets("TestRowListWindow"))
+    assert facts["checkWindow"] == "True", (
+        "a long CheckList must show a window of rows at least 18 points tall"
+    )
+    assert facts["arrowsAtTop"] == "True", "at the top the up arrow is muted, down is live"
+    assert facts["shortHasNone"] == "True", "a list whose rows fit shows them all, no arrows"
+    assert facts["arrowPages"] == "True", "the down arrow must page the window"
+    assert facts["rowClickMaps"] == "True/1", "a click on a scrolled row must toggle that item"
+    assert facts["holdPages"] == "True", "a held arrow must page on"
+    assert facts["homeTop"] == "True"
+    assert facts["endBottom"] == "True", "End must bring the last row into view"
+    assert facts["pageDownKey"] == "True", "Page Down must page a windowed list"
+    assert facts["radioFollows"] == "4/True", (
+        "a RadioGroup's window must follow the selection the keys move"
+    )
+
+
 def test_toggle_caption(run_widgets):
     facts = parse_transcript(run_widgets("TestToggleCaption"))
     assert facts["captionRight"] == "True", "a Toggle's Text must caption it on the right"

@@ -318,6 +318,13 @@ dependencies:
   or unchecks only those rows, Backspace takes a letter off, and Esc clears the filter
   before it leaves. Hidden rows keep their checks, and `WritesTo` still carries every
   checked item. Without the select-all header nothing shows the filter.
+- Long lists: a `CheckList` or `RadioGroup` gives each row its share of the control's
+  height, but never less than 18 points. A list whose rows would squeeze below that shows
+  a window of as many rows as fit, with paging arrows at its right edge, 18-point
+  targets, that page the window, repeat while held, and read muted with nothing beyond
+  them. The keys move the window with the check list's cursor or the radio group's
+  selection, and Page Up and Page Down page a windowed check list. A list whose rows fit
+  draws as before.
 - `Image`: a picture as a control - a rounded rectangle whose fill is the picture, so it
   clicks, adopts, and snaps back like everything else, and the picture embeds in the
   workbook. `Source(path)` takes a file path (no URLs) and loads once per distinct path;
@@ -814,7 +821,7 @@ keep the keys.
 | Stepper | Up and Right step up, Down and Left step down, Page Up and Page Down step ten times, Home and End jump to the range ends. |
 | SlideBar | Arrows move a step, Page Up and Page Down a tenth of the range in whole steps, Home and End go to the ends. |
 | SelectBox | Closed: arrows, Home, End, Page Up, and Page Down change the selection, and Space, Alt+Down, or F4 opens the list. Open: they move the highlight; Enter, Space, or Alt+Up takes it, Tab takes it and moves on, and Esc or F4 closes. Letters jump to the next item that starts with them, open or closed: letters typed within a second build a prefix, and one letter typed again steps through its items. Every move passes over disabled items and group headers. |
-| CheckList | Up and Down move the row cursor, the select-all header included; Home and End jump; Space toggles the cursor's row; Ctrl+A checks every row that shows. Other characters filter the list, Backspace takes one off, and Esc clears the filter. |
+| CheckList | Up and Down move the row cursor, the select-all header included; Home and End jump; Page Up and Page Down page a windowed list (see Long lists) and jump to the ends otherwise; Space toggles the cursor's row; Ctrl+A checks every row that shows. Other characters filter the list, Backspace takes one off, and Esc clears the filter. |
 | TransferList | Up and Down move the row cursor, Left and Right switch panels, Space toggles the cursor's row in the selection, and Enter moves the panel's selection across, or the cursor's row when nothing is selected; Ctrl+A selects every row of the cursor's panel that shows. Other characters filter the cursor's panel, Backspace takes one off, and Esc clears the filter. With `Reorderable`, Alt+Up and Alt+Down move the chosen side's selection. |
 | TextInput, ComboBox | The editing keys under [Text editing](#text-editing); a combo also opens with Alt+Down or F4, closes with Alt+Up, pages its list with Page Up and Page Down, and takes its suggestion with Right at the end of the text or Tab. |
 

@@ -180,6 +180,9 @@ Private Const TIP_REST_SLOP As Double = 3
 ' Transfer paging arrows are square pointer targets of this many points,
 ' 24 pixels at 96 DPI: the WCAG 2.5.8 minimum target size.
 Private Const PAGER_TARGET As Double = 18
+' The least a radio group's or check list's row may take: a list whose
+' rows would squeeze below it shows a window of rows instead.
+Private Const LIST_ROW_MIN As Double = 18
 
 ' Toast size, in points: the width a toast keeps unless MinWidth and
 ' MaxWidth let it fit its words, the height of one line, the greatest
@@ -837,6 +840,9 @@ Private mBadgeText As String
 Private mAppliedBadgeSig As String
 ' A Toggle's caption part as last drawn, empty while it has none.
 Private mAppliedToggleCaptionSig As String
+' A windowed radio group's or check list's paging arrows as last drawn,
+' empty while it has none. Its window's first row is mListOffset.
+Private mAppliedRowScrollSig As String
 ' Stack: its members in the order they joined, the gap between them, the
 ' padding inside it, whether they run across instead of down, and whether
 ' they take its width; a count of flow changes, and the layout last
@@ -8070,7 +8076,10 @@ Friend Sub RunClickBehavior()
             Dim checkPart As String
             Dim checkRow As Long
             checkPart = clickedPart
-            If checkPart = "mb" Or checkPart = "mt" Then
+            If checkPart = "lu" Or checkPart = "ld" Then
+                PageRowList (checkPart = "ld")
+                Exit Sub
+            ElseIf checkPart = "mb" Or checkPart = "mt" Then
                 checkRow = 0
             ElseIf LenB(checkPart) = 0 Then
                 checkRow = 1
@@ -8141,7 +8150,10 @@ Friend Sub RunClickBehavior()
             If Not SelectTab(hostApp, tabPicked) Then Exit Sub
         Case KIND_RADIO
             Dim rowNumber As Long
-            If LenB(clickedPart) = 0 Then
+            If clickedPart = "lu" Or clickedPart = "ld" Then
+                PageRowList (clickedPart = "ld")
+                Exit Sub
+            ElseIf LenB(clickedPart) = 0 Then
                 rowNumber = 1
             ElseIf IsNumeric(Mid$(clickedPart, 2)) Then
                 rowNumber = CLng(Mid$(clickedPart, 2))
@@ -9814,6 +9826,7 @@ Private Sub HandleRadioKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
             hostApp.ClickDefaultButton
     End Select
     If aimRow = 0 Then Exit Sub
+    RevealListRow aimRow
     If SelectRadioRow(hostApp, aimRow) Then RunClickHandlers hostApp
 End Sub
 
@@ -10113,6 +10126,8 @@ Private Sub HandleCheckListKey(ByVal hostApp As ReDimUI, ByVal keyText As String
     Dim firstRow As Long
     Dim aimRow As Long
     Dim shownTotal As Long
+    Dim pageTotal As Long
+    Dim windowRows As Long
 
     If ItemCount = 0 Then Exit Sub
     If TypeListFilter(keyText) Then Exit Sub
@@ -10126,10 +10141,21 @@ Private Sub HandleCheckListKey(ByVal hostApp As ReDimUI, ByVal keyText As String
             aimRow = aimRow - 1
         Case "{DOWN}"
             aimRow = aimRow + 1
-        Case "{HOME}", "{PGUP}"
+        Case "{HOME}"
             aimRow = firstRow
-        Case "{END}", "{PGDN}"
+        Case "{END}"
             aimRow = shownTotal
+        Case "{PGUP}", "{PGDN}"
+            ' A windowed list pages by its window; one that shows every
+            ' row jumps to its ends.
+            RowListWindow pageTotal, windowRows
+            If windowRows < ItemCount Then
+                aimRow = aimRow + IIf(keyText = "{PGDN}", windowRows, -windowRows)
+            ElseIf keyText = "{PGUP}" Then
+                aimRow = firstRow
+            Else
+                aimRow = shownTotal
+            End If
         Case " "
             If ToggleCheckRow(hostApp, mKeyRow) Then RunClickHandlers hostApp
             Exit Sub
@@ -10145,6 +10171,7 @@ Private Sub HandleCheckListKey(ByVal hostApp As ReDimUI, ByVal keyText As String
     If aimRow < firstRow Then aimRow = firstRow
     If aimRow > shownTotal Then aimRow = shownTotal
     PlaceKeyCursor 0, IIf(aimRow = 0, 0, CheckShownItem(aimRow))
+    RevealListRow aimRow
     Touch
 End Sub
 
@@ -11620,6 +11647,7 @@ Friend Sub ForgetPartSignatures()
     mAppliedKeyCursorSig = vbNullString
     mAppliedClearSig = vbNullString
     mAppliedToggleCaptionSig = vbNullString
+    mAppliedRowScrollSig = vbNullString
     Erase mAppliedRowStates
     Erase mAppliedLeftRowStates
     Erase mAppliedRightRowStates
@@ -13929,6 +13957,90 @@ Private Function SelectTab(ByVal hostApp As ReDimUI, ByVal tabNumber As Long) As
     SelectTab = True
 End Function
 
+' A radio group's or check list's row pitch and the rows it shows at
+' once: every row while each gets LIST_ROW_MIN points or more, else a
+' window of as many rows as fit at that height, which the paging arrows
+' at the right edge and the keys move through.
+Private Sub RowListLayout( _
+    ByVal rowTotal As Long, _
+    ByVal headerRows As Long, _
+    ByRef rowPitch As Double, _
+    ByRef windowRows As Long _
+)
+    windowRows = rowTotal
+    rowPitch = mHeight / (rowTotal + headerRows)
+    If rowPitch >= LIST_ROW_MIN Or rowTotal <= 1 Then Exit Sub
+    windowRows = Int(mHeight / LIST_ROW_MIN) - headerRows
+    If windowRows < 1 Then windowRows = 1
+    rowPitch = mHeight / (windowRows + headerRows)
+End Sub
+
+' The rows a radio group or check list windows over: its items, or the
+' check list's rows that show under its filter; and the window's size.
+Private Sub RowListWindow(ByRef shownTotal As Long, ByRef windowRows As Long)
+    Dim rowPitch As Double
+    Dim headerRows As Long
+
+    If mKind = KIND_CHECKLIST Then
+        shownTotal = CheckShownCount()
+        If mSelectAllRow Then headerRows = 1
+    Else
+        shownTotal = ItemCount
+    End If
+    If ItemCount = 0 Then Exit Sub
+    RowListLayout ItemCount, headerRows, rowPitch, windowRows
+End Sub
+
+' A paging arrow's click or held repeat: the window moves by its height
+' less one row, and stops at the ends.
+Private Sub PageRowList(ByVal pageDown As Boolean)
+    Dim shownTotal As Long
+    Dim windowRows As Long
+    Dim offsetBefore As Long
+
+    RowListWindow shownTotal, windowRows
+    If windowRows < 1 Then Exit Sub
+    offsetBefore = mListOffset
+    If pageDown Then
+        mListOffset = mListOffset + IIf(windowRows > 1, windowRows - 1, 1)
+    Else
+        mListOffset = mListOffset - IIf(windowRows > 1, windowRows - 1, 1)
+    End If
+    If mListOffset > shownTotal - windowRows Then mListOffset = shownTotal - windowRows
+    If mListOffset < 0 Then mListOffset = 0
+    If mListOffset <> offsetBefore Then Touch
+End Sub
+
+' Moves the window just far enough to show a row, by its position among
+' the rows shown, or to the top for a check list's select-all header (0);
+' a key that moves the selection or cursor calls it.
+Private Sub RevealListRow(ByVal shownPosition As Long)
+    Dim shownTotal As Long
+    Dim windowRows As Long
+
+    Dim offsetBefore As Long
+
+    RowListWindow shownTotal, windowRows
+    If windowRows < 1 Then Exit Sub
+    offsetBefore = mListOffset
+    If shownPosition < 1 Then
+        mListOffset = 0
+    ElseIf shownPosition > mListOffset + windowRows Then
+        mListOffset = shownPosition - windowRows
+    ElseIf shownPosition <= mListOffset Then
+        mListOffset = shownPosition - 1
+    End If
+    If mListOffset <> offsetBefore Then Touch
+End Sub
+
+' Hides a part a windowed list drew for a row now outside its window,
+' when the part exists.
+Private Sub HideRowPart(ByVal hostSheet As Worksheet, ByVal partName As String)
+    On Error Resume Next
+    hostSheet.Shapes(ShapeName & PART_SEPARATOR & partName).Visible = msoFalse
+    On Error GoTo 0
+End Sub
+
 Private Sub ApplyRadioGroup( _
     ByVal mainShape As Shape, _
     ByVal hostSheet As Worksheet, _
@@ -13943,6 +14055,10 @@ Private Sub ApplyRadioGroup( _
     Dim dot As Shape
     Dim circleSize As Double
     Dim isPicked As Boolean
+    Dim windowRows As Long
+    Dim windowed As Boolean
+    Dim rowPos As Long
+    Dim rowTextRoom As Double
 
     If Not mItems Is Nothing Then rowTotal = mItems.Count
     If rowTotal = 0 Then
@@ -13959,17 +14075,36 @@ Private Sub ApplyRadioGroup( _
             Next idx
             mAppliedOptionCount = 0
         End If
+        DropRowScroller hostSheet
         mAppliedExtrasSig = vbNullString
         Exit Sub
     End If
-    If ExtrasCurrent(PartsState(themeValue) & ":" & CStr(mValue) & _
-        ":" & PointerKey() & DisabledItemsSig() & JoinedSig(mItems)) Then Exit Sub
-    rowPitch = mHeight / rowTotal
+    RowListLayout rowTotal, 0, rowPitch, windowRows
+    windowed = (windowRows < rowTotal)
+    If mListOffset > rowTotal - windowRows Then mListOffset = rowTotal - windowRows
+    If mListOffset < 0 Or Not windowed Then mListOffset = 0
+    If ExtrasCurrent(PartsState(themeValue) & ":" & CStr(mValue) & ":" & _
+        CStr(mListOffset) & ":" & PointerKey() & DisabledItemsSig() & _
+        JoinedSig(mItems)) Then Exit Sub
     circleSize = rowPitch - 6
     If circleSize > 14 Then circleSize = 14
     If circleSize < 10 Then circleSize = 10
+    rowTextRoom = mWidth - circleSize - 8
+    If windowed Then rowTextRoom = rowTextRoom - PAGER_TARGET - 6
     For idx = 1 To rowTotal
-        rowTop = mTop + (idx - 1) * rowPitch
+        ' A windowed group draws the rows in its window and hides the rest.
+        rowPos = idx - mListOffset
+        If rowPos < 1 Or rowPos > windowRows Then
+            If idx = 1 Then
+                mainShape.Visible = msoFalse
+            Else
+                HideRowPart hostSheet, "c" & idx
+            End If
+            HideRowPart hostSheet, "d" & idx
+            HideRowPart hostSheet, "t" & idx
+            GoTo RowDrawn
+        End If
+        rowTop = mTop + (rowPos - 1) * rowPitch
         isPicked = (idx = CLng(mValue))
         If idx = 1 Then
             Set ring = mainShape
@@ -14012,7 +14147,7 @@ Private Sub ApplyRadioGroup( _
         Set captionShape = EnsurePartShape(hostSheet, "t" & idx, msoShapeRectangle)
         captionShape.Left = mLeft + circleSize + 8
         captionShape.Top = rowTop
-        captionShape.Width = mWidth - circleSize - 8
+        captionShape.Width = rowTextRoom
         captionShape.Height = rowPitch
         StyleCaptionPart captionShape, ItemAt(idx), themeValue
         ' A disabled item reads muted and takes no clicks.
@@ -14022,6 +14157,7 @@ Private Sub ApplyRadioGroup( _
         End If
         captionShape.Visible = BoolToMso(mVisible)
         captionShape.OnAction = mAppliedOnAction
+RowDrawn:
     Next idx
     ' Rows beyond the current item count are leftovers from a longer list.
     For idx = rowTotal + 1 To mAppliedOptionCount
@@ -14030,6 +14166,26 @@ Private Sub ApplyRadioGroup( _
         DropPart hostSheet, "t" & idx
     Next idx
     mAppliedOptionCount = rowTotal
+    If windowed Or LenB(mAppliedRowScrollSig) > 0 Then
+        ApplyTransferScroller hostSheet, themeValue, "lu", "ld", mLeft, mTop, _
+            mWidth, mHeight, rowTotal, mListOffset, windowRows, mAppliedRowScrollSig
+    End If
+End Sub
+
+' A check list row key's place in the window, "" for a key with none.
+Private Function RowKeyPlace(ByVal rowKey As String) As String
+    Dim splitAt As Long
+
+    splitAt = InStrRev(rowKey, Chr$(3))
+    If splitAt > 0 Then RowKeyPlace = Mid$(rowKey, splitAt + 1)
+End Function
+
+' Takes a windowed list's paging arrows down.
+Private Sub DropRowScroller(ByVal hostSheet As Worksheet)
+    If LenB(mAppliedRowScrollSig) = 0 Then Exit Sub
+    mAppliedRowScrollSig = vbNullString
+    DropPart hostSheet, "lu"
+    DropPart hostSheet, "ld"
 End Sub
 
 ' One box-and-caption row per item, any number checked, plus an optional
@@ -14065,10 +14221,18 @@ Private Sub ApplyCheckListParts( _
     Dim shownTotal As Long
     Dim cursorAt As Long
     Dim entry As Variant
+    Dim windowRows As Long
+    Dim windowed As Boolean
+    Dim rowPos As Long
+    Dim rowTextRoom As Double
+    Dim priorStates() As String
+    Dim priorTop As Long
+    Dim wasDrawn As Boolean
 
     EnsureCheckedSet
     If Not mItems Is Nothing Then rowTotal = mItems.Count
     If rowTotal = 0 Then
+        DropRowScroller hostSheet
         SyncKeyCursor hostSheet, themeValue, False, 0, 0, 0, 0
         ' An emptied list takes its rows and select-all header down, and
         ' draws them afresh when items come back. The first box is the
@@ -14094,6 +14258,12 @@ Private Sub ApplyCheckListParts( _
         ":" & CStr(rowTotal) & Chr$(1) & mFilterCheck
     fullPass = Not (mAppliedValid And layoutKey = mAppliedCheckSig)
     If fullPass Then
+        ' The row states drawn under the old layout say which rows exist
+        ' to hide; none are known after a Render.
+        On Error Resume Next
+        priorTop = UBound(mAppliedRowStates)
+        On Error GoTo 0
+        If priorTop > 0 Then priorStates = mAppliedRowStates
         mAppliedCheckSig = layoutKey
         mAppliedCheckHeaderSig = vbNullString
         ReDim mAppliedRowStates(1 To rowTotal)
@@ -14123,7 +14293,12 @@ Private Sub ApplyCheckListParts( _
     End If
     headerRows = 0
     If mSelectAllRow Then headerRows = 1
-    rowPitch = mHeight / (rowTotal + headerRows)
+    RowListLayout rowTotal, headerRows, rowPitch, windowRows
+    windowed = (windowRows < rowTotal)
+    If mListOffset > shownTotal - windowRows Then mListOffset = shownTotal - windowRows
+    If mListOffset < 0 Or Not windowed Then mListOffset = 0
+    rowTextRoom = mWidth - 8
+    If windowed Then rowTextRoom = rowTextRoom - PAGER_TARGET - 6
     boxSize = rowPitch - 6
     If boxSize > 14 Then boxSize = 14
     If boxSize < 10 Then boxSize = 10
@@ -14171,27 +14346,40 @@ Private Sub ApplyCheckListParts( _
 
     For idx = 1 To rowTotal
         ' The first character carries the box state: checked adds 1 and
-        ' the pointer adds 2. A row the filter hides keys as "~".
-        If shownAt(idx) = 0 Then
+        ' the pointer adds 2; the row's place in the window ends the key.
+        ' A row the filter hides, or a windowed list's row outside its
+        ' window, keys as "~".
+        rowPos = shownAt(idx) - mListOffset
+        If shownAt(idx) = 0 Or rowPos < 1 Or rowPos > windowRows Then
             rowKey = "~"
         Else
             rowKey = CStr(IIf(checkedFlags(idx), 1, 0) + _
-                IIf(PointerOn("row" & idx), 2, 0)) & ItemAt(idx)
+                IIf(PointerOn("row" & idx), 2, 0)) & ItemAt(idx) & Chr$(3) & CStr(rowPos)
         End If
         priorKey = mAppliedRowStates(idx)
         If rowKey = "~" And priorKey <> "~" Then
             mAppliedRowStates(idx) = rowKey
-            On Error Resume Next
-            If idx = 1 Then
-                mainShape.Visible = msoFalse
-            Else
-                hostSheet.Shapes(ShapeName & PART_SEPARATOR & "b" & idx).Visible = msoFalse
+            ' Only a row drawn before has parts to hide: under this layout,
+            ' under the one before it, or, after a Render, possibly any.
+            wasDrawn = (LenB(priorKey) > 0 Or idx = 1)
+            If fullPass Then
+                If priorTop = 0 Then
+                    wasDrawn = True
+                ElseIf idx <= priorTop Then
+                    If LenB(priorStates(idx)) > 0 And priorStates(idx) <> "~" Then wasDrawn = True
+                End If
             End If
-            hostSheet.Shapes(ShapeName & PART_SEPARATOR & "t" & idx).Visible = msoFalse
-            On Error GoTo 0
+            If wasDrawn Then
+                If idx = 1 Then
+                    mainShape.Visible = msoFalse
+                Else
+                    HideRowPart hostSheet, "b" & idx
+                End If
+                HideRowPart hostSheet, "t" & idx
+            End If
         ElseIf rowKey <> priorKey And rowKey <> "~" Then
             mAppliedRowStates(idx) = rowKey
-            rowTop = mTop + (shownAt(idx) - 1 + headerRows) * rowPitch
+            rowTop = mTop + (rowPos - 1 + headerRows) * rowPitch
             boxCreated = False
             If idx = 1 Then
                 Set box = mainShape
@@ -14202,9 +14390,10 @@ Private Sub ApplyCheckListParts( _
             Set captionShape = EnsurePartShape( _
                 hostSheet, "t" & idx, msoShapeRectangle, captionCreated)
             If LenB(priorKey) > 0 And priorKey <> "~" _
-                And Not (boxCreated Or captionCreated) Then
-                ' Drawn under this layout: rewrite only the box state or the
-                ' caption text, whichever moved.
+                And Not (boxCreated Or captionCreated) _
+                And RowKeyPlace(priorKey) = RowKeyPlace(rowKey) Then
+                ' Drawn under this layout in this place: rewrite only the box
+                ' state or the caption text, whichever moved.
                 If Left$(priorKey, 1) <> Left$(rowKey, 1) Then
                     StyleCheckBoxState box, boxSize, themeValue, _
                         checkedFlags(idx), checkedFlags(idx), PointerOn("row" & idx)
@@ -14222,7 +14411,7 @@ Private Sub ApplyCheckListParts( _
                     checkedFlags(idx), checkedFlags(idx), PointerOn("row" & idx)
                 captionShape.Left = mLeft + boxSize + 8
                 captionShape.Top = rowTop
-                captionShape.Width = mWidth - boxSize - 8
+                captionShape.Width = rowTextRoom - boxSize
                 captionShape.Height = rowPitch
                 StyleCaptionPart captionShape, ItemAt(idx), themeValue
                 captionShape.Visible = BoolToMso(mVisible)
@@ -14230,6 +14419,11 @@ Private Sub ApplyCheckListParts( _
             End If
         End If
     Next idx
+    If windowed Or LenB(mAppliedRowScrollSig) > 0 Then
+        ApplyTransferScroller hostSheet, themeValue, "lu", "ld", mLeft, _
+            mTop + headerRows * rowPitch, mWidth, mHeight - headerRows * rowPitch, _
+            shownTotal, mListOffset, windowRows, mAppliedRowScrollSig
+    End If
     If fullPass Then
         For idx = rowTotal + 1 To mAppliedOptionCount
             DropPart hostSheet, "b" & idx
@@ -14239,8 +14433,12 @@ Private Sub ApplyCheckListParts( _
     End If
     If mKeyRow > rowTotal Then mKeyRow = rowTotal
     If mKeyRow < 1 - headerRows Then mKeyRow = 1
+    ' The cursor's place in the window, 0 while its row is out of view.
     cursorAt = 0
-    If mKeyRow >= 1 Then cursorAt = shownAt(mKeyRow)
+    If mKeyRow >= 1 Then
+        If shownAt(mKeyRow) > 0 Then cursorAt = shownAt(mKeyRow) - mListOffset
+        If cursorAt < 1 Or cursorAt > windowRows Then cursorAt = 0
+    End If
     SyncKeyCursor hostSheet, themeValue, _
         ReDimUI.IsComponentFocused(mOwnerAppId, mComponentId) And mVisible _
             And (mKeyRow = 0 Or cursorAt > 0), _
@@ -14652,10 +14850,10 @@ Private Sub ApplyTransferParts( _
         mAppliedRightRows, mAppliedRightRowStates
     ApplyTransferScroller hostSheet, themeValue, "alu", "ald", _
         mLeft, panelTop, panelW, panelH, TransferShownCount(0), mLeftOffset, _
-        mAppliedScrollLeftSig
+        TransferRowCapacity(), mAppliedScrollLeftSig
     ApplyTransferScroller hostSheet, themeValue, "clu", "cld", _
         rightX, panelTop, panelW, panelH, TransferShownCount(1), mRightOffset, _
-        mAppliedScrollRightSig
+        TransferRowCapacity(), mAppliedScrollRightSig
     SyncReorderButtons hostSheet, themeValue, rightX, panelW
     SyncTransferPartTint hostSheet, themeValue
 
@@ -14707,8 +14905,10 @@ Private Sub ApplyTransferHeader( _
 End Sub
 
 ' Small paging arrows on a panel's right edge, shown only when the list
-' outgrows the panel. appliedKey follows SyncListPager's convention:
-' empty when absent, "?" when unknown after Render.
+' outgrows the rowCapacity rows the panel shows: a transfer panel's, or
+' a long radio group's or check list's. appliedKey follows
+' SyncListPager's convention: empty when absent, "?" when unknown after
+' Render.
 Private Sub ApplyTransferScroller( _
     ByVal hostSheet As Worksheet, _
     ByVal themeValue As ReDimUI, _
@@ -14720,6 +14920,7 @@ Private Sub ApplyTransferScroller( _
     ByVal panelH As Double, _
     ByVal itemTotal As Long, _
     ByVal panelOffset As Long, _
+    ByVal rowCapacity As Long, _
     ByRef appliedKey As String _
 )
     Dim scrollButton As Shape
@@ -14728,13 +14929,13 @@ Private Sub ApplyTransferScroller( _
     Dim upInk As Long
     Dim downInk As Long
 
-    If itemTotal > TransferRowCapacity() And mVisible Then
+    If itemTotal > rowCapacity And mVisible Then
         ' An arrow with nothing beyond it reads muted, as a drop list's
         ' pager does at the first or last page.
         upInk = ResolveDrawnInk(themeValue)
         downInk = upInk
         If panelOffset <= 0 Then upInk = themeValue.OnMutedColor
-        If panelOffset >= itemTotal - TransferRowCapacity() Then
+        If panelOffset >= itemTotal - rowCapacity Then
             downInk = themeValue.OnMutedColor
         End If
         scrollKey = PartsState(themeValue) & ":" & CStr(panelX) & ":" & _
@@ -15726,7 +15927,6 @@ End Function
 Friend Function PartAtPoint(ByVal pointsX As Double, ByVal pointsY As Double) As String
     Dim slot As Long
     Dim itemTotal As Long
-    Dim headerRows As Long
 
     If Not mItems Is Nothing Then itemTotal = mItems.Count
     Select Case mKind
@@ -15736,24 +15936,8 @@ Friend Function PartAtPoint(ByVal pointsX As Double, ByVal pointsY As Double) As
             ElseIf pointsX > mLeft + mWidth - mHeight Then
                 PartAtPoint = "plus"
             End If
-        Case KIND_RADIO
-            If itemTotal > 0 Then
-                slot = Int((pointsY - mTop) / (mHeight / itemTotal)) + 1
-                If slot >= 1 And slot <= itemTotal Then PartAtPoint = "row" & slot
-            End If
-        Case KIND_CHECKLIST
-            If itemTotal > 0 Then
-                If mSelectAllRow Then headerRows = 1
-                slot = Int((pointsY - mTop) / (mHeight / (itemTotal + headerRows))) _
-                    + 1 - headerRows
-                If slot = 0 And headerRows = 1 Then
-                    PartAtPoint = "row0"
-                ElseIf slot >= 1 Then
-                    ' Rows below the filter's last show nothing.
-                    slot = CheckShownItem(slot)
-                    If slot >= 1 Then PartAtPoint = "row" & slot
-                End If
-            End If
+        Case KIND_RADIO, KIND_CHECKLIST
+            If itemTotal > 0 Then PartAtPoint = RowListPartAt(pointsX, pointsY)
         Case KIND_SELECT, KIND_COMBO
             If mSelectOpen Then PartAtPoint = ListPartAt(pointsY)
         Case KIND_TRANSFER
@@ -15772,6 +15956,41 @@ Friend Function PartAtPoint(ByVal pointsX As Double, ByVal pointsY As Double) As
                 Next slot
             End If
     End Select
+End Function
+
+' A radio group's or check list's part at a point: "row" and the item's
+' number (0 for select-all), or a windowed list's paging arrow, "lu" or
+' "ld", as ApplyTransferScroller places them at the right edge.
+Private Function RowListPartAt(ByVal pointsX As Double, ByVal pointsY As Double) As String
+    Dim headerRows As Long
+    Dim rowPitch As Double
+    Dim windowRows As Long
+    Dim slot As Long
+    Dim areaTop As Double
+
+    If mKind = KIND_CHECKLIST And mSelectAllRow Then headerRows = 1
+    RowListLayout ItemCount, headerRows, rowPitch, windowRows
+    areaTop = mTop + headerRows * rowPitch
+    If windowRows < ItemCount _
+        And pointsX >= mLeft + mWidth - PAGER_TARGET - 3 And pointsX <= mLeft + mWidth - 3 Then
+        If pointsY >= areaTop + 3 And pointsY <= areaTop + 3 + PAGER_TARGET Then
+            RowListPartAt = "lu"
+            Exit Function
+        ElseIf pointsY >= mTop + mHeight - PAGER_TARGET - 3 And pointsY <= mTop + mHeight - 3 Then
+            RowListPartAt = "ld"
+            Exit Function
+        End If
+    End If
+    slot = Int((pointsY - mTop) / rowPitch) + 1 - headerRows
+    If slot = 0 And headerRows = 1 Then
+        RowListPartAt = "row0"
+        Exit Function
+    End If
+    If slot < 1 Or slot > windowRows Then Exit Function
+    slot = slot + mListOffset
+    ' A check list's rows below the filter's last show nothing.
+    If mKind = KIND_CHECKLIST Then slot = CheckShownItem(slot)
+    If slot >= 1 And slot <= ItemCount Then RowListPartAt = "row" & slot
 End Function
 
 ' The open list's part at a height: nothing on the face, else a row or
@@ -16061,6 +16280,8 @@ Friend Function RepeatsPart(ByVal partName As String) As Boolean
             RepeatsPart = mSelectOpen And (partName = "cp" Or partName = "cn")
         Case KIND_TABLE
             RepeatsPart = (partName = "tp" Or partName = "tn")
+        Case KIND_RADIO, KIND_CHECKLIST
+            RepeatsPart = (partName = "lu" Or partName = "ld")
         Case KIND_TRANSFER
             Select Case partName
                 Case "alu", "ald", "clu", "cld"
@@ -16087,6 +16308,8 @@ Friend Sub RepeatPart(ByVal hostApp As ReDimUI, ByVal partName As String)
             If mSelectOpen Then TurnCalendarMonth IIf(partName = "cp", -1, 1)
         Case "tp", "tn"
             PageTable IIf(partName = "tp", -1, 1)
+        Case "lu", "ld"
+            PageRowList (partName = "ld")
         Case Else
             PageTransferPanel partName
     End Select
