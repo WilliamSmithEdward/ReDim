@@ -6899,6 +6899,12 @@ Public Function SliderRange( _
         RaiseError ERROR_INVALID_ARGUMENT, "SliderRange", _
             "maximum must be greater than minimum."
     End If
+    ' A step of zero or less would leave a stepper's buttons and arrow
+    ' keys dead or reversed.
+    If stepSize <= 0 Then
+        RaiseError ERROR_INVALID_ARGUMENT, "SliderRange", _
+            "step must be greater than zero."
+    End If
     mSliderMin = lowestValue
     mSliderMax = highestValue
     mSliderStep = stepSize
@@ -14099,9 +14105,17 @@ Private Sub ApplyStepper( _
     Dim minusButton As Shape
     Dim plusButton As Shape
     Dim buttonSize As Double
+    Dim minusInk As Long
+    Dim plusInk As Long
 
     If ExtrasCurrent(PartsState(themeValue) & ":" & CStr(mValue) & _
         ":" & PointerKey()) Then Exit Sub
+    ' A button with no step left in its direction reads muted, as a list
+    ' pager with nothing beyond it does.
+    minusInk = ResolveDrawnInk(themeValue)
+    plusInk = minusInk
+    If mValue <= mSliderMin Then minusInk = themeValue.OnMutedColor
+    If mValue >= mSliderMax Then plusInk = themeValue.OnMutedColor
     buttonSize = mHeight
     mainShape.Left = mLeft + buttonSize + 4
     mainShape.Top = mTop
@@ -14125,7 +14139,7 @@ Private Sub ApplyStepper( _
     minusButton.Fill.ForeColor.RGB = PointerTint(themeValue.MutedColor, _
         ResolveDrawnInk(themeValue), "minus")
     minusButton.Line.Visible = msoFalse
-    StyleGlyphText minusButton, "-", ResolveDrawnInk(themeValue), _
+    StyleGlyphText minusButton, "-", minusInk, _
         themeValue.BaseFontSize + 2, themeValue
     minusButton.Visible = BoolToMso(mVisible)
     minusButton.OnAction = mAppliedOnAction
@@ -14139,7 +14153,7 @@ Private Sub ApplyStepper( _
     plusButton.Fill.ForeColor.RGB = PointerTint(themeValue.MutedColor, _
         ResolveDrawnInk(themeValue), "plus")
     plusButton.Line.Visible = msoFalse
-    StyleGlyphText plusButton, "+", ResolveDrawnInk(themeValue), _
+    StyleGlyphText plusButton, "+", plusInk, _
         themeValue.BaseFontSize + 2, themeValue
     plusButton.Visible = BoolToMso(mVisible)
     plusButton.OnAction = mAppliedOnAction
@@ -14365,9 +14379,10 @@ Private Sub ApplyTransferParts( _
         rightX, panelTop, panelW, panelH, mSelRight, mRightOffset, _
         mAppliedRightRows, mAppliedRightRowStates
     ApplyTransferScroller hostSheet, themeValue, "alu", "ald", _
-        mLeft, panelTop, panelW, panelH, TransferShownCount(0), mAppliedScrollLeftSig
+        mLeft, panelTop, panelW, panelH, TransferShownCount(0), mLeftOffset, _
+        mAppliedScrollLeftSig
     ApplyTransferScroller hostSheet, themeValue, "clu", "cld", _
-        rightX, panelTop, panelW, panelH, TransferShownCount(1), _
+        rightX, panelTop, panelW, panelH, TransferShownCount(1), mRightOffset, _
         mAppliedScrollRightSig
     SyncReorderButtons hostSheet, themeValue, rightX, panelW
     SyncTransferPartTint hostSheet, themeValue
@@ -14432,15 +14447,27 @@ Private Sub ApplyTransferScroller( _
     ByVal panelW As Double, _
     ByVal panelH As Double, _
     ByVal itemTotal As Long, _
+    ByVal panelOffset As Long, _
     ByRef appliedKey As String _
 )
     Dim scrollButton As Shape
     Dim scrollKey As String
     Dim firstDraw As Boolean
+    Dim upInk As Long
+    Dim downInk As Long
 
     If itemTotal > TransferRowCapacity() And mVisible Then
+        ' An arrow with nothing beyond it reads muted, as a drop list's
+        ' pager does at the first or last page.
+        upInk = ResolveDrawnInk(themeValue)
+        downInk = upInk
+        If panelOffset <= 0 Then upInk = themeValue.OnMutedColor
+        If panelOffset >= itemTotal - TransferRowCapacity() Then
+            downInk = themeValue.OnMutedColor
+        End If
         scrollKey = PartsState(themeValue) & ":" & CStr(panelX) & ":" & _
-            CStr(panelTop) & ":" & CStr(panelW) & ":" & CStr(panelH)
+            CStr(panelTop) & ":" & CStr(panelW) & ":" & CStr(panelH) & ":" & _
+            CStr(upInk) & ":" & CStr(downInk)
         If scrollKey = appliedKey Then Exit Sub
         firstDraw = (LenB(appliedKey) = 0 Or appliedKey = "?")
         appliedKey = scrollKey
@@ -14452,8 +14479,7 @@ Private Sub ApplyTransferScroller( _
         scrollButton.Height = PAGER_TARGET
         scrollButton.Fill.Visible = msoTrue
         scrollButton.Fill.ForeColor.RGB = themeValue.MutedColor
-        StyleGlyphText scrollButton, ChrW(9650), _
-            ResolveDrawnInk(themeValue), 9, themeValue
+        StyleGlyphText scrollButton, ChrW(9650), upInk, 9, themeValue
         scrollButton.Visible = msoTrue
         scrollButton.OnAction = mAppliedOnAction
         If firstDraw Then scrollButton.ZOrder msoBringToFront
@@ -14465,8 +14491,7 @@ Private Sub ApplyTransferScroller( _
         scrollButton.Height = PAGER_TARGET
         scrollButton.Fill.Visible = msoTrue
         scrollButton.Fill.ForeColor.RGB = themeValue.MutedColor
-        StyleGlyphText scrollButton, ChrW(9660), _
-            ResolveDrawnInk(themeValue), 9, themeValue
+        StyleGlyphText scrollButton, ChrW(9660), downInk, 9, themeValue
         scrollButton.Visible = msoTrue
         scrollButton.OnAction = mAppliedOnAction
         If firstDraw Then scrollButton.ZOrder msoBringToFront

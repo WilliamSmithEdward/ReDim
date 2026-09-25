@@ -5513,3 +5513,51 @@ Public Function TestPagerHoldsPlace() As String
     ReDimUI.AutoPump True
     TestPagerHoldsPlace = transcript
 End Function
+
+' A button or arrow with nowhere to go reads muted: a stepper's minus at
+' its minimum and plus at its maximum, and a transfer panel's up arrow on
+' its first page and down arrow on its last.
+Public Function TestDeadEnds() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim transcript As String
+    Dim names(0 To 11) As String
+    Dim idx As Long
+    Dim live As Long
+    Dim muted As Long
+
+    For idx = 0 To 11
+        names(idx) = "Item" & Format$(idx + 1, "00")
+    Next idx
+    ReDimUI.AutoPump False
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "wid76")
+    app.Stepper("qty").AtRect(24, 24, 120, 24).SliderRange(0, 3, 1).Value 0
+    app.TransferList("pool").AtRect(24, 80, 380, 128).ItemsFrom names
+    app.Render
+    live = app.Theme.OnSurfaceColor
+    muted = app.Theme.OnMutedColor
+    transcript = "minAtMin=" & CStr(InkOf(host, "rdm_wid76_qty__minus") = muted And _
+        InkOf(host, "rdm_wid76_qty__plus") = live)
+    app.Stepper("qty").Value 1
+    transcript = transcript & "|bothLive=" & CStr(InkOf(host, "rdm_wid76_qty__minus") = live And _
+        InkOf(host, "rdm_wid76_qty__plus") = live)
+    app.Stepper("qty").Value 3
+    transcript = transcript & "|plusAtMax=" & CStr(InkOf(host, "rdm_wid76_qty__minus") = live And _
+        InkOf(host, "rdm_wid76_qty__plus") = muted)
+    transcript = transcript & "|firstPage=" & CStr(InkOf(host, "rdm_wid76_pool__alu") = muted And _
+        InkOf(host, "rdm_wid76_pool__ald") = live)
+    For idx = 1 To 3
+        Sleep 200
+        ReDimUI.DispatchShape "rdm_wid76_pool__ald"
+    Next idx
+    transcript = transcript & "|lastPage=" & CStr(InkOf(host, "rdm_wid76_pool__alu") = live And _
+        InkOf(host, "rdm_wid76_pool__ald") = muted)
+    On Error Resume Next
+    app.Stepper("qty").SliderRange 0, 3, 0
+    transcript = transcript & "|zeroStepRefused=" & CStr(Err.Number <> 0)
+    Err.Clear
+    On Error GoTo 0
+    ReDimUI.AutoPump True
+    TestDeadEnds = transcript
+End Function

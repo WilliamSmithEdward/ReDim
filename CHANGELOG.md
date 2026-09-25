@@ -2,6 +2,14 @@
 
 ## 1.0.3 - 2026-09-25
 
+- Buttons with nowhere to go read muted. A `Stepper`'s minus at its
+  minimum and plus at its maximum, and a `TransferList` panel's up
+  arrow on its first page and down arrow on its last, draw their glyph
+  in muted ink, as a drop list's pager at the end of its list does. A
+  click on them changed nothing before and still changes nothing, but
+  looked live.
+- `SliderRange` refuses a step of zero or less, which left a stepper's
+  buttons and arrow keys dead or running backwards.
 - Errors say where they came from. A component's errors start with its
   id ("Component 'zone': RestrictToItems applies to ComboBox only."),
   so a failure in a long build names the control. A member called on

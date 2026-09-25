@@ -1492,3 +1492,13 @@ def test_pager_holds_place(run_widgets):
     assert facts["nothingPicked"] == "True", "a pager click must never pick a row"
     assert facts["downInertAtEnd"] == "True", "the last page shows an inert down pager"
     assert facts["lastRow"] == "Item20"
+
+
+def test_dead_ends(run_widgets):
+    facts = parse_transcript(run_widgets("TestDeadEnds"))
+    assert facts["minAtMin"] == "True", "a stepper at its minimum mutes its minus"
+    assert facts["bothLive"] == "True"
+    assert facts["plusAtMax"] == "True", "a stepper at its maximum mutes its plus"
+    assert facts["firstPage"] == "True", "a transfer panel's first page mutes its up arrow"
+    assert facts["lastPage"] == "True", "a transfer panel's last page mutes its down arrow"
+    assert facts["zeroStepRefused"] == "True", "SliderRange must refuse a step of zero"

@@ -126,7 +126,8 @@ All fluent, all return the component:
 - Tooltips: `Tooltip(text)` shows a note once the pointer rests on the control, and
   `DisabledReason(text)` says why a disabled control is disabled (see [Pointer](#pointer)).
 - Values: `Value(number)` (progress, slider, picker index), `Checked(flag)`,
-  `SliderRange(min, max, step)`.
+  `SliderRange(min, max, step)`, which refuses a maximum at or below the minimum and a step
+  of zero or less.
 - Item lists (`SelectBox`, `ComboBox`, `RadioGroup`, `TransferList`, `CheckList`):
   `Items("A", "B", ...)` replaces; `ItemsFrom(source)` replaces from a 1D array, a
   Collection, a Range (one item per non-empty cell), or a ROneCOne sequence;
@@ -200,7 +201,8 @@ dependencies:
 - `TickBox`: themed box, check glyph, caption; box and caption both toggle on click.
 - `RadioGroup`: single-select option rows, a control native form controls never offered.
 - `Stepper`: numeric entry as minus and plus around a value face, honoring `SliderRange` -
-  the precise keyboard-free form of numeric input.
+  the precise keyboard-free form of numeric input. At the minimum the minus reads muted,
+  and at the maximum the plus.
 - `SlideBar`: a drawn slider with true press-drag, without blocking. Shape OnAction only
   fires at mouse up, so the pump's frames watch for the left-button press edge themselves,
   hit-test the cursor against the track, and run the drag session: the value follows the
@@ -241,8 +243,8 @@ dependencies:
   with a comma and space; `OnChange` fires once per user transfer, and selecting rows
   fires nothing. A selected row shows a check as well as the accent fill. Rows render up
   to the panel's height; when a list outgrows its panel, paging arrows appear on the
-  panel's right edge, 18-point targets, and move the window a page at a time, and the
-  header counts stay honest about totals. `Reorderable` adds up and down arrows at the
+  panel's right edge, 18-point targets, and move the window a page at a time (the arrow
+  with nothing beyond it reads muted), and the header counts stay honest about totals. `Reorderable` adds up and down arrows at the
   right end of the chosen panel's header: they move the chosen side's selected rows one
   place as a block, stopping at the ends, and Alt+Up and Alt+Down do the same from its
   rows (the cursor's row when nothing is selected). The chosen order is part of the
