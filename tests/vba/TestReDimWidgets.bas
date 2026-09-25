@@ -5900,6 +5900,7 @@ Public Function TestEditChords() As String
     app.Tabs("pages").AtRect(24, 24, 240, 26).Items "One", "Two", "Three"
     app.DatePicker("due").AtRect(24, 70, 150, 24).PickDate DateSerial(2026, 3, 10)
     app.TextInput("name").AtRect 24, 110, 150, 22
+    app.Stepper("qty").AtRect(24, 150, 120, 24).SliderRange(0, 500, 1).Value 5
     app.Render
     transcript = "bound=" & CStr(InStr(RdxCapturedCodes("{BS}"), Chr$(1) & "+{BS}" & Chr$(1)) > 0 _
         And InStr(RdxCapturedCodes("{CUT}"), "+{DEL}") > 0 _
@@ -5920,6 +5921,17 @@ Public Function TestEditChords() As String
     RdxKeyLetter "B"
     transcript = transcript & "|capsFollowed=" & CStr(app.TextInput("name").InputValue = _
         IIf(capsOn, "Ab", "aB"))
+    ' Digits typed into a focused stepper set its value, clamped.
+    app.Stepper("qty").Focus
+    RdxKeyChar "2"
+    RdxKeyChar "5"
+    RdxKeyChar "0"
+    transcript = transcript & "|stepperTyped=" & app.Stepper("qty").CurrentValue
+    Sleep 1100
+    RdxKeyChar "9"
+    RdxKeyChar "9"
+    RdxKeyChar "9"
+    transcript = transcript & "|stepperClamped=" & app.Stepper("qty").CurrentValue
     RdxReleaseKeys
     ReDimUI.AutoPump True
     TestEditChords = transcript

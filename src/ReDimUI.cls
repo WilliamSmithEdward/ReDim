@@ -9965,7 +9965,18 @@ Private Sub HandleStepperKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
             hostApp.ClickDefaultButton
             Exit Sub
         Case Else
-            Exit Sub
+            ' Digits typed within a second of each other build a number,
+            ' as in an up-down control's edit box; a minus leads it when
+            ' the range goes below zero.
+            If Not (keyText Like "[0-9]" Or (keyText = "-" And mSliderMin < 0)) Then Exit Sub
+            If GetTickCount64() - mTypeAheadMs > 1000 Then mTypeAhead = vbNullString
+            mTypeAheadMs = GetTickCount64()
+            If keyText = "-" Then
+                mTypeAhead = "-"
+                Exit Sub
+            End If
+            mTypeAhead = mTypeAhead & keyText
+            aimValue = CDbl(mTypeAhead)
     End Select
     If SetStepperValue(hostApp, aimValue) Then RunClickHandlers hostApp
 End Sub

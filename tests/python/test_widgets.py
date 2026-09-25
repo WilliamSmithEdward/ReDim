@@ -1564,6 +1564,8 @@ def test_edit_chords(run_widgets):
     assert facts["tabsStep"] == "Two", "Ctrl+Page Down must step a tab strip"
     assert facts["calendarYear"] == "2027-03-10", "Ctrl+Page Down must step a calendar a year"
     assert facts["capsFollowed"] == "True", "a keyboard letter must follow Caps Lock"
+    assert facts["stepperTyped"] == "250", "digits typed into a stepper must set its value"
+    assert facts["stepperClamped"] == "500", "a typed value past the range must clamp"
 
 
 def test_filterable_select(run_widgets):

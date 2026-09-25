@@ -2,6 +2,9 @@
 
 ## 1.0.3 - 2026-09-25
 
+- A focused `Stepper` takes typed digits: typed within a second of
+  each other they set its value, clamped to the range, as an up-down
+  control's edit box does. Reaching 250 took 25 Page Ups.
 - A text field's builders raise on a control they do not apply to:
   `Placeholder`, `OnInput`, `DebounceMs`, `Numeric`, `MaxLength`,
   `Validates`, `Clearable`, `Masked`, and `ErrorText` name the kinds
