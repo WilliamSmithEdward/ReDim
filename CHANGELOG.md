@@ -2,6 +2,12 @@
 
 ## 1.0.3 - 2026-09-25
 
+- An async op's `OnDone`, `OnFail`, and `OnCancel` handlers, and a
+  job's, run with the op or job as `ReDimUI.Sender`, and an error
+  inside one reaches the app's `OnError` sink; they ran under `On Error
+  Resume Next`, so a failure there vanished. The new `Task` reader
+  gives the op's ROneCOne task, so `ReDimUI.Sender.Task.Result` reads
+  the result without keeping the task in a module variable.
 - Keys a Windows text box and tab strip take now work too. Caps Lock
   turns a typed letter's case over; OnKey binds keys, not characters,
   so letters typed with Caps Lock on came out lowercase. Shift+Backspace

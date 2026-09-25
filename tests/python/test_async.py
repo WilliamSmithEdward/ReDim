@@ -35,6 +35,11 @@ def test_on_click_async_sugar(run_async):
     assert facts["secondRunWorks"] == "True"
 
 
+def test_outcome_handlers(run_async):
+    facts = parse_transcript(run_async("TestOutcomeHandlers"))
+    assert facts["senderTask"] == "42", "OnDone must read its op's result through Sender.Task"
+
+
 def test_transport_op_across_ticks(run_async):
     facts = parse_transcript(run_async("TestTransportOpAcrossTicks"))
     assert facts["midStatus"] == "running", "delay must span multiple ticks"

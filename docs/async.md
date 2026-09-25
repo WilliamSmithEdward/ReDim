@@ -42,6 +42,21 @@ state (buttons swap to `BusyText`); everything restores on any terminal state. `
 the handler a cancel runs, as `OnDone` and `OnFail` name theirs. `AsyncError(opId)` returns the
 failure message after a fault.
 
+An outcome handler runs with the op as `ReDimUI.Sender`, so it reads the result without a
+module variable holding the task, and an error inside it goes to the app's `OnError` sink
+instead of vanishing:
+
+```vba
+Public Sub ApplyData()
+    Dim body As String
+    body = ReDimUI.Sender.Task.Result
+    ' ...
+End Sub
+```
+
+`Task` is the ROneCOne task the op runs, or Nothing before it starts. A job's `JobOnDone`,
+`JobOnFail`, and `JobOnCancel` handlers run with the job as the sender the same way.
+
 `btn.OnClickAsync "Module.Proc"` is the one-line form: a per-button op that disables the button,
 runs the procedure, and restores it. Clicks while busy are ignored.
 

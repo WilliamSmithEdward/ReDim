@@ -19190,12 +19190,17 @@ Private Sub FinishOp(ByVal hostApp As ReDimUI)
         hostApp.ReportAppError "ReDim async op '" & mComponentId & _
             "' failed: " & mOpLastError
     End If
-    If LenB(outcomeProc) > 0 Then
-        On Error Resume Next
-        Application.Run outcomeProc
-        On Error GoTo 0
-    End If
+    ' The handler runs with the op as ReDimUI.Sender, so it can read
+    ' Sender.Task, and its errors reach the app's error sink.
+    If LenB(outcomeProc) > 0 Then ReDimUI.RunHandlerAs hostApp, Me, outcomeProc
 End Sub
+
+' The ROneCOne task an op runs or ran, for its outcome handlers:
+' ReDimUI.Sender.Task.Result inside OnDone. Nothing before the op starts.
+Public Property Get Task() As ROneCOne
+    RequireRole ROLE_ASYNC_OP, "Task"
+    Set Task = mOpTask
+End Property
 
 Private Sub SetOpControlsBusy(ByVal hostApp As ReDimUI, ByVal busyValue As Boolean)
     Dim disabledId As Variant
@@ -19362,11 +19367,9 @@ End Sub
 Private Sub FinishJob(ByVal hostApp As ReDimUI, ByVal outcomeProc As String)
     mJobRunning = False
     mJobCancelRequested = False
-    If LenB(outcomeProc) > 0 Then
-        On Error Resume Next
-        Application.Run outcomeProc
-        On Error GoTo 0
-    End If
+    ' The handler runs with the job as ReDimUI.Sender, and its errors
+    ' reach the app's error sink.
+    If LenB(outcomeProc) > 0 Then ReDimUI.RunHandlerAs hostApp, Me, outcomeProc
 End Sub
 
 ' =====================================================================

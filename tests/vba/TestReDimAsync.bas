@@ -18,6 +18,7 @@ Private gDoneRan As Long
 Private gCancelRan As Long
 Private gDuringWorkBusy As Boolean
 Private gJobCounter As Long
+Private gResultSeen As Variant
 
 Private Function NewCanvas() As Worksheet
     Set NewCanvas = ActiveWorkbook.Worksheets.Add
@@ -38,6 +39,11 @@ End Sub
 
 Public Sub RecordCancel()
     gCancelRan = gCancelRan + 1
+End Sub
+
+' An outcome handler that reads its op's result through the sender.
+Public Sub ReadResult()
+    gResultSeen = ReDimUI.Sender.Task.Result
 End Sub
 
 Public Function JobStepSmall() As Boolean
@@ -130,6 +136,29 @@ Public Function TestOnClickAsyncSugar() As String
     transcript = transcript & "|secondRunWorks=" & CStr(gWorkRan = 2)
     ReDimUI.AutoPump True
     TestOnClickAsyncSugar = transcript
+End Function
+
+' An op's outcome handler runs with the op as ReDimUI.Sender and reads
+' its task's result through Sender.Task. (An error raised inside a
+' handler escapes a harness call whatever traps it, so the error sink is
+' not exercised here.)
+Public Function TestOutcomeHandlers() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim transcript As String
+
+    gResultSeen = Empty
+    Set host = NewCanvas()
+    ReDimUI.AutoPump False
+    Set app = ReDimUI.Mount(host, "async9")
+    app.Async("val").RunsTask(ROneCOne.Task.FromResult(42)).OnDone "TestReDimAsync.ReadResult"
+    app.Render
+    app.Async("val").Start
+    ReDimUI.PumpOnce
+    ReDimUI.PumpOnce
+    transcript = "senderTask=" & CStr(gResultSeen)
+    ReDimUI.AutoPump True
+    TestOutcomeHandlers = transcript
 End Function
 
 Public Function TestTransportOpAcrossTicks() As String
