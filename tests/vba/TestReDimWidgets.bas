@@ -5685,6 +5685,49 @@ Public Function TestSelectAllKeys() As String
     TestSelectAllKeys = transcript
 End Function
 
+' SelectedText and SelectedValue read the selection the same way on every
+' item control: the item, its value, or empty while nothing is selected,
+' never a placeholder or a combo's free text.
+Public Function TestSelectionReaders() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim transcript As String
+
+    ReDimUI.AutoPump False
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "wid80")
+    app.SelectBox("size").AtRect(24, 24, 140, 22).Text("Pick a size").Items "S", "M", "L"
+    app.RadioGroup("tier").AtRect 24, 60, 140, 60
+    app.RadioGroup("tier").AddItem "Low", , 10
+    app.RadioGroup("tier").AddItem "High", , 20
+    app.Tabs("pages").AtRect(200, 24, 240, 26).Items "One", "Two"
+    app.ComboBox("find").AtRect(200, 70, 150, 22).Items "Alpha", "Beta"
+    app.Render
+    transcript = "noneSelected=" & CStr(app.SelectBox("size").SelectedText = "" And _
+        app.SelectBox("size").CurrentText = "Pick a size" And _
+        IsEmpty(app.SelectBox("size").SelectedValue))
+    app.SelectBox("size").Value 2
+    transcript = transcript & "|select=" & app.SelectBox("size").SelectedText & "/" & _
+        app.SelectBox("size").SelectedValue
+    app.RadioGroup("tier").Value 2
+    transcript = transcript & "|radio=" & app.RadioGroup("tier").SelectedText & "/" & _
+        app.RadioGroup("tier").SelectedValue
+    transcript = transcript & "|tabs=" & app.Tabs("pages").SelectedText
+    With app.ComboBox("find")
+        .InputValue = "Beta"
+        transcript = transcript & "|comboItem=" & .SelectedText
+        .InputValue = "Gamma"
+        transcript = transcript & "|comboFree=[" & .SelectedText & "]"
+    End With
+    On Error Resume Next
+    transcript = transcript & app.Label("note").SelectedText
+    transcript = transcript & "|otherKindRefused=" & CStr(Err.Number <> 0)
+    Err.Clear
+    On Error GoTo 0
+    ReDimUI.AutoPump True
+    TestSelectionReaders = transcript
+End Function
+
 ' A long face text stops short of the drop caret on a SelectBox, a
 ' DatePicker, and a ComboBox, measured from where the text is drawn.
 Public Function TestFaceClearsCaret() As String

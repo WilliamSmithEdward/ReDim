@@ -6114,6 +6114,54 @@ Public Property Get CurrentText() As String
     CurrentText = ResolveText(OwnerApp)
 End Property
 
+' The selected item's text on a SelectBox, ComboBox, RadioGroup, or Tabs,
+' and "" while nothing is selected: never a placeholder, and a combo's
+' free text only when it names an item.
+Public Property Get SelectedText() As String
+    Dim selectedAt As Long
+
+    RequireRole ROLE_COMPONENT, "SelectedText"
+    selectedAt = SelectedPosition("SelectedText")
+    If selectedAt >= 1 Then SelectedText = ItemAt(selectedAt)
+End Property
+
+' The selected item's value (see ItemValueAt), or Empty while nothing is
+' selected.
+Public Property Get SelectedValue() As Variant
+    Dim selectedAt As Long
+    Dim stateValue As Variant
+
+    RequireRole ROLE_COMPONENT, "SelectedValue"
+    selectedAt = SelectedPosition("SelectedValue")
+    If selectedAt < 1 Then Exit Property
+    AssignVariant stateValue, ItemStateValue(ItemAt(selectedAt))
+    If IsObject(stateValue) Then
+        Set SelectedValue = stateValue
+    Else
+        SelectedValue = stateValue
+    End If
+End Property
+
+' The selected item's position for the selection readers, 0 for none.
+Private Function SelectedPosition(ByVal memberName As String) As Long
+    Select Case mKind
+        Case KIND_SELECT, KIND_RADIO
+            If mIsMenu Then GoTo NotSelectable
+            SelectedPosition = CLng(mValue)
+        Case KIND_TABS
+            SelectedPosition = ShownTab()
+        Case KIND_COMBO
+            SelectedPosition = ExactItemMatch(FieldTextNow(OwnerApp.Sheet))
+        Case Else
+            GoTo NotSelectable
+    End Select
+    If SelectedPosition < 1 Or SelectedPosition > ItemCount Then SelectedPosition = 0
+    Exit Function
+NotSelectable:
+    RaiseError ERROR_INVALID_OPERATION, memberName, _
+        memberName & " applies to a SelectBox, ComboBox, RadioGroup, or Tabs."
+End Function
+
 Public Property Get IsEnabled() As Boolean
     RequireRole ROLE_COMPONENT, "IsEnabled"
     IsEnabled = mEnabled

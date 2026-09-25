@@ -187,6 +187,11 @@ All fluent, all return the component:
 - Reads: `ComponentId`, `CurrentValue`, `CurrentText`, `IsChecked`, `IsEnabled`,
   `IsVisible`, `IsBusy`, `InputValue` (TextInput and ComboBox; reads the float buffer or
   the backing cell, and assigning it writes without firing change events).
+- `SelectedText` and `SelectedValue` read the selection of a `SelectBox`, `ComboBox`,
+  `RadioGroup`, or `Tabs` alike: the selected item's text and its value (see Item values),
+  or `""` and `Empty` while nothing is selected. `CurrentText` differs by kind: a SelectBox
+  with nothing picked answers its placeholder, and a combo its typed text, where
+  `SelectedText` answers only an item the text names exactly.
 - `Remove` deletes the component and its shapes.
 
 Handlers are zero-argument public procedures referenced as `"Module.Proc"`. Inside a handler,

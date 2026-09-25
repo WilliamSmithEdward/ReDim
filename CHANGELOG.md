@@ -2,6 +2,11 @@
 
 ## 1.0.3 - 2026-09-25
 
+- `SelectedText` and `SelectedValue` read the selection of a
+  `SelectBox`, `ComboBox`, `RadioGroup`, or `Tabs` the same way: the
+  item's text and value, or empty while nothing is selected.
+  `CurrentText` answers a SelectBox's placeholder when nothing is
+  picked, so code that saved it could store the placeholder as data.
 - Buttons with nowhere to go read muted. A `Stepper`'s minus at its
   minimum and plus at its maximum, and a `TransferList` panel's up
   arrow on its first page and down arrow on its last, draw their glyph

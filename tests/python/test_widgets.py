@@ -1537,6 +1537,19 @@ def test_select_all_keys(run_widgets):
     )
 
 
+def test_selection_readers(run_widgets):
+    facts = parse_transcript(run_widgets("TestSelectionReaders"))
+    assert facts["noneSelected"] == "True", (
+        "SelectedText must be empty, not the placeholder, while nothing is picked"
+    )
+    assert facts["select"] == "M/M"
+    assert facts["radio"] == "High/20", "a RadioGroup must read its item and value"
+    assert facts["tabs"] == "One"
+    assert facts["comboItem"] == "Beta"
+    assert facts["comboFree"] == "[]", "a combo's free text is not a selection"
+    assert facts["otherKindRefused"] == "True"
+
+
 def test_face_clears_caret(run_widgets):
     facts = parse_transcript(run_widgets("TestFaceClearsCaret"))
     assert facts["pick"] == "True", "a SelectBox's long text must stop short of its caret"
