@@ -88,7 +88,6 @@ Public Sub BuildExpenseTracker()
 
     ui.SetStateDefault "darkMode", False
     ui.SetStateDefault "budget", 3000
-    ui.TextInput("budget").InputValue = CStr(ui.State("budget"))
     ui.OnStateChanged "darkMode", "ExpenseTracker.ShowThemeChoice"
     ShowThemeChoice
     RefreshViews ui
@@ -119,8 +118,7 @@ Private Sub BuildForm(ByVal ui As ReDimUI)
     ui.Expander("budgetBox").AtRect(24, 420, 290, 28).Text "Monthly budget"
     ui.TextInput("budget").AtRect(40, 456, 120, 22).Numeric(allowNegative:=False) _
         .WritesTo("budget").InExpander("budgetBox").OnChange "ExpenseTracker.HandleBudget"
-    ui.Toggle("dark").AtRect(24, 500, 44, 22).Text("Dark mode").WritesTo("darkMode") _
-        .BindValue "darkMode"
+    ui.Toggle("dark").AtRect(24, 500, 44, 22).Text("Dark mode").WritesTo "darkMode"
 End Sub
 
 ' This month's spend with its change on last month, six months as a

@@ -182,6 +182,22 @@ def test_protect_surface(run_core):
     assert facts["unmountUnprotects"] == "True"
 
 
+def test_writes_to_follows(run_core):
+    facts = parse_transcript(run_core("TestWritesToFollows"))
+    assert facts["seeded"] == "True/0", (
+        "a key with no value takes the control's on render, firing no listener"
+    )
+    assert facts["follows"] == "True/1", (
+        "SetState must move the control; the listener runs, OnChange does not"
+    )
+    assert facts["valueMaps"] == "2", "an item's value must map back to its item"
+    assert facts["textMaps"] == "1", "an item's text must map back to its item"
+    assert facts["clamps"] == "50"
+    assert facts["fieldFollows"] == "Ada"
+    assert facts["typingKept"] == "Adax", "a focused field must keep what is being typed"
+    assert facts["renderKeepsState"] == "True", "Render must show the value in play"
+
+
 def test_theme_builders(run_core):
     facts = parse_transcript(run_core("TestThemeBuilders"))
     assert facts["tokens"] == "True", "each theme builder must set the tokens it names"

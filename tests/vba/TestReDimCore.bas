@@ -633,6 +633,54 @@ Public Function TestUnmount() As String
         "|forgotten=" & CStr(Not ReDimUI.HasApp("core7"))
 End Function
 
+' A control follows the key it writes. A key with no value takes the
+' control's on the first render, silently; a key with a value shows on
+' the control after SetState, firing no OnChange; a select maps a value
+' or text back to its item; a focused field keeps what is being typed;
+' and a Render shows the value in play over the one a rebuild declares.
+Public Function TestWritesToFollows() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim transcript As String
+
+    gClickCount = 0
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "core10")
+    app.OnStateChanged "darkMode", "TestReDimCore.CoreStateHandler"
+    app.Toggle("dark").AtRect(24, 24, 44, 22).Checked(True).WritesTo("darkMode") _
+        .OnChange "TestReDimCore.CoreStateHandlerTens"
+    app.SelectBox("size").AtRect(24, 60, 140, 22).WritesTo "size"
+    app.SelectBox("size").AddItem "Small"
+    app.SelectBox("size").AddItem "Medium", , 20
+    app.Stepper("qty").AtRect(24, 100, 120, 24).SliderRange(0, 50, 1).WritesTo "qty"
+    app.TextInput("name").AtRect(24, 140, 150, 22).WritesTo "name"
+    app.Render
+    transcript = "seeded=" & CStr(app.State("darkMode") = True And app.State("qty") = 0 _
+        And app.State("name") = "" And Not app.HasState("size")) & "/" & gClickCount
+    app.SetState "darkMode", False
+    transcript = transcript & "|follows=" & CStr(Not app.Toggle("dark").IsChecked) & "/" & gClickCount
+    app.SetState "size", 20
+    transcript = transcript & "|valueMaps=" & app.SelectBox("size").CurrentValue
+    app.SetState "size", "Small"
+    transcript = transcript & "|textMaps=" & app.SelectBox("size").CurrentValue
+    app.SetState "qty", 999
+    transcript = transcript & "|clamps=" & app.Stepper("qty").CurrentValue
+    app.SetState "name", "Ada"
+    transcript = transcript & "|fieldFollows=" & app.TextInput("name").InputValue
+    app.TextInput("name").Focus
+    RdxKeyChar "x"
+    app.SetState "name", "Bob"
+    transcript = transcript & "|typingKept=" & app.TextInput("name").InputValue
+    RdxReleaseKeys
+    ReDimUI.ClearKeyboardFocus
+    app.SetState "darkMode", True
+    app.Toggle("dark").Checked False
+    app.Render
+    transcript = transcript & "|renderKeepsState=" & CStr(app.Toggle("dark").IsChecked)
+    app.Unmount True
+    TestWritesToFollows = transcript
+End Function
+
 ' The theme builders set every color a theme holds, each read back by
 ' its token, and building on a preset leaves the next preset untouched.
 Public Function TestThemeBuilders() As String

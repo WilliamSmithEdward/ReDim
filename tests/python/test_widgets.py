@@ -1230,7 +1230,7 @@ def test_date_picker(run_widgets):
     assert facts["faceFormat"] == "2026-09-22"
     assert facts["picked"] == "2026-09-22"
     assert facts["programSilent"] == "True", (
-        "PickDate must write nothing and fire nothing"
+        "PickDate fires nothing; a key with no value takes the picked date as its first"
     )
     assert facts["opens"] == "True", "a click must open the calendar on the date's month"
     assert facts["dateFilled"] == "True"

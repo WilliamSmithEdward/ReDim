@@ -83,7 +83,7 @@ Public Sub BuildWidgetGallery()
     ui.RadioGroup("priority").AtRect(190, 204, 130, 60) _
         .Items("Low", "Medium", "High").Value(2).WritesTo "priority"
     ui.Stepper("volume").AtRect(350, 206, 120, 24).SliderRange(0, 100, 5) _
-        .Value(35).WritesTo("volume").BindValue "volume"
+        .Value(35).WritesTo "volume"
 
     ui.Label("lblInput").AtRect(24, 280, 200, 16).Text("Cell-free fields").Bold
     ui.TextInput("username").AtRect(24, 304, 150, 22).WritesTo "userName"
@@ -122,7 +122,7 @@ Public Sub BuildWidgetGallery()
     ui.Label("lblProgress").AtRect(24, 526, 200, 16) _
         .Text("Slider, stepper, and meter share one state key").Bold
     ui.SlideBar("volumeslide").AtRect(24, 548, 240, 18) _
-        .SliderRange(0, 100, 5).Value(35).WritesTo("volume").BindValue "volume"
+        .SliderRange(0, 100, 5).Value(35).WritesTo "volume"
     ui.ProgressBar("meter").AtRect(24, 574, 240, 12).BindValue "volume"
     ui.Label("meterLbl").AtRect(276, 568, 220, 18) _
         .BindText "volume", "Slide, step, or watch: {0}"
@@ -133,25 +133,15 @@ Public Sub BuildWidgetGallery()
 
     BuildNewSection ui
 
-    ui.SetState "notifications", False
-    ui.SetState "region", "North"
-    ui.SetState "drawnCheck", False
-    ui.SetState "priority", "Medium"
-    ui.SetState "volume", 35
-    ui.SetState "userName", vbNullString
-    ui.SetState "fruit", vbNullString
-    ui.SetState "notes", vbNullString
+    ' Each control seeds the key it writes on the first render; the check
+    ' list and transfer list, which write joined lists, are seeded here.
     ui.SetState "crew", "Barbara"
     ui.SetState "options", "Auto-save"
-    ui.SetState "email", vbNullString
-    ui.SetState "dueDate", vbNullString
-    ui.SetState "size", vbNullString
-    ui.SetState "stock", vbNullString
     ui.SetState "lastAction", "none yet"
     ui.SetState "oplog", "no run yet"
-    RefreshInspector
     WireInspector ui
     ui.Render
+    RefreshInspector
     ui.EndUpdate
     ui.ProtectSurface
 End Sub
@@ -217,17 +207,18 @@ Public Sub RefreshInspector()
     Dim inspectorText As String
 
     Set ui = GalleryApp()
-    inspectorText = "notifications = " & CStr(ui.State("notifications")) & _
-        "   region = " & CStr(ui.State("region")) & _
-        "   check = " & CStr(ui.State("drawnCheck")) & vbLf & _
-        "volume = " & CStr(ui.State("volume")) & _
-        "   priority = " & CStr(ui.State("priority")) & _
-        "   userName = " & CStr(ui.State("userName")) & vbLf & _
-        "email = " & CStr(ui.State("email")) & _
-        "   due = " & CStr(ui.State("dueDate")) & _
-        "   size = " & CStr(ui.State("size")) & _
-        "   stock row = " & CStr(ui.State("stock")) & vbLf & _
-        "last action = " & CStr(ui.State("lastAction"))
+    ' A pick not made yet has no value, so each reads with a fallback.
+    inspectorText = "notifications = " & CStr(ui.StateOrDefault("notifications", "")) & _
+        "   region = " & CStr(ui.StateOrDefault("region", "")) & _
+        "   check = " & CStr(ui.StateOrDefault("drawnCheck", "")) & vbLf & _
+        "volume = " & CStr(ui.StateOrDefault("volume", "")) & _
+        "   priority = " & CStr(ui.StateOrDefault("priority", "")) & _
+        "   userName = " & CStr(ui.StateOrDefault("userName", "")) & vbLf & _
+        "email = " & CStr(ui.StateOrDefault("email", "")) & _
+        "   due = " & CStr(ui.StateOrDefault("dueDate", "")) & _
+        "   size = " & CStr(ui.StateOrDefault("size", "")) & _
+        "   stock row = " & CStr(ui.StateOrDefault("stock", "")) & vbLf & _
+        "last action = " & CStr(ui.StateOrDefault("lastAction", ""))
     ui.SetState "inspector", inspectorText
 End Sub
 

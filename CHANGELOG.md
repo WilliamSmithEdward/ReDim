@@ -2,6 +2,19 @@
 
 ## 1.0.3 - 2026-09-25
 
+- `WritesTo` goes both ways: a control follows the key it writes.
+  `SetState` on the key moves the control, firing no `OnChange`, so New
+  game in the Snake demo turns its Pause switch off with the state, where
+  the switch stayed on. On the first render a key with no value takes
+  the control's value, as `SetStateDefault` would, so a build no longer
+  seeds each key by hand; a key that has one shows on the control, so a
+  rebuild keeps the value in play. A select, radio group, or tab strip
+  maps the item's value or text back to the item, and a field that has
+  the keys keeps what is being typed. Check lists, transfer lists, and
+  cell-backed fields do not follow. `BindValue` on a select, radio
+  group, or tab strip now takes an item's text as well as a position.
+  The demos drop their seeding lines and hand-written loads, and the
+  Expense Tracker's budget stays a number instead of turning into text.
 - A one-line face cut short ends in an ellipsis: an unfocused
   `TextInput` or `ComboBox`, a `SelectBox`, and a `DatePicker`. They
   stopped mid-word on one line, so "A very long selection" read as

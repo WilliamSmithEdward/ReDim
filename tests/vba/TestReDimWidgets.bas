@@ -4362,7 +4362,7 @@ Public Function TestDatePicker() As String
         host.Shapes("rdm_wid54_due").TextFrame2.TextRange.Text
     transcript = transcript & "|picked=" & Format$(app.DatePicker("due").PickedDate, "yyyy-mm-dd")
     transcript = transcript & "|programSilent=" & _
-        CStr(Not app.HasState("dueState") And gChangeCount = 0)
+        CStr(gChangeCount = 0 And Format$(app.StateOrDefault("dueState", 0), "yyyy-mm-dd") = "2026-09-22")
 
     ReDimUI.DispatchShape "rdm_wid54_due"
     transcript = transcript & "|opens=" & CStr(ShapeExists(host, "rdm_wid54_due__cr6") _

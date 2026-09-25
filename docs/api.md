@@ -136,7 +136,8 @@ All fluent, all return the component:
   and unrelated removals; removing it clears the selection to the placeholder. A
   `RadioGroup` or `CheckList` left with no items shows nothing until items return.
   Programmatic mutations re-render but do not write `WritesTo` state or fire `OnChange`;
-  those belong to user interaction and explicit `SetState`.
+  those belong to user interaction and explicit `SetState`. The one exception is the first
+  render, when a `WritesTo` key with no value yet takes the control's value.
 - Item values: an item can carry a value apart from its text, `AddItem("Medium", , 20)` or
   `ItemsFrom(texts, values)` with the values in a source of the same shape (a range of
   items with gaps pairs with its range of values cell by cell). A pick then writes the
@@ -167,10 +168,19 @@ All fluent, all return the component:
   its own pager.
 - Bindings: `BindText(key, template)` where `{0}` is the value, `BindValue(key)`,
   `BindVisible(key, invert)`, `BindEnabled(key, invert)`, `WritesTo(key)`. The invert flag
-  serves the disable-while-busy pattern: `BindEnabled "anyRunning", True`. A `Toggle`,
-  `TickBox`, or `Expander` bound with `BindValue` follows `True` and `False`, so
-  `WritesTo "darkMode"` with `BindValue "darkMode"` keeps a switch and its state in step
-  whichever side changes.
+  serves the disable-while-busy pattern: `BindEnabled "anyRunning", True`.
+- `WritesTo(key)` goes both ways. A user's change writes the key, and the control follows
+  the key: `SetState "darkMode", True` flips a switch that writes `darkMode`, firing no
+  `OnChange`. On the first render a key with no value takes the control's, as
+  `SetStateDefault` would, with no listener run; a key that has one shows on the control,
+  so a rebuild keeps the value in play over the one the build declares. A `Toggle`,
+  `TickBox`, or `Expander` follows `True` and `False`, a `Stepper` or `SlideBar` a number
+  (clamped), a `DatePicker` a `Date`, a `SelectBox`, `RadioGroup`, or `Tabs` the item whose
+  value or text the key holds, and a float `TextInput` or `ComboBox` its text, except
+  while it has the keys. A `CheckList` or `TransferList` writes a joined list and does not
+  follow, nor does a cell-backed field, whose value is its cell. `BindValue(key)` follows
+  a different key one way; on a `SelectBox`, `RadioGroup`, or `Tabs` a number is a
+  position and a text names an item.
 - Behavior: `OnClick "Module.Proc"`, `OnClickAsync "Module.Proc"`, `OnChange "Module.Proc"`.
 - Keyboard: `TabIndex(n)` orders Tab, `Focus` gives the control keyboard focus,
   `AccessKey(letter)` binds Alt+letter for a button or tick box, `Shortcut(keyCode)` binds

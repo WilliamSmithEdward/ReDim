@@ -840,6 +840,9 @@ Private mBadgeText As String
 Private mAppliedBadgeSig As String
 ' A Toggle's caption part as last drawn, empty while it has none.
 Private mAppliedToggleCaptionSig As String
+' The state value a control last took from its WritesTo key, as
+' FollowSig renders it, so an unchanged key costs no mapping.
+Private mAppliedFollowSig As String
 ' A one-line face whose text was cut to fit with an ellipsis, and the
 ' width it was fitted at.
 Private mFaceTrimmed As Boolean
@@ -3561,6 +3564,18 @@ Public Sub SetState(ByVal stateKey As String, ByVal stateValue As Variant)
     MarkBoundComponentsDirty stateKey
     InvokeStateHandlers stateKey
     If mBatchDepth = 0 And mRendered Then FlushDirty
+End Sub
+
+' A control seeding the key it writes: stored when the key has none,
+' marking nothing dirty and running no listener, since it happens while
+' the app draws.
+Friend Sub SeedState(ByVal stateKey As String, ByVal stateValue As Variant)
+    Dim known As Variant
+
+    RequireRole ROLE_APP, "SeedState"
+    If TryGetItem(mStateValues, stateKey, known) Then Exit Sub
+    mStateKeys.Add stateKey
+    ReplaceItem mStateValues, stateKey, stateValue
 End Sub
 
 ' Sets the key only when it has no value yet, so setup code stays
@@ -7475,6 +7490,7 @@ Friend Function IsBoundTo(ByVal stateKey As String) As Boolean
     IsBoundTo = (mBindTextKey = stateKey) Or (mBindValueKey = stateKey) _
         Or (mBindVisibleKey = stateKey) Or (mBindEnabledKey = stateKey) _
         Or (LenB(mBindSourceKey) > 0 And mBindSourceKey = stateKey)
+    If Not IsBoundTo And mWritesToKey = stateKey Then IsBoundTo = FollowsWritesTo()
 End Function
 
 ' =====================================================================
@@ -8583,9 +8599,148 @@ Private Function AccessibleDescription() As String
     AccessibleDescription = described
 End Function
 
+' Whether the control follows its WritesTo key: a control whose one
+' value the key holds, and no BindValue naming a key of its own. Check
+' lists and transfer lists write a joined list, which an item holding
+' ", " would split wrongly, and a cell-backed field keeps its value in
+' the cell.
+Private Function FollowsWritesTo() As Boolean
+    If LenB(mWritesToKey) = 0 Then Exit Function
+    If LenB(mBindValueKey) > 0 And mBindValueKey <> mWritesToKey Then Exit Function
+    Select Case mKind
+        Case KIND_TOGGLE, KIND_TICKBOX, KIND_EXPANDER, KIND_STEPPER, KIND_SLIDEBAR, _
+            KIND_DATE, KIND_RADIO, KIND_TABS
+            FollowsWritesTo = True
+        Case KIND_SELECT
+            FollowsWritesTo = Not mIsMenu
+        Case KIND_INPUT, KIND_COMBO
+            FollowsWritesTo = IsFloatField()
+    End Select
+End Function
+
+' A state value as a comparable text: its type and value, or "" for an
+' object or array, which a control does not follow.
+Private Function FollowSig(ByRef stateValue As Variant) As String
+    If IsObject(stateValue) Then Exit Function
+    If IsArrayValue(stateValue) Then Exit Function
+    FollowSig = CStr(VarType(stateValue)) & ":" & CStr(stateValue)
+End Function
+
+' Shows a state value on the control, without writing state or firing
+' anything, the way the control's own writes would read back. False for
+' a value the control cannot show, or a field that has the keys, whose
+' typing is not overwritten.
+Private Function TakeStateValue(ByRef stateValue As Variant) As Boolean
+    Dim namedItem As Long
+
+    If IsObject(stateValue) Or IsArrayValue(stateValue) Then Exit Function
+    Select Case mKind
+        Case KIND_TOGGLE, KIND_TICKBOX, KIND_EXPANDER
+            If VarType(stateValue) <> vbBoolean And Not IsNumeric(stateValue) Then Exit Function
+            mChecked = CBool(stateValue)
+        Case KIND_STEPPER, KIND_SLIDEBAR
+            If Not IsNumeric(stateValue) Then Exit Function
+            mValue = CDbl(stateValue)
+            If mValue < mSliderMin Then mValue = mSliderMin
+            If mValue > mSliderMax Then mValue = mSliderMax
+        Case KIND_DATE
+            If IsEmpty(stateValue) Then
+                mValue = 0
+            ElseIf IsDate(stateValue) Or IsNumeric(stateValue) Then
+                mValue = CDbl(DayOnly(CDate(stateValue)))
+            Else
+                Exit Function
+            End If
+        Case KIND_SELECT, KIND_RADIO, KIND_TABS
+            namedItem = ItemPositionOf(stateValue)
+            If namedItem = 0 And Not IsEmpty(stateValue) Then Exit Function
+            mValue = namedItem
+        Case KIND_INPUT, KIND_COMBO
+            If ReDimUI.IsComponentFocused(mOwnerAppId, mComponentId) Then Exit Function
+            ' A combo writes a named item's value; it shows the item.
+            namedItem = 0
+            If mKind = KIND_COMBO Then namedItem = ItemPositionOf(stateValue)
+            If namedItem > 0 Then
+                mText = ItemAt(namedItem)
+            Else
+                mText = CStr(stateValue)
+            End If
+            mCaretPos = Len(mText)
+            mSelAnchor = mCaretPos
+    End Select
+    TakeStateValue = True
+End Function
+
+' The item a state value names, as the control writes one: by the
+' item's value where it has one, else by its text; 0 for none.
+Private Function ItemPositionOf(ByRef stateValue As Variant) As Long
+    Dim idx As Long
+    Dim itemValue As Variant
+
+    For idx = 1 To ItemCount
+        AssignVariant itemValue, ItemStateValue(ItemAt(idx))
+        If Not IsObject(itemValue) Then
+            If IsNumeric(itemValue) And IsNumeric(stateValue) _
+                And VarType(stateValue) <> vbString Then
+                If CDbl(itemValue) = CDbl(stateValue) Then ItemPositionOf = idx
+            ElseIf CStr(itemValue) = CStr(stateValue) Then
+                ItemPositionOf = idx
+            End If
+            If ItemPositionOf > 0 Then Exit Function
+        End If
+    Next idx
+End Function
+
+' A key with no value takes what the control shows, silently, as if the
+' build had set it with SetStateDefault before any listener could care:
+' a switch's True or False, a number, a picked date, a picked item's
+' value or text, or a field's text. Nothing picked leaves the key unset.
+Private Sub SeedWritesTo(ByVal hostApp As ReDimUI)
+    Dim seedValue As Variant
+    Dim namedItem As Long
+
+    Select Case mKind
+        Case KIND_TOGGLE, KIND_TICKBOX, KIND_EXPANDER
+            seedValue = mChecked
+        Case KIND_STEPPER, KIND_SLIDEBAR
+            seedValue = mValue
+        Case KIND_DATE
+            If mValue = 0 Then Exit Sub
+            seedValue = CDate(mValue)
+        Case KIND_SELECT, KIND_RADIO, KIND_TABS
+            namedItem = CLng(mValue)
+            If mKind = KIND_TABS Then namedItem = ShownTab()
+            If namedItem < 1 Or namedItem > ItemCount Then Exit Sub
+            AssignVariant seedValue, ItemStateValue(ItemAt(namedItem))
+        Case KIND_INPUT, KIND_COMBO
+            If mKind = KIND_COMBO And ExactItemMatch(mText) > 0 Then
+                AssignVariant seedValue, ItemStateValue(mText)
+            Else
+                seedValue = mText
+            End If
+    End Select
+    hostApp.SeedState mWritesToKey, seedValue
+    mAppliedFollowSig = FollowSig(seedValue)
+End Sub
+
 Private Sub ResolveBindings(ByVal hostApp As ReDimUI)
     Dim bound As Variant
+    Dim followed As Variant
 
+    ' A control follows the key it writes: the key's value, when it has
+    ' one, shows on the control; a key with none takes the control's.
+    If FollowsWritesTo() Then
+        If hostApp.HasState(mWritesToKey) Then
+            AssignVariant followed, hostApp.State(mWritesToKey)
+            ' Render forgets the value taken, so a rebuild shows the
+            ' value in play over the one the build declares.
+            If FollowSig(followed) <> mAppliedFollowSig Then
+                If TakeStateValue(followed) Then mAppliedFollowSig = FollowSig(followed)
+            End If
+        Else
+            SeedWritesTo hostApp
+        End If
+    End If
     If LenB(mBindTextKey) > 0 Then
         If hostApp.HasState(mBindTextKey) Then
             mText = FormatBoundText(hostApp.State(mBindTextKey))
@@ -8606,6 +8761,10 @@ Private Sub ResolveBindings(ByVal hostApp As ReDimUI)
                 End If
             ElseIf IsNumeric(bound) Then
                 mValue = CDbl(bound)
+            ElseIf mKind = KIND_SELECT Or mKind = KIND_RADIO Or mKind = KIND_TABS Then
+                ' A number is a position; a text names an item by its text
+                ' or its value, as the control writes it.
+                If ItemPositionOf(bound) > 0 Then mValue = ItemPositionOf(bound)
             End If
         End If
     End If
@@ -11870,6 +12029,7 @@ End Function
 
 Friend Sub ForgetExtrasSignature()
     mAppliedExtrasSig = vbNullString
+    mAppliedFollowSig = vbNullString
 End Sub
 
 ' Every part key dropped, so the next apply rewrites every part: for a

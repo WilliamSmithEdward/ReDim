@@ -96,10 +96,9 @@ Private Sub BuildSettings()
         .Text("These choices live in app state for this session.")
     ui.Button("back").Below("hint", 14).Sized(110, 30).Text("< Back") _
         .Secondary.OnClick "Navigator.HandleBack"
+    ' Each switch follows the key it writes, so the defaults show on it.
     ui.SetStateDefault "alertsOn", True
     ui.SetStateDefault "autoSave", False
-    ui.Toggle("alerts").Checked CBool(ui.State("alertsOn"))
-    ui.Toggle("autosave").Checked CBool(ui.State("autoSave"))
     ui.Render
     ui.ProtectSurface
 End Sub
