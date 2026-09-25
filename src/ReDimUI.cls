@@ -835,6 +835,8 @@ Private mAppliedIconGlyph As String
 ' signature it was drawn with.
 Private mBadgeText As String
 Private mAppliedBadgeSig As String
+' A Toggle's caption part as last drawn, empty while it has none.
+Private mAppliedToggleCaptionSig As String
 ' Stack: its members in the order they joined, the gap between them, the
 ' padding inside it, whether they run across instead of down, and whether
 ' they take its width; a count of flow changes, and the layout last
@@ -8381,6 +8383,7 @@ Private Function AccessibleDescription() As String
             Else
                 described = Phrase(UI_ALT_SWITCH_OFF)
             End If
+            If LenB(mText) > 0 Then described = mText & ", " & described
         Case KIND_INPUT
             described = Phrase(UI_ALT_EDIT_FIELD)
             If mMasked Then described = described & ", " & Phrase(UI_ALT_MASKED)
@@ -11079,6 +11082,9 @@ Private Sub ApplyKindExtras( _
     Select Case mKind
         Case KIND_TOGGLE
             ApplyToggleKnob hostSheet, themeValue
+            If LenB(mText) > 0 Or LenB(mAppliedToggleCaptionSig) > 0 Then
+                ApplyToggleCaption hostSheet, themeValue
+            End If
             mAppliedChecked = mChecked
         Case KIND_PROGRESS
             ' Tween loops repaint bars at frame rate; skip the fill
@@ -11613,6 +11619,7 @@ Friend Sub ForgetPartSignatures()
     mAppliedRingSig = vbNullString
     mAppliedKeyCursorSig = vbNullString
     mAppliedClearSig = vbNullString
+    mAppliedToggleCaptionSig = vbNullString
     Erase mAppliedRowStates
     Erase mAppliedLeftRowStates
     Erase mAppliedRightRowStates
@@ -14432,6 +14439,36 @@ Private Sub ApplyToggleKnob( _
     End If
     knob.Visible = BoolToMso(mVisible)
     knob.OnAction = mAppliedOnAction
+End Sub
+
+' A Toggle's Text: a caption right of the switch, sized to its words,
+' that flips the switch when clicked, as a TickBox's caption does. It
+' lies outside the control's width, which stays the switch's.
+Private Sub ApplyToggleCaption(ByVal hostSheet As Worksheet, ByVal themeValue As ReDimUI)
+    Dim captionShape As Shape
+    Dim captionKey As String
+
+    If LenB(mText) > 0 And mVisible Then
+        captionKey = PartsState(themeValue) & ":" & mText & ":" & mAccessKey
+    End If
+    If captionKey = mAppliedToggleCaptionSig Then Exit Sub
+    mAppliedToggleCaptionSig = captionKey
+    If LenB(captionKey) = 0 Then
+        DropPart hostSheet, "lbl"
+        Exit Sub
+    End If
+    Set captionShape = EnsurePartShape(hostSheet, "lbl", msoShapeRectangle)
+    captionShape.Left = mLeft + mWidth + 8
+    captionShape.Top = mTop - 1
+    captionShape.Height = mHeight + 2
+    captionShape.Width = 600
+    StyleCaptionPart captionShape, mText, themeValue
+    If LenB(mAccessKey) > 0 Or LenB(mAppliedAccessKey) > 0 Then
+        MarkAccessKey captionShape, mText
+    End If
+    captionShape.Width = captionShape.TextFrame2.TextRange.BoundWidth + 8
+    captionShape.Visible = msoTrue
+    captionShape.OnAction = mAppliedOnAction
 End Sub
 
 ' Puts a part at its target left and width, or, when it may glide and

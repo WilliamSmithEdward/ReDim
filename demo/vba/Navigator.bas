@@ -88,12 +88,10 @@ Private Sub BuildSettings()
     ui.NavBar
 
     ui.Label("title").AtRect(24, 48, 320, 30).Text("Settings").FontSize(20).Bold
-    ui.Toggle("alerts").Below("title", 16).Sized(44, 22).WritesTo "alertsOn"
-    ui.Label("alertslbl").RightOf("alerts", 10).Sized(200, 18) _
-        .Text("Alert notifications")
-    ui.Toggle("autosave").Below("alerts", 14).Sized(44, 22).WritesTo "autoSave"
-    ui.Label("autosavelbl").RightOf("autosave", 10).Sized(200, 18) _
-        .Text("Autosave results")
+    ui.Toggle("alerts").Below("title", 16).Sized(44, 22).Text("Alert notifications") _
+        .WritesTo "alertsOn"
+    ui.Toggle("autosave").Below("alerts", 14).Sized(44, 22).Text("Autosave results") _
+        .WritesTo "autoSave"
     ui.Label("hint").Below("autosave", 20).Sized(360, 18) _
         .Text("These choices live in app state for this session.")
     ui.Button("back").Below("hint", 14).Sized(110, 30).Text("< Back") _

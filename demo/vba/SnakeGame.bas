@@ -74,8 +74,7 @@ Public Sub BuildSnake()
         .BindText("score", "Score: {0}").FontSize(12).Bold
     ui.Button("newgame").AtRect(24, 76, 110, 30).Text("New game").Primary _
         .OnClick "SnakeGame.NewGame"
-    ui.Toggle("pause").AtRect(144, 80, 44, 22).WritesTo "paused"
-    ui.Label("pauselbl").AtRect(196, 82, 60, 18).Text("Pause")
+    ui.Toggle("pause").AtRect(144, 80, 44, 22).Text("Pause").WritesTo "paused"
     ui.Label("hint").AtRect(24, 116, 220, 60) _
         .Text("Steer with the arrow keys. Eat the red squares. Do not eat yourself.")
 

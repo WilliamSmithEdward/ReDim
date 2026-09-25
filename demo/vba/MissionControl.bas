@@ -64,9 +64,8 @@ Public Sub BuildMissionControl()
     ui.Label("subtitle").AtRect(24, 48, 420, 18) _
         .Text("Three async feeds, one responsive workbook. Built with ReDim.")
     ui.Spinner("busy").AtRect 400, 18, 26, 26
-    ui.Toggle("dark").AtRect(452, 22, 44, 22).WritesTo("darkMode") _
+    ui.Toggle("dark").AtRect(452, 22, 44, 22).Text("Dark mode").WritesTo("darkMode") _
         .OnChange "MissionControl.HandleThemeToggle"
-    ui.Label("darklbl").AtRect(502, 24, 80, 18).Text("Dark mode")
 
     ui.Button("launch").AtRect(24, 78, 120, 32).Text("Launch all feeds") _
         .Primary.BindEnabled("anyRunning", True) _

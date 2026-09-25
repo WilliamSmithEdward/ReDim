@@ -119,8 +119,8 @@ Private Sub BuildForm(ByVal ui As ReDimUI)
     ui.Expander("budgetBox").AtRect(24, 420, 290, 28).Text "Monthly budget"
     ui.TextInput("budget").AtRect(40, 456, 120, 22).Numeric(allowNegative:=False) _
         .WritesTo("budget").InExpander("budgetBox").OnChange "ExpenseTracker.HandleBudget"
-    ui.Toggle("dark").AtRect(24, 500, 44, 22).WritesTo("darkMode").BindValue "darkMode"
-    ui.Label("darkLbl").AtRect(76, 502, 200, 18).Text "Dark mode"
+    ui.Toggle("dark").AtRect(24, 500, 44, 22).Text("Dark mode").WritesTo("darkMode") _
+        .BindValue "darkMode"
 End Sub
 
 ' This month's spend with its change on last month, six months as a

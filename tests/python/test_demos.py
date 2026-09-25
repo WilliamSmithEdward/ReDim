@@ -540,7 +540,7 @@ def test_snake_smoke(demo_paths):
         result = excel.run_vba(SMOKE_SNAKE, proc="SmokeSnake", timeout=120)
         assert result.outcome == "passed", result.error
         facts = dict(t.split("=", 1) for t in result.value.split("|"))
-        assert int(facts["components"]) >= 6
+        assert int(facts["components"]) >= 5
         assert facts["active"] == "True"
         assert facts["headMoved"] == "True"
         assert facts["steered"] == "True"

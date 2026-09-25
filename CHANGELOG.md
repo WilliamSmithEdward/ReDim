@@ -2,6 +2,11 @@
 
 ## 1.0.3 - 2026-09-25
 
+- A `Toggle`'s `Text` draws as a caption right of the switch that flips
+  it when clicked and names it for screen readers ("Dark mode, Switch,
+  on"). `Text` did nothing on a Toggle, so every demo placed a separate
+  `Label` beside each switch; the six demos now caption their switches
+  instead, and a click on the words flips the switch.
 - `Required` on a `SelectBox`, `DatePicker`, or `RadioGroup` is checked:
   `ValidateAll` fails while nothing is picked, shows the message under
   the control, and puts focus on it, and a pick takes the message down.

@@ -5728,6 +5728,36 @@ Public Function TestSelectionReaders() As String
     TestSelectionReaders = transcript
 End Function
 
+' A Toggle's Text draws as a caption right of the switch, sized to its
+' words; a click on it flips the switch, the alternative text leads with
+' it, and Text "" takes it away.
+Public Function TestToggleCaption() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim transcript As String
+
+    ReDimUI.AutoPump False
+    ReDimUI.ReduceMotion True
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "wid83")
+    app.Toggle("dark").AtRect(24, 24, 44, 22).Text("Dark mode").WritesTo "darkMode"
+    app.Toggle("bare").AtRect 24, 60, 44, 22
+    app.Render
+    With host.Shapes("rdm_wid83_dark__lbl")
+        transcript = "captionRight=" & CStr(.Left >= 24 + 44 And _
+            .TextFrame2.TextRange.Text = "Dark mode" And .Width < 120)
+    End With
+    transcript = transcript & "|bareHasNone=" & CStr(Not ShapeExists(host, "rdm_wid83_bare__lbl"))
+    ReDimUI.DispatchShape "rdm_wid83_dark__lbl"
+    transcript = transcript & "|captionFlips=" & CStr(app.State("darkMode"))
+    transcript = transcript & "|altLeads=" & host.Shapes("rdm_wid83_dark").AlternativeText
+    app.Toggle("dark").Text ""
+    transcript = transcript & "|textGone=" & CStr(Not ShapeExists(host, "rdm_wid83_dark__lbl"))
+    ReDimUI.ReduceMotion
+    ReDimUI.AutoPump True
+    TestToggleCaption = transcript
+End Function
+
 ' Required on a SelectBox, DatePicker, and RadioGroup: ValidateAll fails
 ' while nothing is picked, shows the message under each, and puts focus
 ' on the first; a pick takes its message down, and ValidateAll passes

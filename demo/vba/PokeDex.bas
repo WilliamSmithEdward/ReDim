@@ -227,9 +227,8 @@ Private Sub BuildTrainer()
     ui.Stepper("level").AtRect(220, 198, 140, 24).SliderRange(1, 100, 5) _
         .Value(5).WritesTo "ambition"
 
-    ui.Toggle("darkmode").AtRect(24, 226, 44, 22).WritesTo("darkMode") _
+    ui.Toggle("darkmode").AtRect(24, 226, 44, 22).Text("Night mode").WritesTo("darkMode") _
         .OnChange "PokeDex.ApplyThemeChoice"
-    ui.Label("darklbl").AtRect(76, 228, 160, 18).Text("Night mode")
 
     ui.Card("card").AtRect(24, 262, 420, 96).Text("Trainer summary")
     ui.Label("cardbody").AtRect(36, 290, 396, 60).BindText "cardText"

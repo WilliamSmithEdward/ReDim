@@ -1550,6 +1550,15 @@ def test_selection_readers(run_widgets):
     assert facts["otherKindRefused"] == "True"
 
 
+def test_toggle_caption(run_widgets):
+    facts = parse_transcript(run_widgets("TestToggleCaption"))
+    assert facts["captionRight"] == "True", "a Toggle's Text must caption it on the right"
+    assert facts["bareHasNone"] == "True", "a Toggle without Text draws no caption"
+    assert facts["captionFlips"] == "True", "a click on the caption must flip the switch"
+    assert facts["altLeads"] == "Dark mode, Switch, on"
+    assert facts["textGone"] == "True", 'Text "" must take the caption away'
+
+
 def test_required_picks(run_widgets):
     facts = parse_transcript(run_widgets("TestRequiredPicks"))
     assert facts["fails"] == "True", "ValidateAll must fail while a required pick is empty"

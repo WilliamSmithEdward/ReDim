@@ -326,7 +326,11 @@ dependencies:
   even after its source file goes away.
 - `Toggle`: the pill switch for booleans. Switched on, the knob takes the theme's
   `OnPrimary` ink, as Windows draws it, so it stays visible on every accent track. A flip,
-  by click, key, or bound state, glides the knob across in about 200 ms.
+  by click, key, or bound state, glides the knob across in about 200 ms. `Text` draws a
+  caption 8 points right of the switch, sized to its words, that flips the switch when
+  clicked, as a `TickBox` caption does, and leads the alternative text ("Dark mode,
+  Switch, on"). The caption lies outside the control's width, which stays the switch's,
+  so leave it room in a row.
 - `MenuButton`: a button that drops a menu of commands. `AddCommand "Export",
   "Module.Export", "Download"` adds a row with its text, the Public procedure it runs, and
   an optional icon, which shows in the row's gutter. `AddGroup` labels a section, and

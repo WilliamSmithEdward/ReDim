@@ -71,8 +71,7 @@ Public Sub BuildWidgetGallery()
     ui.Label("oplog").AtRect(440, 114, 160, 16).BindText "oplog"
 
     ui.Label("lblValues").AtRect(24, 128, 200, 16).Text("Value controls").Bold
-    ui.Toggle("notify").AtRect(24, 150, 44, 22).WritesTo "notifications"
-    ui.Label("notifyLbl").AtRect(76, 152, 110, 18).Text("Notifications")
+    ui.Toggle("notify").AtRect(24, 150, 44, 22).Text("Notifications").WritesTo "notifications"
     ui.SelectBox("region").AtRect(196, 148, 130, 24) _
         .Items("North", "South", "East", "West").Value(1).WritesTo "region"
     ui.SelectBox("region").OnChange "WidgetGallery.HandleRegionChange"
