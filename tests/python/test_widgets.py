@@ -1091,6 +1091,10 @@ def test_hold_repeat(run_widgets):
     assert facts["arrowPages"] == "Item 11", (
         "a held paging arrow must page again and again"
     )
+    assert facts["tablePagesOn"] == "True", "a held table pager must page on"
+    assert facts["monthsTurn"] == "True", (
+        "a held calendar arrow must turn more than one month"
+    )
 
 
 def test_transfer_gestures(run_widgets):

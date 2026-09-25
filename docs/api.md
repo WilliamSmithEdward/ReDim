@@ -713,8 +713,9 @@ the pointer at most once a frame and act only while their sheet is in front.
   takes the new words. Screen readers get the note with the control's alternative text.
   An app with a tooltip reads the pointer every frame its sheet is in front, as
   `PointerEffects` does.
-- Hold-to-repeat: a press held on a stepper's minus or plus, a drop list's pager, or a
-  transfer panel's paging arrow repeats after the Windows keyboard repeat delay, at the
+- Hold-to-repeat: a press held on a stepper's minus or plus, a drop list's pager, a
+  transfer panel's paging arrow, a table's footer pager, or an open calendar's month
+  arrow repeats after the Windows keyboard repeat delay, at the
   keyboard repeat rate, while the pointer stays on it. A held stepper writes its
   `WritesTo` state at each step and fires `OnChange` once at the release, as a slider
   drag does, and the click Excel delivers for the release is swallowed.

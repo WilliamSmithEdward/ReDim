@@ -3824,6 +3824,25 @@ Public Function TestHoldRepeat() As String
     ReDimUI.OverridePointer 335, 172, False
     ReDimUI.PumpOnce
     transcript = transcript & "|arrowPages=" & RowItem(host, "rdm_wid46_tl__al1")
+
+    ' A held table pager pages on, and a held calendar arrow turns month
+    ' after month.
+    app.Table("tb").AtRect(24, 220, 300, 120).Columns "Row"
+    For itemNo = 1 To 60
+        app.Table("tb").AddRow "Row " & Format$(itemNo, "00")
+    Next itemNo
+    app.DatePicker("due").AtRect(360, 220, 150, 24).PickDate DateSerial(2026, 3, 10)
+    HoldOnPart host, "rdm_wid46_tb__tn"
+    transcript = transcript & "|tablePagesOn=" & CStr(TableRowShown(host, "rdm_wid46_tb__tr1") _
+        <> "Row 01")
+    Sleep 450
+    ReDimUI.DispatchShape "rdm_wid46_due"
+    HoldOnPart host, "rdm_wid46_due__cn"
+    transcript = transcript & "|monthsTurn=" & CStr( _
+        host.Shapes("rdm_wid46_due__ch").TextFrame2.TextRange.Text <> _
+            Format$(DateSerial(2026, 4, 1), "mmmm yyyy") And _
+        host.Shapes("rdm_wid46_due__ch").TextFrame2.TextRange.Text <> _
+            Format$(DateSerial(2026, 3, 1), "mmmm yyyy"))
     ReDimUI.ClearPointerOverride
     ReDimUI.AutoPump True
     TestHoldRepeat = transcript
@@ -4582,6 +4601,27 @@ Public Function TestTable() As String
 End Function
 
 ' A table row's text with its tabs as spaces and outer spaces trimmed.
+' Holds the left button on a part's middle past the slowest keyboard
+' repeat delay and one repeat interval, then lets go. No click follows,
+' so whatever changed came from the hold's repeats.
+Private Sub HoldOnPart(ByVal host As Worksheet, ByVal shapeName As String)
+    Dim pointsX As Double
+    Dim pointsY As Double
+
+    With host.Shapes(shapeName)
+        pointsX = .Left + .Width / 2
+        pointsY = .Top + .Height / 2
+    End With
+    ReDimUI.OverridePointer pointsX, pointsY, True
+    ReDimUI.PumpOnce
+    Sleep 1100
+    ReDimUI.PumpOnce
+    Sleep 450
+    ReDimUI.PumpOnce
+    ReDimUI.OverridePointer pointsX, pointsY, False
+    ReDimUI.PumpOnce
+End Sub
+
 Private Function TableRowShown(ByVal host As Worksheet, ByVal shapeName As String) As String
     TableRowShown = Trim$(Replace(host.Shapes(shapeName).TextFrame2.TextRange.Text, vbTab, " "))
 End Function

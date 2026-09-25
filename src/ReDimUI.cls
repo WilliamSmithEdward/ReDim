@@ -4404,7 +4404,8 @@ Friend Sub NoteTooltips()
 End Sub
 
 ' Hold-to-repeat: a press held on a stepper's minus or plus, a drop
-' list's pager, or a transfer panel's paging arrow repeats its action
+' list's pager, a transfer panel's paging arrow, a table's footer pager,
+' or an open calendar's month arrow repeats its action
 ' after the Windows keyboard repeat delay, at the keyboard repeat rate,
 ' while the pointer stays on the part. The release then fires OnChange
 ' once and swallows the click Excel delivers for it.
@@ -12963,13 +12964,7 @@ Private Function ClickCalendar(ByVal hostApp As ReDimUI, ByVal partName As Strin
             Touch
         Case "cp", "cn"
             If Not mSelectOpen Then Exit Function
-            mCalendarMonth = DateAdd("m", IIf(partName = "cp", -1, 1), mCalendarMonth)
-            mCalendarCursor = DateSerial(Year(mCalendarMonth), Month(mCalendarMonth), _
-                Day(mCalendarCursor))
-            If Month(mCalendarCursor) <> Month(mCalendarMonth) Then
-                mCalendarCursor = DateSerial(Year(mCalendarMonth), Month(mCalendarMonth) + 1, 0)
-            End If
-            Touch
+            TurnCalendarMonth IIf(partName = "cp", -1, 1)
         Case Else
             If Left$(partName, 2) <> "cd" Or Not IsNumeric(Mid$(partName, 3)) Then
                 Exit Function
@@ -12979,6 +12974,19 @@ Private Function ClickCalendar(ByVal hostApp As ReDimUI, ByVal partName As Strin
                 CalendarGridStart() + CLng(Mid$(partName, 3)) - 1)
     End Select
 End Function
+
+' Turns the open calendar a month back or on, from a click or a held
+' arrow. The keyboard cursor keeps its day of the month, or the month's
+' last day when the new month is shorter.
+Private Sub TurnCalendarMonth(ByVal monthStep As Long)
+    mCalendarMonth = DateAdd("m", monthStep, mCalendarMonth)
+    mCalendarCursor = DateSerial(Year(mCalendarMonth), Month(mCalendarMonth), _
+        Day(mCalendarCursor))
+    If Month(mCalendarCursor) <> Month(mCalendarMonth) Then
+        mCalendarCursor = DateSerial(Year(mCalendarMonth), Month(mCalendarMonth) + 1, 0)
+    End If
+    Touch
+End Sub
 
 ' Picks a calendar day: the calendar closes, and a new date writes to
 ' WritesTo and returns True for OnChange. A day outside DateRange is not
@@ -15824,6 +15832,10 @@ Friend Function RepeatsPart(ByVal partName As String) As Boolean
             RepeatsPart = (partName = "minus" Or partName = "plus")
         Case KIND_SELECT, KIND_COMBO
             RepeatsPart = mSelectOpen And (partName = "optu" Or partName = "optd")
+        Case KIND_DATE
+            RepeatsPart = mSelectOpen And (partName = "cp" Or partName = "cn")
+        Case KIND_TABLE
+            RepeatsPart = (partName = "tp" Or partName = "tn")
         Case KIND_TRANSFER
             Select Case partName
                 Case "alu", "ald", "clu", "cld"
@@ -15846,6 +15858,10 @@ Friend Sub RepeatPart(ByVal hostApp As ReDimUI, ByVal partName As String)
             SetStepperValue hostApp, mValue + mSliderStep
         Case "optu", "optd"
             PageDropList (partName = "optd")
+        Case "cp", "cn"
+            If mSelectOpen Then TurnCalendarMonth IIf(partName = "cp", -1, 1)
+        Case "tp", "tn"
+            PageTable IIf(partName = "tp", -1, 1)
         Case Else
             PageTransferPanel partName
     End Select

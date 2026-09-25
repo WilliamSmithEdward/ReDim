@@ -8,6 +8,10 @@
   in muted ink, as a drop list's pager at the end of its list does. A
   click on them changed nothing before and still changes nothing, but
   looked live.
+- A `Table`'s footer pager and a `DatePicker` calendar's month arrows
+  repeat while held, as the stepper, drop list, and transfer arrows
+  already did, so a long table or a date months away takes one press
+  instead of a click per page or month.
 - A `RadioGroup` or `CheckList` emptied by `ClearItems`, or by
   `RemoveItem` down to nothing, takes its rows down. It used to leave
   them on the sheet, looking clickable, with a check list's select-all
