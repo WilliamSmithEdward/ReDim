@@ -82,7 +82,9 @@
   and Space did nothing, and a calendar opened with no date started on
   today even when today lay outside. The cursor now stops on the
   range's first or last day, and the calendar opens on the nearest day
-  in range.
+  in range. The month arrows stop at the range's first and last month
+  and read muted there, where they turned into months with no day to
+  pick; a live arrow now reads in full ink.
 - `SliderRange` refuses a step of zero or less, which left a stepper's
   buttons and arrow keys dead or running backwards.
 - Errors say where they came from. A component's errors start with its

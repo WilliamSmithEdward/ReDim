@@ -13338,14 +13338,30 @@ End Function
 ' arrow. The keyboard cursor keeps its day of the month, or the month's
 ' last day when the new month is shorter.
 Private Sub TurnCalendarMonth(ByVal monthStep As Long)
+    ' DateRange stops the arrows at the months that hold a day it allows.
+    If Not CanTurnMonth(monthStep) Then Exit Sub
     mCalendarMonth = DateAdd("m", monthStep, mCalendarMonth)
     mCalendarCursor = DateSerial(Year(mCalendarMonth), Month(mCalendarMonth), _
         Day(mCalendarCursor))
     If Month(mCalendarCursor) <> Month(mCalendarMonth) Then
         mCalendarCursor = DateSerial(Year(mCalendarMonth), Month(mCalendarMonth) + 1, 0)
     End If
+    mCalendarCursor = DayClamped(mCalendarCursor)
     Touch
 End Sub
+
+' True when the month a step away holds a day DateRange allows.
+Private Function CanTurnMonth(ByVal monthStep As Long) As Boolean
+    Dim firstDay As Date
+
+    firstDay = DateAdd("m", monthStep, mCalendarMonth)
+    If mDateLatest <> 0 And firstDay > mDateLatest Then Exit Function
+    If mDateEarliest <> 0 _
+        And DateSerial(Year(firstDay), Month(firstDay) + 1, 0) < mDateEarliest Then
+        Exit Function
+    End If
+    CanTurnMonth = True
+End Function
 
 ' Picks a calendar day: the calendar closes, and a new date writes to
 ' WritesTo and returns True for OnChange. A day outside DateRange is not
@@ -13519,12 +13535,16 @@ Private Sub SyncCalendar(ByVal hostSheet As Worksheet, ByVal themeValue As ReDim
         cardTop + CAL_PAD, 5 * CAL_CELL_W, CAL_HEAD_H, _
         Format$(mCalendarMonth, "mmmm yyyy"), -1, themeValue.OnSurfaceColor, -1, _
         True, textSize
+    ' An arrow reads live while its month holds a day DateRange allows,
+    ' muted past the range, as a list's pager does at its end.
     SyncCalendarPart hostSheet, themeValue, 3, "cp", mLeft + CAL_PAD, _
         cardTop + CAL_PAD, CAL_CELL_W, CAL_HEAD_H, ChrW(9664), _
-        PartFill("cp", themeValue), themeValue.OnMutedColor, -1, False, textSize - 2
+        PartFill("cp", themeValue), IIf(CanTurnMonth(-1), themeValue.OnSurfaceColor, _
+            themeValue.OnMutedColor), -1, False, textSize - 2
     SyncCalendarPart hostSheet, themeValue, 4, "cn", mLeft + CAL_PAD + 6 * CAL_CELL_W, _
         cardTop + CAL_PAD, CAL_CELL_W, CAL_HEAD_H, ChrW(9654), _
-        PartFill("cn", themeValue), themeValue.OnMutedColor, -1, False, textSize - 2
+        PartFill("cn", themeValue), IIf(CanTurnMonth(1), themeValue.OnSurfaceColor, _
+            themeValue.OnMutedColor), -1, False, textSize - 2
     gridStart = CalendarGridStart()
     gridTop = cardTop + CAL_PAD + CAL_HEAD_H + CAL_WEEK_H
     If mValue <> 0 Then heldCell = CalendarCellOf(CDate(mValue), gridStart)

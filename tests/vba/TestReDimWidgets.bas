@@ -4426,6 +4426,24 @@ Public Function TestDatePicker() As String
     RdxKeyChar "{PGUP}"
     RdxKeyChar "{ENTER}"
     transcript = transcript & "|keysStopAtEarliest=" & Format$(app.State("dueState"), "yyyy-mm-dd")
+    ' The month arrows stop at DateRange too, and read muted there.
+    RdxKeyChar "{ALTDOWN}"
+    transcript = transcript & "|arrowsAtStart=" & CStr( _
+        InkOf(host, "rdm_wid54_due__cp") = app.Theme.OnMutedColor And _
+        InkOf(host, "rdm_wid54_due__cn") = app.Theme.OnSurfaceColor)
+    ReDimUI.DispatchShape "rdm_wid54_due__cp"
+    transcript = transcript & "|prevRefused=" & CStr( _
+        host.Shapes("rdm_wid54_due__ch").TextFrame2.TextRange.Text _
+            = Format$(DateSerial(2026, 9, 1), "mmmm yyyy"))
+    ReDimUI.DispatchShape "rdm_wid54_due__cn"
+    ReDimUI.DispatchShape "rdm_wid54_due__cn"
+    ReDimUI.DispatchShape "rdm_wid54_due__cn"
+    ReDimUI.DispatchShape "rdm_wid54_due__cn"
+    transcript = transcript & "|nextStopsAtEnd=" & CStr( _
+        host.Shapes("rdm_wid54_due__ch").TextFrame2.TextRange.Text _
+            = Format$(DateSerial(2026, 12, 1), "mmmm yyyy") And _
+        InkOf(host, "rdm_wid54_due__cn") = app.Theme.OnMutedColor)
+    RdxKeyChar "{ESC}"
     RdxReleaseKeys
 
     Sleep 200

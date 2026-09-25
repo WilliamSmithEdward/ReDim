@@ -1258,6 +1258,9 @@ def test_date_picker(run_widgets):
     assert facts["keysStopAtEarliest"] == "2026-09-05", (
         "Page Up past DateRange must stop on its first day, which Enter picks"
     )
+    assert facts["arrowsAtStart"] == "True", "a month arrow past DateRange must read muted"
+    assert facts["prevRefused"] == "True", "an arrow must not turn past DateRange"
+    assert facts["nextStopsAtEnd"] == "True", "the next arrow must stop at the range's last month"
     assert facts["pressOnKeeps"] == "True"
     assert facts["hoverTints"] == "True"
     assert facts["pressOffCloses"] == "True"
