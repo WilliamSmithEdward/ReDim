@@ -2,7 +2,10 @@
 
 Everything lives on `ReDimUI`, a predeclared role-tagged class in the ROneCOne style. The same
 type is the factory, an app, a component, a theme, an async op, and a job; each value answers
-only the members of its role and raises a clear error otherwise.
+only the members of its role and raises a clear error otherwise, such as "Text applies to a
+component; this value is an app." A component's errors start with its id, as in
+"Component 'zone': RestrictToItems applies to ComboBox only.", so a failure in a long build
+names the control that raised it.
 
 ## Factory
 

@@ -181,6 +181,20 @@ def test_protect_surface(run_core):
     assert facts["unmountUnprotects"] == "True"
 
 
+def test_error_words(run_core):
+    facts = parse_transcript(run_core("TestErrorWords"))
+    assert facts["componentNamed"] == (
+        "Component 'zone': RestrictToItems applies to ComboBox only."
+    )
+    assert facts["kindClash"] == (
+        "Component 'dark' already exists as kind Toggle, not Button."
+    )
+    assert facts["roleNamed"] == "Text applies to a component; this value is an app."
+    assert facts["relNamed"] == (
+        "Component 'tag': RightOf names 'nowhere', which is not a component of this app."
+    )
+
+
 def test_hotkey_lifecycle_and_version(run_core):
     facts = parse_transcript(run_core("TestHotKeyLifecycle"))
     assert facts["procCallable"] == "True"

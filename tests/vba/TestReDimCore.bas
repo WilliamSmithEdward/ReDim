@@ -623,3 +623,34 @@ Public Function TestUnmount() As String
         "|after=" & CountAppShapes(host, "core7") & _
         "|forgotten=" & CStr(Not ReDimUI.HasApp("core7"))
 End Function
+
+' Errors say where they came from: a component's lead with its id, a
+' kind clash names both kinds, a member on the wrong role names the role
+' it needs, and a relative placement names the builder that set it.
+Public Function TestErrorWords() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim transcript As String
+
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "core8")
+    app.SelectBox("zone").AtRect 24, 24, 120, 22
+    app.Toggle("dark").AtRect 24, 60, 44, 22
+    On Error Resume Next
+    app.SelectBox("zone").RestrictToItems
+    transcript = "componentNamed=" & Err.Description
+    Err.Clear
+    app.Button "dark"
+    transcript = transcript & "|kindClash=" & Err.Description
+    Err.Clear
+    app.Text "x"
+    transcript = transcript & "|roleNamed=" & Err.Description
+    Err.Clear
+    app.Label("tag").RightOf "nowhere"
+    app.Render
+    transcript = transcript & "|relNamed=" & Err.Description
+    Err.Clear
+    On Error GoTo 0
+    app.Unmount True
+    TestErrorWords = transcript
+End Function

@@ -2,6 +2,15 @@
 
 ## 1.0.3 - 2026-09-25
 
+- Errors say where they came from. A component's errors start with its
+  id ("Component 'zone': RestrictToItems applies to ComboBox only."),
+  so a failure in a long build names the control. A member called on
+  the wrong kind of value names the one it needs ("Text applies to a
+  component; this value is an app."), where it used to say only that
+  it was not valid. Reusing an id for another kind names both kinds,
+  and a relative placement that names no component, or runs in a
+  circle, names `RightOf` or `Below`, whichever set it; both used to
+  say `Below`.
 - Clicking a drop list's down pager until the last page no longer
   closes the list (#2). The pagers came and went with the page: the
   first page down added an up pager that pushed every row one row

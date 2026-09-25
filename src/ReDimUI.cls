@@ -3484,8 +3484,9 @@ Friend Function GetOrCreateComponent( _
     If TryGetComponent(targetComponentId, componentValue) Then
         If componentValue.ComponentKind <> kindCode Then
             RaiseError ERROR_INVALID_OPERATION, "Component", _
-                "Component '" & targetComponentId & _
-                "' already exists with a different kind."
+                "Component '" & targetComponentId & "' already exists as kind " & _
+                KindName(componentValue.ComponentKind) & ", not " & _
+                KindName(kindCode) & "."
         End If
         Set GetOrCreateComponent = componentValue
         Exit Function
@@ -8496,8 +8497,9 @@ Private Sub ResolvePlacement(ByVal hostSheet As Worksheet)
 
     If mRelMode <> REL_NONE Then
         If Not OwnerApp.TryGetComponent(mRelTargetId, relTarget) Then
-            RaiseError ERROR_NOT_FOUND, "Below", _
-                "Relative anchor '" & mRelTargetId & "' is not a component of this app."
+            RaiseError ERROR_NOT_FOUND, RelModeName(), _
+                RelModeName() & " names '" & mRelTargetId & _
+                "', which is not a component of this app."
         End If
         relTarget.EnsureGeometryResolved hostSheet
         If mRelMode = REL_BELOW Then
@@ -8525,12 +8527,17 @@ BadAnchor:
         "'" & mAnchor & "' is not a valid range on sheet '" & hostSheet.Name & "'."
 End Sub
 
+' The builder that set this control's relative placement.
+Private Function RelModeName() As String
+    If mRelMode = REL_RIGHT_OF Then RelModeName = "RightOf" Else RelModeName = "Below"
+End Function
+
 ' Relative chains resolve the anchor's geometry first. The flag turns a
 ' circular chain into a clear error instead of infinite recursion.
 Friend Sub EnsureGeometryResolved(ByVal hostSheet As Worksheet)
     If mGeometryResolving Then
-        RaiseError ERROR_INVALID_OPERATION, "Below", _
-            "Relative placement of '" & mComponentId & "' is circular."
+        RaiseError ERROR_INVALID_OPERATION, RelModeName(), _
+            "its " & RelModeName() & " placement is circular."
     End If
     mGeometryResolving = True
     On Error GoTo Unwind
@@ -18780,15 +18787,71 @@ End Sub
 Private Sub RequireRole(ByVal expectedRole As Long, ByVal memberName As String)
     If mRole <> expectedRole Then
         RaiseError ERROR_INVALID_OPERATION, memberName, _
-            memberName & " is not valid on this ReDimUI value."
+            memberName & " applies to " & RoleWords(expectedRole) & _
+            "; this value is " & RoleWords(mRole) & "."
     End If
 End Sub
 
+' A kind as its factory names it, for error messages.
+Private Function KindName(ByVal kindCode As Long) As String
+    Select Case kindCode
+        Case KIND_BUTTON: KindName = "Button"
+        Case KIND_LABEL: KindName = "Label"
+        Case KIND_CARD: KindName = "Card"
+        Case KIND_PROGRESS: KindName = "ProgressBar"
+        Case KIND_SPINNER: KindName = "Spinner"
+        Case KIND_TOGGLE: KindName = "Toggle"
+        Case KIND_INPUT: KindName = "TextInput"
+        Case KIND_TOAST: KindName = "Toast"
+        Case KIND_SELECT: KindName = "SelectBox or MenuButton"
+        Case KIND_TICKBOX: KindName = "TickBox"
+        Case KIND_RADIO: KindName = "RadioGroup"
+        Case KIND_STEPPER: KindName = "Stepper"
+        Case KIND_SLIDEBAR: KindName = "SlideBar"
+        Case KIND_COMBO: KindName = "ComboBox"
+        Case KIND_TRANSFER: KindName = "TransferList"
+        Case KIND_CHECKLIST: KindName = "CheckList"
+        Case KIND_IMAGE: KindName = "Image"
+        Case KIND_SKELETON: KindName = "Skeleton"
+        Case KIND_TABS: KindName = "Tabs"
+        Case KIND_DATE: KindName = "DatePicker"
+        Case KIND_TABLE: KindName = "Table"
+        Case KIND_BADGE: KindName = "Badge"
+        Case KIND_STACK: KindName = "Stack"
+        Case KIND_EXPANDER: KindName = "Expander"
+        Case KIND_SPARKLINE: KindName = "Sparkline"
+        Case Else: KindName = "a built-in control"
+    End Select
+End Function
+
+' A role as the error messages name it.
+Private Function RoleWords(ByVal roleValue As Long) As String
+    Select Case roleValue
+        Case ROLE_APP
+            RoleWords = "an app"
+        Case ROLE_COMPONENT
+            RoleWords = "a component"
+        Case ROLE_THEME
+            RoleWords = "a theme"
+        Case ROLE_ASYNC_OP
+            RoleWords = "an async op"
+        Case ROLE_JOB
+            RoleWords = "a job"
+        Case Else
+            RoleWords = "the ReDimUI factory"
+    End Select
+End Function
+
+' A component's errors lead with its id, so a failure in a long build
+' names the control that raised it.
 Private Sub RaiseError( _
     ByVal errNumber As Long, _
     ByVal memberName As String, _
     ByVal messageText As String _
 )
+    If mRole = ROLE_COMPONENT And LenB(mComponentId) > 0 Then
+        messageText = "Component '" & mComponentId & "': " & messageText
+    End If
     Err.Raise errNumber, "ReDimUI." & memberName, messageText
 End Sub
 
