@@ -182,6 +182,12 @@ def test_protect_surface(run_core):
     assert facts["unmountUnprotects"] == "True"
 
 
+def test_theme_builders(run_core):
+    facts = parse_transcript(run_core("TestThemeBuilders"))
+    assert facts["tokens"] == "True", "each theme builder must set the tokens it names"
+    assert facts["stockUntouched"] == "True", "building on ThemeLight must not change it"
+
+
 def test_error_words(run_core):
     facts = parse_transcript(run_core("TestErrorWords"))
     assert facts["componentNamed"] == (

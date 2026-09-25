@@ -633,6 +633,28 @@ Public Function TestUnmount() As String
         "|forgotten=" & CStr(Not ReDimUI.HasApp("core7"))
 End Function
 
+' The theme builders set every color a theme holds, each read back by
+' its token, and building on a preset leaves the next preset untouched.
+Public Function TestThemeBuilders() As String
+    Dim themeValue As ReDimUI
+    Dim transcript As String
+
+    Set themeValue = ReDimUI.ThemeLight.WithSurface(RGB(1, 2, 3), RGB(4, 5, 6)) _
+        .WithMuted(RGB(7, 8, 9), RGB(10, 11, 12)).WithStatus(RGB(13, 14, 15), RGB(16, 17, 18)) _
+        .WithBorder(RGB(19, 20, 21)).WithCanvas(RGB(22, 23, 24))
+    transcript = "tokens=" & CStr(themeValue.SurfaceColor = RGB(1, 2, 3) _
+        And themeValue.OnSurfaceColor = RGB(4, 5, 6) _
+        And themeValue.MutedColor = RGB(7, 8, 9) _
+        And themeValue.OnMutedColor = RGB(10, 11, 12) _
+        And themeValue.SuccessColor = RGB(13, 14, 15) _
+        And themeValue.DangerColor = RGB(16, 17, 18) _
+        And themeValue.BorderColor = RGB(19, 20, 21) _
+        And themeValue.CanvasColor = RGB(22, 23, 24))
+    transcript = transcript & "|stockUntouched=" & CStr(ReDimUI.ThemeLight.SurfaceColor = _
+        RGB(255, 255, 255))
+    TestThemeBuilders = transcript
+End Function
+
 ' Errors say where they came from: a component's lead with its id, a
 ' kind clash names both kinds, a member on the wrong role names the role
 ' it needs, and a relative placement names the builder that set it.

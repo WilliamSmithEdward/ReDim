@@ -19535,6 +19535,42 @@ Public Function WithFont( _
     Set WithFont = Me
 End Function
 
+' The rest of a theme's colors, each builder a fill and the ink drawn on
+' it where the pair goes together, so a custom theme needs no Friend
+' calls. ContrastReport checks the result.
+Public Function WithSurface(ByVal surfaceRgb As Long, ByVal onSurfaceRgb As Long) As ReDimUI
+    RequireRole ROLE_THEME, "WithSurface"
+    mThemeSurface = surfaceRgb
+    mThemeOnSurface = onSurfaceRgb
+    Set WithSurface = Me
+End Function
+
+Public Function WithMuted(ByVal mutedRgb As Long, ByVal onMutedRgb As Long) As ReDimUI
+    RequireRole ROLE_THEME, "WithMuted"
+    mThemeMuted = mutedRgb
+    mThemeOnMuted = onMutedRgb
+    Set WithMuted = Me
+End Function
+
+Public Function WithStatus(ByVal successRgb As Long, ByVal dangerRgb As Long) As ReDimUI
+    RequireRole ROLE_THEME, "WithStatus"
+    mThemeSuccess = successRgb
+    mThemeDanger = dangerRgb
+    Set WithStatus = Me
+End Function
+
+Public Function WithBorder(ByVal borderRgb As Long) As ReDimUI
+    RequireRole ROLE_THEME, "WithBorder"
+    mThemeBorder = borderRgb
+    Set WithBorder = Me
+End Function
+
+Public Function WithCanvas(ByVal canvasRgb As Long) As ReDimUI
+    RequireRole ROLE_THEME, "WithCanvas"
+    mThemeCanvas = canvasRgb
+    Set WithCanvas = Me
+End Function
+
 ' =====================================================================
 ' Shared helpers
 ' =====================================================================

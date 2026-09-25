@@ -766,28 +766,27 @@ Private Function EnsureSheet(ByVal sheetName As String) As Worksheet
     EnsureSheet.Name = sheetName
 End Function
 
-' A Pokedex-red theme in light and night variants, built on the same
-' ConfigureTheme surface the stock themes use.
+' A Pokedex-red theme in light and night variants: a stock theme with
+' every color replaced through the theme builders.
 Private Function PokeTheme(ByVal darkMode As Boolean) As ReDimUI
     Dim themeValue As ReDimUI
 
-    Set themeValue = New ReDimUI
     If darkMode Then
-        themeValue.ConfigureTheme _
-            RGB(232, 84, 74), RGB(20, 20, 22), _
-            RGB(45, 44, 48), RGB(240, 238, 235), _
-            RGB(66, 64, 70), RGB(176, 172, 168), _
-            RGB(96, 200, 140), RGB(240, 110, 110), _
-            RGB(92, 88, 94), RGB(30, 29, 33), _
-            "Segoe UI", 11
+        Set themeValue = ReDimUI.ThemeDark _
+            .WithPrimary(RGB(232, 84, 74), RGB(20, 20, 22)) _
+            .WithSurface(RGB(45, 44, 48), RGB(240, 238, 235)) _
+            .WithMuted(RGB(66, 64, 70), RGB(176, 172, 168)) _
+            .WithStatus(RGB(96, 200, 140), RGB(240, 110, 110)) _
+            .WithBorder(RGB(92, 88, 94)).WithCanvas(RGB(30, 29, 33)) _
+            .WithFont("Segoe UI", 11)
     Else
-        themeValue.ConfigureTheme _
-            RGB(214, 55, 46), RGB(255, 255, 255), _
-            RGB(255, 255, 255), RGB(40, 40, 42), _
-            RGB(238, 233, 229), RGB(122, 116, 112), _
-            RGB(46, 140, 90), RGB(178, 34, 52), _
-            RGB(220, 212, 206), RGB(250, 247, 244), _
-            "Segoe UI", 11
+        Set themeValue = ReDimUI.ThemeLight _
+            .WithPrimary(RGB(214, 55, 46), RGB(255, 255, 255)) _
+            .WithSurface(RGB(255, 255, 255), RGB(40, 40, 42)) _
+            .WithMuted(RGB(238, 233, 229), RGB(122, 116, 112)) _
+            .WithStatus(RGB(46, 140, 90), RGB(178, 34, 52)) _
+            .WithBorder(RGB(220, 212, 206)).WithCanvas(RGB(250, 247, 244)) _
+            .WithFont("Segoe UI", 11)
     End If
     Set PokeTheme = themeValue
 End Function

@@ -2,6 +2,10 @@
 
 ## 1.0.3 - 2026-09-25
 
+- A theme's other colors have builders: `WithSurface`, `WithMuted`,
+  `WithStatus`, `WithBorder`, and `WithCanvas` join `WithPrimary` and
+  `WithFont`, so a custom theme no longer needs the undocumented Friend
+  `ConfigureTheme`. The ReDex demo's theme is built with them.
 - A focused `Stepper` takes typed digits: typed within a second of
   each other they set its value, clamped to the range, as an up-down
   control's edit box does. Reaching 250 took 25 Page Ups.
