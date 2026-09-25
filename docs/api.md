@@ -220,8 +220,8 @@ dependencies:
   or a modal overlay never reaches a track painted underneath. Use `Stepper` for
   precision.
 - `SelectBox`: a themed face, caret, and option list in place of the native dropdown.
-  `Text` is the placeholder shown while nothing is selected. The list windows to
-  `ListRows` rows (eight by default): opening scrolls the selection into view, and
+  `Text`, or `Placeholder`, is the placeholder shown while nothing is selected. The list
+  windows to `ListRows` rows (eight by default): opening scrolls the selection into view, and
   clickable pager rows at the list edges (arrow plus the count beyond that edge) page the
   window, drawn whenever the list is longer than its window. Picking a new item writes the
   `WritesTo` state and fires `OnChange`; re-picking the selected item only closes the
@@ -279,8 +279,8 @@ dependencies:
   its right edge toggles the list. `RestrictToItems` limits a float combo's commits to
   its items (see [Field rules](#field-rules)).
 - `DatePicker`: a date field. Its face shows the date in the system's short date, or in
-  a `Format$` pattern given with `DateFormat "yyyy-mm-dd"`, and `Text` is the placeholder
-  it shows in muted ink while it holds none. A click, or Alt+Down, F4, Space, or Down
+  a `Format$` pattern given with `DateFormat "yyyy-mm-dd"`, and `Text`, or `Placeholder`,
+  is the placeholder it shows in muted ink while it holds none. A click, or Alt+Down, F4, Space, or Down
   while it has the keys, opens a month calendar under the face, over it when there is no
   room below: the month between two arrows, the weekday initials from the system's
   first day of the week, and six weeks of days. The date held fills with the accent,
@@ -810,7 +810,8 @@ keep the keys.
 - Alternative text: ReDim writes a description on each control's shape from its kind, text,
   and state, such as "Save, button", "Agree, checkbox, checked", "Drop-down, South",
   "Tabs, Advanced selected, tab 2 of 3", "Progress, 40 percent" (in 5 percent steps),
-  with ", unavailable" when disabled. A `Masked` field reads "Edit field, masked" and
+  with ", unavailable" when disabled. A `Caption` leads, as in "Email, Edit field", so a
+  field reads by its name. A `Masked` field reads "Edit field, masked" and
   never its text. Labels, cards, and toasts carry none, since their text is what a
   reader announces. A `Tooltip`
   follows the description, or the `DisabledReason` while the control is disabled.

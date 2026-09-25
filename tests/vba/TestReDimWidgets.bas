@@ -2307,9 +2307,14 @@ Public Function TestAccessibility() As String
     app.SelectBox("zone").AtRect(24, 140, 140, 22) _
         .Items("North", "South").Value 2
     app.ProgressBar("load").AtRect(24, 180, 160, 10).Value 40
+    app.TextInput("email").AtRect(24, 230, 160, 22).Caption "Email"
+    app.SelectBox("size").AtRect(220, 24, 140, 22).Items("S", "M").Placeholder "Choose a size"
     app.Render
 
     transcript = "buttonAlt=" & host.Shapes("rdm_wid32_save").AlternativeText
+    transcript = transcript & "|captionAlt=" & host.Shapes("rdm_wid32_email").AlternativeText
+    transcript = transcript & "|selectPlaceholder=" & _
+        host.Shapes("rdm_wid32_size").TextFrame2.TextRange.Text
     app.Button("save").Enabled False
     transcript = transcript & "|disabledAlt=" & _
         host.Shapes("rdm_wid32_save").AlternativeText

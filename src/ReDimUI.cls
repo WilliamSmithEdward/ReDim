@@ -5713,6 +5713,9 @@ End Sub
 ' empty, focused or not.
 Public Function Placeholder(ByVal hintText As String) As ReDimUI
     RequireRole ROLE_COMPONENT, "Placeholder"
+    ' A SelectBox and a DatePicker show their Text while nothing is
+    ' picked, so their placeholder is that text.
+    If (mKind = KIND_SELECT And Not mIsMenu) Or mKind = KIND_DATE Then mText = hintText
     mPlaceholder = hintText
     Touch
     Set Placeholder = Me
@@ -8280,7 +8283,8 @@ Private Sub ApplyAltText(ByVal mainShape As Shape)
 End Sub
 
 ' What a screen reader says for the control: the AltText override, or
-' its text, its role, and the state that matters for the kind. Labels,
+' its caption, its text, its role, and the state that matters for the
+' kind. Labels,
 ' cards, and toasts are their text, which a reader already gets, so
 ' they carry none; typed field text stays out for the same reason, and
 ' progress reads in 5 percent steps. Each of those would otherwise
@@ -8393,6 +8397,11 @@ Private Function AccessibleDescription() As String
                     Phrase(UI_ALT_TAB_SELECTED, ItemAt(ShownTab()), ShownTab(), ItemCount)
             End If
     End Select
+    ' The caption names the field, as a label tied to a native control
+    ' does, so it leads.
+    If LenB(mCaptionText) > 0 And LenB(described) > 0 Then
+        described = mCaptionText & ", " & described
+    End If
     If Not mEnabled And LenB(described) > 0 Then
         described = described & ", " & Phrase(UI_ALT_UNAVAILABLE)
     End If

@@ -700,6 +700,10 @@ def test_motion_and_blink(run_widgets):
 def test_accessibility(run_widgets):
     facts = parse_transcript(run_widgets("TestAccessibility"))
     assert facts["buttonAlt"] == "Save, button"
+    assert facts["captionAlt"] == "Email, Edit field", "a caption must name its field"
+    assert facts["selectPlaceholder"] == "Choose a size", (
+        "Placeholder must set a SelectBox's placeholder"
+    )
     assert facts["disabledAlt"] == "Save, button, unavailable"
     assert facts["tickAlt"] == "Agree, checkbox, checked"
     assert facts["toggleAlt"] == "Switch, off"

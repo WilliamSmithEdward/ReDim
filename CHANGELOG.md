@@ -8,6 +8,10 @@
   in muted ink, as a drop list's pager at the end of its list does. A
   click on them changed nothing before and still changes nothing, but
   looked live.
+- A control's `Caption` leads its alternative text, so a screen reader
+  names the field: "Email, Edit field", where it read "Edit field".
+- `Placeholder` works on a `SelectBox` and a `DatePicker`, as the same
+  words given with `Text`. It used to do nothing there.
 - A long selection, date, or typed text no longer runs under the drop
   caret of a `SelectBox`, `DatePicker`, or `ComboBox`. The face text
   kept a 6-point right margin, while the caret sits 12 to 14 points in
