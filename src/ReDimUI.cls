@@ -5359,9 +5359,10 @@ Public Function Hint(ByVal hintText As String) As ReDimUI
 End Function
 
 ' Marks the control required: an asterisk after its caption, in the
-' danger color. A float TextInput or ComboBox committed empty shows
-' emptyMessage as its validation message, the Required UI text unless
-' given.
+' danger color. A float TextInput or ComboBox committed empty, or a
+' SelectBox, DatePicker, or RadioGroup with nothing picked when
+' ValidateAll runs, shows emptyMessage as its validation message, the
+' Required UI text unless given; a pick takes it down.
 Public Function Required( _
     Optional ByVal requiredOn As Boolean = True, _
     Optional ByVal emptyMessage As String _
@@ -5403,6 +5404,7 @@ End Function
 Public Function PickDate(ByVal chosenDate As Date) As ReDimUI
     RequireDatePicker "PickDate"
     mValue = CDbl(DayOnly(chosenDate))
+    If mValidationLive Then RecheckPick OwnerApp
     Touch
     Set PickDate = Me
 End Function
@@ -6096,6 +6098,7 @@ Public Function Value(ByVal newNumber As Double) As ReDimUI
         If IsGroupHeader(CLng(newNumber)) Then newNumber = 0
     End If
     mValue = newNumber
+    If mValidationLive Then RecheckPick OwnerApp
     Touch
     Set Value = Me
 End Function
@@ -8307,6 +8310,8 @@ Friend Sub Apply( _
     If IsFloatField() Then
         ApplyClearButton mainShape, hostSheet, themeValue
         ApplyFieldNotes hostSheet, themeValue
+    ElseIf ChecksPick() Or LenB(mAppliedMessageSig) > 0 Then
+        ApplyFieldNotes hostSheet, themeValue
     End If
     If LenB(mCaptionText) > 0 Or LenB(mAppliedCaptionSig) > 0 _
         Or LenB(mHintText) > 0 Or LenB(mAppliedHintSig) > 0 Then
@@ -9837,6 +9842,7 @@ Private Function SelectRadioRow(ByVal hostApp As ReDimUI, ByVal rowNumber As Lon
     If LenB(mWritesToKey) > 0 Then
         hostApp.SetState mWritesToKey, ItemStateValue(ItemAt(rowNumber))
     End If
+    RecheckPick hostApp
     Touch
     SelectRadioRow = True
 End Function
@@ -10053,6 +10059,7 @@ Private Function PickSelectItem(ByVal hostApp As ReDimUI, ByVal itemIndex As Lon
     If LenB(mWritesToKey) > 0 Then
         hostApp.SetState mWritesToKey, ItemStateValue(ItemAt(itemIndex))
     End If
+    RecheckPick hostApp
     Touch
     PickSelectItem = True
 End Function
@@ -10465,7 +10472,7 @@ Private Sub ApplyAdornments(ByVal hostSheet As Worksheet, ByVal themeValue As Re
     End If
     SyncFieldCaption hostSheet, themeValue, captionKey, noteSize
     If LenB(mHintText) > 0 And mVisible _
-        And Not (IsFloatField() And LenB(ShownError()) > 0) Then
+        And Not ((IsFloatField() Or ChecksPick()) And LenB(ShownError()) > 0) Then
         hintKey = PartsState(themeValue) & ":" & mHintText & ":" & CStr(mMaxLength)
     End If
     SyncFieldNote hostSheet, themeValue, "fh", hintKey, mHintText, _
@@ -10803,6 +10810,20 @@ Private Sub FireInput(ByVal hostApp As ReDimUI)
     ReDimUI.RunHandlerAs hostApp, Me, mInputProc
 End Sub
 
+' A required SelectBox, DatePicker, or RadioGroup: ValidateAll checks
+' that something is picked, and the message shows under the control.
+Private Function ChecksPick() As Boolean
+    If Not mRequired Then Exit Function
+    ChecksPick = (mKind = KIND_SELECT And Not mIsMenu) Or mKind = KIND_DATE _
+        Or mKind = KIND_RADIO
+End Function
+
+' A pick on a required control that showed its message checks again,
+' which takes the message down.
+Private Sub RecheckPick(ByVal hostApp As ReDimUI)
+    If mValidationLive And ChecksPick() Then RunValidation hostApp
+End Sub
+
 ' The message a float field shows: its validation's, else the one set
 ' from outside.
 Private Function ShownError() As String
@@ -10816,7 +10837,7 @@ End Function
 ' ValidateAll's fields: an enabled float field with Required or
 ' Validates that shows, or would once its panels show.
 Friend Function TakesChecks(ByVal hostApp As ReDimUI) As Boolean
-    If Not IsFloatField() Or Not mEnabled Then Exit Function
+    If Not (IsFloatField() Or ChecksPick()) Or Not mEnabled Then Exit Function
     If Not mRequired And LenB(mValidateProc) = 0 Then Exit Function
     TakesChecks = Revealable(hostApp)
 End Function
@@ -10890,6 +10911,22 @@ End Sub
 Private Sub RunValidation(ByVal hostApp As ReDimUI)
     Dim verdict As Variant
 
+    ' A required pick fails while nothing is picked; it has no text to
+    ' check.
+    If ChecksPick() Then
+        If mValue = 0 Then
+            If LenB(mRequiredMessage) > 0 Then
+                mValidationError = mRequiredMessage
+            Else
+                mValidationError = Phrase(UI_REQUIRED)
+            End If
+            mValidationLive = True
+        Else
+            mValidationError = vbNullString
+            mValidationLive = False
+        End If
+        Exit Sub
+    End If
     ' Required speaks first: an empty text never reaches the check.
     If mRequired And LenB(Trim$(mText)) = 0 Then
         If LenB(mRequiredMessage) > 0 Then
@@ -13142,6 +13179,7 @@ Private Function PickCalendarDay(ByVal hostApp As ReDimUI, ByVal pickedDay As Da
     If CDbl(pickedDay) <> mValue Then
         mValue = CDbl(pickedDay)
         If LenB(mWritesToKey) > 0 Then hostApp.SetState mWritesToKey, pickedDay
+        RecheckPick hostApp
         PickCalendarDay = True
     End If
     Touch

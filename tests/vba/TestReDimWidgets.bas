@@ -5728,6 +5728,45 @@ Public Function TestSelectionReaders() As String
     TestSelectionReaders = transcript
 End Function
 
+' Required on a SelectBox, DatePicker, and RadioGroup: ValidateAll fails
+' while nothing is picked, shows the message under each, and puts focus
+' on the first; a pick takes its message down, and ValidateAll passes
+' once all three hold a pick.
+Public Function TestRequiredPicks() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim transcript As String
+
+    ReDimUI.AutoPump False
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "wid82")
+    app.SelectBox("size").AtRect(24, 24, 140, 22).Text("Pick a size").Items("S", "M") _
+        .Required
+    app.DatePicker("due").AtRect(24, 70, 140, 22).Required True, "Pick a due date"
+    app.RadioGroup("tier").AtRect(24, 116, 140, 40).Items("Low", "High").Required
+    app.Render
+    transcript = "fails=" & CStr(Not app.ValidateAll)
+    transcript = transcript & "|messages=" & _
+        host.Shapes("rdm_wid82_size__me").TextFrame2.TextRange.Text & "/" & _
+        host.Shapes("rdm_wid82_due__me").TextFrame2.TextRange.Text & "/" & _
+        CStr(ShapeExists(host, "rdm_wid82_tier__me"))
+    transcript = transcript & "|firstFocused=" & ReDimUI.FocusedComponentId
+    RdxReleaseKeys
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid82_size"
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid82_size__opt2"
+    transcript = transcript & "|pickClears=" & CStr(Not ShapeExists(host, "rdm_wid82_size__me"))
+    app.DatePicker("due").PickDate DateSerial(2026, 10, 1)
+    app.RadioGroup("tier").Value 1
+    transcript = transcript & "|passes=" & CStr(app.ValidateAll)
+    transcript = transcript & "|allClear=" & CStr(Not ShapeExists(host, "rdm_wid82_due__me") _
+        And Not ShapeExists(host, "rdm_wid82_tier__me"))
+    RdxReleaseKeys
+    ReDimUI.AutoPump True
+    TestRequiredPicks = transcript
+End Function
+
 ' ItemEnabled on a RadioGroup and a ComboBox: a disabled item reads
 ' muted, a click or the keys never take it, and a combo's highlight and
 ' suggestion pass over it.

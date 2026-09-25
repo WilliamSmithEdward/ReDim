@@ -84,7 +84,7 @@ framework. Also:
 | `ToastTray rangeAddress` | Pins the tray's top-left to a range, exactly and unclamped. |
 | `Confirm titleText, messageText, okProc, cancelProc, okText, cancelText` | Shapes-based modal. It takes keyboard focus: Enter confirms, Esc cancels, and Tab stays among its buttons. The buttons read the `OK` and `Cancel` [UI text](#ui-text) unless given words; `cancelText:=""` leaves Cancel out. |
 | `FocusFirst` / `DefaultButton componentId` | Keyboard focus to the first control in Tab order; the button Enter clicks from controls that do not use Enter themselves. |
-| `ValidateAll` | Checks the form before a save: every enabled float field with `Required` or `Validates`, the way a commit does, whether it shows or sits on a Tabs or Expander panel not shown. Hidden and disabled fields are skipped. Each field that fails shows its message, and the first in Tab order takes focus, its tab turned to or its expander opened first. True when every field passes (see [Field rules](#field-rules)). |
+| `ValidateAll` | Checks the form before a save: every enabled float field with `Required` or `Validates`, and every enabled `SelectBox`, `DatePicker`, or `RadioGroup` with `Required`, the way a commit does, whether it shows or sits on a Tabs or Expander panel not shown. Hidden and disabled fields are skipped. Each field that fails shows its message, and the first in Tab order takes focus, its tab turned to or its expander opened first. True when every field passes (see [Field rules](#field-rules)). |
 | `FocusRings ringsOn` | An accent ring around a focused control that is not a text field (see [Keyboard focus for every control](#keyboard-focus-for-every-control)). Off by default. |
 | `PointerEffects effectsOn` | Hover and press looks for the app's controls, and an open list whose highlight follows the pointer (see [Pointer](#pointer)). Off by default. |
 | `AddCommand commandWords, handlerProc, iconName` | Adds an entry to the app's command palette: its text, the Public procedure it runs, and an optional icon. Inside the handler, `ReDimUI.SenderApp.LastCommand` names the entry. On a `MenuButton` the same builder adds a menu row. |
@@ -564,7 +564,10 @@ Builders for float `TextInput` and `ComboBox` fields:
 - `Required` marks the field: an empty commit, or one of only spaces, shows "Required"
   (the `Required` [UI text](#ui-text)) as its validation message, the same way
   `Validates` shows one, and the check function never sees the empty text.
-  `Required emptyMessage:="Enter an email"` words it; `Required False` lifts it.
+  `Required emptyMessage:="Enter an email"` words it; `Required False` lifts it. On a
+  `SelectBox`, `DatePicker`, or `RadioGroup`, `ValidateAll` fails while nothing is
+  picked and shows the message under the control; a pick, by hand or from code, takes it
+  down.
 - `ErrorText "That name is taken"` shows an error from outside the field, a server's
   answer for one, with the same danger border and message line. It stays until
   `ErrorText ""` clears it. A validation message shows in its place while there is one.

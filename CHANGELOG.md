@@ -2,6 +2,11 @@
 
 ## 1.0.3 - 2026-09-25
 
+- `Required` on a `SelectBox`, `DatePicker`, or `RadioGroup` is checked:
+  `ValidateAll` fails while nothing is picked, shows the message under
+  the control, and puts focus on it, and a pick takes the message down.
+  It used to draw only the caption's asterisk, and `ValidateAll` passed
+  a form with nothing picked.
 - `ItemEnabled` works on a `ComboBox` and a `RadioGroup`, where it used
   to raise: a disabled item reads muted, clicks and keys pass over it,
   and a combo never suggests it.
