@@ -8,6 +8,10 @@
   in muted ink, as a drop list's pager at the end of its list does. A
   click on them changed nothing before and still changes nothing, but
   looked live.
+- A `RadioGroup` or `CheckList` emptied by `ClearItems`, or by
+  `RemoveItem` down to nothing, takes its rows down. It used to leave
+  them on the sheet, looking clickable, with a check list's select-all
+  header still counting the old items. Items added back draw fresh.
 - A `DatePicker`'s keys stop at its `DateRange`. The arrow and page
   keys used to walk the cursor onto days outside the range, where Enter
   and Space did nothing, and a calendar opened with no date started on

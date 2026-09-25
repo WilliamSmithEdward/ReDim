@@ -1508,3 +1508,13 @@ def test_dead_ends(run_widgets):
     assert facts["firstPage"] == "True", "a transfer panel's first page mutes its up arrow"
     assert facts["lastPage"] == "True", "a transfer panel's last page mutes its down arrow"
     assert facts["zeroStepRefused"] == "True", "SliderRange must refuse a step of zero"
+
+
+def test_emptied_lists(run_widgets):
+    facts = parse_transcript(run_widgets("TestEmptiedLists"))
+    assert facts["radioCleared"] == "True", "an emptied RadioGroup must take its rows down"
+    assert facts["checkCleared"] == "True", (
+        "an emptied CheckList must take its rows and select-all header down"
+    )
+    assert facts["radioReturns"] == "True", "a RadioGroup must draw again when items return"
+    assert facts["checkReturns"] == "True", "a CheckList must draw again when items return"

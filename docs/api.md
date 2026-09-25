@@ -133,7 +133,8 @@ All fluent, all return the component:
   Collection, a Range (one item per non-empty cell), or a ROneCOne sequence;
   `AddItem(text, atPosition)` appends or inserts; `RemoveItem(indexOrText)`; `ClearItems`;
   read back with `ItemCount` and `ItemTextAt(position)`. The selected item survives inserts
-  and unrelated removals; removing it clears the selection to the placeholder.
+  and unrelated removals; removing it clears the selection to the placeholder. A
+  `RadioGroup` or `CheckList` left with no items shows nothing until items return.
   Programmatic mutations re-render but do not write `WritesTo` state or fire `OnChange`;
   those belong to user interaction and explicit `SetState`.
 - Item values: an item can carry a value apart from its text, `AddItem("Medium", , 20)` or

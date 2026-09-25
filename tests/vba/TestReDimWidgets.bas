@@ -5575,3 +5575,36 @@ Public Function TestDeadEnds() As String
     ReDimUI.AutoPump True
     TestDeadEnds = transcript
 End Function
+
+' A RadioGroup or CheckList emptied of its items takes its rows down,
+' select-all header included, and draws them again when items return.
+Public Function TestEmptiedLists() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim transcript As String
+
+    ReDimUI.AutoPump False
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "wid77")
+    app.RadioGroup("tier").AtRect(24, 24, 140, 60).Items "Low", "Mid", "High"
+    app.CheckList("tags").AtRect(200, 24, 170, 100).Items "Red", "Green", "Blue"
+    app.Render
+    app.RadioGroup("tier").ClearItems
+    app.CheckList("tags").ClearItems
+    transcript = "radioCleared=" & CStr(Not ShapeExists(host, "rdm_wid77_tier__c2") And _
+        Not ShapeExists(host, "rdm_wid77_tier__t1") And _
+        host.Shapes("rdm_wid77_tier").Visible = msoFalse)
+    transcript = transcript & "|checkCleared=" & CStr(Not ShapeExists(host, "rdm_wid77_tags__b2") And _
+        Not ShapeExists(host, "rdm_wid77_tags__t1") And _
+        Not ShapeExists(host, "rdm_wid77_tags__mt") And _
+        host.Shapes("rdm_wid77_tags").Visible = msoFalse)
+    app.RadioGroup("tier").AddItem "Solo"
+    app.CheckList("tags").AddItem "Gold"
+    transcript = transcript & "|radioReturns=" & CStr(host.Shapes("rdm_wid77_tier").Visible = msoTrue And _
+        host.Shapes("rdm_wid77_tier__t1").TextFrame2.TextRange.Text = "Solo")
+    transcript = transcript & "|checkReturns=" & CStr(host.Shapes("rdm_wid77_tags").Visible = msoTrue And _
+        host.Shapes("rdm_wid77_tags__t1").TextFrame2.TextRange.Text = "Gold" And _
+        ShapeExists(host, "rdm_wid77_tags__mt"))
+    ReDimUI.AutoPump True
+    TestEmptiedLists = transcript
+End Function

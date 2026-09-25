@@ -13746,9 +13746,24 @@ Private Sub ApplyRadioGroup( _
     Dim circleSize As Double
     Dim isPicked As Boolean
 
-    If mItems Is Nothing Then Exit Sub
-    rowTotal = mItems.Count
-    If rowTotal = 0 Then Exit Sub
+    If Not mItems Is Nothing Then rowTotal = mItems.Count
+    If rowTotal = 0 Then
+        ' An emptied group takes its rows down, and draws them afresh when
+        ' items come back. The first ring is the control's own shape.
+        mainShape.Visible = msoFalse
+        If mAppliedOptionCount > 0 Then
+            DropPart hostSheet, "d1"
+            DropPart hostSheet, "t1"
+            For idx = 2 To mAppliedOptionCount
+                DropPart hostSheet, "c" & idx
+                DropPart hostSheet, "d" & idx
+                DropPart hostSheet, "t" & idx
+            Next idx
+            mAppliedOptionCount = 0
+        End If
+        mAppliedExtrasSig = vbNullString
+        Exit Sub
+    End If
     If ExtrasCurrent(PartsState(themeValue) & ":" & CStr(mValue) & _
         ":" & PointerKey() & JoinedSig(mItems)) Then Exit Sub
     rowPitch = mHeight / rowTotal
@@ -13852,6 +13867,22 @@ Private Sub ApplyCheckListParts( _
     If Not mItems Is Nothing Then rowTotal = mItems.Count
     If rowTotal = 0 Then
         SyncKeyCursor hostSheet, themeValue, False, 0, 0, 0, 0
+        ' An emptied list takes its rows and select-all header down, and
+        ' draws them afresh when items come back. The first box is the
+        ' control's own shape.
+        mainShape.Visible = msoFalse
+        If mAppliedOptionCount > 0 Or LenB(mAppliedCheckHeaderSig) > 0 Then
+            DropPart hostSheet, "t1"
+            For idx = 2 To mAppliedOptionCount
+                DropPart hostSheet, "b" & idx
+                DropPart hostSheet, "t" & idx
+            Next idx
+            DropPart hostSheet, "mb"
+            DropPart hostSheet, "mt"
+            mAppliedOptionCount = 0
+            mAppliedCheckSig = vbNullString
+            mAppliedCheckHeaderSig = vbNullString
+        End If
         Exit Sub
     End If
     PruneTransferSelection mCheckedSet, rowTotal
