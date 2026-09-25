@@ -466,6 +466,8 @@ Private mNavBarLeft As Double
 Private mNavBarTop As Double
 Private mNavBarTabWidth As Double
 Private mNavBarTabHeight As Double
+' Whether a focused control that is not a text field wears the ring.
+Private mFocusRings As Boolean
 ' Whether the app follows the Windows look, and the look it last took.
 Private mFollowSystem As Boolean
 Private mAppliedSystemLook As String
@@ -3833,6 +3835,25 @@ End Function
 
 Friend Property Get FollowsSystemTheme() As Boolean
     FollowsSystemTheme = mFollowSystem
+End Property
+
+' Rings a focused control that is not a text field in the accent. Off by
+' default, where focus still moves and takes keys but draws nothing; a
+' text field shows focus on its own border either way. A focused control
+' redraws at once.
+Public Function FocusRings(Optional ByVal ringsOn As Boolean = True) As ReDimUI
+    RequireRole ROLE_APP, "FocusRings"
+    If mFocusRings <> ringsOn Then
+        mFocusRings = ringsOn
+        If ReDimUI.IsComponentFocused(mAppId, ReDimUI.FocusedComponentId) Then
+            NotifyComponentTouched ReDimUI.FocusedComponentId
+        End If
+    End If
+    Set FocusRings = Me
+End Function
+
+Friend Property Get ShowsFocusRings() As Boolean
+    ShowsFocusRings = mFocusRings
 End Property
 
 ' Takes the Windows look when it differs from the one the app last took.
@@ -10757,10 +10778,10 @@ Private Sub ClearFieldText(ByVal hostApp As ReDimUI)
     Touch
 End Sub
 
-' A focused control that is not a text field wears a ring: an accent
-' outline three points outside its bounds. Float fields show focus on
-' their own border. A focused control that turns hidden or disabled
-' gives focus up here.
+' A focused control that is not a text field wears a ring when its app
+' asks for FocusRings: an accent outline three points outside its
+' bounds. Float fields show focus on their own border. A focused control
+' that turns hidden or disabled gives focus up here.
 Private Sub ApplyFocusRing(ByVal hostSheet As Worksheet, ByVal themeValue As ReDimUI)
     Dim ringOn As Boolean
     Dim ringShape As Shape
@@ -10772,6 +10793,7 @@ Private Sub ApplyFocusRing(ByVal hostSheet As Worksheet, ByVal themeValue As ReD
         ringOn = False
     End If
     If IsFloatField() Then Exit Sub
+    If ringOn Then ringOn = OwnerApp.ShowsFocusRings
     If ringOn Then
         ringKey = PartsState(themeValue)
         If ringKey = mAppliedRingSig Then Exit Sub

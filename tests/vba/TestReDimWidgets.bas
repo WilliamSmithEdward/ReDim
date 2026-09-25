@@ -2745,8 +2745,15 @@ Public Function TestKeyboardFocus() As String
 
     app.FocusFirst
     transcript = "firstFocused=" & CStr(ReDimUI.FocusedComponentId = "first")
+    transcript = transcript & "|ringOffByDefault=" & _
+        CStr(Not ShapeExists(host, "rdm_wid34_first__fr"))
+    app.FocusRings
     transcript = transcript & "|ringDrawn=" & _
         CStr(ShapeExists(host, "rdm_wid34_first__fr"))
+    app.FocusRings False
+    transcript = transcript & "|ringOffTakesRing=" & _
+        CStr(Not ShapeExists(host, "rdm_wid34_first__fr"))
+    app.FocusRings
     RdxKeyChar "{TAB}"
     transcript = transcript & "|tabToField=" & _
         CStr(ReDimUI.FocusedComponentId = "name" And _

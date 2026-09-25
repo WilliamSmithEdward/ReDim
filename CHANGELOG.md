@@ -1,7 +1,12 @@
 # Changelog
 
-## 1.0.3 - 2026-09-23
+## 1.0.3 - 2026-09-25
 
+- The accent ring around a focused control that is not a text field is
+  now opt-in: `ui.FocusRings` turns it on for an app, and
+  `FocusRings False` turns it off again. Without it, focus still moves
+  with Tab and takes keys, and nothing marks the control. A text
+  field's focused border is unchanged. (#3)
 - CI's static gate runs pyvbaanalysis 2.2.1. Its Excel model now says
   `Shape.Duplicate` returns a Shape, as Excel's type library does, so
   the suppression 1.0.1 put on that line is gone.

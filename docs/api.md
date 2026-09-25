@@ -82,6 +82,7 @@ framework. Also:
 | `Confirm titleText, messageText, okProc, cancelProc, okText, cancelText` | Shapes-based modal. It takes keyboard focus: Enter confirms, Esc cancels, and Tab stays among its buttons. The buttons read the `OK` and `Cancel` [UI text](#ui-text) unless given words; `cancelText:=""` leaves Cancel out. |
 | `FocusFirst` / `DefaultButton componentId` | Keyboard focus to the first control in Tab order; the button Enter clicks from controls that do not use Enter themselves. |
 | `ValidateAll` | Checks the form before a save: every enabled float field with `Required` or `Validates`, the way a commit does, whether it shows or sits on a Tabs or Expander panel not shown. Hidden and disabled fields are skipped. Each field that fails shows its message, and the first in Tab order takes focus, its tab turned to or its expander opened first. True when every field passes (see [Field rules](#field-rules)). |
+| `FocusRings ringsOn` | An accent ring around a focused control that is not a text field (see [Keyboard focus for every control](#keyboard-focus-for-every-control)). Off by default. |
 | `PointerEffects effectsOn` | Hover and press looks for the app's controls, and an open list whose highlight follows the pointer (see [Pointer](#pointer)). Off by default. |
 | `AddCommand commandWords, handlerProc, iconName` | Adds an entry to the app's command palette: its text, the Public procedure it runs, and an optional icon. Inside the handler, `ReDimUI.SenderApp.LastCommand` names the entry. On a `MenuButton` the same builder adds a menu row. |
 | `CommandPalette paletteKey` / `OpenCommandPalette` | Turns on the command palette and binds its key, Ctrl+Shift+P unless another OnKey code is given (`""` binds none); `OpenCommandPalette` opens it from code (see [Command palette](#command-palette)). |
@@ -729,9 +730,11 @@ keep the keys.
   rest in creation order. `TabIndex(-1)` leaves a control out of Tab while `Focus` still
   reaches it. Tab wraps within the app. Focus that lands outside the visible window
   scrolls the control into view by rows and columns, leaving the selection where it is.
-- A focused control wears an accent ring three points outside its bounds; a text field
-  shows focus on its own border. A check list or transfer list also shows a dotted cursor
-  on the row its arrow keys have reached.
+- `ui.FocusRings` rings a focused control in the accent, three points outside its bounds;
+  `FocusRings False` turns the ring back off. It is off by default: focus still moves and
+  takes keys, and nothing marks the control. A text field shows focus on its own border
+  either way, and a check list or transfer list shows a dotted cursor on the row its
+  arrow keys have reached.
 - Focus ends on Esc, on a click on another control, on a press anywhere off the control
   once the button comes back up, or when the grid selection moves: the watch that ends a
   text field's focus, for every kind. A control that turns hidden or disabled gives focus

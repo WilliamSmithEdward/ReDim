@@ -812,7 +812,13 @@ def test_toast_conventions(run_widgets):
 def test_keyboard_focus(run_widgets):
     facts = parse_transcript(run_widgets("TestKeyboardFocus"))
     assert facts["firstFocused"] == "True", "TabIndex 1 must come first"
-    assert facts["ringDrawn"] == "True", "a focused button must wear a ring"
+    assert facts["ringOffByDefault"] == "True", (
+        "the focus ring must stay off until the app asks for FocusRings"
+    )
+    assert facts["ringDrawn"] == "True", "FocusRings must ring a focused button"
+    assert facts["ringOffTakesRing"] == "True", (
+        "FocusRings False must take the ring off the focused button"
+    )
     assert facts["tabToField"] == "True", (
         "Tab must move on in creation order and take the ring along"
     )
