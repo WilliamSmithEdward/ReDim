@@ -484,7 +484,8 @@ Focus mechanics, all automatic:
   tail window of its buffer - the last lines that fit (multi-line) or the rightmost
   characters that fit (single-line and combo) - with a leading ellipsis marking trimmed
   content. The buffer keeps the complete text and commits intact; unfocused fields show
-  their beginning.
+  their beginning, ending in an ellipsis where the text is cut, as a `SelectBox` or
+  `DatePicker` face does with a long item or date.
 - Esc reverts the field to the text it had when focus arrived, fires nothing, and leaves.
   A combo with its list open closes the list on the first Esc, keeping focus and text,
   and reverts on the second. `Clearable` gives either field a clear button for emptying

@@ -840,6 +840,10 @@ Private mBadgeText As String
 Private mAppliedBadgeSig As String
 ' A Toggle's caption part as last drawn, empty while it has none.
 Private mAppliedToggleCaptionSig As String
+' A one-line face whose text was cut to fit with an ellipsis, and the
+' width it was fitted at.
+Private mFaceTrimmed As Boolean
+Private mAppliedFitWidth As Double
 ' A transfer list's move buttons' inks as last written: which of them
 ' has something to move.
 Private mAppliedMoveInkSig As String
@@ -9538,6 +9542,36 @@ Private Sub AppendFace(ByRef faceText As String, ByVal faceChar As String, ByVal
     mFaceMap(mFaceLength) = textIndex
 End Sub
 
+' Cuts a one-line face's text to the longest start that fits on one line
+' with an ellipsis, measured from the drawn text: a face that holds its
+' text costs one read, and one that does not a few writes.
+Private Sub FitFaceLine(ByVal faceShape As Shape, ByVal fullText As String, ByVal textSize As Double)
+    Dim lineTall As Double
+    Dim fitLow As Long
+    Dim fitHigh As Long
+    Dim fitMid As Long
+
+    mFaceTrimmed = False
+    If Len(fullText) < 2 Then Exit Sub
+    lineTall = textSize * 1.7
+    With faceShape.TextFrame2.TextRange
+        If .BoundHeight <= lineTall Then Exit Sub
+        fitLow = 0
+        fitHigh = Len(fullText) - 1
+        Do While fitLow < fitHigh
+            fitMid = (fitLow + fitHigh + 1) \ 2
+            .Text = Left$(fullText, fitMid) & ChrW(8230)
+            If .BoundHeight <= lineTall Then
+                fitLow = fitMid
+            Else
+                fitHigh = fitMid - 1
+            End If
+        Loop
+        .Text = RTrim$(Left$(fullText, fitLow)) & ChrW(8230)
+    End With
+    mFaceTrimmed = True
+End Sub
+
 ' The characters a face line holds and the height a line takes, both
 ' estimated from the font size because they are needed before the text
 ' is written.
@@ -9746,6 +9780,22 @@ Private Sub ApplyText(ByVal mainShape As Shape, ByVal themeValue As ReDimUI)
         mAppliedFontSize = resolvedSize
         mAppliedFontBold = mFontBold
         mAppliedIconGlyph = mIconGlyph
+    End If
+    ' A one-line face at rest ends in an ellipsis where its text is cut,
+    ' instead of stopping mid-word as if that were all of it.
+    If (mKind = KIND_SELECT Or mKind = KIND_DATE _
+        Or (IsFloatField() And Not mMultiLine)) And Not focusedField Then
+        If textChanged Or mustRestyle Or mAppliedFitWidth <> mWidth Then
+            mAppliedFitWidth = mWidth
+            If mFaceTrimmed And Not textChanged Then
+                mainShape.TextFrame2.TextRange.Text = shownText
+            End If
+            FitFaceLine mainShape, shownText, resolvedSize
+        End If
+    ElseIf mFaceTrimmed Then
+        mainShape.TextFrame2.TextRange.Text = shownText
+        mFaceTrimmed = False
+        mAppliedFitWidth = 0
     End If
     If IsFloatField() Then
         PaintFieldMarks mainShape, themeValue, resolvedColor, focusedField, _

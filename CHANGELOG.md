@@ -2,6 +2,11 @@
 
 ## 1.0.3 - 2026-09-25
 
+- A one-line face cut short ends in an ellipsis: an unfocused
+  `TextInput` or `ComboBox`, a `SelectBox`, and a `DatePicker`. They
+  stopped mid-word on one line, so "A very long selection" read as
+  "A very long" and a long date format as "Wednesday". The face is
+  measured as drawn, and the value keeps its whole text.
 - A theme's other colors have builders: `WithSurface`, `WithMuted`,
   `WithStatus`, `WithBorder`, and `WithCanvas` join `WithPrimary` and
   `WithFont`, so a custom theme no longer needs the undocumented Friend

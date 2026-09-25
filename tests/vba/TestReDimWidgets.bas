@@ -5937,6 +5937,46 @@ Public Function TestEditChords() As String
     TestEditChords = transcript
 End Function
 
+' A one-line face at rest cuts a long text with an ellipsis on one line,
+' keeps the whole text as its value, drops the ellipsis while focused,
+' fits again when it leaves, and shows a short text whole.
+Public Function TestFaceEllipsis() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim transcript As String
+    Dim faceWords As String
+
+    ReDimUI.AutoPump False
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "wid87")
+    app.TextInput("mail").AtRect 24, 24, 120, 22
+    app.SelectBox("pick").AtRect(24, 70, 110, 24).Items("A very long selection", "Short").Value 1
+    app.Render
+    With app.TextInput("mail")
+        .InputValue = "someone.with.a.long.name@example.com"
+    End With
+    faceWords = host.Shapes("rdm_wid87_mail").TextFrame2.TextRange.Text
+    transcript = "fieldCut=" & CStr(Right$(faceWords, 1) = ChrW(8230) And _
+        Left$(faceWords, 8) = "someone." And _
+        app.TextInput("mail").InputValue = "someone.with.a.long.name@example.com")
+    faceWords = host.Shapes("rdm_wid87_pick").TextFrame2.TextRange.Text
+    transcript = transcript & "|selectCut=" & CStr(Right$(faceWords, 1) = ChrW(8230) And _
+        app.SelectBox("pick").SelectedText = "A very long selection")
+    ' Focused, the field shows its tail after a leading ellipsis instead.
+    app.TextInput("mail").Focus
+    faceWords = host.Shapes("rdm_wid87_mail").TextFrame2.TextRange.Text
+    transcript = transcript & "|focusedTail=" & CStr(Left$(faceWords, 1) = ChrW(8230) And _
+        InStr(faceWords, "@example.com") > 0)
+    RdxKeyChar "{TAB}"
+    RdxReleaseKeys
+    transcript = transcript & "|blurCutsAgain=" & CStr(Right$(host.Shapes("rdm_wid87_mail") _
+        .TextFrame2.TextRange.Text, 1) = ChrW(8230))
+    app.SelectBox("pick").Value 2
+    transcript = transcript & "|shortWhole=" & host.Shapes("rdm_wid87_pick").TextFrame2.TextRange.Text
+    ReDimUI.AutoPump True
+    TestFaceEllipsis = transcript
+End Function
+
 ' True when a part exists and is visible.
 Private Function IsShown(ByVal host As Worksheet, ByVal shapeName As String) As Boolean
     If Not ShapeExists(host, shapeName) Then Exit Function

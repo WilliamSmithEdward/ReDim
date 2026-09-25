@@ -1556,6 +1556,17 @@ def test_selection_readers(run_widgets):
     assert facts["otherKindRefused"] == "True"
 
 
+def test_face_ellipsis(run_widgets):
+    facts = parse_transcript(run_widgets("TestFaceEllipsis"))
+    assert facts["fieldCut"] == "True", (
+        "a long field text at rest must end in an ellipsis and keep its value whole"
+    )
+    assert facts["selectCut"] == "True"
+    assert facts["focusedTail"] == "True", "a focused field shows its tail after a leading ellipsis"
+    assert facts["blurCutsAgain"] == "True"
+    assert facts["shortWhole"] == "Short"
+
+
 def test_edit_chords(run_widgets):
     facts = parse_transcript(run_widgets("TestEditChords"))
     assert facts["bound"] == "True", (
