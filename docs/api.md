@@ -225,7 +225,13 @@ dependencies:
   or a modal overlay never reaches a track painted underneath. Use `Stepper` for
   precision.
 - `SelectBox`: a themed face, caret, and option list in place of the native dropdown.
-  `Text`, or `Placeholder`, is the placeholder shown while nothing is selected. The list
+  `Text`, or `Placeholder`, is the placeholder shown while nothing is selected.
+  `Filterable` lets typing filter the open list to the items that contain the letters, in
+  any case, as a combo's list filters: the face shows the letters, the matches bold them,
+  Backspace takes one off, Esc clears them before it closes the list, and the arrows,
+  Enter, and clicks work among the matches. A letter typed on the closed list opens it,
+  and a click that opens it gives it the keys, so typing reaches it. Without
+  `Filterable`, letters jump to an item. It works on a `MenuButton` as well. The list
   windows to `ListRows` rows (eight by default): opening scrolls the selection into view, and
   clickable pager rows at the list edges (arrow plus the count beyond that edge) page the
   window, drawn whenever the list is longer than its window. Picking a new item writes the
@@ -820,7 +826,7 @@ keep the keys.
 | DatePicker | Closed: Alt+Down, F4, Space, or Down opens the calendar on the date held, or today. Open: Left and Right move a day, Up and Down a week, Page Up and Page Down a month, Home and End to the month's first and last day; Enter or Space picks the day reached, and Esc, F4, or Alt+Up closes. A dashed ring marks the day reached. |
 | Stepper | Up and Right step up, Down and Left step down, Page Up and Page Down step ten times, Home and End jump to the range ends. |
 | SlideBar | Arrows move a step, Page Up and Page Down a tenth of the range in whole steps, Home and End go to the ends. |
-| SelectBox | Closed: arrows, Home, End, Page Up, and Page Down change the selection, and Space, Alt+Down, or F4 opens the list. Open: they move the highlight; Enter, Space, or Alt+Up takes it, Tab takes it and moves on, and Esc or F4 closes. Letters jump to the next item that starts with them, open or closed: letters typed within a second build a prefix, and one letter typed again steps through its items. Every move passes over disabled items and group headers. |
+| SelectBox | Closed: arrows, Home, End, Page Up, and Page Down change the selection, and Space, Alt+Down, or F4 opens the list. Open: they move the highlight; Enter, Space, or Alt+Up takes it, Tab takes it and moves on, and Esc or F4 closes. Letters jump to the next item that starts with them, open or closed: letters typed within a second build a prefix, and one letter typed again steps through its items. Every move passes over disabled items and group headers. With `Filterable`, letters filter the open list instead (see SelectBox). |
 | CheckList | Up and Down move the row cursor, the select-all header included; Home and End jump; Page Up and Page Down page a windowed list (see Long lists) and jump to the ends otherwise; Space toggles the cursor's row; Ctrl+A checks every row that shows. Other characters filter the list, Backspace takes one off, and Esc clears the filter. |
 | TransferList | Up and Down move the row cursor, Left and Right switch panels, Space toggles the cursor's row in the selection, and Enter moves the panel's selection across, or the cursor's row when nothing is selected; Ctrl+A selects every row of the cursor's panel that shows. Other characters filter the cursor's panel, Backspace takes one off, and Esc clears the filter. With `Reorderable`, Alt+Up and Alt+Down move the chosen side's selection. |
 | TextInput, ComboBox | The editing keys under [Text editing](#text-editing); a combo also opens with Alt+Down or F4, closes with Alt+Up, pages its list with Page Up and Page Down, and takes its suggestion with Right at the end of the text or Tab. |

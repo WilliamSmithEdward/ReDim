@@ -2,6 +2,13 @@
 
 ## 1.0.3 - 2026-09-25
 
+- `Filterable` lets typing filter a `SelectBox`'s or `MenuButton`'s
+  open list, as a combo's list filters: the face shows the letters,
+  the matches bold them, and the arrows, Enter, and clicks work among
+  the matches. Backspace takes a letter off and Esc clears them before
+  it closes the list. A letter on the closed list opens it, and a click
+  that opens it gives it the keys. Off by default, where letters still
+  jump to an item.
 - A long `CheckList` or `RadioGroup` scrolls. Every row used to share
   the control's height however many items there were, so 30 items in
   150 points made rows under 5 points: boxes overlapped, captions could

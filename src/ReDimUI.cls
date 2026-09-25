@@ -895,6 +895,10 @@ Private mAppliedGhostKey As String
 Private mListRows As Long
 Private mListMatches As Collection
 Private mListMatchesFilter As String
+' A Filterable SelectBox or MenuButton: typing filters its open list, and
+' the letters typed so far, which the face shows while the list is open.
+Private mFilterable As Boolean
+Private mSelectFilter As String
 ' Set when the list opened upward for want of room below the face.
 Private mListFlipped As Boolean
 ' A menu's rows run as wide as its widest command needs; 0 while the rows
@@ -6679,6 +6683,23 @@ Public Property Get IsItemEnabled(ByVal itemNumber As Long) As Boolean
     IsItemEnabled = ItemPickable(itemNumber)
 End Property
 
+' Typing filters a SelectBox's or MenuButton's open list to the items
+' that contain the letters, in any case, as a combo's does: the face
+' shows the letters, Backspace takes one off, Esc clears them before it
+' closes, and the arrows and Enter work among the matches. A letter on a
+' closed list opens it, and a click that opens it gives it the keys, so
+' typing reaches it. Off by default, where letters jump to an item.
+Public Function Filterable(Optional ByVal filterOn As Boolean = True) As ReDimUI
+    RequireRole ROLE_COMPONENT, "Filterable"
+    If mKind <> KIND_SELECT Then
+        RaiseError ERROR_INVALID_OPERATION, "Filterable", _
+            "Filterable applies to a SelectBox or MenuButton."
+    End If
+    mFilterable = filterOn
+    Touch
+    Set Filterable = Me
+End Function
+
 ' Appends a group header to a SelectBox: a bold, muted row that labels
 ' the items after it. It takes a place in the item list, so ItemCount
 ' counts it and later item numbers count past it, and it cannot be
@@ -8063,6 +8084,9 @@ Friend Sub RunClickBehavior()
                 If Not PickSelectItem(hostApp, pickedItem) Then Exit Sub
             Else
                 ToggleDropList hostApp.Sheet
+                ' A Filterable list opened by a click takes the keys, so
+                ' typing filters it.
+                If mFilterable And mSelectOpen Then TakeFocus hostApp, False
                 Exit Sub
             End If
         Case KIND_TICKBOX
@@ -9291,6 +9315,11 @@ Friend Function ResolveText(ByVal hostApp As ReDimUI) As String
         End If
     End If
     If mKind = KIND_SELECT Then
+        ' An open list being filtered shows the letters typed.
+        If mSelectOpen And LenB(mSelectFilter) > 0 Then
+            ResolveText = mSelectFilter
+            Exit Function
+        End If
         ResolveText = ItemAt(CLng(mValue))
         If LenB(ResolveText) = 0 Then ResolveText = mText
         Exit Function
@@ -9708,8 +9737,8 @@ Private Sub HandleControlKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
             If mSelectOpen And (mKind = KIND_DATE Or mIsMenu) Then CloseDropList
             If mKind = KIND_SELECT And mSelectOpen Then
                 ' Tab takes the highlighted item, as a native list does.
-                If mListHighlight >= 1 Then
-                    If PickSelectItem(hostApp, mListHighlight) Then
+                If HighlightedItem() >= 1 Then
+                    If PickSelectItem(hostApp, HighlightedItem()) Then
                         RunClickHandlers hostApp
                     End If
                 Else
@@ -9955,6 +9984,9 @@ Private Sub HandleSelectKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
         If keyText = "{ENTER}" Then hostApp.ClickDefaultButton
         Exit Sub
     End If
+    If mFilterable Then
+        If SelectFilterKey(hostApp, keyText) Then Exit Sub
+    End If
     ' Moves land on items that can be picked, passing over disabled
     ' items and group headers in the direction of travel.
     If mSelectOpen Then
@@ -10043,6 +10075,113 @@ Private Sub HandleSelectKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
     If aimRow = 0 Then Exit Sub
     If PickSelectItem(hostApp, aimRow) Then RunClickHandlers hostApp
 End Sub
+
+' A Filterable list's keys. Letters and Backspace edit the filter, and a
+' letter on a closed list opens it; while the filter holds letters the
+' arrows, Page Up and Page Down, Home, and End move among the matches,
+' Space types a space, and Enter or Alt+Up takes the match highlighted.
+' True when the key was handled here.
+Private Function SelectFilterKey(ByVal hostApp As ReDimUI, ByVal keyText As String) As Boolean
+    Dim typedChar As String
+    Dim aimMatch As Long
+    Dim stepDirection As Long
+    Dim pickedItem As Long
+
+    typedChar = keyText
+    If typedChar = "{APOS}" Then typedChar = "'"
+    If typedChar = "{QUOTE}" Then typedChar = """"
+    If typedChar = "{BS}" Then
+        If Not mSelectOpen Or LenB(mSelectFilter) = 0 Then Exit Function
+        SetSelectFilter Left$(mSelectFilter, Len(mSelectFilter) - 1)
+        SelectFilterKey = True
+        Exit Function
+    End If
+    If Len(typedChar) = 1 And (typedChar <> " " Or LenB(mSelectFilter) > 0) Then
+        If Not mSelectOpen Then OpenDropList hostApp.Sheet
+        SetSelectFilter mSelectFilter & typedChar
+        SelectFilterKey = True
+        Exit Function
+    End If
+    If Not mSelectOpen Or LenB(mSelectFilter) = 0 Or mListMatches Is Nothing Then Exit Function
+    stepDirection = 1
+    Select Case keyText
+        Case "{UP}"
+            aimMatch = mListHighlight - 1
+            stepDirection = -1
+        Case "{DOWN}"
+            aimMatch = mListHighlight + 1
+        Case "{PGUP}"
+            aimMatch = mListHighlight - mListRows
+            stepDirection = -1
+        Case "{PGDN}"
+            aimMatch = mListHighlight + mListRows
+        Case "{HOME}"
+            aimMatch = 1
+        Case "{END}"
+            aimMatch = mListMatches.Count
+            stepDirection = -1
+        Case "{ENTER}", "{ALTUP}"
+            pickedItem = HighlightedItem()
+            If pickedItem >= 1 Then
+                If PickSelectItem(hostApp, pickedItem) Then RunClickHandlers hostApp
+            Else
+                CloseDropList
+            End If
+            SelectFilterKey = True
+            Exit Function
+        Case Else
+            Exit Function
+    End Select
+    aimMatch = PickableMatchNear(aimMatch, stepDirection)
+    If aimMatch > 0 Then HighlightListItem aimMatch
+    SelectFilterKey = True
+End Function
+
+' Filters an open Filterable list and highlights its first match that
+' can be picked, from the top of the window.
+Private Sub SetSelectFilter(ByVal filterText As String)
+    mSelectFilter = filterText
+    mListOffset = 0
+    Set mListMatches = BuildListMatches(OwnerApp.Sheet)
+    mListHighlight = PickableMatchNear(1, 1)
+    Touch
+End Sub
+
+' The match nearest a target, in one direction and then the other, whose
+' item can be picked; 0 when none can.
+Private Function PickableMatchNear(ByVal aimMatch As Long, ByVal stepDirection As Long) As Long
+    Dim matchTotal As Long
+    Dim probe As Long
+
+    If mListMatches Is Nothing Then Exit Function
+    matchTotal = mListMatches.Count
+    If matchTotal = 0 Then Exit Function
+    If aimMatch < 1 Then aimMatch = 1
+    If aimMatch > matchTotal Then aimMatch = matchTotal
+    For probe = aimMatch To IIf(stepDirection > 0, matchTotal, 1) Step stepDirection
+        If ItemPickable(CLng(mListMatches.Item(probe))) Then
+            PickableMatchNear = probe
+            Exit Function
+        End If
+    Next probe
+    For probe = aimMatch To IIf(stepDirection > 0, 1, matchTotal) Step -stepDirection
+        If ItemPickable(CLng(mListMatches.Item(probe))) Then
+            PickableMatchNear = probe
+            Exit Function
+        End If
+    Next probe
+End Function
+
+' The item an open select's highlight stands on: its match's item while
+' a filter narrows the list, where rows and items part; 0 for none.
+Private Function HighlightedItem() As Long
+    If mListHighlight < 1 Then Exit Function
+    If LenB(mSelectFilter) = 0 Or mListMatches Is Nothing Then
+        HighlightedItem = mListHighlight
+    ElseIf mListHighlight <= mListMatches.Count Then
+        HighlightedItem = CLng(mListMatches.Item(mListHighlight))
+    End If
+End Function
 
 ' Moves an open select's highlight, scrolling the window to keep it in
 ' view.
@@ -15320,6 +15459,11 @@ Private Function ClearListFilter() As Boolean
         SetTableFilter vbNullString
         ClearListFilter = True
         Exit Function
+    ElseIf mKind = KIND_SELECT Then
+        If LenB(mSelectFilter) = 0 Or Not mSelectOpen Then Exit Function
+        SetSelectFilter vbNullString
+        ClearListFilter = True
+        Exit Function
     Else
         Exit Function
     End If
@@ -17396,6 +17540,8 @@ Private Function BuildListMatches(ByVal hostSheet As Worksheet) As Collection
         If mFilterPristine Then
             If ExactItemMatch(filterText) > 0 Then filterText = vbNullString
         End If
+    ElseIf mKind = KIND_SELECT Then
+        filterText = mSelectFilter
     End If
     ' Matches are cached per filter text; any item change drops them.
     If Not mListMatches Is Nothing Then
@@ -17417,6 +17563,7 @@ Private Sub OpenDropList(ByVal hostSheet As Worksheet)
     mSelectOpen = True
     NoteListOpened
     mFilterPristine = True
+    mSelectFilter = vbNullString
     mListHighlight = 0
     If mKind = KIND_COMBO Then
         currentItem = ExactItemMatch(FieldTextNow(hostSheet))

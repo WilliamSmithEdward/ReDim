@@ -5795,6 +5795,64 @@ Public Function TestRowListWindow() As String
     TestRowListWindow = transcript
 End Function
 
+' A Filterable SelectBox: a click opens it with the keys, letters filter
+' the list and show on the face, the arrows and Enter work among the
+' matches, a click on a filtered row takes that row's item, Backspace
+' and Esc undo the filter, and a filter that matches nothing says so.
+Public Function TestFilterableSelect() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim transcript As String
+
+    ReDimUI.AutoPump False
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "wid85")
+    app.SelectBox("fruit").AtRect(24, 24, 150, 22).Text("Pick a fruit").Items("Apple", _
+        "Apricot", "Banana", "Cherry", "Mango", "Orange", "Grape", "Lemon", "Lime", _
+        "Peach", "Pear", "Plum").Filterable
+    app.Render
+    ReDimUI.DispatchShape "rdm_wid85_fruit"
+    transcript = "clickTakesKeys=" & CStr(ReDimUI.FocusedComponentId = "fruit")
+    RdxKeyChar "a"
+    RdxKeyChar "n"
+    transcript = transcript & "|filtered=" & RowItem(host, "rdm_wid85_fruit__opt1") & "," & _
+        RowItem(host, "rdm_wid85_fruit__opt3") & "/" & _
+        CStr(Not ShapeExists(host, "rdm_wid85_fruit__opt4")) & "/" & _
+        host.Shapes("rdm_wid85_fruit").TextFrame2.TextRange.Text
+    RdxKeyChar "{DOWN}"
+    RdxKeyChar "{ENTER}"
+    transcript = transcript & "|enterTakes=" & app.SelectBox("fruit").SelectedText & "/" & _
+        CStr(Not app.SelectBox("fruit").ListIsOpen)
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid85_fruit"
+    RdxKeyChar "p"
+    RdxKeyChar "e"
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid85_fruit__opt3"
+    transcript = transcript & "|clickTakesMatch=" & app.SelectBox("fruit").SelectedText
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid85_fruit"
+    RdxKeyChar "z"
+    RdxKeyChar "z"
+    transcript = transcript & "|noMatches=" & CStr(ShapeExists(host, "rdm_wid85_fruit__optn"))
+    RdxKeyChar "{BS}"
+    RdxKeyChar "{BS}"
+    transcript = transcript & "|backspaceRestores=" & CStr(ShapeExists(host, "rdm_wid85_fruit__opt8"))
+    RdxKeyChar "l"
+    RdxKeyChar "{ESC}"
+    transcript = transcript & "|escClearsFirst=" & CStr(app.SelectBox("fruit").ListIsOpen And _
+        host.Shapes("rdm_wid85_fruit").TextFrame2.TextRange.Text = "Pear")
+    RdxKeyChar "{ESC}"
+    On Error Resume Next
+    app.Button("go").Filterable
+    transcript = transcript & "|otherKindRefused=" & CStr(Err.Number <> 0)
+    Err.Clear
+    On Error GoTo 0
+    RdxReleaseKeys
+    ReDimUI.AutoPump True
+    TestFilterableSelect = transcript
+End Function
+
 ' True when a part exists and is visible.
 Private Function IsShown(ByVal host As Worksheet, ByVal shapeName As String) As Boolean
     If Not ShapeExists(host, shapeName) Then Exit Function

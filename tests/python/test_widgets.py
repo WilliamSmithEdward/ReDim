@@ -1550,6 +1550,22 @@ def test_selection_readers(run_widgets):
     assert facts["otherKindRefused"] == "True"
 
 
+def test_filterable_select(run_widgets):
+    facts = parse_transcript(run_widgets("TestFilterableSelect"))
+    assert facts["clickTakesKeys"] == "True", (
+        "a click that opens a Filterable list must give it the keys"
+    )
+    assert facts["filtered"] == "Banana,Orange/True/an", (
+        "letters must filter the list to the items containing them and show on the face"
+    )
+    assert facts["enterTakes"] == "Mango/True", "Down and Enter must take the next match"
+    assert facts["clickTakesMatch"] == "Pear", "a click on a filtered row must take its item"
+    assert facts["noMatches"] == "True", "a filter matching nothing must say so"
+    assert facts["backspaceRestores"] == "True"
+    assert facts["escClearsFirst"] == "True", "Esc must clear the filter before closing"
+    assert facts["otherKindRefused"] == "True"
+
+
 def test_row_list_window(run_widgets):
     facts = parse_transcript(run_widgets("TestRowListWindow"))
     assert facts["checkWindow"] == "True", (
