@@ -75,11 +75,12 @@ def test_theme_swap_repaint(run_core):
 
 def test_state_handlers(run_core):
     facts = parse_transcript(run_core("TestStateHandlers"))
-    assert facts["handlersRanOnSet"] == "2", (
-        "both registered handlers must fire on SetState"
+    assert facts["handlersRanOnSet"] == "11", (
+        "both listeners must fire on SetState, a repeated registration only once"
     )
-    assert facts["handlersRanAgain"] == "4"
-    assert facts["unwatchedIgnored"] == "4"
+    assert facts["handlersRanAgain"] == "22"
+    assert facts["unwatchedIgnored"] == "22"
+    assert facts["secondKeyHeard"] == "32", "a listener given two keys must hear the second"
 
 
 def test_unmount(run_core):

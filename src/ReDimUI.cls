@@ -3625,16 +3625,32 @@ End Property
 ' is the format of choice.
 
 ' Registers a zero-argument workbook procedure invoked after the key changes.
-Public Sub OnStateChanged(ByVal stateKey As String, ByVal handlerProc As String)
+' Listens on a key, or on each key of an array: Array("volume", "mode").
+' A listener already on a key is not added again, so a build that runs
+' twice in a session still fires it once per change.
+Public Sub OnStateChanged(ByVal watchedKeys As Variant, ByVal handlerProc As String)
     Dim handlers As Collection
+    Dim stateKey As Variant
+    Dim listed As Variant
+    Dim alreadyListed As Boolean
 
     RequireRole ROLE_APP, "OnStateChanged"
-    Set handlers = FindHandlers(stateKey)
-    If handlers Is Nothing Then
-        Set handlers = New Collection
-        mStateHandlers.Add handlers, stateKey
-    End If
-    handlers.Add handlerProc
+    If Not IsArray(watchedKeys) Then watchedKeys = Array(watchedKeys)
+    For Each stateKey In watchedKeys
+        Set handlers = FindHandlers(CStr(stateKey))
+        If handlers Is Nothing Then
+            Set handlers = New Collection
+            mStateHandlers.Add handlers, CStr(stateKey)
+        End If
+        alreadyListed = False
+        For Each listed In handlers
+            If StrComp(CStr(listed), handlerProc, vbTextCompare) = 0 Then
+                alreadyListed = True
+                Exit For
+            End If
+        Next listed
+        If Not alreadyListed Then handlers.Add handlerProc
+    Next stateKey
 End Sub
 
 Private Sub InvokeStateHandlers(ByVal stateKey As String)

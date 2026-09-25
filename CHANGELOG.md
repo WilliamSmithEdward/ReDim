@@ -2,6 +2,11 @@
 
 ## 1.0.3 - 2026-09-25
 
+- `OnStateChanged` takes an array of keys, `Array("volume", "mode")`,
+  to put one listener on each, and adds a listener to a key only once.
+  A build that ran twice in a session registered every listener again,
+  so each change fired it twice. The Widget Gallery and ReDex demos
+  wire their listeners in one call each.
 - An async op's `OnDone`, `OnFail`, and `OnCancel` handlers, and a
   job's, run with the op or job as `ReDimUI.Sender`, and an error
   inside one reaches the app's `OnError` sink; they ran under `On Error

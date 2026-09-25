@@ -157,17 +157,9 @@ Public Sub BuildWidgetGallery()
 End Sub
 
 Private Sub WireInspector(ByVal ui As ReDimUI)
-    ui.OnStateChanged "notifications", "WidgetGallery.RefreshInspector"
-    ui.OnStateChanged "region", "WidgetGallery.RefreshInspector"
-    ui.OnStateChanged "drawnCheck", "WidgetGallery.RefreshInspector"
-    ui.OnStateChanged "priority", "WidgetGallery.RefreshInspector"
-    ui.OnStateChanged "volume", "WidgetGallery.RefreshInspector"
-    ui.OnStateChanged "userName", "WidgetGallery.RefreshInspector"
-    ui.OnStateChanged "lastAction", "WidgetGallery.RefreshInspector"
-    ui.OnStateChanged "email", "WidgetGallery.RefreshInspector"
-    ui.OnStateChanged "dueDate", "WidgetGallery.RefreshInspector"
-    ui.OnStateChanged "size", "WidgetGallery.RefreshInspector"
-    ui.OnStateChanged "stock", "WidgetGallery.RefreshInspector"
+    ui.OnStateChanged Array("notifications", "region", "drawnCheck", "priority", _
+        "volume", "userName", "lastAction", "email", "dueDate", "size", "stock"), _
+        "WidgetGallery.RefreshInspector"
 End Sub
 
 ' New in 1.0: a tab strip whose panels hold a form with captions, hints,

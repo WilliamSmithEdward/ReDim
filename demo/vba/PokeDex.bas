@@ -241,10 +241,8 @@ Private Sub BuildTrainer()
     ui.SetStateDefault "ambition", 5
     ui.SetStateDefault "darkMode", False
     ui.SetStateDefault "cardText", ""
-    ui.OnStateChanged "trainerName", "PokeDex.RefreshTrainerCard"
-    ui.OnStateChanged "starter", "PokeDex.RefreshTrainerCard"
-    ui.OnStateChanged "favType", "PokeDex.RefreshTrainerCard"
-    ui.OnStateChanged "ambition", "PokeDex.RefreshTrainerCard"
+    ui.OnStateChanged Array("trainerName", "starter", "favType", "ambition"), _
+        "PokeDex.RefreshTrainerCard"
     ui.Render
     ui.ProtectSurface
 End Sub

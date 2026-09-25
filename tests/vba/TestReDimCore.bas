@@ -270,8 +270,11 @@ Public Function TestStateHandlers() As String
     gClickCount = 0
     Set app = ReDimUI.Mount(host, "core8")
     app.Label("out").At("B2:E2").BindText "watched"
+    ' The same listener twice, as a build that runs twice registers it,
+    ' counts once; a second listener watches two keys from one call.
     app.OnStateChanged "watched", "TestReDimCore.CoreStateHandler"
     app.OnStateChanged "watched", "TestReDimCore.CoreStateHandler"
+    app.OnStateChanged Array("watched", "other"), "TestReDimCore.CoreStateHandlerTens"
     app.SetState "watched", "first"
     app.Render
 
@@ -280,11 +283,17 @@ Public Function TestStateHandlers() As String
     transcript = transcript & "|handlersRanAgain=" & gClickCount
     app.SetState "unwatched", "x"
     transcript = transcript & "|unwatchedIgnored=" & gClickCount
+    app.SetState "other", "y"
+    transcript = transcript & "|secondKeyHeard=" & gClickCount
     TestStateHandlers = transcript
 End Function
 
 Public Sub CoreStateHandler()
     gClickCount = gClickCount + 1
+End Sub
+
+Public Sub CoreStateHandlerTens()
+    gClickCount = gClickCount + 10
 End Sub
 
 ' State is session-scoped by design: a rebuild starts empty, and

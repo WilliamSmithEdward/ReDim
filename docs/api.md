@@ -72,7 +72,7 @@ framework. Also:
 | `SetStateDefault key, value` | Sets only when the key has no value; the right form for initial values. |
 | (persistence) | The state store is deliberately in-memory and session-scoped; ReDim ships no persistence. Durability belongs to the host application: walk the store with `StateKeys` and `State`, save wherever fits (a hidden sheet, workbook names, a file), and reseed on build with `SetStateDefault`, which never clobbers a value already in play. `ROneCOne.Json.Serialize`/`Deserialize` are available if JSON is the format of choice. |
 | `HotKey keyCode, "Module.Proc"` / `ClearHotKeys` | Application.OnKey with cleanup on Unmount and Shutdown. |
-| `OnStateChanged key, "Module.Proc"` | Zero-argument listener runs after the key changes. |
+| `OnStateChanged key, "Module.Proc"` | Zero-argument listener runs after the key changes. `Array("a", "b")` in place of the key listens on each; a listener already on a key is not added again, so a build that runs twice still fires it once. |
 | `BeginUpdate` / `EndUpdate` | Batch several changes into one flush. |
 | `Render` | Mark everything dirty and paint. Call once after building the UI. |
 | `FlushDirty` | Paint the components changed since the last paint, now. A change outside `BeginUpdate` paints on its own, so code rarely needs it. |
