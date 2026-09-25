@@ -146,8 +146,11 @@ All fluent, all return the component:
   selected, and `Value(0)` clears the selection back to it. Like the item mutations, the
   clear writes no `WritesTo` state and fires no `OnChange`.
 - Drop lists (`SelectBox`, `ComboBox`): `ListRows(n)` sets how many item rows the open
-  list shows at once, eight by default. A longer list windows behind clickable pager rows
-  at its edges, each showing an arrow and the count of items beyond it. The current item's
+  list shows at once, eight by default. A longer list windows between clickable pager rows
+  at its edges, each showing an arrow and the count of items beyond it. Both pagers stay
+  in place at every page, so clicking one spot pages through the whole list; at the first
+  or last page the pager with nothing beyond it shows its arrow alone, muted, and a click
+  on it does nothing. The current item's
   row carries a check in a gutter every row shares, so the selection reads without color.
   An open list with nothing to show says so in an inert row, "No matches" under a combo's
   filter or "No items" in an empty select. A list that would run past the bottom of the
@@ -214,7 +217,7 @@ dependencies:
   `Text` is the placeholder shown while nothing is selected. The list windows to
   `ListRows` rows (eight by default): opening scrolls the selection into view, and
   clickable pager rows at the list edges (arrow plus the count beyond that edge) page the
-  window, appearing only when something lies beyond them. Picking a new item writes the
+  window, drawn whenever the list is longer than its window. Picking a new item writes the
   `WritesTo` state and fires `OnChange`; re-picking the selected item only closes the
   list, the same rule `RadioGroup` follows for its selected row. `ItemEnabled(position,
   False)` leaves an item showing but out of reach: it reads muted, a click on it does
@@ -260,7 +263,7 @@ dependencies:
   never counts. The drop list windows to `ListRows` rows (eight by default): Up and Down
   walk a highlight that scrolls the window, Enter takes the highlighted match, typing
   re-filters, and clickable pager rows at the list edges (arrow plus the count beyond that
-  edge) page the window for the mouse, appearing only when something lies beyond them.
+  edge) page the window for the mouse, drawn whenever the matches outrun the window.
   When the text names an item, as it does after a pick, the list reopens unfiltered and
   scrolled to that item, and Down walks on from it; the first edit filters again. While
   the text filters the list, each row bolds what the text matched, and the first item

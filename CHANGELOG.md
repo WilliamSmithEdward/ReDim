@@ -2,6 +2,15 @@
 
 ## 1.0.3 - 2026-09-25
 
+- Clicking a drop list's down pager until the last page no longer
+  closes the list (#2). The pagers came and went with the page: the
+  first page down added an up pager that pushed every row one row
+  lower, and the last page removed the down pager, so the next click
+  where the pager had been landed on an item row and picked it. A list
+  longer than its window now keeps both pager rows in place at every
+  page. At the first or last page the pager with nothing beyond it
+  shows its arrow alone in muted ink, and a click on it does nothing.
+  This applies to a `SelectBox`, `ComboBox`, and `MenuButton`.
 - The accent ring around a focused control that is not a text field is
   now opt-in: `ui.FocusRings` turns it on for an app, and
   `FocusRings False` turns it off again. Without it, focus still moves

@@ -15483,15 +15483,14 @@ Private Function ListPartAt(ByVal pointsY As Double) As String
     matchTotal = mListMatches.Count
     wanted = matchTotal - mListOffset
     If wanted > mListRows Then wanted = mListRows
-    If mListOffset > 0 Then rowShift = 1
+    If matchTotal > mListRows Then rowShift = 1
     If pointsY < ListTop() Then Exit Function
     slot = Int((pointsY - ListTop()) / DropRowPitch())
     If rowShift = 1 And slot = 0 Then
         ListPartAt = "optu"
     ElseIf slot - rowShift + 1 <= wanted Then
         ListPartAt = "opt" & (slot - rowShift + 1)
-    ElseIf slot - rowShift = wanted _
-        And matchTotal - mListOffset - wanted > 0 Then
+    ElseIf slot - rowShift = wanted And rowShift = 1 Then
         ListPartAt = "optd"
     End If
 End Function
@@ -16367,6 +16366,7 @@ Private Sub SyncDropList( _
     Dim listSig As String
     Dim showEmpty As Boolean
     Dim listTopAt As Double
+    Dim listPages As Boolean
 
     ' A closed list draws nothing, so it skips the match walk: an item
     ' change on a closed long list would otherwise rebuild every match.
@@ -16384,9 +16384,13 @@ Private Sub SyncDropList( _
             If wanted > mListRows Then wanted = mListRows
             aboveCount = mListOffset
             belowCount = matchTotal - mListOffset - wanted
+            listPages = (matchTotal > mListRows)
         End If
     End If
-    If aboveCount > 0 Then rowShift = 1
+    ' A list that pages keeps both pager rows in place at every page, the
+    ' one with nothing beyond it drawn inert, so the rows and pagers never
+    ' move under a pointer clicking through the pages.
+    If listPages Then rowShift = 1
     rowPitch = DropRowPitch()
     resolvedSize = mFontSize
     If resolvedSize <= 0 Then resolvedSize = themeValue.BaseFontSize
@@ -16398,7 +16402,7 @@ Private Sub SyncDropList( _
     listSig = CStr(ObjPtr(themeValue)) & ":" & CStr(wanted) & ":" & _
         CStr(mValue) & ":" & CStr(mListOffset) & ":" & _
         CStr(mListHighlight) & ":" & CStr(aboveCount) & ":" & _
-        CStr(belowCount) & ":" & CStr(showEmpty) & ":" & _
+        CStr(belowCount) & ":" & CStr(listPages) & ":" & CStr(showEmpty) & ":" & _
         CStr(listTopAt) & ":" & CStr(mLeft) & ":" & CStr(mTop) & ":" & _
         CStr(mWidth) & ":" & CStr(mHeight) & ":" & CStr(resolvedSize) & _
         Chr$(2) & mListMatchesFilter
@@ -16413,7 +16417,7 @@ Private Sub SyncDropList( _
         DropPart hostSheet, "optm"
     End If
     SyncListPager hostSheet, themeValue, "optu", ChrW(9650), _
-        aboveCount, listTopAt, resolvedSize, mAppliedPagerUpSig
+        aboveCount, listPages, listTopAt, resolvedSize, mAppliedPagerUpSig
     SyncEmptyRow hostSheet, themeValue, showEmpty, listTopAt, rowPitch, _
         resolvedSize
     EnsureRowStates mAppliedRowStates, wanted
@@ -16552,7 +16556,7 @@ Private Sub SyncDropList( _
         FitMenuWidth hostSheet, wanted
         ' The up pager drew before the rows; it follows the fitted width.
         SyncListPager hostSheet, themeValue, "optu", ChrW(9650), _
-            aboveCount, listTopAt, resolvedSize, mAppliedPagerUpSig
+            aboveCount, listPages, listTopAt, resolvedSize, mAppliedPagerUpSig
     End If
     EnsureRowStates mAppliedRowStates, mAppliedOptionCount
     For idx = wanted + 1 To mAppliedOptionCount
@@ -16561,7 +16565,7 @@ Private Sub SyncDropList( _
     Next idx
     mAppliedOptionCount = wanted
     SyncListPager hostSheet, themeValue, "optd", ChrW(9660), _
-        belowCount, listTopAt + (rowShift + wanted) * rowPitch, _
+        belowCount, listPages, listTopAt + (rowShift + wanted) * rowPitch, _
         resolvedSize, mAppliedPagerDownSig
 End Sub
 
@@ -16838,11 +16842,10 @@ Private Function DropListDepth() As Double
     shownRows = matchTotal - mListOffset
     If shownRows > mListRows Then shownRows = mListRows
     If shownRows < 0 Then shownRows = 0
-    If mListOffset > 0 Then rowShift = 1
+    ' A list that pages draws both pager rows at every page.
+    If matchTotal > mListRows Then rowShift = 1
     DropListDepth = (rowShift + shownRows) * DropRowPitch()
-    If matchTotal - mListOffset - shownRows > 0 Then
-        DropListDepth = DropListDepth + mHeight
-    End If
+    If rowShift = 1 Then DropListDepth = DropListDepth + mHeight
 End Function
 
 ' The item indexes the open list walks, in order. A SelectBox lists every
@@ -16904,10 +16907,17 @@ End Sub
 
 ' A pager row pages the window by its height less one row of overlap and
 ' keeps the list open. The combo's keyboard highlight resets so the next
-' arrow press starts inside the visible window.
+' arrow press starts inside the visible window. A pager with nothing
+' beyond it, at the first or last page, changes nothing.
 Private Sub PageDropList(ByVal pageDown As Boolean)
     Dim pageRows As Long
 
+    If pageDown Then
+        If mListMatches Is Nothing Then Exit Sub
+        If mListOffset >= mListMatches.Count - mListRows Then Exit Sub
+    ElseIf mListOffset <= 0 Then
+        Exit Sub
+    End If
     pageRows = mListRows - 1
     If pageRows < 1 Then pageRows = 1
     If pageDown Then
@@ -16932,16 +16942,18 @@ Private Function ListItemAtRow(ByVal windowRow As Long) As Long
 End Function
 
 ' A clickable paging row at a list edge: the arrow plus the count of
-' items beyond that edge. Clicking pages the window; absent when nothing
-' lies beyond. appliedKey holds the state it was last drawn with: empty
-' when absent, "?" when unknown after Render, which forces one redraw or
-' one delete.
+' items beyond that edge. Clicking pages the window. A list that pages
+' draws both, and the one with nothing beyond it shows its arrow alone in
+' muted ink, where a click pages nothing; a list that fits draws neither.
+' appliedKey holds the state it was last drawn with: empty when absent,
+' "?" when unknown after Render, which forces one redraw or one delete.
 Private Sub SyncListPager( _
     ByVal hostSheet As Worksheet, _
     ByVal themeValue As ReDimUI, _
     ByVal partName As String, _
     ByVal arrowGlyph As String, _
     ByVal beyondCount As Long, _
+    ByVal listPages As Boolean, _
     ByVal rowTop As Double, _
     ByVal resolvedSize As Double, _
     ByRef appliedKey As String _
@@ -16950,9 +16962,16 @@ Private Sub SyncListPager( _
     Dim pagerKey As String
     Dim firstDraw As Boolean
     Dim pagerWords As String
+    Dim pagerInk As Long
 
-    If beyondCount > 0 Then
-        pagerWords = arrowGlyph & " " & Phrase(UI_MORE_ITEMS, beyondCount)
+    If listPages Then
+        If beyondCount > 0 Then
+            pagerWords = arrowGlyph & " " & Phrase(UI_MORE_ITEMS, beyondCount)
+            pagerInk = themeValue.OnSurfaceColor
+        Else
+            pagerWords = arrowGlyph
+            pagerInk = themeValue.OnMutedColor
+        End If
         pagerKey = PartsState(themeValue) & ":" & CStr(rowTop) & ":" & _
             pagerWords & ":" & CStr(resolvedSize) & ":" & CStr(ListSpanLeft()) & ":" & _
             CStr(ListSpanWidth())
@@ -16970,7 +16989,7 @@ Private Sub SyncListPager( _
         pagerShape.Line.Visible = msoTrue
         pagerShape.Line.ForeColor.RGB = themeValue.BorderColor
         pagerShape.Line.Weight = 1
-        StyleGlyphText pagerShape, pagerWords, themeValue.OnSurfaceColor, _
+        StyleGlyphText pagerShape, pagerWords, pagerInk, _
             resolvedSize - 1, themeValue
         pagerShape.Visible = msoTrue
         pagerShape.OnAction = mAppliedOnAction

@@ -527,8 +527,8 @@ def test_long_lists(run_widgets):
         "the bottom pager must page the window, clamped to the tail"
     )
     assert facts["optuText"] == "▲ 4 more"
-    assert facts["optdGoneAtEnd"] == "True", (
-        "the bottom pager disappears when nothing lies below"
+    assert facts["optdInertAtEnd"] == "True", (
+        "the bottom pager turns inert when nothing lies below"
     )
     assert facts["downStartsInWindow"] == "True", (
         "a Down after mouse paging starts the highlight in the window"
@@ -1480,3 +1480,15 @@ def test_press_off_release(run_widgets):
     assert facts["clickKeeps"] == "True/A", "a click on the list's pager pages and keeps it open"
     assert facts["waits"] == "True", "the close waits out the grace after the release"
     assert facts["closes"] == "True", "a press off with no click closes the list"
+
+
+def test_pager_holds_place(run_widgets):
+    facts = parse_transcript(run_widgets("TestPagerHoldsPlace"))
+    assert facts["upInertAtTop"] == "True", "a paging list shows an inert up pager at the top"
+    assert facts["downStays"] == "True", (
+        "the down pager must stay under the pointer through every page"
+    )
+    assert facts["stillOpen"] == "True", "clicking through the pages keeps the list open"
+    assert facts["nothingPicked"] == "True", "a pager click must never pick a row"
+    assert facts["downInertAtEnd"] == "True", "the last page shows an inert down pager"
+    assert facts["lastRow"] == "Item20"

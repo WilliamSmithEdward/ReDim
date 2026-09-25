@@ -317,6 +317,12 @@ Private Function ShapeExists(ByVal host As Worksheet, ByVal shapeName As String)
     ShapeExists = Not probe Is Nothing
 End Function
 
+' True for a list pager drawn with nothing beyond it: the arrow alone.
+Private Function PagerInert(ByVal host As Worksheet, ByVal shapeName As String) As Boolean
+    If Not ShapeExists(host, shapeName) Then Exit Function
+    PagerInert = (Len(host.Shapes(shapeName).TextFrame2.TextRange.Text) = 1)
+End Function
+
 ' "1" when the probe button takes keyCode as its shortcut, "0" when
 ' Shortcut refuses it.
 Private Function ShortcutAccepts(ByVal app As ReDimUI, ByVal keyCode As String) As String
@@ -1716,13 +1722,14 @@ Public Function TestLongLists() As String
     app.TransferList("pool").ItemsFrom(items).WritesTo "poolState"
     app.Render
 
-    ' The open list windows to eight rows plus the bottom pager row.
+    ' The open list windows to eight rows between two pager rows, the top
+    ' one inert while nothing lies above.
     ReDimUI.DispatchShape "rdm_wid27_pick"
     transcript = "comboWindow=" & _
         CStr(ShapeExists(host, "rdm_wid27_pick__opt8") And _
             Not ShapeExists(host, "rdm_wid27_pick__opt9") And _
             ShapeExists(host, "rdm_wid27_pick__optd") And _
-            Not ShapeExists(host, "rdm_wid27_pick__optu"))
+            PagerInert(host, "rdm_wid27_pick__optu"))
     transcript = transcript & "|moreText=" & _
         host.Shapes("rdm_wid27_pick__optd").TextFrame2.TextRange.Text
 
@@ -1753,9 +1760,9 @@ Public Function TestLongLists() As String
     ReDimUI.DispatchShape "rdm_wid27_pick__opt1"
     transcript = transcript & "|clickMaps=" & app.State("pickState")
 
-    ' Mouse paging: the bottom pager pages the window (clamped), the
-    ' top pager appears with its count and pages back, and a Down after
-    ' paging starts the highlight inside the visible window.
+    ' Mouse paging: the bottom pager pages the window (clamped) and turns
+    ' inert at the end, the top pager shows its count and pages back, and
+    ' a Down after paging starts the highlight inside the visible window.
     Sleep 200
     ReDimUI.DispatchShape "rdm_wid27_pick"
     BackspaceAll app.ComboBox("pick")
@@ -1765,8 +1772,8 @@ Public Function TestLongLists() As String
         RowItem(host, "rdm_wid27_pick__opt1")
     transcript = transcript & "|optuText=" & _
         host.Shapes("rdm_wid27_pick__optu").TextFrame2.TextRange.Text
-    transcript = transcript & "|optdGoneAtEnd=" & _
-        CStr(Not ShapeExists(host, "rdm_wid27_pick__optd"))
+    transcript = transcript & "|optdInertAtEnd=" & _
+        CStr(PagerInert(host, "rdm_wid27_pick__optd"))
     RdxKeyChar "{DOWN}"
     transcript = transcript & "|downStartsInWindow=" & _
         CStr(host.Shapes("rdm_wid27_pick__opt1").Fill.ForeColor.RGB = _
@@ -1776,7 +1783,7 @@ Public Function TestLongLists() As String
     ReDimUI.DispatchShape "rdm_wid27_pick__optu"
     transcript = transcript & "|pagedBack=" & _
         CStr(RowItem(host, "rdm_wid27_pick__opt1") _
-            = "Item01" And Not ShapeExists(host, "rdm_wid27_pick__optu"))
+            = "Item01" And PagerInert(host, "rdm_wid27_pick__optu"))
     RdxKeyChar "{ENTER}"
 
     ' A pick reopens pristine: the whole list, scrolled so the pick is
@@ -1868,7 +1875,7 @@ Public Function TestLongLists() As String
         CStr(ShapeExists(host, "rdm_wid27_zone__opt8") And _
             Not ShapeExists(host, "rdm_wid27_zone__opt9") And _
             ShapeExists(host, "rdm_wid27_zone__optu") And _
-            Not ShapeExists(host, "rdm_wid27_zone__optd"))
+            PagerInert(host, "rdm_wid27_zone__optd"))
     transcript = transcript & "|selectShowsPick=" & _
         RowItem(host, "rdm_wid27_zone__opt6")
     Sleep 200
@@ -1968,8 +1975,8 @@ Public Function TestChromeClaim() As String
     transcript = transcript & "|closedAgain=" & _
         CStr(Not app.PointClaimedByChrome(30, 150, "vol"))
 
-    ' An open SelectBox claims its windowed depth - eight rows and the
-    ' bottom pager, ending near y 266 - not all twelve items.
+    ' An open SelectBox claims its windowed depth - eight rows between
+    ' two pagers, ending near y 290 - not all twelve items.
     ReDimUI.DispatchShape "rdm_wid28_zone"
     transcript = transcript & "|selectClaimsWindow=" & _
         CStr(app.PointClaimedByChrome(310, 250, "vol"))
@@ -5451,4 +5458,58 @@ Public Function TestPressOffRelease() As String
     ReDimUI.ClearPointerOverride
     ReDimUI.AutoPump True
     TestPressOffRelease = transcript
+End Function
+
+' Clicking through a list's pages at one spot (issue #2): a list that
+' pages keeps both pager rows in place, so the down pager stays under the
+' pointer from the first page to the last, where it turns inert instead
+' of leaving an item row to be picked. The up pager at the top is inert
+' the same way.
+Public Function TestPagerHoldsPlace() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim transcript As String
+    Dim names(0 To 19) As String
+    Dim idx As Long
+    Dim pagerTop As Double
+    Dim steady As Boolean
+
+    For idx = 0 To 19
+        names(idx) = "Item" & Format$(idx + 1, "00")
+    Next idx
+    ReDimUI.AutoPump False
+    ReDimUI.OverridePointer 900, 5, False
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "wid75")
+    app.SelectBox("pick").AtRect(24, 24, 140, 22).ItemsFrom names
+    app.Render
+    ReDimUI.DispatchShape "rdm_wid75_pick"
+    transcript = "upInertAtTop=" & CStr(PagerInert(host, "rdm_wid75_pick__optu"))
+    pagerTop = host.Shapes("rdm_wid75_pick__optd").Top
+    steady = True
+    For idx = 1 To 4
+        Sleep 200
+        ReDimUI.OverridePointer 90, pagerTop + 11, True
+        ReDimUI.PumpOnce
+        ReDimUI.OverridePointer 90, pagerTop + 11, False
+        ReDimUI.PumpOnce
+        ReDimUI.DispatchShape "rdm_wid75_pick__optd"
+        Sleep 150
+        ReDimUI.PumpOnce
+        If Not ShapeExists(host, "rdm_wid75_pick__optd") Then
+            steady = False
+        ElseIf host.Shapes("rdm_wid75_pick__optd").Top <> pagerTop Then
+            steady = False
+        End If
+    Next idx
+    transcript = transcript & "|downStays=" & CStr(steady)
+    transcript = transcript & "|stillOpen=" & CStr(app.SelectBox("pick").ListIsOpen)
+    transcript = transcript & "|nothingPicked=" & CStr(app.SelectBox("pick").CurrentValue = 0)
+    transcript = transcript & "|downInertAtEnd=" & _
+        CStr(PagerInert(host, "rdm_wid75_pick__optd"))
+    transcript = transcript & "|lastRow=" & _
+        Trim$(Mid$(host.Shapes("rdm_wid75_pick__opt8").TextFrame2.TextRange.Text, 2))
+    ReDimUI.ClearPointerOverride
+    ReDimUI.AutoPump True
+    TestPagerHoldsPlace = transcript
 End Function
