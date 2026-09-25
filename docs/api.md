@@ -246,7 +246,7 @@ dependencies:
   selected by `Value`, or reached by the keys. Both marks follow their items through
   inserts and removals.
 - `TransferList`: a dual listbox - two panels with counted headers, selectable rows, and
-  four move buttons (`>`, `>>`, `<`, `<<`). `Items`/`ItemsFrom` and the item APIs feed the
+  four move buttons (`>`, `>>`, `<`, `<<`), each muted while it has nothing to move. `Items`/`ItemsFrom` and the item APIs feed the
   available side, `ChosenFrom` seeds the chosen side, `Captions` names the headers, and
   `ChosenCount`/`ChosenTextAt` read the result. Rows multi-select by click-to-toggle:
   each plain click adds or removes that row from the panel's selection, and `>`/`<` move

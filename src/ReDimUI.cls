@@ -840,6 +840,9 @@ Private mBadgeText As String
 Private mAppliedBadgeSig As String
 ' A Toggle's caption part as last drawn, empty while it has none.
 Private mAppliedToggleCaptionSig As String
+' A transfer list's move buttons' inks as last written: which of them
+' has something to move.
+Private mAppliedMoveInkSig As String
 ' A windowed radio group's or check list's paging arrows as last drawn,
 ' empty while it has none. Its window's first row is mListOffset.
 Private mAppliedRowScrollSig As String
@@ -11787,6 +11790,7 @@ Friend Sub ForgetPartSignatures()
     mAppliedClearSig = vbNullString
     mAppliedToggleCaptionSig = vbNullString
     mAppliedRowScrollSig = vbNullString
+    mAppliedMoveInkSig = vbNullString
     Erase mAppliedRowStates
     Erase mAppliedLeftRowStates
     Erase mAppliedRightRowStates
@@ -15001,7 +15005,9 @@ Private Sub ApplyTransferParts( _
             TRANSFER_BUTTON_W, TRANSFER_BUTTON_H
         mAppliedPartTint = vbNullString
         mAppliedDropPanel = 0
+        mAppliedMoveInkSig = vbNullString
     End If
+    SyncMoveButtonInks hostSheet, themeValue
     SyncTransferDropTarget mainShape, hostSheet, themeValue
 
     ApplyTransferHeader hostSheet, themeValue, "hl", mLeft, panelW, TRANSFER_HEADER_H, _
@@ -15577,6 +15583,36 @@ Private Sub SyncTransferPartTint(ByVal hostSheet As Worksheet, ByVal themeValue 
     End If
     On Error GoTo 0
     mAppliedPartTint = tintKey
+End Sub
+
+' A move button with nothing to move reads muted, as a pager with
+' nothing beyond it does: > and < while their panel has no selection,
+' >> and << while their panel shows no rows.
+Private Sub SyncMoveButtonInks(ByVal hostSheet As Worksheet, ByVal themeValue As ReDimUI)
+    Dim canMove(1 To 4) As Boolean
+    Dim partNames As Variant
+    Dim inkKey As String
+    Dim idx As Long
+
+    EnsureTransferCollections
+    canMove(1) = mSelLeft.Count > 0
+    canMove(2) = TransferShownCount(0) > 0
+    canMove(3) = mSelRight.Count > 0
+    canMove(4) = TransferShownCount(1) > 0
+    inkKey = CStr(ObjPtr(themeValue)) & ":" & CStr(mEnabled)
+    For idx = 1 To 4
+        inkKey = inkKey & IIf(canMove(idx), "1", "0")
+    Next idx
+    If inkKey = mAppliedMoveInkSig Then Exit Sub
+    mAppliedMoveInkSig = inkKey
+    partNames = Array("mvr", "mvar", "mvl", "mval")
+    On Error Resume Next
+    For idx = 1 To 4
+        hostSheet.Shapes(ShapeName & PART_SEPARATOR & partNames(idx - 1)) _
+            .TextFrame2.TextRange.Font.Fill.ForeColor.RGB = _
+            IIf(canMove(idx), ResolveDrawnInk(themeValue), themeValue.OnMutedColor)
+    Next idx
+    On Error GoTo 0
 End Sub
 
 Private Sub ApplyTransferButton( _

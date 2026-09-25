@@ -5631,6 +5631,18 @@ Public Function TestDeadEnds() As String
     Next idx
     transcript = transcript & "|lastPage=" & CStr(InkOf(host, "rdm_wid76_pool__alu") = live And _
         InkOf(host, "rdm_wid76_pool__ald") = muted)
+    ' Move buttons with nothing to move read muted.
+    transcript = transcript & "|movesIdle=" & CStr(InkOf(host, "rdm_wid76_pool__mvr") = muted And _
+        InkOf(host, "rdm_wid76_pool__mvar") = live And _
+        InkOf(host, "rdm_wid76_pool__mvl") = muted And _
+        InkOf(host, "rdm_wid76_pool__mval") = muted)
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid76_pool__al1"
+    transcript = transcript & "|selectionWakesMove=" & CStr(InkOf(host, "rdm_wid76_pool__mvr") = live)
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid76_pool__mvr"
+    transcript = transcript & "|chosenWakesBack=" & CStr(InkOf(host, "rdm_wid76_pool__mval") = live _
+        And InkOf(host, "rdm_wid76_pool__mvr") = muted)
     On Error Resume Next
     app.Stepper("qty").SliderRange 0, 3, 0
     transcript = transcript & "|zeroStepRefused=" & CStr(Err.Number <> 0)

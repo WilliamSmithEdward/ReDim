@@ -51,7 +51,9 @@
   arrow on its first page and down arrow on its last, draw their glyph
   in muted ink, as a drop list's pager at the end of its list does. A
   click on them changed nothing before and still changes nothing, but
-  looked live.
+  looked live. A `TransferList`'s move buttons read muted the same way:
+  `>` and `<` while their panel has no selection, `>>` and `<<` while
+  it shows no rows.
 - The ReDex demo no longer catches a Pokemon twice once it is in the
   party. Its duplicate check read only the box side of the team list.
 - A control's `Caption` leads its alternative text, so a screen reader

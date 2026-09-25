@@ -1518,6 +1518,9 @@ def test_dead_ends(run_widgets):
     assert facts["plusAtMax"] == "True", "a stepper at its maximum mutes its plus"
     assert facts["firstPage"] == "True", "a transfer panel's first page mutes its up arrow"
     assert facts["lastPage"] == "True", "a transfer panel's last page mutes its down arrow"
+    assert facts["movesIdle"] == "True", "move buttons with nothing to move must read muted"
+    assert facts["selectionWakesMove"] == "True"
+    assert facts["chosenWakesBack"] == "True"
     assert facts["zeroStepRefused"] == "True", "SliderRange must refuse a step of zero"
 
 
