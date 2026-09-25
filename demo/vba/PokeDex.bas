@@ -622,6 +622,13 @@ Public Sub CatchCurrent()
             Exit Sub
         End If
     Next idx
+    ' The party is the chosen side; a Pokemon moved there is caught too.
+    For idx = 1 To teamApp.TransferList("team").ChosenCount
+        If teamApp.TransferList("team").ChosenTextAt(idx) = caughtName Then
+            browseApp.Toast caughtName & " is already in your party.", 3000
+            Exit Sub
+        End If
+    Next idx
     teamApp.TransferList("team").AddItem caughtName
     browseApp.Toast "Gotcha! " & caughtName & " was caught!", 3500
 End Sub

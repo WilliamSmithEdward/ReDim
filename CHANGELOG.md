@@ -8,6 +8,8 @@
   in muted ink, as a drop list's pager at the end of its list does. A
   click on them changed nothing before and still changes nothing, but
   looked live.
+- The ReDex demo no longer catches a Pokemon twice once it is in the
+  party. Its duplicate check read only the box side of the team list.
 - A control's `Caption` leads its alternative text, so a screen reader
   names the field: "Email, Edit field", where it read "Edit field".
 - `Placeholder` works on a `SelectBox` and a `DatePicker`, as the same
