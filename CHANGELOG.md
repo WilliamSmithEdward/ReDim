@@ -8,6 +8,12 @@
   in muted ink, as a drop list's pager at the end of its list does. A
   click on them changed nothing before and still changes nothing, but
   looked live.
+- A long selection, date, or typed text no longer runs under the drop
+  caret of a `SelectBox`, `DatePicker`, or `ComboBox`. The face text
+  kept a 6-point right margin, while the caret sits 12 to 14 points in
+  from the edge; a combo made room for it only while its clear button
+  showed. The margin now clears the caret, and a combo's overflow
+  window counts it.
 - Ctrl+A in a focused `CheckList` checks every row that shows and
   fires `OnChange` once, and in a `TransferList` selects every row of
   the cursor's panel. ReDim captured the key while such a list had

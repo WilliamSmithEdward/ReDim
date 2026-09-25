@@ -9371,7 +9371,7 @@ End Sub
 ' estimated from the font size because they are needed before the text
 ' is written.
 Private Function FaceCharsPerLine(ByVal resolvedSize As Double) As Long
-    FaceCharsPerLine = Int((mWidth - 12 - ClearReserve()) / (resolvedSize * 0.58))
+    FaceCharsPerLine = Int((mWidth - 6 - FaceMarginRight()) / (resolvedSize * 0.58))
     If FaceCharsPerLine < 4 Then FaceCharsPerLine = 4
 End Function
 
@@ -9514,7 +9514,7 @@ Private Sub ApplyText(ByVal mainShape As Shape, ByVal themeValue As ReDimUI)
     End If
     If Not mAppliedValid Then
         mainShape.TextFrame2.MarginLeft = 6
-        mainShape.TextFrame2.MarginRight = 6
+        mainShape.TextFrame2.MarginRight = FaceMarginRight()
         mainShape.TextFrame2.MarginTop = 3
         mainShape.TextFrame2.MarginBottom = 3
         mainShape.TextFrame2.VerticalAnchor = msoAnchorMiddle
@@ -10260,12 +10260,11 @@ Private Sub ApplyClearButton( _
             ClearButtonSize() * 0.5, themeValue
         clearShape.Visible = msoTrue
         clearShape.OnAction = mAppliedOnAction
-        mainShape.TextFrame2.MarginRight = 6 + ClearReserve() + _
-            IIf(mKind = KIND_COMBO, 16, 0)
+        mainShape.TextFrame2.MarginRight = FaceMarginRight()
     ElseIf LenB(mAppliedClearSig) > 0 Then
         mAppliedClearSig = vbNullString
         DropPart hostSheet, "cx"
-        mainShape.TextFrame2.MarginRight = 6
+        mainShape.TextFrame2.MarginRight = FaceMarginRight()
     End If
 End Sub
 
@@ -10527,6 +10526,19 @@ Private Sub SyncFieldNote( _
 End Sub
 
 ' Points the clear button takes from the text, 0 while it is not shown.
+' The face text's right margin: clear of the drop caret a select, date
+' picker, or combo draws at its right end, and of the clear button while
+' it shows.
+Private Function FaceMarginRight() As Double
+    FaceMarginRight = 6 + ClearReserve()
+    Select Case mKind
+        Case KIND_COMBO
+            FaceMarginRight = FaceMarginRight + 16
+        Case KIND_SELECT, KIND_DATE
+            FaceMarginRight = FaceMarginRight + 12
+    End Select
+End Function
+
 Private Function ClearReserve() As Double
     If mClearable And mVisible And mEnabled And LenB(mText) > 0 Then
         ClearReserve = ClearButtonSize() + 4

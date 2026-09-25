@@ -5679,3 +5679,43 @@ Public Function TestSelectAllKeys() As String
     ReDimUI.AutoPump True
     TestSelectAllKeys = transcript
 End Function
+
+' A long face text stops short of the drop caret on a SelectBox, a
+' DatePicker, and a ComboBox, measured from where the text is drawn.
+Public Function TestFaceClearsCaret() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim transcript As String
+    Dim faceName As Variant
+
+    ReDimUI.AutoPump False
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "wid79")
+    app.SelectBox("pick").AtRect(24, 24, 110, 24).Items("Wwwwwwwwwwwwwwwwwwww").Value 1
+    app.DatePicker("due").AtRect(24, 64, 90, 24).DateFormat("dddd d mmmm yyyy") _
+        .PickDate DateSerial(2026, 9, 30)
+    app.ComboBox("find").AtRect(24, 104, 110, 22).Items "A"
+    app.Render
+    app.ComboBox("find").Focus
+    RdxKeyChar "W"
+    RdxKeyChar "W"
+    RdxKeyChar "W"
+    RdxKeyChar "W"
+    RdxKeyChar "W"
+    RdxKeyChar "W"
+    RdxKeyChar "W"
+    RdxKeyChar "W"
+    RdxKeyChar "W"
+    RdxKeyChar "W"
+    RdxKeyChar "W"
+    RdxKeyChar "W"
+    For Each faceName In Array("pick", "due", "find")
+        With host.Shapes("rdm_wid79_" & faceName).TextFrame2.TextRange
+            transcript = transcript & "|" & faceName & "=" & CStr(.BoundLeft + .BoundWidth _
+                <= host.Shapes("rdm_wid79_" & faceName & "__caret").Left + 0.5)
+        End With
+    Next faceName
+    RdxReleaseKeys
+    ReDimUI.AutoPump True
+    TestFaceClearsCaret = Mid$(transcript, 2)
+End Function

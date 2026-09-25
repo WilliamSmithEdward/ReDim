@@ -1531,3 +1531,10 @@ def test_select_all_keys(run_widgets):
     assert facts["transferSelectsAll"] == "5", (
         "Ctrl+A must select every row of the transfer panel"
     )
+
+
+def test_face_clears_caret(run_widgets):
+    facts = parse_transcript(run_widgets("TestFaceClearsCaret"))
+    assert facts["pick"] == "True", "a SelectBox's long text must stop short of its caret"
+    assert facts["due"] == "True", "a DatePicker's long date must stop short of its caret"
+    assert facts["find"] == "True", "a ComboBox's long text must stop short of its caret"
