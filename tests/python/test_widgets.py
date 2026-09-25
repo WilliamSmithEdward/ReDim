@@ -1244,6 +1244,12 @@ def test_date_picker(run_widgets):
         "Right, Down, and Page Down walk a day, a week, and a month; Enter picks"
     )
     assert facts["escCloses"] == "True"
+    assert facts["keysStopAtLatest"] == "2026-12-31", (
+        "Page Down past DateRange must stop on its last day, which Enter picks"
+    )
+    assert facts["keysStopAtEarliest"] == "2026-09-05", (
+        "Page Up past DateRange must stop on its first day, which Enter picks"
+    )
     assert facts["pressOnKeeps"] == "True"
     assert facts["hoverTints"] == "True"
     assert facts["pressOffCloses"] == "True"

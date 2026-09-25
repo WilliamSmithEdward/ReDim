@@ -8,6 +8,12 @@
   in muted ink, as a drop list's pager at the end of its list does. A
   click on them changed nothing before and still changes nothing, but
   looked live.
+- A `DatePicker`'s keys stop at its `DateRange`. The arrow and page
+  keys used to walk the cursor onto days outside the range, where Enter
+  and Space did nothing, and a calendar opened with no date started on
+  today even when today lay outside. The cursor now stops on the
+  range's first or last day, and the calendar opens on the nearest day
+  in range.
 - `SliderRange` refuses a step of zero or less, which left a stepper's
   buttons and arrow keys dead or running backwards.
 - Errors say where they came from. A component's errors start with its

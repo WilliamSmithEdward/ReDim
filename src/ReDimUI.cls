@@ -12905,6 +12905,14 @@ Private Function DayInRange(ByVal candidateDay As Date) As Boolean
     DayInRange = True
 End Function
 
+' The nearest day DateRange allows: the keyboard cursor stops at the
+' range's ends, as a native month calendar's does.
+Private Function DayClamped(ByVal candidateDay As Date) As Date
+    DayClamped = candidateDay
+    If mDateEarliest <> 0 And candidateDay < mDateEarliest Then DayClamped = mDateEarliest
+    If mDateLatest <> 0 And candidateDay > mDateLatest Then DayClamped = mDateLatest
+End Function
+
 ' Where the calendar card sits: under the face, or over it when the list
 ' rule found no room below.
 Private Function CalendarTop() As Double
@@ -12928,7 +12936,7 @@ Private Sub OpenCalendar()
     If mValue <> 0 Then
         anchorDay = CDate(mValue)
     Else
-        anchorDay = Date
+        anchorDay = DayClamped(Date)
     End If
     mCalendarMonth = DateSerial(Year(anchorDay), Month(anchorDay), 1)
     mCalendarCursor = anchorDay
@@ -13030,8 +13038,8 @@ Private Sub HandleDateKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
         Case Else
             Exit Sub
     End Select
-    mCalendarCursor = aimDay
-    mCalendarMonth = DateSerial(Year(aimDay), Month(aimDay), 1)
+    mCalendarCursor = DayClamped(aimDay)
+    mCalendarMonth = DateSerial(Year(mCalendarCursor), Month(mCalendarCursor), 1)
     Touch
 End Sub
 

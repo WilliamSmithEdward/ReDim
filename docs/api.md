@@ -286,7 +286,9 @@ dependencies:
   today wears an accent ring, and days of other months read muted. A day picks: the
   calendar closes, and a new date writes to `WritesTo` as a VBA `Date` and fires
   `OnChange`. `DateRange earliest, latest` limits what picks, with either side left
-  out; days outside read muted and take no clicks. `PickDate` sets the date from code
+  out; days outside read muted and take no clicks, and the arrow and page keys stop at the
+  range's first and last day, where a calendar opened with no date starts when today lies
+  outside it. `PickDate` sets the date from code
   and `Value 0` clears it, both writing nothing and firing nothing, and `PickedDate`
   reads it as a `Date`, or `Empty` while there is none. `BindValue` takes a `Date` or a
   date serial. The calendar is the control's list: one list is open per app, and a

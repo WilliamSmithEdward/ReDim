@@ -4387,6 +4387,20 @@ Public Function TestDatePicker() As String
     RdxKeyChar "{ALTDOWN}"
     RdxKeyChar "{ESC}"
     transcript = transcript & "|escCloses=" & CStr(Not ShapeExists(host, "rdm_wid54_due__cr1"))
+    ' The keys stop at DateRange's ends, so Enter always has a day to pick.
+    RdxKeyChar "{ALTDOWN}"
+    RdxKeyChar "{PGDN}"
+    RdxKeyChar "{PGDN}"
+    RdxKeyChar "{PGDN}"
+    RdxKeyChar "{ENTER}"
+    transcript = transcript & "|keysStopAtLatest=" & Format$(app.State("dueState"), "yyyy-mm-dd")
+    RdxKeyChar "{ALTDOWN}"
+    RdxKeyChar "{PGUP}"
+    RdxKeyChar "{PGUP}"
+    RdxKeyChar "{PGUP}"
+    RdxKeyChar "{PGUP}"
+    RdxKeyChar "{ENTER}"
+    transcript = transcript & "|keysStopAtEarliest=" & Format$(app.State("dueState"), "yyyy-mm-dd")
     RdxReleaseKeys
 
     Sleep 200
