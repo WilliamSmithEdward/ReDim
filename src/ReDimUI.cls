@@ -10032,6 +10032,9 @@ Private Sub HandleCheckListKey(ByVal hostApp As ReDimUI, ByVal keyText As String
         Case " "
             If ToggleCheckRow(hostApp, mKeyRow) Then RunClickHandlers hostApp
             Exit Sub
+        Case "{SELECTALL}"
+            If CheckAllShown(hostApp) Then RunClickHandlers hostApp
+            Exit Sub
         Case "{ENTER}"
             hostApp.ClickDefaultButton
             Exit Sub
@@ -10071,6 +10074,29 @@ Private Sub ToggleShownChecks()
         End If
     Next idx
 End Sub
+
+' Ctrl+A: checks every row that shows, with or without a select-all
+' header, and never clears, as Ctrl+A selects all in a native list. True
+' when a row changed; the caller runs the handlers.
+Private Function CheckAllShown(ByVal hostApp As ReDimUI) As Boolean
+    Dim idx As Long
+
+    EnsureCheckedSet
+    For idx = 1 To ItemCount
+        If LenB(mFilterCheck) = 0 _
+            Or InStr(1, ItemAt(idx), mFilterCheck, vbTextCompare) > 0 Then
+            If Not TransferSelectionHas(mCheckedSet, idx) Then
+                TransferSelectionToggle mCheckedSet, idx
+                CheckAllShown = True
+            End If
+        End If
+    Next idx
+    If Not CheckAllShown Then Exit Function
+    If LenB(mWritesToKey) > 0 Then
+        hostApp.SetState mWritesToKey, CheckedJoined()
+    End If
+    Touch
+End Function
 
 Private Function ToggleCheckRow(ByVal hostApp As ReDimUI, ByVal checkRow As Long) As Boolean
     Dim rowNumber As Long
@@ -10115,6 +10141,8 @@ Private Sub HandleTransferKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
     Dim rowTotal As Long
     Dim aimRow As Long
     Dim rowsShown As Long
+    Dim shownPos As Long
+    Dim itemNo As Long
 
     EnsureTransferCollections
     If TypeListFilter(keyText) Then Exit Sub
@@ -10154,6 +10182,20 @@ Private Sub HandleTransferKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
                 End If
                 Touch
             End If
+            Exit Sub
+        Case "{SELECTALL}"
+            ' Ctrl+A selects every row the cursor's panel shows.
+            For shownPos = 1 To TransferShownCount(mKeyPanel)
+                itemNo = TransferShownItem(mKeyPanel, shownPos)
+                If mKeyPanel = 0 Then
+                    If Not TransferSelectionHas(mSelLeft, itemNo) Then
+                        TransferSelectionToggle mSelLeft, itemNo
+                    End If
+                ElseIf Not TransferSelectionHas(mSelRight, itemNo) Then
+                    TransferSelectionToggle mSelRight, itemNo
+                End If
+            Next shownPos
+            Touch
             Exit Sub
         Case "{ENTER}"
             If mKeyRow >= 1 And mKeyRow <= TransferPanelCount(mKeyPanel) Then

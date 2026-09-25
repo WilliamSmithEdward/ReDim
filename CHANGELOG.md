@@ -8,6 +8,11 @@
   in muted ink, as a drop list's pager at the end of its list does. A
   click on them changed nothing before and still changes nothing, but
   looked live.
+- Ctrl+A in a focused `CheckList` checks every row that shows and
+  fires `OnChange` once, and in a `TransferList` selects every row of
+  the cursor's panel. ReDim captured the key while such a list had
+  focus and did nothing with it. A second Ctrl+A clears nothing, as in
+  a native list.
 - A `Table`'s footer pager and a `DatePicker` calendar's month arrows
   repeat while held, as the stepper, drop list, and transfer arrows
   already did, so a long table or a date months away takes one press

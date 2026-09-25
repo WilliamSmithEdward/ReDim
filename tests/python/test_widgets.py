@@ -1522,3 +1522,12 @@ def test_emptied_lists(run_widgets):
     )
     assert facts["radioReturns"] == "True", "a RadioGroup must draw again when items return"
     assert facts["checkReturns"] == "True", "a CheckList must draw again when items return"
+
+
+def test_select_all_keys(run_widgets):
+    facts = parse_transcript(run_widgets("TestSelectAllKeys"))
+    assert facts["checksAll"] == "4/1", "Ctrl+A must check every row and fire OnChange once"
+    assert facts["againKeeps"] == "4/1", "a second Ctrl+A must clear nothing and fire nothing"
+    assert facts["transferSelectsAll"] == "5", (
+        "Ctrl+A must select every row of the transfer panel"
+    )

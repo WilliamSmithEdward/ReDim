@@ -5648,3 +5648,34 @@ Public Function TestEmptiedLists() As String
     ReDimUI.AutoPump True
     TestEmptiedLists = transcript
 End Function
+
+' Ctrl+A in a focused CheckList checks every row and fires OnChange
+' once; again, it clears nothing. In a TransferList it selects every row
+' of the cursor's panel, which the move button then carries across.
+Public Function TestSelectAllKeys() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim transcript As String
+
+    gChangeCount = 0
+    ReDimUI.AutoPump False
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "wid78")
+    app.CheckList("tags").AtRect(24, 24, 170, 100).Items("Red", "Green", "Blue", "Gold") _
+        .WritesTo("tagState").OnChange "TestReDimWidgets.RecordChange"
+    app.TransferList("pool").AtRect(24, 150, 380, 128).Items "A", "B", "C", "D", "E"
+    app.Render
+    app.CheckList("tags").Focus
+    RdxKeyChar "{SELECTALL}"
+    transcript = "checksAll=" & app.CheckList("tags").CheckedCount & "/" & gChangeCount
+    RdxKeyChar "{SELECTALL}"
+    transcript = transcript & "|againKeeps=" & app.CheckList("tags").CheckedCount & "/" & gChangeCount
+    app.TransferList("pool").Focus
+    RdxKeyChar "{SELECTALL}"
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid78_pool__mvr"
+    transcript = transcript & "|transferSelectsAll=" & app.TransferList("pool").ChosenCount
+    RdxReleaseKeys
+    ReDimUI.AutoPump True
+    TestSelectAllKeys = transcript
+End Function
