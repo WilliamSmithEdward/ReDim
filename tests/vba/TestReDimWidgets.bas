@@ -7,6 +7,7 @@ Option Explicit
 Private Declare PtrSafe Sub Sleep Lib "kernel32" (ByVal milliseconds As Long)
 Private Declare PtrSafe Function GetCaretBlinkTime Lib "user32" () As Long
 Private Declare PtrSafe Function GetDoubleClickTime Lib "user32" () As Long
+Private Declare PtrSafe Function GetKeyState Lib "user32" (ByVal nVirtKey As Long) As Integer
 
 Private gChangeCount As Long
 Private gConfirmRan As Long
@@ -5834,7 +5835,8 @@ Public Function TestFilterableSelect() As String
     ReDimUI.DispatchShape "rdm_wid85_fruit"
     RdxKeyChar "z"
     RdxKeyChar "z"
-    transcript = transcript & "|noMatches=" & CStr(ShapeExists(host, "rdm_wid85_fruit__optn"))
+    transcript = transcript & "|noMatches=" & CStr(ShapeExists(host, "rdm_wid85_fruit__optn")) & _
+        "/" & Replace(host.Shapes("rdm_wid85_fruit__optn").TextFrame2.TextRange.Text, vbTab, "")
     RdxKeyChar "{BS}"
     RdxKeyChar "{BS}"
     transcript = transcript & "|backspaceRestores=" & CStr(ShapeExists(host, "rdm_wid85_fruit__opt8"))
@@ -5851,6 +5853,46 @@ Public Function TestFilterableSelect() As String
     RdxReleaseKeys
     ReDimUI.AutoPump True
     TestFilterableSelect = transcript
+End Function
+
+' The Windows edit chords and Ctrl+Page keys are captured, Ctrl+Page
+' Down steps a tab strip and a calendar's year, and a letter from the
+' keyboard follows Caps Lock.
+Public Function TestEditChords() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim transcript As String
+    Dim capsOn As Boolean
+
+    ReDimUI.AutoPump False
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "wid86")
+    app.Tabs("pages").AtRect(24, 24, 240, 26).Items "One", "Two", "Three"
+    app.DatePicker("due").AtRect(24, 70, 150, 24).PickDate DateSerial(2026, 3, 10)
+    app.TextInput("name").AtRect 24, 110, 150, 22
+    app.Render
+    transcript = "bound=" & CStr(InStr(RdxCapturedCodes("{BS}"), Chr$(1) & "+{BS}" & Chr$(1)) > 0 _
+        And InStr(RdxCapturedCodes("{CUT}"), "+{DEL}") > 0 _
+        And InStr(RdxCapturedCodes("{PASTE}"), "+{INSERT}") > 0 _
+        And InStr(RdxCapturedCodes("{COPY}"), "^{INSERT}") > 0 _
+        And InStr(RdxCapturedCodes("{CTRLPGDN}"), "^{PGDN}") > 0)
+    app.Tabs("pages").Focus
+    RdxKeyChar "{CTRLPGDN}"
+    transcript = transcript & "|tabsStep=" & app.Tabs("pages").SelectedText
+    app.DatePicker("due").Focus
+    RdxKeyChar "{ALTDOWN}"
+    RdxKeyChar "{CTRLPGDN}"
+    RdxKeyChar "{ENTER}"
+    transcript = transcript & "|calendarYear=" & Format$(app.DatePicker("due").PickedDate, "yyyy-mm-dd")
+    capsOn = (GetKeyState(&H14) And 1) <> 0
+    app.TextInput("name").Focus
+    RdxKeyLetter "a"
+    RdxKeyLetter "B"
+    transcript = transcript & "|capsFollowed=" & CStr(app.TextInput("name").InputValue = _
+        IIf(capsOn, "Ab", "aB"))
+    RdxReleaseKeys
+    ReDimUI.AutoPump True
+    TestEditChords = transcript
 End Function
 
 ' True when a part exists and is visible.

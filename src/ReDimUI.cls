@@ -9816,10 +9816,10 @@ Private Sub HandleTabsKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
     tabTotal = ItemCount
     If tabTotal = 0 Then Exit Sub
     Select Case keyText
-        Case "{LEFT}"
+        Case "{LEFT}", "{CTRLPGUP}"
             aimTab = ShownTab() - 1
             If aimTab < 1 Then aimTab = tabTotal
-        Case "{RIGHT}"
+        Case "{RIGHT}", "{CTRLPGDN}"
             aimTab = ShownTab() + 1
             If aimTab > tabTotal Then aimTab = 1
         Case "{HOME}"
@@ -13390,6 +13390,10 @@ Private Sub HandleDateKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
             aimDay = DateAdd("m", -1, aimDay)
         Case "{PGDN}"
             aimDay = DateAdd("m", 1, aimDay)
+        Case "{CTRLPGUP}"
+            aimDay = DateAdd("yyyy", -1, aimDay)
+        Case "{CTRLPGDN}"
+            aimDay = DateAdd("yyyy", 1, aimDay)
         Case "{HOME}"
             aimDay = DateSerial(Year(aimDay), Month(aimDay), 1)
         Case "{END}"
@@ -17314,7 +17318,8 @@ Private Sub SyncEmptyRow( _
     Dim emptyRowWords As String
 
     If showIt Then
-        If mKind = KIND_COMBO Then
+        ' A filter that matches nothing is not an empty list.
+        If mKind = KIND_COMBO Or LenB(mSelectFilter) > 0 Then
             emptyRowWords = Phrase(UI_NO_MATCHES)
         Else
             emptyRowWords = Phrase(UI_NO_ITEMS)

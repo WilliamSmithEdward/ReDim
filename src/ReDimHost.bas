@@ -55,6 +55,14 @@ Private Declare PtrSafe Function timeEndPeriod Lib "winmm.dll" ( _
     ByVal uPeriod As Long _
 ) As Long
 
+' Caps Lock's toggle, which Application.OnKey does not see: a letter key
+' binds by the key, so its case comes from Shift alone.
+Private Declare PtrSafe Function GetKeyState Lib "user32" ( _
+    ByVal nVirtKey As Long _
+) As Integer
+
+Private Const VK_CAPITAL As Long = &H14
+
 ' Animation frame interval. Work (ops, budget jobs, toast expiry) runs on a
 ' 50 ms cadence inside ReDimUI.TickAll regardless of the frame rate.
 Private Const PUMP_DEFAULT_INTERVAL_MS As Long = 16
@@ -164,6 +172,17 @@ Private Function CapturedKeys() As Collection
     keyTable.Add Array("^y", "{REDO}")
     keyTable.Add Array("^+z", "{REDO}")
     keyTable.Add Array("+ ", " ")
+    ' Backspace with Shift still held deletes, and the older Windows
+    ' clipboard chords work as in any text box.
+    keyTable.Add Array("+{BS}", "{BS}")
+    keyTable.Add Array("+{DEL}", "{CUT}")
+    keyTable.Add Array("+{INSERT}", "{PASTE}")
+    keyTable.Add Array("^{INSERT}", "{COPY}")
+    ' Ctrl+Page Up and Ctrl+Page Down step a tab strip or a calendar's
+    ' year; elsewhere they stay with the control instead of switching
+    ' the workbook's sheet out from under it.
+    keyTable.Add Array("^{PGUP}", "{CTRLPGUP}")
+    keyTable.Add Array("^{PGDN}", "{CTRLPGDN}")
     ' Punctuation and symbols, bound by character so Excel maps each to
     ' its key on the active layout. OnKey's own metacharacters go in
     ' braces; the apostrophe and the quote travel as names, since they
@@ -201,14 +220,31 @@ Private Function CapturedKeys() As Collection
 End Function
 
 ' Arms capture for a focused control.
+' A letter key from the keyboard: Caps Lock turns its case over, as it
+' does in any text box, then it goes on as RdxKeyChar does. Never raises.
+Public Sub RdxKeyLetter(ByVal keyText As String)
+    If (GetKeyState(VK_CAPITAL) And 1) <> 0 Then
+        If keyText = LCase$(keyText) Then
+            keyText = UCase$(keyText)
+        Else
+            keyText = LCase$(keyText)
+        End If
+    End If
+    RdxKeyChar keyText
+End Sub
+
 Public Sub RdxBindKeys()
     Dim binding As Variant
 
     If gKeysBound Then Exit Sub
     On Error Resume Next
     For Each binding In CapturedKeys()
-        Application.OnKey binding(0), _
-            "'RdxKeyChar """ & Replace(binding(1), """", """""") & """'"
+        If binding(1) Like "[a-zA-Z]" Then
+            Application.OnKey binding(0), "'RdxKeyLetter """ & binding(1) & """'"
+        Else
+            Application.OnKey binding(0), _
+                "'RdxKeyChar """ & Replace(binding(1), """", """""") & """'"
+        End If
     Next binding
     On Error GoTo 0
     gKeysBound = True

@@ -531,13 +531,18 @@ A focused float field edits the way a Windows text box does.
 | Ctrl+Home, Ctrl+End | Jump to the start or end of the text; with Shift, select to there. |
 | Ctrl+Backspace, Ctrl+Del | Delete the word before or after the caret. |
 | Ctrl+A | Select everything. |
-| Ctrl+C, Ctrl+X, Ctrl+V | Copy, cut, and paste through the Windows clipboard, as Unicode text. |
+| Ctrl+C, Ctrl+X, Ctrl+V | Copy, cut, and paste through the Windows clipboard, as Unicode text; Ctrl+Ins, Shift+Del, and Shift+Ins do the same. |
+| Shift+Backspace | Delete, as Backspace does. |
 | Ctrl+Z; Ctrl+Y or Ctrl+Shift+Z | Undo; redo. |
 
 - The selection shows in the accent color with accent ink. Typing, a delete, or a paste
   replaces it, and Left or Right without Shift collapses it to its start or end.
 - The numeric keypad types into a focused field as the top row does, its decimal key
   typing the decimal separator Excel uses.
+- Caps Lock turns a typed letter's case over, as in any text box. `Application.OnKey`
+  binds keys, not characters, so ReDim reads the Caps Lock toggle itself.
+- Ctrl+Page Up and Ctrl+Page Down stay with the focused control, so they step a tab
+  strip or a calendar and never switch the sheet out from under a field.
 - A word is a run of letters, digits, underscores, and characters past ASCII.
 - A paste keeps what the field takes: a single-line field turns line breaks and tabs into
   spaces, a trailing line break (a copied cell brings one) is dropped, and `Numeric` and
@@ -819,11 +824,11 @@ keep the keys.
 | Button, Image | Space or Enter clicks. |
 | Toggle, TickBox | Space toggles. |
 | RadioGroup | Arrows move the selection, wrapping at the ends; Home and End jump. Each move fires `OnChange`. |
-| Tabs | Left and Right show the tab beside, wrapping at the ends; Home and End jump. Each move fires `OnChange`. |
+| Tabs | Left and Right, or Ctrl+Page Up and Ctrl+Page Down, show the tab beside, wrapping at the ends; Home and End jump. Each move fires `OnChange`. |
 | Expander | Space or Enter opens or closes it; Right opens and Left closes. Each change fires `OnChange`. |
 | MenuButton | Closed: Space, Enter, Down, Up, Alt+Down, or F4 opens the menu with the first command highlighted. Open: the arrows, Page Up, Page Down, Home, and End move the highlight past disabled commands and headers, letters jump by name, Enter or Space runs the highlighted command, and Esc, F4, Alt+Up, or Tab closes. |
 | Table | Up and Down move the selection a row in the order shown, Page Up and Page Down a page, Home and End to the first and last row; the rows scroll to keep it in view, and each move fires `OnChange`. Other characters filter the rows, Backspace takes one off, and Esc clears the filter. Ctrl+C copies the selected row or the rows shown, and Enter opens the selected row when the table has `OnRowOpen`. |
-| DatePicker | Closed: Alt+Down, F4, Space, or Down opens the calendar on the date held, or today. Open: Left and Right move a day, Up and Down a week, Page Up and Page Down a month, Home and End to the month's first and last day; Enter or Space picks the day reached, and Esc, F4, or Alt+Up closes. A dashed ring marks the day reached. |
+| DatePicker | Closed: Alt+Down, F4, Space, or Down opens the calendar on the date held, or today. Open: Left and Right move a day, Up and Down a week, Page Up and Page Down a month, Ctrl+Page Up and Ctrl+Page Down a year, Home and End to the month's first and last day; Enter or Space picks the day reached, and Esc, F4, or Alt+Up closes. A dashed ring marks the day reached. |
 | Stepper | Up and Right step up, Down and Left step down, Page Up and Page Down step ten times, Home and End jump to the range ends. |
 | SlideBar | Arrows move a step, Page Up and Page Down a tenth of the range in whole steps, Home and End go to the ends. |
 | SelectBox | Closed: arrows, Home, End, Page Up, and Page Down change the selection, and Space, Alt+Down, or F4 opens the list. Open: they move the highlight; Enter, Space, or Alt+Up takes it, Tab takes it and moves on, and Esc or F4 closes. Letters jump to the next item that starts with them, open or closed: letters typed within a second build a prefix, and one letter typed again steps through its items. Every move passes over disabled items and group headers. With `Filterable`, letters filter the open list instead (see SelectBox). |

@@ -1550,6 +1550,16 @@ def test_selection_readers(run_widgets):
     assert facts["otherKindRefused"] == "True"
 
 
+def test_edit_chords(run_widgets):
+    facts = parse_transcript(run_widgets("TestEditChords"))
+    assert facts["bound"] == "True", (
+        "Shift+Backspace, Shift+Del, Shift+Ins, Ctrl+Ins, and Ctrl+Page Down must be captured"
+    )
+    assert facts["tabsStep"] == "Two", "Ctrl+Page Down must step a tab strip"
+    assert facts["calendarYear"] == "2027-03-10", "Ctrl+Page Down must step a calendar a year"
+    assert facts["capsFollowed"] == "True", "a keyboard letter must follow Caps Lock"
+
+
 def test_filterable_select(run_widgets):
     facts = parse_transcript(run_widgets("TestFilterableSelect"))
     assert facts["clickTakesKeys"] == "True", (
@@ -1560,7 +1570,7 @@ def test_filterable_select(run_widgets):
     )
     assert facts["enterTakes"] == "Mango/True", "Down and Enter must take the next match"
     assert facts["clickTakesMatch"] == "Pear", "a click on a filtered row must take its item"
-    assert facts["noMatches"] == "True", "a filter matching nothing must say so"
+    assert facts["noMatches"] == "True/No matches", "a filter matching nothing must say so"
     assert facts["backspaceRestores"] == "True"
     assert facts["escClearsFirst"] == "True", "Esc must clear the filter before closing"
     assert facts["otherKindRefused"] == "True"

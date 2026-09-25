@@ -2,6 +2,14 @@
 
 ## 1.0.3 - 2026-09-25
 
+- Keys a Windows text box and tab strip take now work too. Caps Lock
+  turns a typed letter's case over; OnKey binds keys, not characters,
+  so letters typed with Caps Lock on came out lowercase. Shift+Backspace
+  deletes where it went to Excel, and Ctrl+Ins, Shift+Del, and
+  Shift+Ins copy, cut, and paste. Ctrl+Page Up and Ctrl+Page Down step
+  a focused tab strip and a calendar's year, and no longer switch the
+  sheet while a control has the keys. A `Filterable` list that matches
+  nothing says "No matches", not "No items".
 - `Filterable` lets typing filter a `SelectBox`'s or `MenuButton`'s
   open list, as a combo's list filters: the face shows the letters,
   the matches bold them, and the arrows, Enter, and clicks work among
