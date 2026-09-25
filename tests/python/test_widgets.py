@@ -1620,6 +1620,8 @@ def test_required_picks(run_widgets):
     assert facts["pickClears"] == "True", "a pick must take the message down"
     assert facts["passes"] == "True"
     assert facts["allClear"] == "True"
+    assert facts["errorTextShows"] == "That kind is sold out", "ErrorText must show under a pick"
+    assert facts["errorTextClears"] == "True"
 
 
 def test_item_enabled_kinds(run_widgets):

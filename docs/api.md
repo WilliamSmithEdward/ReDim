@@ -181,7 +181,9 @@ All fluent, all return the component:
   `DebounceMs(ms)`, `Numeric`, `MaxLength(n)`, `Required`, `ErrorText(message)`, and
   `Validates(checkProc)` read back with `ValidationError` (see [Field rules](#field-rules));
   `MultiLine`, `AutoGrow(maxLines)`, and `Masked` for a TextInput and `RestrictToItems`
-  for a ComboBox.
+  for a ComboBox. On any other kind these raise an error naming the kinds they take,
+  rather than doing nothing; `Placeholder` also takes a SelectBox and a DatePicker, and
+  `ErrorText` those two and a RadioGroup.
 - Adornments (any control): `Caption(text)` puts a label in small text above the control,
   and `Hint(text)` helper text in muted ink below it (see [Field rules](#field-rules)).
 - Reads: `ComponentId`, `CurrentValue`, `CurrentText`, `IsChecked`, `IsEnabled`,
@@ -594,6 +596,8 @@ Builders for float `TextInput` and `ComboBox` fields:
 - `ErrorText "That name is taken"` shows an error from outside the field, a server's
   answer for one, with the same danger border and message line. It stays until
   `ErrorText ""` clears it. A validation message shows in its place while there is one.
+  On a SelectBox, DatePicker, or RadioGroup the message shows under the control, required
+  or not.
 - `Masked` shows a float TextInput's characters as dots, focused or not, as a password
   box does. Copy and cut take nothing from it, while `InputValue` and `WritesTo` keep
   the text. `Masked False` lifts it.

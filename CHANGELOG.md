@@ -2,6 +2,13 @@
 
 ## 1.0.3 - 2026-09-25
 
+- A text field's builders raise on a control they do not apply to:
+  `Placeholder`, `OnInput`, `DebounceMs`, `Numeric`, `MaxLength`,
+  `Validates`, `Clearable`, `Masked`, and `ErrorText` name the kinds
+  they take, where they did nothing on, say, a Toggle, as `MultiLine`
+  and `RestrictToItems` already raised. `ErrorText` shows under a
+  `SelectBox`, `DatePicker`, or `RadioGroup` whether or not it is
+  `Required`; it showed only on a required one.
 - `OnStateChanged` takes an array of keys, `Array("volume", "mode")`,
   to put one listener on each, and adds a listener to a key only once.
   A build that ran twice in a session registered every listener again,

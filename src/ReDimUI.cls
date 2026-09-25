@@ -5342,6 +5342,7 @@ End Function
 ' InputValue and writes to WritesTo.
 Public Function Masked(Optional ByVal maskedOn As Boolean = True) As ReDimUI
     RequireRole ROLE_COMPONENT, "Masked"
+    RequireFieldKind "Masked"
     mMasked = maskedOn
     Touch
     Set Masked = Me
@@ -5352,6 +5353,7 @@ End Function
 ' it focused; the emptied value commits when focus leaves.
 Public Function Clearable(Optional ByVal clearOn As Boolean = True) As ReDimUI
     RequireRole ROLE_COMPONENT, "Clearable"
+    RequireFieldKind "Clearable"
     mClearable = clearOn
     Touch
     Set Clearable = Me
@@ -5410,6 +5412,10 @@ End Function
 ' to "". A validation message shows in its place while there is one.
 Public Function ErrorText(ByVal messageText As String) As ReDimUI
     RequireRole ROLE_COMPONENT, "ErrorText"
+    If mKind <> KIND_INPUT And mKind <> KIND_COMBO And Not IsPickKind() Then
+        RaiseError ERROR_INVALID_OPERATION, "ErrorText", _
+            "ErrorText applies to a TextInput, ComboBox, SelectBox, DatePicker, or RadioGroup."
+    End If
     mErrorText = messageText
     Touch
     Set ErrorText = Me
@@ -5748,7 +5754,12 @@ Public Function Placeholder(ByVal hintText As String) As ReDimUI
     RequireRole ROLE_COMPONENT, "Placeholder"
     ' A SelectBox and a DatePicker show their Text while nothing is
     ' picked, so their placeholder is that text.
-    If (mKind = KIND_SELECT And Not mIsMenu) Or mKind = KIND_DATE Then mText = hintText
+    If (mKind = KIND_SELECT And Not mIsMenu) Or mKind = KIND_DATE Then
+        mText = hintText
+    ElseIf mKind <> KIND_INPUT And mKind <> KIND_COMBO Then
+        RaiseError ERROR_INVALID_OPERATION, "Placeholder", _
+            "Placeholder applies to a TextInput, ComboBox, SelectBox, or DatePicker."
+    End If
     mPlaceholder = hintText
     Touch
     Set Placeholder = Me
@@ -5759,12 +5770,14 @@ End Function
 ' InputValue holds the text so far.
 Public Function OnInput(ByVal handlerProc As String) As ReDimUI
     RequireRole ROLE_COMPONENT, "OnInput"
+    RequireFieldKind "OnInput"
     mInputProc = handlerProc
     Set OnInput = Me
 End Function
 
 Public Function DebounceMs(ByVal pauseMs As Long) As ReDimUI
     RequireRole ROLE_COMPONENT, "DebounceMs"
+    RequireFieldKind "DebounceMs"
     If pauseMs < 0 Then pauseMs = 0
     mDebounceMs = pauseMs
     Set DebounceMs = Me
@@ -5778,6 +5791,7 @@ Public Function Numeric( _
     Optional ByVal allowNegative As Boolean = True _
 ) As ReDimUI
     RequireRole ROLE_COMPONENT, "Numeric"
+    RequireFieldKind "Numeric"
     mNumeric = True
     mNumericDecimal = allowDecimal
     mNumericNegative = allowNegative
@@ -5788,6 +5802,7 @@ End Function
 ' under the field's right edge shows the length against the cap.
 Public Function MaxLength(ByVal maxChars As Long) As ReDimUI
     RequireRole ROLE_COMPONENT, "MaxLength"
+    RequireFieldKind "MaxLength"
     If maxChars < 0 Then maxChars = 0
     mMaxLength = maxChars
     Touch
@@ -5801,6 +5816,7 @@ End Function
 ' happens; ValidationError reads the message.
 Public Function Validates(ByVal checkProc As String) As ReDimUI
     RequireRole ROLE_COMPONENT, "Validates"
+    RequireFieldKind "Validates"
     mValidateProc = checkProc
     Set Validates = Me
 End Function
@@ -6733,6 +6749,21 @@ Public Function AddGroup(ByVal groupCaption As String) As ReDimUI
     ItemsChanged
     Touch
     Set AddGroup = Me
+End Function
+
+' A text field's builders raise on other kinds rather than do nothing.
+Private Sub RequireFieldKind(ByVal memberName As String)
+    If mKind <> KIND_INPUT And mKind <> KIND_COMBO Then
+        RaiseError ERROR_INVALID_OPERATION, memberName, _
+            memberName & " applies to a TextInput or ComboBox."
+    End If
+End Sub
+
+' A SelectBox (not a MenuButton), DatePicker, or RadioGroup: a control
+' whose value is a pick, which Required and ErrorText speak for under it.
+Private Function IsPickKind() As Boolean
+    IsPickKind = (mKind = KIND_SELECT And Not mIsMenu) Or mKind = KIND_DATE _
+        Or mKind = KIND_RADIO
 End Function
 
 Private Sub RequireSelectKind(ByVal memberName As String)
@@ -8367,7 +8398,8 @@ Friend Sub Apply( _
     If IsFloatField() Then
         ApplyClearButton mainShape, hostSheet, themeValue
         ApplyFieldNotes hostSheet, themeValue
-    ElseIf ChecksPick() Or LenB(mAppliedMessageSig) > 0 Then
+    ElseIf (IsPickKind() And (mRequired Or LenB(mErrorText) > 0)) _
+        Or LenB(mAppliedMessageSig) > 0 Then
         ApplyFieldNotes hostSheet, themeValue
     End If
     If LenB(mCaptionText) > 0 Or LenB(mAppliedCaptionSig) > 0 _
@@ -10660,7 +10692,7 @@ Private Sub ApplyAdornments(ByVal hostSheet As Worksheet, ByVal themeValue As Re
     End If
     SyncFieldCaption hostSheet, themeValue, captionKey, noteSize
     If LenB(mHintText) > 0 And mVisible _
-        And Not ((IsFloatField() Or ChecksPick()) And LenB(ShownError()) > 0) Then
+        And Not ((IsFloatField() Or IsPickKind()) And LenB(ShownError()) > 0) Then
         hintKey = PartsState(themeValue) & ":" & mHintText & ":" & CStr(mMaxLength)
     End If
     SyncFieldNote hostSheet, themeValue, "fh", hintKey, mHintText, _
@@ -11002,8 +11034,7 @@ End Sub
 ' that something is picked, and the message shows under the control.
 Private Function ChecksPick() As Boolean
     If Not mRequired Then Exit Function
-    ChecksPick = (mKind = KIND_SELECT And Not mIsMenu) Or mKind = KIND_DATE _
-        Or mKind = KIND_RADIO
+    ChecksPick = IsPickKind()
 End Function
 
 ' A pick on a required control that showed its message checks again,
@@ -13040,7 +13071,7 @@ End Function
 Private Function NoteRoom(ByVal themeValue As ReDimUI) As Double
     If LenB(mHintText) = 0 Then
         ' A required pick shows its message in the same row.
-        If ChecksPick() Then GoTo Reserve
+        If IsPickKind() And (mRequired Or LenB(mErrorText) > 0) Then GoTo Reserve
         If Not IsFloatField() Then Exit Function
         If LenB(mValidateProc) = 0 And Not mRequired And LenB(mErrorText) = 0 _
             And mMaxLength = 0 Then Exit Function

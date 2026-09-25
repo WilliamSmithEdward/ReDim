@@ -659,6 +659,9 @@ Public Function TestErrorWords() As String
     app.Render
     transcript = transcript & "|relNamed=" & Err.Description
     Err.Clear
+    app.Toggle("dark").Clearable
+    transcript = transcript & "|fieldOnly=" & Err.Description
+    Err.Clear
     On Error GoTo 0
     app.Unmount True
     TestErrorWords = transcript

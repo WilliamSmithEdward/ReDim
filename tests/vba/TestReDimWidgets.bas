@@ -6001,6 +6001,12 @@ Public Function TestRequiredPicks() As String
     transcript = transcript & "|passes=" & CStr(app.ValidateAll)
     transcript = transcript & "|allClear=" & CStr(Not ShapeExists(host, "rdm_wid82_due__me") _
         And Not ShapeExists(host, "rdm_wid82_tier__me"))
+    ' ErrorText speaks under a pick whether it is required or not.
+    app.SelectBox("kind").Required(False).ErrorText "That kind is sold out"
+    transcript = transcript & "|errorTextShows=" & _
+        host.Shapes("rdm_wid82_kind__me").TextFrame2.TextRange.Text
+    app.SelectBox("kind").ErrorText ""
+    transcript = transcript & "|errorTextClears=" & CStr(Not ShapeExists(host, "rdm_wid82_kind__me"))
     RdxReleaseKeys
     ReDimUI.AutoPump True
     TestRequiredPicks = transcript

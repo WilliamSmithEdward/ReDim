@@ -194,6 +194,9 @@ def test_error_words(run_core):
     assert facts["relNamed"] == (
         "Component 'tag': RightOf names 'nowhere', which is not a component of this app."
     )
+    assert facts["fieldOnly"] == (
+        "Component 'dark': Clearable applies to a TextInput or ComboBox."
+    )
 
 
 def test_hotkey_lifecycle_and_version(run_core):
