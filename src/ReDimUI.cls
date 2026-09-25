@@ -3639,7 +3639,7 @@ Public Sub OnStateChanged(ByVal watchedKeys As Variant, ByVal handlerProc As Str
     Dim alreadyListed As Boolean
 
     RequireRole ROLE_APP, "OnStateChanged"
-    If Not IsArray(watchedKeys) Then watchedKeys = Array(watchedKeys)
+    If Not IsArrayValue(watchedKeys) Then watchedKeys = Array(watchedKeys)
     For Each stateKey In watchedKeys
         Set handlers = FindHandlers(CStr(stateKey))
         If handlers Is Nothing Then
