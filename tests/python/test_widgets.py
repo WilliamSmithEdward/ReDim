@@ -1550,6 +1550,21 @@ def test_selection_readers(run_widgets):
     assert facts["otherKindRefused"] == "True"
 
 
+def test_item_enabled_kinds(run_widgets):
+    facts = parse_transcript(run_widgets("TestItemEnabledKinds"))
+    assert facts["radioMuted"] == "True", "a disabled radio item must read muted"
+    assert facts["radioClickRefused"] == "1/0", "a click must not take a disabled radio item"
+    assert facts["radioKeySkips"] == "3", "Down must pass over a disabled radio item"
+    assert facts["radioKeyBack"] == "1", "Up must pass over it too"
+    assert facts["comboHighlightSkips"] == "True", (
+        "a combo's highlight must pass over a disabled item"
+    )
+    assert facts["comboTakes"] == "Apricot"
+    assert facts["suggestionSkips"] == "Apricot", (
+        "a combo must not suggest a disabled item"
+    )
+
+
 def test_face_clears_caret(run_widgets):
     facts = parse_transcript(run_widgets("TestFaceClearsCaret"))
     assert facts["pick"] == "True", "a SelectBox's long text must stop short of its caret"

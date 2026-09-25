@@ -6643,12 +6643,16 @@ Public Property Get ItemCount() As Long
     If Not mItems Is Nothing Then ItemCount = mItems.Count
 End Property
 
-' A SelectBox item that shows but cannot be picked: it reads muted, the
-' keys pass over it, and a click on it does nothing. A selection
-' already on it stays.
+' A SelectBox, MenuButton, ComboBox, or RadioGroup item that shows but
+' cannot be picked: it reads muted, the keys pass over it, a combo never
+' suggests it, and a click on it does nothing. A selection already on it
+' stays.
 Public Function ItemEnabled(ByVal itemNumber As Long, ByVal enabledFlag As Boolean) As ReDimUI
     RequireRole ROLE_COMPONENT, "ItemEnabled"
-    RequireSelectKind "ItemEnabled"
+    If mKind <> KIND_SELECT And mKind <> KIND_COMBO And mKind <> KIND_RADIO Then
+        RaiseError ERROR_INVALID_OPERATION, "ItemEnabled", _
+            "ItemEnabled applies to a SelectBox, MenuButton, ComboBox, or RadioGroup."
+    End If
     If itemNumber >= 1 And itemNumber <= ItemCount Then
         If mDisabledItems Is Nothing Then Set mDisabledItems = New Collection
         If TransferSelectionHas(mDisabledItems, itemNumber) = enabledFlag Then
@@ -6703,6 +6707,16 @@ Private Function ItemPickable(ByVal itemNumber As Long) As Boolean
         If TransferSelectionHas(mGroupHeaders, itemNumber) Then Exit Function
     End If
     ItemPickable = True
+End Function
+
+' The disabled item numbers, for draw keys that must follow ItemEnabled.
+Private Function DisabledItemsSig() As String
+    Dim entry As Variant
+
+    If mDisabledItems Is Nothing Then Exit Function
+    For Each entry In mDisabledItems
+        DisabledItemsSig = DisabledItemsSig & "~" & CStr(entry)
+    Next entry
 End Function
 
 Private Function IsGroupHeader(ByVal itemNumber As Long) As Boolean
@@ -9776,19 +9790,18 @@ Private Sub HandleRadioKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
 
     itemTotal = ItemCount
     If itemTotal = 0 Then Exit Sub
+    ' Every move passes over disabled items; the arrows wrap.
     Select Case keyText
         Case "{UP}", "{LEFT}"
-            aimRow = CLng(mValue) - 1
-            If aimRow < 1 Then aimRow = itemTotal
+            aimRow = RadioStep(-1)
         Case "{DOWN}", "{RIGHT}"
-            aimRow = CLng(mValue) + 1
-            If aimRow > itemTotal Then aimRow = 1
+            aimRow = RadioStep(1)
         Case "{HOME}"
-            aimRow = 1
+            aimRow = PickableNear(1, 1)
         Case "{END}"
-            aimRow = itemTotal
+            aimRow = PickableNear(itemTotal, -1)
         Case " "
-            If CLng(mValue) = 0 Then aimRow = 1
+            If CLng(mValue) = 0 Then aimRow = PickableNear(1, 1)
         Case "{ENTER}"
             hostApp.ClickDefaultButton
     End Select
@@ -9796,8 +9809,29 @@ Private Sub HandleRadioKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
     If SelectRadioRow(hostApp, aimRow) Then RunClickHandlers hostApp
 End Sub
 
+' The next enabled row from the selection in one direction, wrapping at
+' the ends; 0 when no other row can be picked.
+Private Function RadioStep(ByVal stepDirection As Long) As Long
+    Dim itemTotal As Long
+    Dim probe As Long
+    Dim stepNo As Long
+
+    itemTotal = ItemCount
+    probe = CLng(mValue)
+    For stepNo = 1 To itemTotal
+        probe = probe + stepDirection
+        If probe < 1 Then probe = itemTotal
+        If probe > itemTotal Then probe = 1
+        If ItemPickable(probe) Then
+            RadioStep = probe
+            Exit Function
+        End If
+    Next stepNo
+End Function
+
+' A click or key on a row: a disabled row takes nothing.
 Private Function SelectRadioRow(ByVal hostApp As ReDimUI, ByVal rowNumber As Long) As Boolean
-    If rowNumber < 1 Or rowNumber > ItemCount Then Exit Function
+    If Not ItemPickable(rowNumber) Then Exit Function
     If rowNumber = CLng(mValue) Then Exit Function
     mValue = rowNumber
     If LenB(mWritesToKey) > 0 Then
@@ -13884,7 +13918,7 @@ Private Sub ApplyRadioGroup( _
         Exit Sub
     End If
     If ExtrasCurrent(PartsState(themeValue) & ":" & CStr(mValue) & _
-        ":" & PointerKey() & JoinedSig(mItems)) Then Exit Sub
+        ":" & PointerKey() & DisabledItemsSig() & JoinedSig(mItems)) Then Exit Sub
     rowPitch = mHeight / rowTotal
     circleSize = rowPitch - 6
     If circleSize > 14 Then circleSize = 14
@@ -13936,6 +13970,11 @@ Private Sub ApplyRadioGroup( _
         captionShape.Width = mWidth - circleSize - 8
         captionShape.Height = rowPitch
         StyleCaptionPart captionShape, ItemAt(idx), themeValue
+        ' A disabled item reads muted and takes no clicks.
+        If Not ItemPickable(idx) Then
+            captionShape.TextFrame2.TextRange.Font.Fill.ForeColor.RGB = themeValue.OnMutedColor
+            ring.Line.ForeColor.RGB = themeValue.BorderColor
+        End If
         captionShape.Visible = BoolToMso(mVisible)
         captionShape.OnAction = mAppliedOnAction
     Next idx
@@ -16603,7 +16642,7 @@ Private Sub SyncDropList( _
         CStr(belowCount) & ":" & CStr(listPages) & ":" & CStr(showEmpty) & ":" & _
         CStr(listTopAt) & ":" & CStr(mLeft) & ":" & CStr(mTop) & ":" & _
         CStr(mWidth) & ":" & CStr(mHeight) & ":" & CStr(resolvedSize) & _
-        Chr$(2) & mListMatchesFilter
+        Chr$(2) & mListMatchesFilter & DisabledItemsSig()
     For idx = 1 To wanted
         itemIndex = CLng(mListMatches.Item(mListOffset + idx))
         listSig = listSig & "|" & CStr(itemIndex) & "=" & ItemAt(itemIndex)
@@ -17615,6 +17654,8 @@ End Sub
 Private Sub ComboListNav(ByVal hostApp As ReDimUI, ByVal rowDelta As Long)
     Dim matchCount As Long
     Dim currentItem As Long
+    Dim stepDirection As Long
+    Dim probe As Long
 
     If Not mSelectOpen Then OpenDropList hostApp.Sheet
     Set mListMatches = BuildListMatches(hostApp.Sheet)
@@ -17637,6 +17678,22 @@ Private Sub ComboListNav(ByVal hostApp As ReDimUI, ByVal rowDelta As Long)
     End If
     If mListHighlight < 1 Then mListHighlight = 1
     If mListHighlight > matchCount Then mListHighlight = matchCount
+    ' The highlight passes over disabled items: on in the direction of
+    ' the move, else back from the end it reached.
+    stepDirection = IIf(rowDelta < 0, -1, 1)
+    probe = mListHighlight
+    Do While probe >= 1 And probe <= matchCount
+        If ItemPickable(CLng(mListMatches.Item(probe))) Then Exit Do
+        probe = probe + stepDirection
+    Loop
+    If probe < 1 Or probe > matchCount Then
+        probe = mListHighlight
+        Do While probe >= 1 And probe <= matchCount
+            If ItemPickable(CLng(mListMatches.Item(probe))) Then Exit Do
+            probe = probe - stepDirection
+        Loop
+    End If
+    If probe >= 1 And probe <= matchCount Then mListHighlight = probe
     If mListHighlight > mListOffset + mListRows Then
         mListOffset = mListHighlight - mListRows
     ElseIf mListHighlight <= mListOffset Then
@@ -18175,7 +18232,8 @@ Private Function GhostItem(ByVal hostSheet As Worksheet) As Long
                 GhostItem = 0
                 Exit Function
             End If
-        ElseIf GhostItem = 0 And Len(itemText) > typedLength Then
+        ElseIf GhostItem = 0 And Len(itemText) > typedLength _
+            And ItemPickable(CLng(matchEntry)) Then
             If StrComp(Left$(itemText, typedLength), mText, vbTextCompare) = 0 Then
                 GhostItem = CLng(matchEntry)
             End If
@@ -18237,6 +18295,8 @@ Friend Function PickComboItem( _
     If mListMatches Is Nothing Then Exit Function
     If matchRow < 1 Or matchRow > mListMatches.Count Then Exit Function
     itemIndex = CLng(mListMatches.Item(matchRow))
+    ' A disabled item is shown, muted, and never taken.
+    If Not ItemPickable(itemIndex) Then Exit Function
     picked = ItemAt(itemIndex)
     replacedText = FieldTextNow(hostApp.Sheet)
     If IsFloatField() Then

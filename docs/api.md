@@ -233,7 +233,8 @@ dependencies:
   list, the same rule `RadioGroup` follows for its selected row. `ItemEnabled(position,
   False)` leaves an item showing but out of reach: it reads muted, a click on it does
   nothing, and the keys and type-ahead pass over it; a selection already on it stays, and
-  `IsItemEnabled` reads it. `AddGroup "Fruit"` appends a group header, a bold, muted row
+  `IsItemEnabled` reads it. A `ComboBox` and a `RadioGroup` take `ItemEnabled` the same
+  way, and a combo never suggests a disabled item. `AddGroup "Fruit"` appends a group header, a bold, muted row
   flush left that labels the items after it. A header takes a place in the item list, so
   `ItemCount` counts it and later item numbers count past it, and it is never picked,
   selected by `Value`, or reached by the keys. Both marks follow their items through

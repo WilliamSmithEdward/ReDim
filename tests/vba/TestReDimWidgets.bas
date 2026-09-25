@@ -5728,6 +5728,51 @@ Public Function TestSelectionReaders() As String
     TestSelectionReaders = transcript
 End Function
 
+' ItemEnabled on a RadioGroup and a ComboBox: a disabled item reads
+' muted, a click or the keys never take it, and a combo's highlight and
+' suggestion pass over it.
+Public Function TestItemEnabledKinds() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim transcript As String
+
+    gChangeCount = 0
+    ReDimUI.AutoPump False
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "wid81")
+    app.RadioGroup("tier").AtRect(24, 24, 140, 60).Items("Low", "Mid", "High") _
+        .Value(1).OnChange "TestReDimWidgets.RecordChange"
+    app.RadioGroup("tier").ItemEnabled 2, False
+    app.ComboBox("find").AtRect(200, 24, 150, 22).Items "Apple", "Apricot", "Banana"
+    app.ComboBox("find").ItemEnabled 1, False
+    app.Render
+    transcript = "radioMuted=" & CStr(InkOf(host, "rdm_wid81_tier__t2") = app.Theme.OnMutedColor)
+    ReDimUI.DispatchShape "rdm_wid81_tier__t2"
+    transcript = transcript & "|radioClickRefused=" & app.RadioGroup("tier").CurrentValue & "/" & gChangeCount
+    app.RadioGroup("tier").Focus
+    RdxKeyChar "{DOWN}"
+    transcript = transcript & "|radioKeySkips=" & app.RadioGroup("tier").CurrentValue
+    RdxKeyChar "{UP}"
+    transcript = transcript & "|radioKeyBack=" & app.RadioGroup("tier").CurrentValue
+
+    app.ComboBox("find").Focus
+    RdxKeyChar "{DOWN}"
+    transcript = transcript & "|comboHighlightSkips=" & _
+        CStr(host.Shapes("rdm_wid81_find__opt2").Fill.ForeColor.RGB = app.Theme.PrimaryColor)
+    RdxKeyChar "{ENTER}"
+    transcript = transcript & "|comboTakes=" & app.ComboBox("find").SelectedText
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid81_find"
+    BackspaceAll app.ComboBox("find")
+    RdxKeyChar "A"
+    RdxKeyChar "p"
+    RdxKeyChar "{TAB}"
+    transcript = transcript & "|suggestionSkips=" & app.ComboBox("find").InputValue
+    RdxReleaseKeys
+    ReDimUI.AutoPump True
+    TestItemEnabledKinds = transcript
+End Function
+
 ' A long face text stops short of the drop caret on a SelectBox, a
 ' DatePicker, and a ComboBox, measured from where the text is drawn.
 Public Function TestFaceClearsCaret() As String

@@ -2,6 +2,9 @@
 
 ## 1.0.3 - 2026-09-25
 
+- `ItemEnabled` works on a `ComboBox` and a `RadioGroup`, where it used
+  to raise: a disabled item reads muted, clicks and keys pass over it,
+  and a combo never suggests it.
 - `SelectedText` and `SelectedValue` read the selection of a
   `SelectBox`, `ComboBox`, `RadioGroup`, or `Tabs` the same way: the
   item's text and value, or empty while nothing is selected.
