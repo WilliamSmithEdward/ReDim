@@ -3465,11 +3465,7 @@ Public Function PrepareCanvas( _
     End If
     If hideGridlines Then
         mCanvasPrepared = True
-        On Error Resume Next
-        If mSheet Is ActiveWindow.ActiveSheet Then
-            ActiveWindow.DisplayGridlines = False
-        End If
-        On Error GoTo 0
+        ReassertCanvas
     End If
     Set PrepareCanvas = Me
 End Function
@@ -4399,18 +4395,14 @@ Public Function OnHide(ByVal handlerProc As String) As ReDimUI
     Set OnHide = Me
 End Function
 
+' OnShow and OnHide run with the app as ReDimUI.SenderApp, and a failure
+' goes to its error sink, where it was dropped without a trace.
 Friend Sub InvokeShow()
-    If LenB(mOnShowProc) = 0 Then Exit Sub
-    On Error Resume Next
-    Application.Run mOnShowProc
-    On Error GoTo 0
+    If LenB(mOnShowProc) > 0 Then ReDimUI.RunHandlerAs Me, Nothing, mOnShowProc
 End Sub
 
 Friend Sub InvokeHide()
-    If LenB(mOnHideProc) = 0 Then Exit Sub
-    On Error Resume Next
-    Application.Run mOnHideProc
-    On Error GoTo 0
+    If LenB(mOnHideProc) > 0 Then ReDimUI.RunHandlerAs Me, Nothing, mOnHideProc
 End Sub
 
 ' Gridlines are window state, not sheet state, so a freshly activated
@@ -4444,8 +4436,7 @@ Public Function ProtectSurface( _
         For Each componentValue In mComponents
             componentValue.UnlockInputCell mSheet
         Next componentValue
-        mSheet.Protect DrawingObjects:=True, Contents:=True, _
-            UserInterfaceOnly:=True
+        RestoreSurfaceProtection
         If allowCellSelection Then
             mSheet.EnableSelection = xlNoRestrictions
         Else
@@ -7669,13 +7660,7 @@ Public Property Let InputValue(ByVal assignedText As String)
             RaiseError writeError, "InputValue", writeDescription
         End If
     End If
-    If LenB(mWritesToKey) > 0 Then
-        If mKind = KIND_COMBO Then
-            WriteOwnKey OwnerApp, ItemStateValue(assignedText)
-        Else
-            WriteOwnKey OwnerApp, assignedText
-        End If
-    End If
+    WriteFieldKey OwnerApp, assignedText
 End Property
 
 Friend Function InputCell(ByVal hostSheet As Worksheet) As Range
@@ -7713,13 +7698,7 @@ Friend Sub SyncInputFromSheet(ByVal hostApp As ReDimUI, ByVal changed As Range)
     If cell Is Nothing Then Exit Sub
     If Application.Intersect(cell, changed) Is Nothing Then Exit Sub
     cellText = ValueWords(cell.Value)
-    If LenB(mWritesToKey) > 0 Then
-        If mKind = KIND_COMBO Then
-            WriteOwnKey hostApp, ItemStateValue(cellText)
-        Else
-            WriteOwnKey hostApp, cellText
-        End If
-    End If
+    WriteFieldKey hostApp, cellText
     RunChangeHandler hostApp
     ' Combo auto-suggest at commit time, the moment Excel hands control
     ' back: an exact match takes the item and closes; partial matches drop
@@ -8106,6 +8085,13 @@ End Sub
 Private Sub WriteOwnKey(ByVal hostApp As ReDimUI, ByVal writtenValue As Variant)
     If LenB(mWritesToKey) = 0 Then Exit Sub
     hostApp.WriteStateFrom Me, mWritesToKey, writtenValue
+End Sub
+
+' A text field's write to its WritesTo key: a combo writes the value of
+' the item its text names, and a text that names no item, as a
+' TextInput's text, writes as it is.
+Private Sub WriteFieldKey(ByVal hostApp As ReDimUI, ByVal fieldText As String)
+    WriteOwnKey hostApp, ItemStateValue(fieldText)
 End Sub
 
 ' =====================================================================
@@ -18521,13 +18507,7 @@ Friend Sub BlurField(ByVal hostApp As ReDimUI, ByVal keepEdits As Boolean)
         End If
         RunValidation hostApp
         If mText <> mFieldTextAtFocus Then
-            If LenB(mWritesToKey) > 0 Then
-                If mKind = KIND_COMBO Then
-                    WriteOwnKey hostApp, ItemStateValue(mText)
-                Else
-                    WriteOwnKey hostApp, mText
-                End If
-            End If
+            WriteFieldKey hostApp, mText
             RunChangeHandler hostApp
         End If
     Else

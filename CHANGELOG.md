@@ -440,6 +440,9 @@
   draws in full the next time it changes; it came back unstyled. A
   pump that stood still for 25 days no longer faults at every frame on
   restart.
+- `OnShow` and `OnHide` run with the app as `ReDimUI.SenderApp`, and a
+  failure in one reaches `OnError`, where it was dropped without a
+  trace.
 
 ## 1.0.2 - 2026-09-23
 
