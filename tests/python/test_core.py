@@ -245,6 +245,31 @@ def test_focus_rails(run_core):
     assert facts["clickResumes"] == "1", "a click after a held close must run"
 
 
+def test_follow_catches_up(run_core):
+    facts = parse_transcript(run_core("TestFollowCatchesUp"))
+    assert facts["typingKept"] == "Ann", "a focused field keeps its text"
+    assert facts["takenOnLeave"] == "Bob", "the field takes the code write once left"
+    assert facts["notYet"] == "0"
+    assert facts["takenOnLoad"] == "2", "a select takes the value once its item loads"
+    assert facts["listenerRewrite"] == "3/3", (
+        "a listener's rewrite of the key must move the control that wrote it"
+    )
+    assert facts["keyCase"] == "100", "WritesTo and BindValue keys match in any case"
+    assert facts["sharedAfterRender"] == "2", (
+        "a pick among items sharing a value must survive Render"
+    )
+    assert facts["snapBackQuiet"] == "5/0", "a digit that snaps back must fire nothing"
+
+
+def test_bindings_and_windows(run_core):
+    facts = parse_transcript(run_core("TestBindingsAndWindows"))
+    assert facts["nullText"] == "Name: ", "BindText must show Null as nothing"
+    assert facts["nullHidden"] == "True", "BindVisible must read Null as False"
+    assert facts["textTrue"] == "True", "text that holds something reads as True"
+    assert facts["nullFalse"] == "True", "BindEnabled must read Null as False"
+    assert facts["navigateCase"] == "True", "Navigate must take an app id in any case"
+
+
 def test_theme_builders(run_core):
     facts = parse_transcript(run_core("TestThemeBuilders"))
     assert facts["tokens"] == "True", "each theme builder must set the tokens it names"

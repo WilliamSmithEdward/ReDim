@@ -1470,10 +1470,115 @@ Public Function TestImage() As String
     app.SetState "logo", imgB
     transcript = transcript & "|embeddedKept=" & _
         CStr(host.Shapes("rdm_wid24_lost").Fill.Type = msoFillPicture)
+
+    ' A new source that is missing, or none, never shows the last one's
+    ' picture, and the placeholder takes a new theme's colors.
+    app.SetState "logo", "C:\nope\other.png"
+    transcript = transcript & "|newMissingPlaceholder=" & _
+        CStr(host.Shapes("rdm_wid24_lost").Fill.Type <> msoFillPicture)
+    app.SetState "logo", imgA
+    app.SetState "logo", ""
+    transcript = transcript & "|clearedPlaceholder=" & _
+        CStr(host.Shapes("rdm_wid24_lost").Fill.Type <> msoFillPicture)
+    app.SetTheme ReDimUI.ThemeDark
+    transcript = transcript & "|placeholderThemed=" & _
+        CStr(host.Shapes("rdm_wid24_lost").Fill.ForeColor.RGB = ReDimUI.ThemeDark.MutedColor)
+    app.SetTheme ReDimUI.ThemeLight
     On Error Resume Next
     Kill imgA
     On Error GoTo 0
     TestImage = transcript
+End Function
+
+' Fixes from the review of the table, sparkline, badge, stack, check
+' list, and dialog chrome: a table's rows and headers come back whole
+' after a shrink, a live sparkline stays under a dialog, a badge's hit
+' test covers its words, a stretched member takes its own width back and
+' a removed stack's members go free, a check list keeps its checks when
+' its items are replaced, the command palette stays shut under a
+' dialog, and "mdl_" ids belong to the dialogs.
+Public Function TestReviewFixes() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim transcript As String
+    Dim lineOrder As Long
+
+    ReDimUI.AutoPump False
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "wid84")
+    app.Table("t").AtRect(24, 24, 300, 82).FontSize(9).Columns "Name", "Qty"
+    app.Table("t").AddRow "Pear", 3
+    app.Table("t").AddRow "Apple", 12
+    app.Table("t").AddRow "Fig", 3
+    app.Sparkline("sp").AtRect(360, 24, 120, 40).ValuesFrom Array(1, 3, 2)
+    app.Badge("bd").AtRect(360, 90, 0, 18).Text "Overdue now"
+    app.Stack("col").AtRect(24, 140, 200, 0).Gap(6).Stretch
+    app.Label("wide").Sized(60, 18).Text("Stretched").InStack "col"
+    app.Stack("hid").AtRect(260, 140, 160, 0).Gap 6
+    app.Label("inHid").Sized(80, 18).Text("Hidden with it").InStack "hid"
+    app.CheckList("ck").AtRect(24, 260, 160, 80).Items("A", "B", "C").CheckedFrom Array("B")
+    app.CommandPalette ""
+    app.Render
+
+    app.Table("t").AtRect 24, 24, 300, 62
+    app.Table("t").AtRect 24, 24, 300, 82
+    transcript = "tableRowBack=" & CStr(ShapeExists(host, "rdm_wid84_t__tr3"))
+    If ShapeExists(host, "rdm_wid84_t__tr3") Then
+        transcript = transcript & "/" & CStr(host.Shapes("rdm_wid84_t__tr3").Top > _
+            host.Shapes("rdm_wid84_t__tr2").Top)
+    End If
+
+    app.Confirm "Wait", "A dialog is up."
+    app.Sparkline("sp").ValuesFrom Array(3, 1, 2)
+    app.Sparkline("sp").ValuesFrom Array(3, 1, 2, 5)
+    lineOrder = host.Shapes("rdm_wid84_sp__sl").ZOrderPosition
+    transcript = transcript & "|sparkUnderDialog=" & CStr(lineOrder < _
+        host.Shapes("rdm_wid84_mdl_ov").ZOrderPosition) & "/" & _
+        host.Shapes("rdm_wid84_sp__sl").Nodes.Count
+    app.OpenCommandPalette
+    transcript = transcript & "|paletteShut=" & CStr(Not ShapeExists(host, _
+        "rdm_wid84_mdl_pal_card"))
+    app.CloseModal
+
+    transcript = transcript & "|badgeHit=" & CStr(app.Badge("bd").CoversPoint(390, 99))
+
+    app.Stack("col").Stretch False
+    app.Render
+    transcript = transcript & "|ownWidthBack=" & CStr(Abs(host.Shapes("rdm_wid84_wide").Width - _
+        60) < 0.5)
+    app.Stack("hid").Visible False
+    app.Stack("hid").Remove
+    transcript = transcript & "|memberFreed=" & CStr(host.Shapes("rdm_wid84_inHid").Visible = _
+        msoTrue)
+
+    app.CheckList("ck").Items "B", "C", "D"
+    transcript = transcript & "|checksKept=" & CStr(app.CheckList("ck").IsItemChecked(1) And _
+        Not app.CheckList("ck").IsItemChecked(2) And app.CheckList("ck").CheckedCount = 1)
+
+    On Error Resume Next
+    app.Label "mdl_mine"
+    transcript = transcript & "|mdlReserved=" & Err.Description
+    Err.Clear
+    On Error GoTo 0
+    app.Label("toast_1").AtRect(24, 360, 80, 18).Text "Mine"
+    app.Toast "Hello"
+    transcript = transcript & "|toastSkips=" & CStr(app.Label("toast_1").CurrentText = "Mine")
+
+    app.Table("ex").AtRect(24, 400, 300, 82).Columns "Code", "Formula"
+    app.Table("ex").AddRow "00123", "=1+1"
+    app.Table("ex").ExportTo host.Range("K1")
+    transcript = transcript & "|exportLiteral=" & CStr(VarType(host.Range("K2").Value) = _
+        vbString And host.Range("K2").Value = "00123" And Not host.Range("L2").HasFormula _
+        And host.Range("L2").Value = "=1+1")
+
+    app.Table("dt").AtRect(24, 500, 300, 82).Columns "When"
+    app.Table("dt").AddRow DateSerial(2026, 3, 5)
+    app.Table("dt").FilterRows "Mar"
+    transcript = transcript & "|formatFilter=" & app.Table("dt").ShownRowCount
+    app.Table("dt").ColumnFormat 1, "mmm d"
+    transcript = transcript & "/" & app.Table("dt").ShownRowCount
+    app.Unmount True
+    TestReviewFixes = transcript
 End Function
 
 Private Sub ExportColorPng( _

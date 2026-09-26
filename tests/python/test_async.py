@@ -74,8 +74,13 @@ def test_runs_again_after_cancel(run_async):
 def test_tags_reach_handlers(run_async):
     facts = parse_transcript(run_async("TestTagsReachHandlers"))
     assert facts["buttonTag"] == "fromButton", "a click handler must read its button's Tag"
-    assert facts["stepTag"] == "7", "a job step must run with the job as Sender"
+    assert facts["stepTag"] == "7/tagged", (
+        "a job step must run with the job as Sender, and SenderId names the job"
+    )
     assert facts["doneTag"] == "7", "a job's outcome handler must read the job's Tag"
+    assert facts["pacedUnmount"] == "0/True", (
+        "a paced step that unmounts its app must not run OnDone"
+    )
 
 
 def test_job_chunks(run_async):

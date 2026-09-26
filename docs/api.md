@@ -33,7 +33,8 @@ A theme answers its tokens, for shapes of your own that should match the control
 `FontName`, and `BaseFontSize`, as in `ui.Theme.PrimaryColor`.
 
 App ids use letters and digits only. Component ids may add single underscores, though not
-at either end.
+at either end. Ids starting with `mdl_` belong to `Confirm` and the command palette; an app
+can style those parts once they are drawn, but cannot make its own.
 
 ## Windows and navigation
 
@@ -136,7 +137,9 @@ All fluent, all return the component:
   `AddItem(text, atPosition)` appends or inserts; `RemoveItem(indexOrText)`; `ClearItems`;
   read back with `ItemCount` and `ItemTextAt(position)`, and `ItemPosition(text)` finds
   an item by its text, ignoring case (0 for none). The selected item survives inserts
-  and unrelated removals; removing it clears the selection to the placeholder. A
+  and unrelated removals; removing it clears the selection to the placeholder. `Items`
+  and `ItemsFrom` keep a `CheckList`'s checks on the items the new list still holds, by
+  text, so a rebuild keeps what the user checked. A
   `RadioGroup` or `CheckList` left with no items shows nothing until items return.
   Programmatic mutations re-render but do not write `WritesTo` state or fire `OnChange`;
   those belong to user interaction and explicit `SetState`. The one exception is the first
@@ -460,8 +463,9 @@ ui.TickBox("beta").AtRect(24, 70, 200, 18).Text("Beta features").OnTab "tabs", 2
   `FilterRows "ap"` filters from code; `ShownRowCount` counts the rows it lets through.
   Ctrl+C copies the selected row, or every row shown when none is selected or the filter
   hides it, under the header row as tab-separated text that pastes into cells, dates as
-  yyyy-mm-dd so the sheet reads them back as dates. `ExportTo Range("H1")` writes the header and the rows
-  shown, filtered and sorted, from that cell down in one write.
+  yyyy-mm-dd so the sheet reads them back as dates. `ExportTo Range("H1")` writes the
+  header and the rows shown, filtered and sorted, from that cell down in one write. Text
+  stays text: "00123" keeps its zeros and "=A1" stays words, never a formula.
   `EmptyText "No orders yet"` words the row an empty table shows, and a filter that
   matches nothing reads "No rows match". `OnRowOpen "Module.Proc"` runs on a double
   click on a row, or on Enter while the table has the keys and shows its selected row,
@@ -697,7 +701,8 @@ ui.Button("cancel").Sized(90, 30).Text("Cancel").Secondary.InStack "buttons"
 
 `ui.CommandPalette` gives an app a searchable list of everything it can do, the way code
 editors do. Ctrl+Shift+P opens it while the app's sheet is in front, and so does
-`ui.OpenCommandPalette` from code. It opens as a field at the top of the visible window,
+`ui.OpenCommandPalette` from code, unless a `Confirm` is waiting for an answer, which keeps
+the commands behind it out of reach. It opens as a field at the top of the visible window,
 over a list with the keys in the field. The list holds, in this order:
 
 - the app's own entries, added with `ui.AddCommand "Export to CSV", "Module.Export",

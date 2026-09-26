@@ -485,6 +485,9 @@ Private mPendingReflows As Collection
 ' The command palette: whether it is on, what each entry it lists runs,
 ' and the control that had the keys when it opened.
 Private mPaletteOn As Boolean
+' Set while Confirm or the palette draws its parts, whose ids start
+' "mdl_"; an app cannot make a component with such an id itself.
+Private mDrawingChrome As Boolean
 Private mPaletteActions As Collection
 Private mFocusBeforePalette As String
 
@@ -852,10 +855,10 @@ Private mAppliedToggleCaptionSig As String
 Private mToggleCaptionRoom As Double
 ' A control that follows its WritesTo key takes the key's value at its
 ' next draw: set when code writes the key and when the app renders, and
-' left clear when the control's own write is what changed it, so a pick
-' among items sharing a value stays on the item picked.
+' left clear when the control's own write is what changed it. It stays
+' set while the control cannot take the value yet (a field being typed
+' in, an item not loaded), so the control catches up later.
 Private mFollowPending As Boolean
-Private mWritingOwnKey As Boolean
 ' A one-line face whose text was cut to fit with an ellipsis, and the
 ' width it was fitted at.
 Private mFaceTrimmed As Boolean
@@ -876,6 +879,9 @@ Private mStackGap As Double
 Private mStackPadding As Double
 Private mStackAcross As Boolean
 Private mStackStretch As Boolean
+' A member's own width while a stretching stack widens it.
+Private mOwnWidth As Double
+Private mStretched As Boolean
 Private mStackGen As Long
 Private mStackLaidGen As Long
 Private mStackLaidLeft As Double
@@ -1201,10 +1207,17 @@ Public Property Get SenderApp() As ReDimUI
     Set SenderApp = ReDimUI.FactorySenderApp
 End Property
 
+' The id of what a handler runs for: a control's, or an op's or a job's
+' when the handler is its step or outcome handler.
 Public Property Get SenderId() As String
     If Not ReDimUI.FactorySender Is Nothing Then
-        SenderId = ReDimUI.FactorySender.ComponentId
+        SenderId = ReDimUI.FactorySender.OwnId
     End If
+End Property
+
+' A control's, op's, or job's id, whatever its role.
+Friend Property Get OwnId() As String
+    OwnId = mComponentId
 End Property
 
 Friend Property Get FactorySender() As ReDimUI
@@ -1344,8 +1357,7 @@ Friend Sub DispatchKey(ByVal keyText As String)
         ' A captured key with nothing focused: the capture outlived its
         ' focus, as it does after the VBA project resets under a focused
         ' field. Letting the keys go gives typing back to the sheet.
-        RdxReleaseKeys
-        RebindShortcuts
+        ReleaseTypingKeys
         Exit Sub
     End If
     ' The keypad's decimal key types the separator Excel would.
@@ -1369,7 +1381,6 @@ Friend Sub SetKeyboardFocus(ByVal hostApp As ReDimUI, ByVal componentValue As Re
     Dim previousApp As ReDimUI
     Dim previousComponent As ReDimUI
     Dim leaveError As Long
-    Dim leaveSource As String
     Dim leaveDescription As String
 
     If Not IsFactory(Me) Then
@@ -1390,7 +1401,6 @@ Friend Sub SetKeyboardFocus(ByVal hostApp As ReDimUI, ByVal componentValue As Re
                 On Error Resume Next
                 previousComponent.LeaveFocus previousApp, True
                 leaveError = Err.Number
-                leaveSource = Err.Source
                 leaveDescription = Err.Description
                 On Error GoTo 0
                 mFocusHandoff = False
@@ -1402,13 +1412,14 @@ Friend Sub SetKeyboardFocus(ByVal hostApp As ReDimUI, ByVal componentValue As Re
     mCaretBlinkMs = SystemCaretBlinkMs()
     ' Keys are captured only while the app's sheet is in front: a dialog
     ' raised on a sheet behind must not swallow typing on the one in view.
-    If SheetInFront(hostApp) Then
-        RdxBindKeys
-    Else
-        RdxReleaseKeys
-    End If
+    SyncKeyCapture
     RequestPump
-    If leaveError <> 0 Then Err.Raise leaveError, leaveSource, leaveDescription
+    ' The new control has the focus and draws as focused; what failed in
+    ' the old one's commit goes to its app's error sink.
+    If leaveError <> 0 Then
+        previousApp.ReportAppError HandlerFailureText(previousComponent, vbNullString, _
+            leaveError, leaveDescription)
+    End If
 End Sub
 
 ' The keys follow the focused app's sheet: captured while it is in
@@ -1422,8 +1433,15 @@ Private Sub SyncKeyCapture()
     If SheetInFront(appValue) Then
         RdxBindKeys
     Else
-        RdxReleaseKeys
+        ReleaseTypingKeys
     End If
+End Sub
+
+' The typing keys go back to Excel, and the shortcuts that share some of
+' them (Ctrl+Z, say) take theirs again.
+Private Sub ReleaseTypingKeys()
+    RdxReleaseKeys
+    RebindShortcuts
 End Sub
 
 ' The Windows caret blink interval, or 0 when the user turned blinking
@@ -1822,8 +1840,7 @@ Friend Sub ClearKeyboardFocus()
     mFocusAppId = vbNullString
     mFocusComponentId = vbNullString
     If Not mFocusHandoff Then
-        RdxReleaseKeys
-        RebindShortcuts
+        ReleaseTypingKeys
     End If
 End Sub
 
@@ -2371,6 +2388,9 @@ Private Sub NavigateCore(ByVal targetAppId As String, ByVal pushCurrent As Boole
         RaiseError ERROR_INVALID_OPERATION, "Navigate", _
             "App '" & targetAppId & "' is not a window. Call AsWindow on it first."
     End If
+    ' App ids ignore case; the windows list and the back stack hold each
+    ' as it was mounted, so the target is compared in that spelling.
+    targetAppId = targetApp.AppId
     If mActiveWindowId = targetAppId Then Exit Sub
     previousId = mActiveWindowId
     targetApp.Sheet.Visible = xlSheetVisible
@@ -3100,7 +3120,11 @@ Public Function Toast( _
         If ttlMs < 4000 Then ttlMs = 4000
         If ttlMs > 12000 Then ttlMs = 12000
     End If
-    mToastCounter = mToastCounter + 1
+    ' A toast takes the next number no component holds, so an app's own
+    ' "toast_1" is never mistaken for one.
+    Do
+        mToastCounter = mToastCounter + 1
+    Loop While TryGetComponent("toast_" & mToastCounter, toastValue)
     Set toastValue = GetOrCreateComponent("toast_" & mToastCounter, KIND_TOAST)
     toastValue.ConfigureToast messageText, ttlMs, NextToastSlot()
     NotifyDirty toastValue.ComponentId
@@ -3247,6 +3271,7 @@ Public Sub Confirm( _
     cardLeft = viewLeft + (viewWidth - 340) / 2
     cardTop = viewTop + (viewHeight - 150) / 2
     BeginUpdate
+    mDrawingChrome = True
     ' The dim sheet runs from the origin to one viewport past the visible
     ' area, so ordinary scrolling while the modal is up stays covered.
     GetOrCreateComponent("mdl_ov", KIND_OVERLAY) _
@@ -3262,6 +3287,7 @@ Public Sub Confirm( _
         .Text(cancelWords).Secondary.Visible(LenB(cancelWords) > 0)
     Button("mdl_cancel").OnClick cancelProc
     Component("mdl_cancel").MarkCloseModalOnClick
+    mDrawingChrome = False
     EndUpdate
     If Not mRendered Then Render
     RaiseModalZOrder
@@ -3313,7 +3339,7 @@ Private Sub HideIfExists(ByVal targetComponentId As String)
     End If
 End Sub
 
-Private Sub RaiseModalZOrder()
+Friend Sub RaiseModalZOrder()
     Dim modalId As Variant
     Dim componentValue As ReDimUI
 
@@ -3439,6 +3465,9 @@ Public Sub OpenCommandPalette()
     Dim paletteField As ReDimUI
 
     RequireRole ROLE_APP, "OpenCommandPalette"
+    ' A dialog waiting on an answer keeps the app's commands behind it,
+    ' as it keeps their shortcuts.
+    If ModalUp() Then Exit Sub
     ResolveViewport viewLeft, viewTop, viewWidth, viewHeight
     cardWidth = 440
     If cardWidth > viewWidth - 16 Then cardWidth = viewWidth - 16
@@ -3451,8 +3480,10 @@ Public Sub OpenCommandPalette()
         mFocusBeforePalette = ReDimUI.FocusedComponentId
     End If
     BeginUpdate
+    mDrawingChrome = True
     Card(PALETTE_CARD_ID).AtRect(cardLeft, cardTop, cardWidth, 48).Text("").Visible True
     Set paletteField = ComboBox(PALETTE_FIELD_ID)
+    mDrawingChrome = False
     paletteField.AtRect(cardLeft + 12, cardTop + 12, cardWidth - 24, 24) _
         .Placeholder(Phrase(UI_TYPE_COMMAND)).RestrictToItems.Visible True
     paletteField.ItemsFrom entryTexts
@@ -3635,7 +3666,7 @@ Friend Sub ReapplyDependents(ByVal anchorId As String)
 
     RequireRole ROLE_APP, "ReapplyDependents"
     For Each componentValue In mComponents
-        If componentValue.PlacedRelativeTo = anchorId Then
+        If StrComp(componentValue.PlacedRelativeTo, anchorId, vbTextCompare) = 0 Then
             componentValue.Apply mSheet, mTheme, Me
             ReapplyDependents componentValue.ComponentId
         End If
@@ -3689,6 +3720,14 @@ Friend Function GetOrCreateComponent( _
 
     RequireRole ROLE_APP, "Component"
     RequireIdentifier targetComponentId, True, "Component", "componentId"
+    ' Ids starting "mdl_" name the parts of Confirm and the command
+    ' palette; an app may style them once drawn, but not make its own.
+    If Not mDrawingChrome And StrComp(Left$(targetComponentId, 4), "mdl_", vbTextCompare) = 0 Then
+        If Not TryGetComponent(targetComponentId, componentValue) Then
+            RaiseError ERROR_INVALID_ARGUMENT, "Component", _
+                "Component ids starting with ""mdl_"" belong to ReDim's dialogs."
+        End If
+    End If
     If TryGetComponent(targetComponentId, componentValue) Then
         If componentValue.ComponentKind <> kindCode Then
             RaiseError ERROR_INVALID_OPERATION, "Component", _
@@ -3742,30 +3781,67 @@ End Property
 ' ---------------------------------------------------------------
 
 Public Sub SetState(ByVal stateKey As String, ByVal stateValue As Variant)
-    Dim known As Variant
-
     RequireRole ROLE_APP, "SetState"
+    StoreState stateKey, stateValue, Nothing
+End Sub
+
+' A control's own write to the key it writes. The controls bound to the
+' key redraw, but the writer, which already shows the value, is not
+' asked to take it back; a listener that then writes the key again
+' reaches the writer like any other write.
+Friend Sub WriteStateFrom( _
+    ByVal writer As ReDimUI, _
+    ByVal stateKey As String, _
+    ByVal stateValue As Variant _
+)
+    RequireRole ROLE_APP, "WriteStateFrom"
+    StoreState stateKey, stateValue, writer
+End Sub
+
+' Stores the value, redraws the controls bound to the key, then runs the
+' key's listeners, so a listener reading a control sees the value it now
+' shows. A draw that raises still lets the listeners run, then raises.
+Private Sub StoreState( _
+    ByVal stateKey As String, _
+    ByVal stateValue As Variant, _
+    ByVal writer As ReDimUI _
+)
+    Dim known As Variant
+    Dim drawError As Long
+    Dim drawSource As String
+    Dim drawDescription As String
+
     If Not TryGetItem(mStateValues, stateKey, known) Then mStateKeys.Add stateKey
     ReplaceItem mStateValues, stateKey, stateValue
-    MarkBoundComponentsDirty stateKey
-    ' The controls redraw first, so a listener reading one sees the value
-    ' it now shows.
-    If mBatchDepth = 0 And mRendered Then FlushDirty
+    MarkBoundComponentsDirty stateKey, writer
+    If mBatchDepth = 0 And mRendered Then
+        On Error Resume Next
+        FlushDirty
+        drawError = Err.Number
+        drawSource = Err.Source
+        drawDescription = Err.Description
+        On Error GoTo 0
+    End If
     InvokeStateHandlers stateKey
+    If drawError <> 0 Then Err.Raise drawError, drawSource, drawDescription
 End Sub
 
 ' A control seeding the key it writes: stored when the key has none,
 ' running no listener, since it happens while the app draws. Controls
 ' bound to the key redraw with it; Render seeds every key before it
 ' draws, so one drawn earlier in the build does not miss the value.
-Friend Sub SeedState(ByVal stateKey As String, ByVal stateValue As Variant)
+Friend Sub SeedState( _
+    ByVal stateKey As String, _
+    ByVal stateValue As Variant, _
+    ByVal seeder As ReDimUI _
+)
     Dim known As Variant
 
     RequireRole ROLE_APP, "SeedState"
     If TryGetItem(mStateValues, stateKey, known) Then Exit Sub
     mStateKeys.Add stateKey
     ReplaceItem mStateValues, stateKey, stateValue
-    MarkBoundComponentsDirty stateKey
+    MarkBoundComponentsDirty stateKey, seeder
 End Sub
 
 ' Sets the key only when it has no value yet, so setup code stays
@@ -3882,12 +3958,14 @@ Private Function FindHandlers(ByVal stateKey As String) As Collection
     On Error GoTo 0
 End Function
 
-Private Sub MarkBoundComponentsDirty(ByVal stateKey As String)
+' The controls bound to the key redraw; each that follows it takes the
+' value, except the writer, which shows it already.
+Private Sub MarkBoundComponentsDirty(ByVal stateKey As String, ByVal writer As ReDimUI)
     Dim componentValue As ReDimUI
 
     For Each componentValue In mComponents
         If componentValue.IsBoundTo(stateKey) Then
-            componentValue.NoteStateWritten stateKey
+            If Not componentValue Is writer Then componentValue.NoteStateWritten stateKey
             NotifyDirty componentValue.ComponentId
         End If
     Next componentValue
@@ -5216,6 +5294,8 @@ End Function
 Private Sub TakeSize(ByVal widthPoints As Double, ByVal heightPoints As Double)
     mWidth = widthPoints
     mHeight = heightPoints
+    ' A width given now is the control's own, whatever a stack stretched.
+    mStretched = False
     mGrowAdded = 0
     If mKind = KIND_STACK Then
         mStackAutoWidth = (widthPoints <= 0)
@@ -5883,6 +5963,8 @@ Public Function ColumnFormat( _
     If columnNumber >= 1 And columnNumber <= mTableCols Then
         mColumnFormats(columnNumber) = formatPattern
         mColumnLayoutKey = vbNullString
+        ' A filter matches cells as shown, so a new format filters anew.
+        mTableShownKey = vbNullString
         Touch
     End If
     Set ColumnFormat = Me
@@ -5946,13 +6028,28 @@ Public Function ExportTo(ByVal exportAnchor As Range) As ReDimUI
     EnsureTableShown
     ReDim grid(1 To mTableShownCount + 1, 1 To mTableCols)
     For colNo = 1 To mTableCols
-        grid(1, colNo) = mTableHeads(colNo)
+        grid(1, colNo) = LiteralCell(mTableHeads(colNo))
         For rowNo = 1 To mTableShownCount
-            grid(rowNo + 1, colNo) = mTableCells(colNo, mTableShown(rowNo))
+            grid(rowNo + 1, colNo) = LiteralCell(mTableCells(colNo, mTableShown(rowNo)))
         Next rowNo
     Next colNo
     exportAnchor.Cells(1, 1).Resize(mTableShownCount + 1, mTableCols).Value = grid
     Set ExportTo = Me
+End Function
+
+' A cell value as a sheet write keeps it: text behind the apostrophe
+' Excel hides, so "00123" stays text and "=A1" stays words rather than
+' turning into a number or a live formula; other values as they are.
+Private Function LiteralCell(ByVal entryValue As Variant) As Variant
+    If VarType(entryValue) = vbString Then
+        If LenB(entryValue) > 0 Then
+            LiteralCell = "'" & entryValue
+        Else
+            LiteralCell = entryValue
+        End If
+    Else
+        LiteralCell = entryValue
+    End If
 End Function
 
 ' The rows the table shows under its filter, in order.
@@ -6131,6 +6228,7 @@ Public Function InStack(ByVal stackId As String) As ReDimUI
             stackValue.LeaveStack mComponentId
         End If
     End If
+    RestoreOwnWidth
     mStackId = stackId
     mAppliedFlowSig = vbNullString
     If LenB(stackId) > 0 Then
@@ -6550,19 +6648,11 @@ Public Property Get IsChecked() As Boolean
 End Property
 
 Public Function Items(ParamArray listItems() As Variant) As ReDimUI
-    Dim idx As Long
+    Dim itemList As Variant
 
     RequireRole ROLE_COMPONENT, "Items"
-    Set mItems = New Collection
-    For idx = LBound(listItems) To UBound(listItems)
-        mItems.Add CStr(listItems(idx))
-    Next idx
-    ResetItemValues
-    ForgetItemMarks
-    ItemsChanged
-    ClampItemSelection
-    Touch
-    Set Items = Me
+    itemList = listItems
+    Set Items = ItemsFrom(itemList)
 End Function
 
 ' Replaces the item list from a 1D array, a Collection, a Range (one
@@ -6573,7 +6663,13 @@ Public Function ItemsFrom( _
     ByVal itemSource As Variant, _
     Optional ByVal valueSource As Variant _
 ) As ReDimUI
+    Dim keptChecks As Collection
+
     RequireRole ROLE_COMPONENT, "ItemsFrom"
+    ' A check list keeps its checks on the items the new list still has,
+    ' by text, so a rebuild with the same items keeps what the user
+    ' checked.
+    If Not mCheckedSet Is Nothing Then Set keptChecks = CheckedTexts()
     Set mItems = ReadItemSource(itemSource, "ItemsFrom")
     ResetItemValues
     ForgetItemMarks
@@ -6582,7 +6678,7 @@ Public Function ItemsFrom( _
     End If
     ItemsChanged
     ClampItemSelection
-    If Not mCheckedSet Is Nothing Then Set mCheckedSet = New Collection
+    If Not keptChecks Is Nothing Then CheckItemTexts keptChecks
     Touch
     Set ItemsFrom = Me
 End Function
@@ -6607,17 +6703,24 @@ End Function
 ' Seeds the checkbox list's checked rows by item text; names that match
 ' no item are ignored. Programmatic, so no state write and no OnChange.
 Public Function CheckedFrom(ByVal itemSource As Variant) As ReDimUI
+    RequireRole ROLE_COMPONENT, "CheckedFrom"
+    CheckItemTexts ReadItemSource(itemSource, "CheckedFrom")
+    Touch
+    Set CheckedFrom = Me
+End Function
+
+' Checks exactly the items whose texts are wanted, ignoring case.
+Private Sub CheckItemTexts(ByVal wantedTexts As Collection)
     Dim entry As Variant
     Dim idx As Long
     Dim wantedSet As Collection
     Dim ignored As Variant
 
-    RequireRole ROLE_COMPONENT, "CheckedFrom"
     ' Wanted texts go into a keyed set (Collection keys compare without
     ' case, like the match this replaced), so each item costs one lookup
     ' instead of a scan of the wanted list.
     Set wantedSet = New Collection
-    For Each entry In ReadItemSource(itemSource, "CheckedFrom")
+    For Each entry In wantedTexts
         On Error Resume Next
         wantedSet.Add True, CStr(entry)
         Err.Clear
@@ -6632,8 +6735,19 @@ Public Function CheckedFrom(ByVal itemSource As Variant) As ReDimUI
             End If
         Next idx
     End If
-    Touch
-    Set CheckedFrom = Me
+End Sub
+
+' The texts of the items checked now.
+Private Function CheckedTexts() As Collection
+    Dim entry As Variant
+
+    Set CheckedTexts = New Collection
+    If mCheckedSet Is Nothing Then Exit Function
+    For Each entry In mCheckedSet
+        If CLng(entry) >= 1 And CLng(entry) <= ItemCount Then
+            CheckedTexts.Add ItemAt(CLng(entry))
+        End If
+    Next entry
 End Function
 
 ' The numbers a Sparkline plots, in order, from an array, a Collection,
@@ -7642,6 +7756,7 @@ Public Sub Remove()
     ' Controls placed Below or RightOf it stay where they are, rather than
     ' failing every later draw for want of their anchor.
     hostApp.PinPlacedAgainst mComponentId
+    If mKind = KIND_STACK Then hostApp.FreeStackMembers mComponentId
     hostApp.ForgetComponent mComponentId
     ' A key it declared goes back to Excel, unless another control has it.
     If LenB(mShortcut) > 0 Or LenB(mAccessKey) > 0 Then ReDimUI.RefreshAccessKeys
@@ -7651,6 +7766,15 @@ Public Sub Remove()
     End If
     ' The members after it in its stack close the gap.
     If LenB(mStackId) > 0 Then hostApp.ReflowStackNow mStackId
+End Sub
+
+Friend Sub FreeStackMembers(ByVal stackId As String)
+    Dim componentValue As ReDimUI
+
+    RequireRole ROLE_APP, "FreeStackMembers"
+    For Each componentValue In mComponents
+        componentValue.LeaveGoneStack stackId
+    Next componentValue
 End Sub
 
 Friend Sub PinPlacedAgainst(ByVal targetComponentId As String)
@@ -7762,27 +7886,17 @@ Private Function SameStateKey(ByVal boundKey As String, ByVal stateKey As String
     SameStateKey = (StrComp(boundKey, stateKey, vbTextCompare) = 0)
 End Function
 
-' A key the control follows was written: by code, so the control takes
-' the value at its next draw, or by the control itself, which already
-' shows it.
+' A key the control follows was written by someone else: the control
+' takes the value at its next draw.
 Friend Sub NoteStateWritten(ByVal stateKey As String)
-    If mWritingOwnKey Then Exit Sub
     If SameStateKey(mWritesToKey, stateKey) Then mFollowPending = True
 End Sub
 
-' The control's own write to its WritesTo key, marked so the redraw it
-' causes keeps the control as it is rather than mapping the value back.
+' The control's own write to its WritesTo key; the redraw it causes
+' keeps the control as it is rather than mapping the value back.
 Private Sub WriteOwnKey(ByVal hostApp As ReDimUI, ByVal writtenValue As Variant)
     If LenB(mWritesToKey) = 0 Then Exit Sub
-    mWritingOwnKey = True
-    On Error GoTo Failed
-    hostApp.SetState mWritesToKey, writtenValue
-    mWritingOwnKey = False
-    Exit Sub
-
-Failed:
-    mWritingOwnKey = False
-    Err.Raise Err.Number, Err.Source, Err.Description
+    hostApp.WriteStateFrom Me, mWritesToKey, writtenValue
 End Sub
 
 ' =====================================================================
@@ -8887,7 +9001,9 @@ End Function
 ' the cell.
 Private Function FollowsWritesTo() As Boolean
     If LenB(mWritesToKey) = 0 Then Exit Function
-    If LenB(mBindValueKey) > 0 And mBindValueKey <> mWritesToKey Then Exit Function
+    If LenB(mBindValueKey) > 0 And Not SameStateKey(mBindValueKey, mWritesToKey) Then
+        Exit Function
+    End If
     Select Case mKind
         Case KIND_TOGGLE, KIND_TICKBOX, KIND_EXPANDER, KIND_STEPPER, KIND_SLIDEBAR, _
             KIND_DATE, KIND_RADIO, KIND_TABS
@@ -8900,21 +9016,25 @@ Private Function FollowsWritesTo() As Boolean
 End Function
 
 ' Shows a state value on the control, without writing state or firing
-' anything, the way the control's own writes would read back. Empty or
-' Null clears a pick; a value the control cannot show leaves it as it
-' is, as does a field that has the keys, whose typing is not overwritten.
-Private Sub TakeStateValue(ByVal hostApp As ReDimUI, ByRef stateValue As Variant)
+' anything, the way the control's own writes would read back; True once
+' shown. Empty or Null clears a pick. A value the control cannot show
+' yet (an item not loaded, a field that has the keys and whose typing is
+' not overwritten) leaves it as it is and returns False, so the next
+' draw tries again.
+Private Function TakeStateValue(ByVal hostApp As ReDimUI, ByRef stateValue As Variant) As Boolean
     Dim namedItem As Long
     Dim takenDay As Double
+    Dim currentItem As Long
 
-    If IsObject(stateValue) Or IsArrayValue(stateValue) Then Exit Sub
+    If IsObject(stateValue) Or IsArrayValue(stateValue) Then Exit Function
     Select Case mKind
         Case KIND_TOGGLE, KIND_TICKBOX, KIND_EXPANDER
-            If VarType(stateValue) = vbBoolean Or IsNumeric(stateValue) Then
-                mChecked = CBool(stateValue)
+            If VarType(stateValue) <> vbBoolean And Not IsNumeric(stateValue) Then
+                Exit Function
             End If
+            mChecked = CBool(stateValue)
         Case KIND_STEPPER, KIND_SLIDEBAR
-            If Not IsNumeric(stateValue) Then Exit Sub
+            If Not IsNumeric(stateValue) Then Exit Function
             mValue = CDbl(stateValue)
             If mValue < mSliderMin Then mValue = mSliderMin
             If mValue > mSliderMax Then mValue = mSliderMax
@@ -8923,14 +9043,23 @@ Private Sub TakeStateValue(ByVal hostApp As ReDimUI, ByRef stateValue As Variant
                 mValue = 0
             ElseIf DayFromState(stateValue, takenDay) Then
                 mValue = takenDay
+            Else
+                Exit Function
             End If
         Case KIND_SELECT, KIND_RADIO, KIND_TABS
-            namedItem = ItemPositionOf(stateValue)
-            If namedItem > 0 Or IsEmpty(stateValue) Or IsNull(stateValue) Then
+            ' A pick on an item that already names the value stays, so of
+            ' items sharing a value the one picked keeps its place.
+            currentItem = CLng(mValue)
+            If mKind = KIND_TABS Then currentItem = ShownTab()
+            If Not ItemNamesState(currentItem, stateValue) Then
+                namedItem = ItemPositionOf(stateValue)
+                If namedItem = 0 And Not (IsEmpty(stateValue) Or IsNull(stateValue)) Then
+                    Exit Function
+                End If
                 mValue = namedItem
             End If
         Case KIND_INPUT, KIND_COMBO
-            If ReDimUI.IsComponentFocused(mOwnerAppId, mComponentId) Then Exit Sub
+            If ReDimUI.IsComponentFocused(mOwnerAppId, mComponentId) Then Exit Function
             ' A combo writes a named item's value; it shows the item.
             If mKind = KIND_COMBO Then namedItem = ItemPositionOf(stateValue)
             If namedItem > 0 Then
@@ -8945,7 +9074,8 @@ Private Sub TakeStateValue(ByVal hostApp As ReDimUI, ByRef stateValue As Variant
     End Select
     ' A Required message goes once state fills the control.
     If mValidationLive Then RecheckPick hostApp
-End Sub
+    TakeStateValue = True
+End Function
 
 ' A state value as a picked day: a date, or a number in the range a
 ' date holds (a numeric string counts, as persisted state often is one).
@@ -8971,24 +9101,34 @@ End Function
 ' and Null name no item, and a group header is never one.
 Private Function ItemPositionOf(ByRef stateValue As Variant) As Long
     Dim idx As Long
-    Dim itemValue As Variant
 
     If IsEmpty(stateValue) Or IsNull(stateValue) Then Exit Function
     If IsObject(stateValue) Or IsArrayValue(stateValue) Then Exit Function
     For idx = 1 To ItemCount
-        AssignVariant itemValue, ItemStateValue(ItemAt(idx))
-        If IsObject(itemValue) Or IsNull(itemValue) Or IsArrayValue(itemValue) Then
-            ' An item value no state can name.
-        ElseIf IsGroupHeader(idx) Then
-            ' A heading, never a pick.
-        ElseIf IsNumeric(itemValue) And IsNumeric(stateValue) _
-            And VarType(stateValue) <> vbString Then
-            If CDbl(itemValue) = CDbl(stateValue) Then ItemPositionOf = idx
-        ElseIf CStr(itemValue) = CStr(stateValue) Then
+        If ItemNamesState(idx, stateValue) Then
             ItemPositionOf = idx
+            Exit Function
         End If
-        If ItemPositionOf > 0 Then Exit Function
     Next idx
+End Function
+
+' Whether an item is the one a state value names: a number matches an
+' item's numeric value, anything else its value or text as text. A group
+' header, an item with no nameable value, Empty, and Null match nothing.
+Private Function ItemNamesState(ByVal itemNumber As Long, ByRef stateValue As Variant) As Boolean
+    Dim itemValue As Variant
+
+    If itemNumber < 1 Or itemNumber > ItemCount Then Exit Function
+    If IsEmpty(stateValue) Or IsNull(stateValue) Then Exit Function
+    If IsObject(stateValue) Or IsArrayValue(stateValue) Then Exit Function
+    If IsGroupHeader(itemNumber) Then Exit Function
+    AssignVariant itemValue, ItemStateValue(ItemAt(itemNumber))
+    If IsObject(itemValue) Or IsNull(itemValue) Or IsArrayValue(itemValue) Then Exit Function
+    If IsNumeric(itemValue) And IsNumeric(stateValue) And VarType(stateValue) <> vbString Then
+        ItemNamesState = (CDbl(itemValue) = CDbl(stateValue))
+    Else
+        ItemNamesState = (CStr(itemValue) = CStr(stateValue))
+    End If
 End Function
 
 ' Whether the control seeds the key it writes: every control that follows
@@ -9042,9 +9182,7 @@ Friend Sub SeedWritesTo(ByVal hostApp As ReDimUI)
                 seedValue = mText
             End If
     End Select
-    mWritingOwnKey = True
-    hostApp.SeedState mWritesToKey, seedValue
-    mWritingOwnKey = False
+    hostApp.SeedState mWritesToKey, seedValue, Me
     mFollowPending = False
 End Sub
 
@@ -9060,17 +9198,21 @@ Private Sub ResolveBindings(ByVal hostApp As ReDimUI)
     If FollowsWritesTo() Then
         If Not hostApp.HasState(mWritesToKey) Then
             SeedWritesTo hostApp
+            mFollowPending = False
         ElseIf mFollowPending Then
+            ' A value the control cannot take yet stays pending, so a
+            ' field takes it after the user leaves it, and a select once
+            ' its item loads.
             AssignVariant followed, hostApp.State(mWritesToKey)
-            TakeStateValue hostApp, followed
+            If TakeStateValue(hostApp, followed) Then mFollowPending = False
         End If
-        mFollowPending = False
     ElseIf SeedsWritesTo() Then
         SeedWritesTo hostApp
     End If
     If LenB(mBindTextKey) > 0 Then
         If hostApp.HasState(mBindTextKey) Then
-            mText = FormatBoundText(hostApp.State(mBindTextKey))
+            AssignVariant bound, hostApp.State(mBindTextKey)
+            mText = FormatBoundText(bound)
         End If
     End If
     ' A BindValue on the key the control follows adds nothing: the follow
@@ -9099,32 +9241,57 @@ Private Sub ResolveBindings(ByVal hostApp As ReDimUI)
     End If
     If LenB(mBindVisibleKey) > 0 Then
         If hostApp.HasState(mBindVisibleKey) Then
+            AssignVariant bound, hostApp.State(mBindVisibleKey)
             If mTabShut Then
-                mVisibleBeforeTab = CBool(hostApp.State(mBindVisibleKey)) _
-                    Xor mBindVisibleInvert
+                mVisibleBeforeTab = StateFlag(bound) Xor mBindVisibleInvert
             Else
-                mVisible = CBool(hostApp.State(mBindVisibleKey)) Xor mBindVisibleInvert
+                mVisible = StateFlag(bound) Xor mBindVisibleInvert
             End If
         End If
     End If
     If LenB(mBindSourceKey) > 0 Then
         If hostApp.HasState(mBindSourceKey) Then
-            mImageSource = CStr(hostApp.State(mBindSourceKey))
+            AssignVariant bound, hostApp.State(mBindSourceKey)
+            mImageSource = StateText(bound)
         End If
     End If
     If LenB(mBindEnabledKey) > 0 Then
         If hostApp.HasState(mBindEnabledKey) Then
-            mEnabled = CBool(hostApp.State(mBindEnabledKey)) Xor mBindEnabledInvert
+            AssignVariant bound, hostApp.State(mBindEnabledKey)
+            mEnabled = StateFlag(bound) Xor mBindEnabledInvert
         End If
     End If
 End Sub
 
-Private Function FormatBoundText(ByVal boundValue As Variant) As String
+Private Function FormatBoundText(ByRef boundValue As Variant) As String
     If LenB(mBindTextFormat) = 0 Then
-        FormatBoundText = CStr(boundValue)
+        FormatBoundText = StateText(boundValue)
     Else
-        FormatBoundText = Replace(mBindTextFormat, "{0}", CStr(boundValue))
+        FormatBoundText = Replace(mBindTextFormat, "{0}", StateText(boundValue))
     End If
+End Function
+
+' A state value as the text a binding shows; Null, an object, or an
+' array shows as nothing, as a record's empty field would.
+Private Function StateText(ByRef stateValue As Variant) As String
+    If IsObject(stateValue) Or IsArrayValue(stateValue) Then Exit Function
+    If IsNull(stateValue) Then Exit Function
+    StateText = CStr(stateValue)
+End Function
+
+' A state value as the True or False a binding follows: what CBool
+' makes of it, text it cannot read as True when it holds anything, and
+' Empty, Null, an object, or an array as False.
+Private Function StateFlag(ByRef stateValue As Variant) As Boolean
+    If IsObject(stateValue) Or IsArrayValue(stateValue) Then Exit Function
+    If IsNull(stateValue) Or IsEmpty(stateValue) Then Exit Function
+    On Error Resume Next
+    StateFlag = CBool(stateValue)
+    If Err.Number <> 0 Then
+        StateFlag = (VarType(stateValue) = vbString And LenB(stateValue) > 0)
+    End If
+    Err.Clear
+    On Error GoTo 0
 End Function
 
 ' A control's rectangle: its stack's slot for it, or its own placement;
@@ -9151,10 +9318,38 @@ Private Function PlaceInStack(ByVal hostSheet As Worksheet) As Boolean
     If stackValue.StackSlot(mComponentId, slotLeft, slotTop, slotSpan) Then
         mLeft = slotLeft
         mTop = slotTop
-        If slotSpan > 0 Then mWidth = slotSpan
+        ' A stretching stack widens the member, which keeps its own width
+        ' for when the stretch ends or it leaves the stack.
+        If slotSpan > 0 Then
+            If Not mStretched Then
+                mOwnWidth = mWidth
+                mStretched = True
+            End If
+            mWidth = slotSpan
+        Else
+            RestoreOwnWidth
+        End If
     End If
     PlaceInStack = True
 End Function
+
+' A member a stack stretched takes back the width it was given.
+Private Sub RestoreOwnWidth()
+    If Not mStretched Then Exit Sub
+    mWidth = mOwnWidth
+    mStretched = False
+End Sub
+
+' The member of a stack being removed goes free, at the place the stack
+' gave it: it shows again if the stack hid it, and a stack made later
+' under the same name starts without it.
+Friend Sub LeaveGoneStack(ByVal stackId As String)
+    If StrComp(mStackId, stackId, vbTextCompare) <> 0 Then Exit Sub
+    mStackId = vbNullString
+    RestoreOwnWidth
+    mAppliedFlowSig = vbNullString
+    Touch
+End Sub
 
 Private Sub ResolvePlacement(ByVal hostSheet As Worksheet)
     Dim anchorRange As Range
@@ -9732,11 +9927,14 @@ End Function
 
 ' Paints the picture fill, loading the file only when the source path
 ' changed. A missing or unloadable source renders a themed placeholder,
-' except when the shape already carries an embedded picture: the picture
-' saved with the workbook outlives its source file by design.
+' except while the shape carries the picture that same source drew, or
+' one saved with the workbook that this session has not replaced: a
+' saved picture outlives its source file by design, but a new source,
+' or none, never shows the last one's picture.
 Private Sub ApplyImageFill(ByVal mainShape As Shape, ByVal themeValue As ReDimUI)
     Dim resolvedSource As String
     Dim loaded As Boolean
+    Dim placeholderKey As String
 
     resolvedSource = mImageSource
     If LenB(resolvedSource) > 0 Then
@@ -9759,24 +9957,32 @@ Private Sub ApplyImageFill(ByVal mainShape As Shape, ByVal themeValue As ReDimUI
         End If
     End If
     If mainShape.Fill.Type = msoFillPicture Then
-        mAppliedImageSource = IMAGE_MISSING
-        Exit Sub
+        If LenB(mAppliedImageSource) = 0 Or mAppliedImageSource = resolvedSource Then
+            mAppliedImageSource = resolvedSource
+            Exit Sub
+        End If
     End If
-    If mAppliedImageSource = IMAGE_MISSING And mAppliedValid Then Exit Sub
+    ' The placeholder is keyed to the look it drew with, so a theme swap
+    ' repaints it.
+    placeholderKey = IMAGE_MISSING & PartsState(themeValue)
+    If mAppliedImageSource = placeholderKey Then Exit Sub
     mainShape.Fill.Visible = msoTrue
     mainShape.Fill.Solid
-    mainShape.Fill.ForeColor.RGB = themeValue.MutedColor
-    mainShape.Line.Visible = msoTrue
-    mainShape.Line.ForeColor.RGB = themeValue.BorderColor
-    mainShape.Line.Weight = 1
+    PaintPart mainShape, themeValue.MutedColor, themeValue.BorderColor, 1
     StyleGlyphText mainShape, Phrase(UI_IMAGE_NOT_FOUND), themeValue.OnMutedColor, _
         themeValue.BaseFontSize - 2, themeValue
-    mAppliedImageSource = IMAGE_MISSING
+    mAppliedImageSource = placeholderKey
 End Sub
 
+' Whether a file is there, read with GetAttr, which leaves alone a Dir
+' loop the caller may be walking.
 Private Function FileExistsSafe(ByVal candidatePath As String) As Boolean
+    Dim fileFlags As Long
+
     On Error Resume Next
-    FileExistsSafe = (LenB(Dir$(candidatePath)) > 0)
+    fileFlags = GetAttr(candidatePath)
+    FileExistsSafe = (Err.Number = 0) And ((fileFlags And vbDirectory) = 0)
+    Err.Clear
     On Error GoTo 0
 End Function
 
@@ -11892,13 +12098,15 @@ Private Sub ApplySparkline(ByVal hostSheet As Worksheet, ByVal themeValue As ReD
     Dim coords() As Single
     Dim lineShape As Shape
     Dim dotShape As Shape
+    Dim lineMade As Boolean
+    Dim dotMade As Boolean
 
     inkRgb = ResolveFill(themeValue)
     sparkKey = PartsState(themeValue) & ":" & CStr(mSparkVersion) & ":" & CStr(inkRgb)
     If sparkKey = mAppliedSparkSig Then Exit Sub
     mAppliedSparkSig = sparkKey
-    DropPart hostSheet, "sl"
     If mSparkCount = 0 Then
+        DropPart hostSheet, "sl"
         DropPart hostSheet, "sd"
         Exit Sub
     End If
@@ -11919,27 +12127,76 @@ Private Sub ApplySparkline(ByVal hostSheet As Worksheet, ByVal themeValue As ReD
         End If
     Next pointNo
     If mSparkCount > 1 Then
-        Set lineShape = hostSheet.Shapes.AddPolyline(coords)
-        lineShape.Name = ShapeName & PART_SEPARATOR & "sl"
-        OwnerApp.NoteShapeDrawn lineShape.Name
-        lineShape.Placement = xlFreeFloating
-        lineShape.Fill.Visible = msoFalse
+        ' The line is reshaped where it lies, so it keeps its place under
+        ' an open list or dialog; only a line missing, or one Excel will
+        ' not reshape, is made again.
+        On Error Resume Next
+        Set lineShape = hostSheet.Shapes(ShapeName & PART_SEPARATOR & "sl")
+        On Error GoTo 0
+        If Not lineShape Is Nothing Then
+            If Not ReshapeLine(lineShape, coords, mSparkCount) Then
+                DropPart hostSheet, "sl"
+                Set lineShape = Nothing
+            End If
+        End If
+        If lineShape Is Nothing Then
+            Set lineShape = hostSheet.Shapes.AddPolyline(coords)
+            lineShape.Name = ShapeName & PART_SEPARATOR & "sl"
+            OwnerApp.NoteShapeDrawn lineShape.Name
+            lineShape.Placement = xlFreeFloating
+            lineShape.Fill.Visible = msoFalse
+            lineMade = True
+        End If
         lineShape.Line.Visible = msoTrue
         lineShape.Line.ForeColor.RGB = inkRgb
         lineShape.Line.Weight = 1.5
         lineShape.OnAction = mAppliedOnAction
         lineShape.Visible = BoolToMso(mVisible)
+    Else
+        DropPart hostSheet, "sl"
     End If
-    Set dotShape = EnsurePartShape(hostSheet, "sd", msoShapeOval)
+    Set dotShape = EnsurePartShape(hostSheet, "sd", msoShapeOval, dotMade)
     PlacePart dotShape, coords(mSparkCount, 1) - SPARK_DOT / 2, _
         coords(mSparkCount, 2) - SPARK_DOT / 2, SPARK_DOT, SPARK_DOT
     dotShape.Fill.Visible = msoTrue
     dotShape.Fill.ForeColor.RGB = inkRgb
     dotShape.OnAction = mAppliedOnAction
     dotShape.Visible = BoolToMso(mVisible)
-    ' The line was made after the dot, so the dot comes back on top.
-    If mSparkCount > 1 Then dotShape.ZOrder msoBringToFront
+    ' A line made after the dot comes under it; a part made now lands on
+    ' top of everything, so a dialog up now goes back above it.
+    If lineMade Then dotShape.ZOrder msoBringToFront
+    If lineMade Or dotMade Then
+        If OwnerApp.ModalUp Then OwnerApp.RaiseModalZOrder
+    End If
 End Sub
+
+' Moves a line's points to new places, adding or removing points at the
+' end to match the count; False when Excel refuses the edit.
+Private Function ReshapeLine( _
+    ByVal lineShape As Shape, _
+    ByRef coords() As Single, _
+    ByVal pointTotal As Long _
+) As Boolean
+    Dim nodeTotal As Long
+    Dim pointNo As Long
+
+    On Error GoTo Refused
+    nodeTotal = lineShape.Nodes.Count
+    Do While nodeTotal < pointTotal
+        lineShape.Nodes.Insert nodeTotal, msoSegmentLine, msoEditingAuto, _
+            coords(nodeTotal + 1, 1), coords(nodeTotal + 1, 2)
+        nodeTotal = nodeTotal + 1
+    Loop
+    Do While nodeTotal > pointTotal
+        lineShape.Nodes.Delete nodeTotal
+        nodeTotal = nodeTotal - 1
+    Loop
+    For pointNo = 1 To pointTotal
+        lineShape.Nodes.SetPosition pointNo, coords(pointNo, 1), coords(pointNo, 2)
+    Next pointNo
+    ReshapeLine = True
+Refused:
+End Function
 
 ' A toast's tone from its variant: none unless a variant builder ran;
 ' Primary reads as information.
@@ -12363,28 +12620,9 @@ Private Sub ApplyTickBox( _
     boxSize = mHeight - 2
     If boxSize > 16 Then boxSize = 16
     If boxSize < 10 Then boxSize = 10
-    PlacePart mainShape, mLeft, mTop + (mHeight - boxSize) / 2, boxSize, boxSize
-    mainShape.Visible = BoolToMso(mVisible)
-    mainShape.Fill.Visible = msoTrue
-    If mChecked And mEnabled Then
-        mainShape.Fill.ForeColor.RGB = PointerTint(ResolveFill(themeValue), _
-            themeValue.OnPrimaryColor)
-        mainShape.Line.Visible = msoFalse
-    Else
-        mainShape.Fill.ForeColor.RGB = themeValue.SurfaceColor
-        mainShape.Line.Visible = msoTrue
-        mainShape.Line.ForeColor.RGB = _
-            IIf(PointerOn(), themeValue.PrimaryColor, themeValue.BorderColor)
-        mainShape.Line.Weight = 1.25
-    End If
-    If mChecked Then
-        StyleGlyphText mainShape, ChrW(10003), _
-            IIf(mEnabled, themeValue.OnPrimaryColor, themeValue.OnMutedColor), _
-            boxSize * 0.62, themeValue
-    Else
-        StyleGlyphText mainShape, vbNullString, themeValue.OnSurfaceColor, _
-            boxSize * 0.62, themeValue
-    End If
+    ' The box is a check list row's box with the face as its pointer part.
+    StyleCheckBoxFace mainShape, boxSize, mTop, mHeight, themeValue, mChecked, mChecked, _
+        vbNullString
     Set captionShape = EnsurePartShape(hostSheet, "lbl", msoShapeRectangle)
     PlacePart captionShape, mLeft + boxSize + 6, mTop - 1, mWidth - boxSize - 6, mHeight + 2
     StyleCaptionPart captionShape, mText, themeValue
@@ -12395,8 +12633,6 @@ Private Sub ApplyTickBox( _
     mAppliedChecked = mChecked
 End Sub
 
-' One circle-and-caption row per item. The selected row's circle fills with
-' the accent and carries an inner dot part.
 ' A Tabs control: a rule along its foot, one tab per item sized to its
 ' text (equal shares when the texts need more than the width, cut short
 ' with an ellipsis where they do not fit), and an accent bar under the
@@ -12993,7 +13229,12 @@ Private Sub ApplyTable(ByVal hostSheet As Worksheet, ByVal themeValue As ReDimUI
             mColumnEdges(colNo) - ColumnLeftEdge(colNo), rowPitch, headWords, _
             mColumnNumeric(colNo), headFill, headInk, True, textSize
     Next colNo
+    ' A dropped header or row forgets its drawn state, as a drop list's
+    ' rows do, so it draws whole, in place, when a wider table or a
+    ' taller one brings it back.
+    EnsureRowStates mAppliedTableHeadStates, mAppliedTableColsDrawn
     For colNo = mTableCols + 1 To mAppliedTableColsDrawn
+        mAppliedTableHeadStates(colNo) = vbNullString
         DropPart hostSheet, "th" & colNo
     Next colNo
     mAppliedTableColsDrawn = mTableCols
@@ -13029,7 +13270,9 @@ Private Sub ApplyTable(ByVal hostSheet As Worksheet, ByVal themeValue As ReDimUI
         SyncTableRow hostSheet, themeValue, slotNo, layoutKey, rowWords, rowFill, _
             rowInk, rowPitch, textSize, (displayNo = 1 And mTableShownCount = 0)
     Next slotNo
+    EnsureRowStates mAppliedTableRowStates, mAppliedTableSlotsDrawn
     For slotNo = slotTotal + 1 To mAppliedTableSlotsDrawn
+        mAppliedTableRowStates(slotNo) = vbNullString
         DropPart hostSheet, "tr" & slotNo
     Next slotNo
     mAppliedTableSlotsDrawn = slotTotal
@@ -14656,6 +14899,8 @@ Private Sub HideRowPart(ByVal hostSheet As Worksheet, ByVal partName As String)
     On Error GoTo 0
 End Sub
 
+' One circle-and-caption row per item. The selected row's circle fills with
+' the accent and carries an inner dot part.
 Private Sub ApplyRadioGroup( _
     ByVal mainShape As Shape, _
     ByVal hostSheet As Worksheet, _
@@ -14914,7 +15159,7 @@ Private Sub ApplyCheckListParts( _
             headerText = Phrase(UI_SELECT_ALL_FILTERED, mFilterCheck, checkedTotal, shownTotal)
         End If
         headerKey = CStr(checkedTotal) & "/" & CStr(shownTotal) & _
-            IIf(PointerOn("row0"), "h", vbNullString) & Chr$(1) & headerText
+            CStr(PointerLookCode("row0")) & Chr$(1) & headerText
         priorKey = mAppliedCheckHeaderSig
         If headerKey <> priorKey Then
             mAppliedCheckHeaderSig = headerKey
@@ -14925,7 +15170,7 @@ Private Sub ApplyCheckListParts( _
             If LenB(priorKey) > 0 And Not (boxCreated Or captionCreated) Then
                 StyleCheckBoxState box, boxSize, themeValue, _
                     (checkedTotal = shownTotal And shownTotal > 0), (checkedTotal > 0), _
-                    PointerOn("row0")
+                    "row0"
                 captionShape.TextFrame2.TextRange.Text = headerText
             Else
                 On Error Resume Next
@@ -14933,7 +15178,7 @@ Private Sub ApplyCheckListParts( _
                 On Error GoTo 0
                 StyleCheckBoxFace box, boxSize, mTop, rowPitch, themeValue, _
                     (checkedTotal = shownTotal And shownTotal > 0), (checkedTotal > 0), _
-                    PointerOn("row0")
+                    "row0"
                 PlacePart captionShape, mLeft + boxSize + 8, mTop, mWidth - boxSize - 8, _
                     rowPitch
                 StyleCaptionPart captionShape, headerText, themeValue
@@ -14946,16 +15191,17 @@ Private Sub ApplyCheckListParts( _
     End If
 
     For idx = 1 To rowTotal
-        ' The first character carries the box state: checked adds 1 and
-        ' the pointer adds 2; the row's place in the window ends the key.
+        ' The first character carries the box state: checked adds 1, the
+        ' pointer on the row 2, and pressing it 4 more; the row's place in
+        ' the window ends the key.
         ' A row the filter hides, or a windowed list's row outside its
         ' window, keys as "~".
         rowPos = shownAt(idx) - mListOffset
         If shownAt(idx) = 0 Or rowPos < 1 Or rowPos > windowRows Then
             rowKey = "~"
         Else
-            rowKey = CStr(IIf(checkedFlags(idx), 1, 0) + _
-                IIf(PointerOn("row" & idx), 2, 0)) & ItemAt(idx) & Chr$(3) & CStr(rowPos)
+            rowKey = CStr(IIf(checkedFlags(idx), 1, 0) + PointerLookCode("row" & idx)) & _
+                ItemAt(idx) & Chr$(3) & CStr(rowPos)
         End If
         priorKey = mAppliedRowStates(idx)
         If rowKey = "~" And priorKey <> "~" Then
@@ -14997,7 +15243,7 @@ Private Sub ApplyCheckListParts( _
                 ' state or the caption text, whichever moved.
                 If Left$(priorKey, 1) <> Left$(rowKey, 1) Then
                     StyleCheckBoxState box, boxSize, themeValue, _
-                        checkedFlags(idx), checkedFlags(idx), PointerOn("row" & idx)
+                        checkedFlags(idx), checkedFlags(idx), "row" & idx
                 End If
                 If Mid$(priorKey, 2) <> Mid$(rowKey, 2) Then
                     captionShape.TextFrame2.TextRange.Text = ItemAt(idx)
@@ -15009,7 +15255,7 @@ Private Sub ApplyCheckListParts( _
                     On Error GoTo 0
                 End If
                 StyleCheckBoxFace box, boxSize, rowTop, rowPitch, themeValue, _
-                    checkedFlags(idx), checkedFlags(idx), PointerOn("row" & idx)
+                    checkedFlags(idx), checkedFlags(idx), "row" & idx
                 PlacePart captionShape, mLeft + boxSize + 8, rowTop, rowTextRoom - boxSize, _
                     rowPitch
                 StyleCaptionPart captionShape, ItemAt(idx), themeValue
@@ -15054,9 +15300,9 @@ Private Sub StyleCheckBoxState( _
     ByVal themeValue As ReDimUI, _
     ByVal fullState As Boolean, _
     ByVal partialState As Boolean, _
-    Optional ByVal pointerHere As Boolean = False _
+    ByVal pointerPart As String _
 )
-    StyleCheckBoxEdge box, themeValue, partialState, pointerHere
+    StyleCheckBoxEdge box, themeValue, partialState, pointerPart
     With box.TextFrame2.TextRange
         If fullState Then
             .Text = ChrW(10003)
@@ -15085,11 +15331,11 @@ Private Sub StyleCheckBoxFace( _
     ByVal themeValue As ReDimUI, _
     ByVal fullState As Boolean, _
     ByVal partialState As Boolean, _
-    Optional ByVal pointerHere As Boolean = False _
+    ByVal pointerPart As String _
 )
     PlacePart box, mLeft, rowTop + (rowPitch - boxSize) / 2, boxSize, boxSize
     box.Fill.Visible = msoTrue
-    StyleCheckBoxEdge box, themeValue, partialState, pointerHere
+    StyleCheckBoxEdge box, themeValue, partialState, pointerPart
     If fullState Then
         StyleGlyphText box, ChrW(10003), _
             IIf(mEnabled, themeValue.OnPrimaryColor, themeValue.OnMutedColor), _
@@ -15105,27 +15351,25 @@ Private Sub StyleCheckBoxFace( _
     ShowPart box, BoolToMso(mVisible)
 End Sub
 
-' A check box's fill and edge: the accent when checked or mixed, else
-' the surface with a border, which takes the accent under the pointer.
+' A check box's fill and edge: the accent when checked or mixed, tinted
+' under the pointer and more while pressed, else the surface with a
+' border, which takes the accent under the pointer. pointerPart is the
+' part the pointer watch names the box by.
 Private Sub StyleCheckBoxEdge( _
     ByVal box As Shape, _
     ByVal themeValue As ReDimUI, _
     ByVal filledState As Boolean, _
-    ByVal pointerHere As Boolean _
+    ByVal pointerPart As String _
 )
     If filledState And mEnabled Then
-        If pointerHere Then
-            box.Fill.ForeColor.RGB = BlendRgb(ResolveFill(themeValue), _
-                themeValue.OnPrimaryColor, 0.08)
-        Else
-            box.Fill.ForeColor.RGB = ResolveFill(themeValue)
-        End If
+        box.Fill.ForeColor.RGB = PointerTint(ResolveFill(themeValue), _
+            themeValue.OnPrimaryColor, pointerPart)
         box.Line.Visible = msoFalse
     Else
         box.Fill.ForeColor.RGB = themeValue.SurfaceColor
         box.Line.Visible = msoTrue
         box.Line.ForeColor.RGB = _
-            IIf(pointerHere, themeValue.PrimaryColor, themeValue.BorderColor)
+            IIf(PointerOn(pointerPart), themeValue.PrimaryColor, themeValue.BorderColor)
         box.Line.Weight = 1.25
     End If
 End Sub
@@ -16292,14 +16536,13 @@ Friend Sub SlideToFraction( _
     End If
     If snapped < mSliderMin Then snapped = mSliderMin
     If snapped > mSliderMax Then snapped = mSliderMax
-    If snapped <> mValue Then
-        mValue = snapped
-        If LenB(mWritesToKey) > 0 Then WriteOwnKey hostApp, mValue
-        Touch
-    End If
-    If fireChange Then
-        RunChangeHandler hostApp
-    End If
+    ' A value that snaps back to where it was is no change: a click on
+    ' the thumb, or a typed digit between steps, fires nothing.
+    If snapped = mValue Then Exit Sub
+    mValue = snapped
+    If LenB(mWritesToKey) > 0 Then WriteOwnKey hostApp, mValue
+    Touch
+    If fireChange Then RunChangeHandler hostApp
 End Sub
 
 ' Click-to-set: one cursor read at dispatch time, snapped and applied.
@@ -16451,8 +16694,15 @@ End Function
 
 ' True when this visible control's rectangle holds the point.
 Friend Function CoversPoint(ByVal pointsX As Double, ByVal pointsY As Double) As Boolean
+    Dim drawnWidth As Double
+
     If Not mVisible Or mKind = KIND_STACK Then Exit Function
-    CoversPoint = (pointsX >= mLeft And pointsX <= mLeft + mWidth _
+    ' A badge draws as wide as its words, and a switch's caption, which
+    ' flips it, sits past its width.
+    drawnWidth = mWidth
+    If mKind = KIND_BADGE Then drawnWidth = BadgeSpan()
+    If mKind = KIND_TOGGLE Then drawnWidth = mWidth + mToggleCaptionRoom
+    CoversPoint = (pointsX >= mLeft And pointsX <= mLeft + drawnWidth _
         And pointsY >= mTop And pointsY <= mTop + mHeight)
 End Function
 
@@ -17188,6 +17438,17 @@ End Function
 ' True when the pointer is on the part, for looks that are not tints.
 Private Function PointerOn(Optional ByVal partName As String) As Boolean
     PointerOn = mHovered And mHoveredPart = partName And mEnabled And Not mBusy
+End Function
+
+' The pointer's look on one part as a digit a row key carries: 2 on it,
+' 6 pressing it, else 0.
+Private Function PointerLookCode(ByVal partName As String) As Long
+    If Not PointerOn(partName) Then Exit Function
+    If mHoverPressed Then
+        PointerLookCode = 6
+    Else
+        PointerLookCode = 2
+    End If
 End Function
 
 ' The pointer look as a signature fragment, for the part caches.
@@ -19447,14 +19708,15 @@ Private Sub FinishOp(ByVal hostApp As ReDimUI)
         If mOpCts.IsCancellationRequested Then Set mOpCts = ROneCOne.CancellationTokenSource
     End If
     SetOpControlsBusy hostApp, False
-    ' A listener on the tracked key that raises must not cost the op its
-    ' outcome handler; its error goes to the app's error sink.
+    ' A listener on the tracked key, or a draw of a control bound to it,
+    ' that raises must not cost the op its outcome handler; the error goes
+    ' to the app's error sink.
     If LenB(mOpStatusKey) > 0 Then
         On Error Resume Next
         hostApp.SetState mOpStatusKey, outcomeState
         If Err.Number <> 0 Then
             listenerFailure = "ReDim async op '" & mComponentId & _
-                "' state listener failed: " & Err.Description
+                "' could not record its state: " & Err.Description
         End If
         On Error GoTo 0
         If LenB(listenerFailure) > 0 Then hostApp.ReportAppError listenerFailure
@@ -19600,7 +19862,8 @@ Friend Sub TickJob( _
         If nowMs - mJobLastStepMs < CLngLng(mJobPaceMs) Then Exit Sub
         mJobLastStepMs = nowMs
         stepDone = ReDimUI.RunStepAs(hostApp, Me, mJobStepProc)
-        If CBool(stepDone) Then FinishJob hostApp, mJobDoneProc
+        ' A step that unmounted the job's app has stopped the job.
+        If mJobRunning And CBool(stepDone) Then FinishJob hostApp, mJobDoneProc
         On Error GoTo 0
         Exit Sub
     End If

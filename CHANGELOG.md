@@ -97,6 +97,55 @@
 - `ItemPosition(text)` finds an item by its text and `ChosenPosition(text)`
   a transfer list's chosen item; the ReDex demo's catch check loses its
   two search loops.
+- A control that cannot take its key's value yet takes it later: a
+  focused field once the user leaves it, a select once its item loads;
+  the first try was the only one. An `OnStateChanged` listener that
+  rewrites a key a control just wrote now moves the control back, a pick
+  among items sharing a value keeps its place through `Render` and theme
+  changes, and `WritesTo` and `BindValue` keys match in any case.
+- A draw that raises during `SetState` no longer skips the key's
+  listeners; the error still comes out after them.
+- Focus moving to a sheet behind gives back the shortcuts that share the
+  typing keys, such as Ctrl+Z, which went to Excel instead. A failure
+  in the field left behind goes to the app's error sink, and the control
+  gaining focus still draws as focused.
+- `ReDimUI.SenderId` inside a job's step names the job; it raised there,
+  failing the job. A paced job whose step unmounts its app stops without
+  running `JobOnDone` against the app that is gone.
+- A `SlideBar` fires no `OnChange` for a click or a typed digit that
+  snaps back to the value it held.
+- A table's rows and headers come back whole after a shrink or a
+  filter's footer dropped them; they stayed missing, or drew at the
+  table's corner, until the data changed.
+- `BindText`, `BindVisible`, `BindEnabled`, and `BindSource` read Null
+  as nothing or False, where they raised error 94 and stopped the draw,
+  and text as True when it holds anything.
+- An `Image` whose source changes to a missing file, or to none, shows
+  the placeholder, not the last picture; a picture saved with the
+  workbook still outlives its own source. The placeholder takes a new
+  theme's colors, and the file check no longer resets a `Dir` loop the
+  caller is walking.
+- `ExportTo` writes text as text: "00123" keeps its zeros and "=A1"
+  stays words, where Excel turned them into a number and a live formula.
+- A live `Sparkline` reshapes its line in place, so it stays under an
+  open drop list or a dialog; it drew over them, and its clicks reached
+  it through the dialog.
+- The command palette stays shut while a `Confirm` waits, as the app's
+  shortcuts do; it opened over the dialog and ran the buttons behind it.
+- `Navigate` takes an app id in any case. A different case hid the very
+  sheet it showed and fired OnHide and OnShow on the same window.
+- A `Badge`'s tooltip shows over its words, and a `Toggle`'s caption
+  counts as part of the switch for the pointer.
+- A toast no longer takes an app's own `toast_1`, and ids starting with
+  `mdl_` are ReDim's own dialog parts: making one raises a clear error.
+- A stretched `Stack` member takes its own width back when the stretch
+  ends or it leaves the stack, a removed stack's members show again and
+  go free, `ColumnFormat` filters anew, and a control placed `Below` a
+  component spelled in another case follows its growth.
+- `Items` and `ItemsFrom` keep a check list's checks on the items still
+  there, by text. `ItemsFrom` cleared them, and `Items` kept them by
+  position, on whatever item came to sit there.
+- A check list's boxes take the pressed look a tick box has.
 - Dead code goes: the unused `RdxTickCount` in `ReDimHost` and its
   counter, an unused toast reader, parameters two procedures never read
   (`CurrentText` looked up its app for nothing), and five spike-test

@@ -861,6 +861,118 @@ Public Function TestFocusRails() As String
     TestFocusRails = transcript
 End Function
 
+' A follow that has to wait catches up: a focused field takes a code
+' write once the user leaves it, and a select takes a value once its
+' item loads. A listener that rewrites the key a control just wrote
+' moves the control back, keys match their BindValue in any case, a
+' pick among items sharing a value survives Render, and a typed slider
+' digit that snaps back fires nothing.
+Public Function TestFollowCatchesUp() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim transcript As String
+
+    ReDimUI.AutoPump False
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "core13")
+    app.TextInput("nm").AtRect(24, 24, 150, 22).Text("Ann").WritesTo "nm"
+    app.TextInput("other").AtRect 24, 60, 150, 22
+    app.SelectBox("country").AtRect(24, 96, 150, 22).WritesTo "country"
+    app.Stepper("q").AtRect(24, 132, 120, 24).SliderRange(0, 10, 1).Value(3).WritesTo "q"
+    app.Stepper("qty").AtRect(200, 132, 120, 24).SliderRange(0, 100, 1) _
+        .WritesTo("Qty").BindValue "qty"
+    app.RadioGroup("size").AtRect(200, 24, 140, 70).WritesTo "size"
+    app.RadioGroup("size").AddItem "Small", , 1
+    app.RadioGroup("size").AddItem "Tiny", , 1
+    app.SlideBar("sl").AtRect(24, 180, 160, 18).SliderRange(0, 100, 5).Value(5) _
+        .OnChange "TestReDimCore.CoreClickHandler"
+    app.OnStateChanged "q", "TestReDimCore.CoreClampQ"
+    app.Render
+
+    app.TextInput("nm").Focus
+    app.SetState "nm", "Bob"
+    transcript = "typingKept=" & app.TextInput("nm").InputValue
+    app.TextInput("other").Focus
+    transcript = transcript & "|takenOnLeave=" & app.TextInput("nm").InputValue
+    ReDimUI.ClearKeyboardFocus
+
+    app.SetState "country", "FR"
+    transcript = transcript & "|notYet=" & app.SelectBox("country").CurrentValue
+    app.SelectBox("country").ItemsFrom Array("DE", "FR")
+    transcript = transcript & "|takenOnLoad=" & app.SelectBox("country").CurrentValue
+
+    app.Stepper("q").Focus
+    RdxKeyChar "{UP}"
+    transcript = transcript & "|listenerRewrite=" & app.Stepper("q").CurrentValue & "/" & _
+        app.State("q")
+    ReDimUI.ClearKeyboardFocus
+
+    app.SetState "qty", 150
+    transcript = transcript & "|keyCase=" & app.Stepper("qty").CurrentValue
+
+    ReDimUI.DispatchShape "rdm_core13_size__t2"
+    app.Render
+    transcript = transcript & "|sharedAfterRender=" & app.RadioGroup("size").CurrentValue
+
+    gClickCount = 0
+    app.SlideBar("sl").Focus
+    RdxKeyChar "6"
+    transcript = transcript & "|snapBackQuiet=" & app.SlideBar("sl").CurrentValue & "/" & _
+        gClickCount
+    ReDimUI.ClearKeyboardFocus
+    app.Unmount True
+    TestFollowCatchesUp = transcript
+End Function
+
+' Bindings read Null as empty or False, and text as True when it holds
+' anything; Navigate takes an app id in any case.
+Public Function TestBindingsAndWindows() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim homeApp As ReDimUI
+    Dim ordersApp As ReDimUI
+    Dim transcript As String
+
+    ReDimUI.AutoPump False
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "core14")
+    app.Label("nm").AtRect(24, 24, 120, 18).BindText "nm", "Name: {0}"
+    app.Label("vis").AtRect(24, 60, 120, 18).Text("Shown").BindVisible "vis"
+    app.Button("go").AtRect(24, 96, 90, 28).Text("Go").BindEnabled "en"
+    app.Render
+    app.SetState "nm", Null
+    app.SetState "vis", Null
+    app.SetState "en", "yes"
+    transcript = "nullText=" & app.Label("nm").CurrentText & "|nullHidden=" & _
+        CStr(Not app.Label("vis").IsVisible) & "|textTrue=" & CStr(app.Button("go").IsEnabled)
+    app.SetState "en", Null
+    transcript = transcript & "|nullFalse=" & CStr(Not app.Button("go").IsEnabled)
+    app.Unmount True
+
+    Set homeApp = ReDimUI.Mount(EnsureSheetCore("CaseHome"), "CaseHome")
+    homeApp.AsWindow.WindowTitle "Home"
+    homeApp.Render
+    Set ordersApp = ReDimUI.Mount(EnsureSheetCore("CaseOrders"), "CaseOrders")
+    ordersApp.AsWindow.WindowTitle "Orders"
+    ordersApp.Render
+    ReDimUI.Navigate "casehome"
+    ReDimUI.Navigate "caseorders"
+    transcript = transcript & "|navigateCase=" & CStr( _
+        ActiveWorkbook.Worksheets("CaseOrders").Visible = xlSheetVisible And _
+        ActiveWorkbook.Worksheets("CaseHome").Visible = xlSheetVeryHidden)
+    ActiveWorkbook.Worksheets("CaseHome").Visible = xlSheetVisible
+    ordersApp.Unmount True
+    homeApp.Unmount True
+    TestBindingsAndWindows = transcript
+End Function
+
+' Holds the stepper's key at 3 or below.
+Public Sub CoreClampQ()
+    With ReDimUI.App("core13")
+        If .State("q") > 3 Then .SetState "q", 3
+    End With
+End Sub
+
 Public Sub CoreConfirmAgain()
     ReDimUI.App("core12").Confirm "Second", "Two"
 End Sub

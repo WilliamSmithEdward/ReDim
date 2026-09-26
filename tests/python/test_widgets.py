@@ -453,6 +453,32 @@ def test_image(run_widgets):
     assert facts["embeddedKept"] == "True", (
         "the embedded picture must survive its source file's deletion"
     )
+    assert facts["newMissingPlaceholder"] == "True", (
+        "a new missing source must not keep the last one's picture"
+    )
+    assert facts["clearedPlaceholder"] == "True", "no source must show the placeholder"
+    assert facts["placeholderThemed"] == "True", "the placeholder must take a new theme"
+
+
+def test_review_fixes(run_widgets):
+    facts = parse_transcript(run_widgets("TestReviewFixes"))
+    assert facts["tableRowBack"] == "True/True", (
+        "a table's row must come back, in place, after a shrink"
+    )
+    assert facts["sparkUnderDialog"] == "True/4", (
+        "a live sparkline must stay under a dialog, reshaped in place"
+    )
+    assert facts["paletteShut"] == "True", "the palette must not open over a dialog"
+    assert facts["badgeHit"] == "True", "a badge's hit test must cover its words"
+    assert facts["ownWidthBack"] == "True", "a member must take its own width back"
+    assert facts["memberFreed"] == "True", "a removed stack's members must show again"
+    assert facts["checksKept"] == "True", "replacing items keeps checks by text"
+    assert facts["mdlReserved"] == (
+        "Component ids starting with \"mdl_\" belong to ReDim's dialogs."
+    )
+    assert facts["toastSkips"] == "True", "a toast must not take an app's toast_1"
+    assert facts["exportLiteral"] == "True", "ExportTo must write text as text"
+    assert facts["formatFilter"] == "0/1", "a new column format must filter anew"
 
 
 def test_multi_line_input(run_widgets):

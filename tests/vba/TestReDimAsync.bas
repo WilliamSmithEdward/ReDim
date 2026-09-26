@@ -53,8 +53,14 @@ Public Sub RecordTag()
 End Sub
 
 Public Function TaggedStep() As Boolean
-    gStepTag = CStr(ReDimUI.Sender.TagValue)
+    gStepTag = CStr(ReDimUI.Sender.TagValue) & "/" & ReDimUI.SenderId
     TaggedStep = True
+End Function
+
+' A paced step that unmounts its own app and reports itself finished.
+Public Function UnmountingStep() As Boolean
+    ReDimUI.App("async12").Unmount True
+    UnmountingStep = True
 End Function
 
 ' A Tag reaches the handlers through ReDimUI.Sender: a button's click, a
@@ -77,6 +83,19 @@ Public Function TestTagsReachHandlers() As String
     app.Job("tagged").StartJob
     ReDimUI.PumpOnce
     transcript = transcript & "|stepTag=" & gStepTag & "|doneTag=" & gTagSeen
+
+    ' A paced step that unmounts its app stops its job: OnDone does not
+    ' run against the app that is gone.
+    gDoneRan = 0
+    Set app = ReDimUI.Mount(NewCanvas(), "async12")
+    app.Job("selfEnd").Steps("TestReDimAsync.UnmountingStep").PacedMs(1) _
+        .JobOnDone "TestReDimAsync.RecordDone"
+    app.Render
+    app.Job("selfEnd").StartJob
+    Sleep 5
+    ReDimUI.PumpOnce
+    transcript = transcript & "|pacedUnmount=" & gDoneRan & "/" & _
+        CStr(Not ReDimUI.HasApp("async12"))
     ReDimUI.AutoPump True
     TestTagsReachHandlers = transcript
 End Function
