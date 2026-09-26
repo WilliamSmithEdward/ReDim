@@ -487,6 +487,10 @@
   corner's radius, so an AutoGrow field sized for its lines left the
   last one out, in any font. A multi-line field now keeps a one-line
   field's corners, and its margins give back the corner's inset.
+- A new demo, `ReDim_Whats_New.xlsm` (`BuildWhatsNew`), tours what this
+  release adds, a tab each for two-way state, lists, forms, the look,
+  and async work and errors, beside a log that says what each action
+  did.
 
 ## 1.0.2 - 2026-09-23
 

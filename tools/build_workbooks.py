@@ -88,6 +88,7 @@ DEMOS = {
     "ReDim_Navigator.xlsm": "Navigator",
     "ReDim_ReDex.xlsm": "PokeDex",
     "ReDim_Expense_Tracker.xlsm": "ExpenseTracker",
+    "ReDim_Whats_New.xlsm": "WhatsNew",
 }
 
 

@@ -386,6 +386,71 @@ End Function
 """
 
 
+SMOKE_WHATSNEW = """
+Private Declare PtrSafe Sub Sleep Lib "kernel32" (ByVal milliseconds As Long)
+
+Public Function SmokeWhatsNew() As String
+    Dim app As ReDimUI
+    Dim transcript As String
+    Dim ticks As Long
+
+    ReDimUI.AutoPump False
+    BuildWhatsNew
+    Set app = WhatsNewApp()
+    transcript = "components=" & app.ComponentCount
+
+    ' Code sets the key two controls write, and both follow.
+    ReDimUI.DispatchShape "rdm_whatsnew_setLarge"
+    transcript = transcript & "|sizeFollows=" & app.SelectBox("sizeSelect").SelectedText & _
+        "/" & app.RadioGroup("sizeRadio").SelectedText
+
+    ' One handler serves the buttons by their Tag, and the stepper follows.
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_whatsnew_add5"
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_whatsnew_add10"
+    transcript = transcript & "|count=" & app.State("count") & "/" & _
+        app.Stepper("count").CurrentValue
+
+    HandleFind
+    transcript = transcript & "|found=" & app.SelectBox("fruit").SelectedText
+
+    app.SetState "themeName", "Ocean"
+    transcript = transcript & "|ocean=" & CStr(app.Theme.PrimaryColor = RGB(0, 99, 140))
+
+    app.SetState "section", "Async and errors"
+    transcript = transcript & "|section=" & app.Tabs("sections").CurrentValue
+
+    ' The failing handler is left out: an error raised inside a handler
+    ' escapes a harness call whatever traps it, as TestReDimAsync notes.
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_whatsnew_roll"
+    For ticks = 1 To 50
+        If Not app.Async("dieRoll").IsRunning Then Exit For
+        Sleep 60
+        ReDimUI.PumpOnce
+    Next ticks
+    transcript = transcript & "|rolled=" & CStr(CStr(app.State("roll")) Like "Rolled a [1-6] *")
+
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_whatsnew_fillA"
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_whatsnew_fillB"
+    For ticks = 1 To 120
+        If Not app.Job("jobA").IsRunning And Not app.Job("jobB").IsRunning Then Exit For
+        Sleep 60
+        ReDimUI.PumpOnce
+    Next ticks
+    transcript = transcript & "|filled=" & app.State("jobA") & "/" & app.State("jobB")
+    transcript = transcript & "|protected=" & CStr(app.Sheet.ProtectContents)
+    RdxReleaseKeys
+    RdxStopPump
+    ReDimUI.AutoPump True
+    SmokeWhatsNew = transcript
+End Function
+"""
+
+
 def open_demo(excel, demo_paths, name):
     excel.open_workbook(str(demo_paths[name]))
 
@@ -532,6 +597,23 @@ def test_expense_tracker_smoke(demo_paths):
         assert facts["deleted"] == "True"
         assert facts["restored"] == "True"
         assert facts["dark"] == "True", "the palette's command flips the theme and the switch"
+        assert facts["protected"] == "True"
+
+
+def test_whats_new_smoke(demo_paths):
+    with ExcelSession() as excel:
+        open_demo(excel, demo_paths, "ReDim_Whats_New.xlsm")
+        result = excel.run_vba(SMOKE_WHATSNEW, proc="SmokeWhatsNew", timeout=120)
+        assert result.outcome == "passed", result.error
+        facts = dict(t.split("=", 1) for t in result.value.split("|"))
+        assert int(facts["components"]) >= 60
+        assert facts["sizeFollows"] == "Large/Large", "both controls follow the key code sets"
+        assert facts["count"] == "15/15", "one handler adds each button's Tag"
+        assert facts["found"] == "Mangosteen", "ItemPosition finds an item in any case"
+        assert facts["ocean"] == "True", "a theme built with the With builders"
+        assert facts["section"] == "5", "the tab strip follows its key"
+        assert facts["rolled"] == "True", "the done handler reads the task's result"
+        assert facts["filled"] == "100/100", "two jobs share one step by their Tag"
         assert facts["protected"] == "True"
 
 

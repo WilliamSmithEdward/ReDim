@@ -121,6 +121,7 @@ and it builds itself (each ships an `Auto_Open`); the entry macro rebuilds on de
 | `ReDim_Navigator.xlsm` | Sheets as forms: Navigate, back stack, lifecycle hooks | `BuildNavigator` |
 | `ReDim_ReDex.xlsm` | The full-framework showcase: a living Pokedex on PokeAPI - async HTTP + JSON, sprite images, tweened stat bars, team building, custom theme with night mode | `BuildPokeDex` |
 | `ReDim_Expense_Tracker.xlsm` | A small bookkeeping app from the 1.0 controls: a stacked form checked by `ValidateAll`, a table that filters as you type and deletes with an Undo toast, a sparkline and badge over six months, a budget meter, an Actions menu, and the command palette | `BuildExpenseTracker` |
+| `ReDim_Whats_New.xlsm` | A tour of 1.0.3 with a log of what each action did: two-way `WritesTo`, `Tag` and `TagValue`, filterable lists with disabled items, lists that scroll, `Required` picks, `AutoGrow` and placement that follows, themes from the `With` builders in any font, the pointer tint, focus rings, an op's task result, jobs sharing a step, and the error sink | `BuildWhatsNew` |
 
 ## Documentation
 

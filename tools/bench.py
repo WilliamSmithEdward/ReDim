@@ -50,6 +50,7 @@ BUILD_PROCS = {
     "ReDim_Navigator.xlsm": "BuildNavigator",
     "ReDim_ReDex.xlsm": "BuildPokeDex",
     "ReDim_Expense_Tracker.xlsm": "BuildExpenseTracker",
+    "ReDim_Whats_New.xlsm": "BuildWhatsNew",
 }
 
 TIME_BUILD = """
