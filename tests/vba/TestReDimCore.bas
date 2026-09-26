@@ -746,6 +746,117 @@ Public Function TestWritesToEdges() As String
     TestWritesToEdges = transcript
 End Function
 
+' The rails around focus, dialogs, removal, and a workbook close: a
+' focus handoff commits and still frees the keys at the next blur, a
+' capture with nothing focused lets the keys go at once, a sheet behind
+' another captures no keys until it comes to the front, a Confirm
+' opened from a dialog's OK stays open and focus returns past both, a
+' focused field that hides commits its edits, removing an anchor leaves
+' its dependents in place, At replaces Below, an id cannot end in an
+' underscore, word keys treat Hangul as letters, and a held close keeps
+' the apps.
+Public Function TestFocusRails() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim other As Worksheet
+    Dim transcript As String
+    Dim depTop As Double
+    Dim eventsWereOn As Boolean
+
+    ReDimUI.AutoPump False
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "core12")
+    app.TextInput("a").AtRect(24, 24, 150, 22).WritesTo "k"
+    app.TextInput("b").AtRect 24, 60, 150, 22
+    app.TextInput("c").AtRect(24, 96, 150, 22).WritesTo "cText"
+    app.TextInput("w").AtRect 24, 132, 150, 22
+    app.Label("anchor").AtRect(240, 24, 120, 18).Text "Anchor"
+    app.Label("dep").Below("anchor", 6).Sized(120, 18).Text "Dependent"
+    app.Label("rel").Below("anchor", 40).Sized(120, 18).Text "Relative"
+    app.Button("go").AtRect(240, 160, 90, 28).Text("Go").OnClick "TestReDimCore.CoreClickHandler"
+    app.Render
+
+    app.TextInput("a").Focus
+    transcript = "captured=" & CStr(RdxKeysCaptured())
+    RdxKeyChar "x"
+    app.TextInput("b").Focus
+    transcript = transcript & "|handoff=" & app.State("k") & "/" & ReDimUI.FocusedComponentId
+    ReDimUI.ClearKeyboardFocus
+    transcript = transcript & "|keysFreed=" & CStr(Not RdxKeysCaptured())
+
+    RdxBindKeys
+    RdxKeyChar "q"
+    transcript = transcript & "|strayFreed=" & CStr(Not RdxKeysCaptured())
+
+    ' The harness may hold EnableEvents off; the sheet's activation needs
+    ' them on to reach ReDim.
+    eventsWereOn = Application.EnableEvents
+    Application.EnableEvents = True
+    Set other = NewCanvas()
+    app.TextInput("b").Focus
+    transcript = transcript & "|behindFree=" & CStr(Not RdxKeysCaptured())
+    host.Activate
+    transcript = transcript & "|frontTakes=" & CStr(RdxKeysCaptured())
+    Application.EnableEvents = eventsWereOn
+
+    app.Confirm "First", "One", "TestReDimCore.CoreConfirmAgain"
+    Sleep 250
+    ReDimUI.DispatchShape "rdm_core12_mdl_ok"
+    transcript = transcript & "|secondOpen=" & _
+        CStr(host.Shapes("rdm_core12_mdl_card").Visible = msoTrue) & "/" & _
+        CStr(InStr(host.Shapes("rdm_core12_mdl_card").TextFrame2.TextRange.Text, "Second") > 0)
+    Sleep 250
+    ReDimUI.DispatchShape "rdm_core12_mdl_ok"
+    transcript = transcript & "|focusBack=" & ReDimUI.FocusedComponentId
+
+    app.TextInput("c").Focus
+    RdxKeyChar "h"
+    RdxKeyChar "i"
+    app.TextInput("c").Visible False
+    transcript = transcript & "|hiddenCommits=" & app.State("cText") & "/" & _
+        CStr(LenB(ReDimUI.FocusedComponentId) = 0)
+
+    depTop = host.Shapes("rdm_core12_dep").Top
+    app.Label("anchor").Remove
+    app.Label("dep").Text "Still here"
+    transcript = transcript & "|depStays=" & CStr(host.Shapes("rdm_core12_dep").Top = depTop)
+    app.Label("rel").At "D12"
+    transcript = transcript & "|atReplaces=" & CStr(host.Shapes("rdm_core12_rel").Top = _
+        host.Range("D12").Top)
+
+    On Error Resume Next
+    app.Label "bad_"
+    transcript = transcript & "|idEnds=" & Err.Description
+    Err.Clear
+    On Error GoTo 0
+
+    With app.TextInput("w")
+        .InputValue = ChrW(&H65E5) & ChrW(&H672C) & " " & ChrW(&HD55C) & ChrW(&HAE00)
+    End With
+    app.TextInput("w").Focus
+    RdxKeyChar "{END}"
+    RdxKeyChar "{WORDBS}"
+    transcript = transcript & "|hangulWord=" & CStr(app.TextInput("w").InputValue = _
+        ChrW(&H65E5) & ChrW(&H672C) & " ")
+    ReDimUI.ClearKeyboardFocus
+
+    gClickCount = 0
+    ReDimUI.HoldForClose
+    transcript = transcript & "|heldKeepsApp=" & CStr(ReDimUI.HasApp("core12"))
+    Sleep 250
+    ReDimUI.DispatchShape "rdm_core12_go"
+    transcript = transcript & "|clickResumes=" & gClickCount
+    app.Unmount True
+    Application.DisplayAlerts = False
+    other.Delete
+    Application.DisplayAlerts = True
+    TestFocusRails = transcript
+End Function
+
+Public Sub CoreConfirmAgain()
+    ReDimUI.App("core12").Confirm "Second", "Two"
+End Sub
+
 Public Sub CoreReadToggle()
     gListenerSaw = CStr(ReDimUI.App("core11").Toggle("dark").IsChecked)
 End Sub

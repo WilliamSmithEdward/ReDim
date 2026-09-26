@@ -362,6 +362,11 @@ Private mFocusComponentId As String
 ' Set while focus moves from one field to another, so the outgoing
 ' field's blur leaves the OnKey bindings in place for the incoming one.
 Private mFocusHandoff As Boolean
+' Set when the hosting workbook starts to close: the pump is stopped and
+' every key given back, but the apps stay, since the user can still
+' cancel at Excel's save prompt. The next event from the workbook takes
+' the keys and the pump back.
+Private mCloseHeld As Boolean
 ' Test seam: the next real tick treats the field-watch press edge as
 ' fired, so in-tick blur paths are testable without physical input.
 Private mForcePressEdge As Boolean
@@ -1078,27 +1083,82 @@ Private Sub mExcelApp_SheetChange(ByVal Sh As Object, ByVal Target As Range)
     On Error GoTo 0
 End Sub
 
+' BeforeClose comes before Excel's save prompt, where the user may still
+' cancel, so the apps stay mounted: the pump stops and every key goes
+' back to Excel before this code can unload, and a cancelled close takes
+' them back at the workbook's next event (ResumeAfterClose).
 Private Sub mExcelApp_WorkbookBeforeClose(ByVal Wb As Workbook, Cancel As Boolean)
-    If Wb Is ThisWorkbook Then Shutdown
+    If Wb Is ThisWorkbook Then HoldForClose
+End Sub
+
+Friend Sub HoldForClose()
+    Dim appValue As ReDimUI
+
+    If Not IsFactory(Me) Then
+        ReDimUI.HoldForClose
+        Exit Sub
+    End If
+    EnsureFactory
+    RdxStopPump
+    ClearKeyboardFocus
+    mCloseHeld = True
+    On Error Resume Next
+    For Each appValue In mApps
+        appValue.HoldAppForClose True
+    Next appValue
+    On Error GoTo 0
+    ' With the close held, no app wants a key: every access key and
+    ' shortcut goes back.
+    RefreshAccessKeys
+    ReleaseRecordedKeys
+End Sub
+
+' The workbook is still open after a close began: the user cancelled at
+' the save prompt. Its apps take their keys, and the pump its work, back.
+Private Sub ResumeAfterClose()
+    Dim appValue As ReDimUI
+
+    If Not mCloseHeld Then Exit Sub
+    mCloseHeld = False
+    On Error Resume Next
+    For Each appValue In mApps
+        appValue.HoldAppForClose False
+    Next appValue
+    On Error GoTo 0
+    RefreshAccessKeys
+    If HasPendingWork() Then RequestPump
 End Sub
 
 ' Access-key chords follow the sheet in front.
 ' A sheet coming back to the front re-arms the pump for the watches that
 ' need it there: a slider's press watch, pointer effects. The pump stops
 ' itself while no app has work, and leaving the sheet takes theirs.
+' While a close is held these wait: Excel can bring the closing workbook
+' forward for its save prompt, and binding keys or arming the pump then
+' would outlive the code.
 Private Sub mExcelApp_SheetActivate(ByVal Sh As Object)
+    If mCloseHeld Then Exit Sub
+    SyncKeyCapture
     RefreshAccessKeys
     If HasPendingWork() Then RequestPump
     CheckSystemLook
 End Sub
 
 Private Sub mExcelApp_WorkbookActivate(ByVal Wb As Workbook)
+    If mCloseHeld Then Exit Sub
+    SyncKeyCapture
     RefreshAccessKeys
     If HasPendingWork() Then RequestPump
     CheckSystemLook
 End Sub
 
+' A selection the user makes in the workbook after a close began means
+' the close was cancelled.
 Private Sub mExcelApp_SheetSelectionChange(ByVal Sh As Object, ByVal Target As Range)
+    If mCloseHeld Then
+        If Not Sh.Parent Is ThisWorkbook Then Exit Sub
+        ResumeAfterClose
+    End If
     CheckSystemLook
 End Sub
 
@@ -1170,6 +1230,8 @@ Friend Sub DispatchShape(ByVal clickedName As String)
         Exit Sub
     End If
     EnsureFactory
+    ' A click on a control after a close began: the close was cancelled.
+    ResumeAfterClose
     If Not ParseShapeName(clickedName, targetAppId, targetComponentId, targetPart) Then
         Exit Sub
     End If
@@ -1240,7 +1302,14 @@ Friend Sub DispatchKey(ByVal keyText As String)
         Exit Sub
     End If
     EnsureFactory
-    If LenB(mFocusComponentId) = 0 Then Exit Sub
+    If LenB(mFocusComponentId) = 0 Then
+        ' A captured key with nothing focused: the capture outlived its
+        ' focus, as it does after the VBA project resets under a focused
+        ' field. Letting the keys go gives typing back to the sheet.
+        RdxReleaseKeys
+        RebindShortcuts
+        Exit Sub
+    End If
     ' The keypad's decimal key types the separator Excel would.
     If keyText = "{DECIMAL}" Then keyText = DecimalMark()
     Set appValue = FindApp(mFocusAppId)
@@ -1261,6 +1330,9 @@ End Sub
 Friend Sub SetKeyboardFocus(ByVal hostApp As ReDimUI, ByVal componentValue As ReDimUI)
     Dim previousApp As ReDimUI
     Dim previousComponent As ReDimUI
+    Dim leaveError As Long
+    Dim leaveSource As String
+    Dim leaveDescription As String
 
     If Not IsFactory(Me) Then
         ReDimUI.SetKeyboardFocus hostApp, componentValue
@@ -1273,8 +1345,16 @@ Friend Sub SetKeyboardFocus(ByVal hostApp As ReDimUI, ByVal componentValue As Re
             Set previousComponent = _
                 previousApp.PeekComponent(mFocusComponentId)
             If Not previousComponent Is Nothing Then
+                ' The field left commits, which runs the app's handlers; one
+                ' that raises must not leave the handoff flag up, or every
+                ' later blur would keep the keys captured.
                 mFocusHandoff = True
+                On Error Resume Next
                 previousComponent.LeaveFocus previousApp, True
+                leaveError = Err.Number
+                leaveSource = Err.Source
+                leaveDescription = Err.Description
+                On Error GoTo 0
                 mFocusHandoff = False
             End If
         End If
@@ -1282,8 +1362,30 @@ Friend Sub SetKeyboardFocus(ByVal hostApp As ReDimUI, ByVal componentValue As Re
     mFocusAppId = hostApp.AppId
     mFocusComponentId = componentValue.ComponentId
     mCaretBlinkMs = SystemCaretBlinkMs()
-    RdxBindKeys
+    ' Keys are captured only while the app's sheet is in front: a dialog
+    ' raised on a sheet behind must not swallow typing on the one in view.
+    If SheetInFront(hostApp) Then
+        RdxBindKeys
+    Else
+        RdxReleaseKeys
+    End If
     RequestPump
+    If leaveError <> 0 Then Err.Raise leaveError, leaveSource, leaveDescription
+End Sub
+
+' The keys follow the focused app's sheet: captured while it is in
+' front, released while another sheet is.
+Private Sub SyncKeyCapture()
+    Dim appValue As ReDimUI
+
+    If LenB(mFocusComponentId) = 0 Then Exit Sub
+    Set appValue = FindApp(mFocusAppId)
+    If appValue Is Nothing Then Exit Sub
+    If SheetInFront(appValue) Then
+        RdxBindKeys
+    Else
+        RdxReleaseKeys
+    End If
 End Sub
 
 ' The Windows caret blink interval, or 0 when the user turned blinking
@@ -1356,7 +1458,7 @@ Friend Sub RefreshAccessKeys(Optional ByVal shortcutDeclared As Boolean = False)
     If shortcutDeclared Then mShortcutsDeclared = True
     On Error Resume Next
     For Each appValue In mApps
-        If appValue.Sheet Is ActiveSheet Then
+        If appValue.Sheet Is ActiveSheet And Not mCloseHeld Then
             declaredKeys = appValue.AccessKeyLetters
             For idx = 1 To Len(declaredKeys)
                 keyLetter = Mid$(declaredKeys, idx, 1)
@@ -1454,7 +1556,7 @@ Private Sub RefreshShortcuts()
 
     On Error Resume Next
     For Each appValue In mApps
-        If appValue.Sheet Is ActiveSheet Then
+        If appValue.Sheet Is ActiveSheet And Not mCloseHeld Then
             listedCodes = Split(appValue.ShortcutCodes, Chr$(1))
             For idx = 0 To UBound(listedCodes)
                 If LenB(listedCodes(idx)) > 0 Then
@@ -2085,6 +2187,8 @@ Friend Sub RequestPump()
         ReDimUI.RequestPump
         Exit Sub
     End If
+    ' A timer armed while the workbook closes would call into unloaded code.
+    If mCloseHeld Then Exit Sub
     If Not mAutoPumpOff Then RdxEnsurePump
 End Sub
 
@@ -2113,6 +2217,7 @@ Public Sub Shutdown()
         Exit Sub
     End If
     EnsureFactory
+    mCloseHeld = False
     RdxStopPump
     ClearKeyboardFocus
     ' Keys bound before a reset of the project, which this session never
@@ -3087,10 +3192,14 @@ Public Sub Confirm( _
     If Not mRendered Then Render
     RaiseModalZOrder
     ' The dialog takes the keys: OK holds focus, Tab stays among its
-    ' buttons, Enter confirms, and Esc cancels.
-    mFocusBeforeModal = vbNullString
+    ' buttons, Enter confirms, and Esc cancels. A dialog shown over one
+    ' already open keeps the control that held focus before the first.
     If ReDimUI.IsComponentFocused(mAppId, ReDimUI.FocusedComponentId) Then
-        mFocusBeforeModal = ReDimUI.FocusedComponentId
+        If Left$(ReDimUI.FocusedComponentId, 4) <> "mdl_" Then
+            mFocusBeforeModal = ReDimUI.FocusedComponentId
+        End If
+    Else
+        mFocusBeforeModal = vbNullString
     End If
     Component("mdl_ok").TakeFocus Me, False
 End Sub
@@ -3844,6 +3953,7 @@ Public Sub FlushDirty()
         Next drawIndex
     Loop
     Set pendingIds = Nothing
+    ReleaseLostFocus
     ProcessPendingReflows
     If mToastRestackPending Then
         mToastRestackPending = False
@@ -3867,6 +3977,21 @@ RestoreScreen:
     End If
     If toggledScreen Then Application.ScreenUpdating = priorScreenUpdating
     Err.Raise capturedNumber, capturedSource, capturedDescription
+End Sub
+
+' The focused control the draw just hid or disabled lets focus go as a
+' click elsewhere would: a field commits its edits, running OnChange,
+' WritesTo, and its checks, where dropping the focus lost what was typed.
+' It runs after the draw, not inside it, so the commit's own redraw never
+' re-enters the control being drawn.
+Private Sub ReleaseLostFocus()
+    Dim focusedValue As ReDimUI
+
+    If Not ReDimUI.IsComponentFocused(mAppId, ReDimUI.FocusedComponentId) Then Exit Sub
+    Set focusedValue = PeekComponent(ReDimUI.FocusedComponentId)
+    If focusedValue Is Nothing Then Exit Sub
+    If focusedValue.IsFocusable Then Exit Sub
+    focusedValue.LeaveFocus Me, True
 End Sub
 
 Public Function SetTheme(ByVal themeValue As ReDimUI) As ReDimUI
@@ -4153,20 +4278,38 @@ Public Sub HotKey(ByVal keyCode As String, ByVal handlerProc As String)
     RequireRole ROLE_APP, "HotKey"
     Application.OnKey keyCode, handlerProc
     If mHotKeys Is Nothing Then Set mHotKeys = New Collection
-    mHotKeys.Add keyCode
+    mHotKeys.Add Array(keyCode, handlerProc)
 End Sub
 
 Public Sub ClearHotKeys()
-    Dim keyCode As Variant
-
     RequireRole ROLE_APP, "ClearHotKeys"
+    HoldHotKeys True
+    Set mHotKeys = New Collection
+End Sub
+
+' A workbook close lets the app's hot keys go before its code unloads,
+' and puts away a tooltip, which would be saved with the sheet; a
+' cancelled close binds the hot keys again.
+Friend Sub HoldAppForClose(ByVal held As Boolean)
+    HoldHotKeys held
+    If held Then HideTooltip
+End Sub
+
+' Gives the app's hot keys back to Excel, or binds them again, keeping
+' the list.
+Private Sub HoldHotKeys(ByVal released As Boolean)
+    Dim hotKeyEntry As Variant
+
     If mHotKeys Is Nothing Then Exit Sub
     On Error Resume Next
-    For Each keyCode In mHotKeys
-        Application.OnKey CStr(keyCode)
-    Next keyCode
+    For Each hotKeyEntry In mHotKeys
+        If released Then
+            Application.OnKey CStr(hotKeyEntry(0))
+        Else
+            Application.OnKey CStr(hotKeyEntry(0)), CStr(hotKeyEntry(1))
+        End If
+    Next hotKeyEntry
     On Error GoTo 0
-    Set mHotKeys = New Collection
 End Sub
 
 Friend Sub ReleaseAppResources()
@@ -4178,7 +4321,15 @@ End Sub
 
 ' Removes every component shape and unregisters the app.
 Public Sub Unmount(Optional ByVal deleteShapes As Boolean = True)
+    Dim workValue As ReDimUI
+
     RequireRole ROLE_APP, "Unmount"
+    For Each workValue In mAsyncOps
+        workValue.AbandonWork
+    Next workValue
+    For Each workValue In mJobs
+        workValue.AbandonWork
+    Next workValue
     ClearHotKeys
     If ReDimUI.FocusedComponentId <> vbNullString Then
         If ReDimUI.IsComponentFocused(mAppId, ReDimUI.FocusedComponentId) Then
@@ -4243,17 +4394,24 @@ Friend Sub TickApp( _
     TickComponentsSection nowMs, elapsedMs, runWork
 End Sub
 
+' Each op ticks on its own guard, so one that faults does not hold up
+' the ops after it.
 Private Sub TickOpsSection(ByVal runWork As Boolean)
     Dim opValue As ReDimUI
 
-    On Error GoTo Fault
     If Not runWork Then Exit Sub
     For Each opValue In mAsyncOps
-        If opValue.OpIsRunning Then opValue.TickOp Me
+        If opValue.OpIsRunning Then
+            On Error Resume Next
+            Err.Clear
+            opValue.TickOp Me
+            If Err.Number <> 0 Then
+                Err.Clear
+                ReDimUI.NoteTickFault
+            End If
+            On Error GoTo 0
+        End If
     Next opValue
-    Exit Sub
-Fault:
-    ReDimUI.NoteTickFault
 End Sub
 
 ' Paced jobs self-gate on the wall clock, so sampling them every frame
@@ -4338,7 +4496,7 @@ End Sub
 ' or a control with a tooltip, with its sheet in front.
 Private Function NeedsPointerWatch() As Boolean
     If Not (mPointerEffects Or mHasTooltips) Then Exit Function
-    NeedsPointerWatch = AppSheetInFront()
+    NeedsPointerWatch = SheetInFront(Me)
 End Function
 
 ' The control under the pointer takes the hover look, and the press look
@@ -4498,7 +4656,7 @@ Private Sub TickHold(ByVal nowMs As LongLong, ByVal leftButtonDown As Boolean)
 
     If leftButtonDown And Not mHoldPrevDown Then
         mHoldId = vbNullString
-        If AppSheetInFront() Then
+        If SheetInFront(Me) Then
             If ReDimUI.FramePointer(pointsX, pointsY) Then
                 HitTestPoint pointsX, pointsY, hitId, hitPart
             End If
@@ -4713,18 +4871,12 @@ Friend Function HasAppWork() As Boolean
             Exit Function
         End If
         If componentValue.NeedsPressWatch Then
-            If AppSheetInFront() Then
+            If SheetInFront(Me) Then
                 HasAppWork = True
                 Exit Function
             End If
         End If
     Next componentValue
-End Function
-
-Private Function AppSheetInFront() As Boolean
-    On Error Resume Next
-    AppSheetInFront = (mSheet Is ActiveSheet)
-    On Error GoTo 0
 End Function
 
 ' ---------------------------------------------------------------
@@ -4929,6 +5081,8 @@ End Property
 Public Function At(ByVal rangeAddress As String) As ReDimUI
     RequireRole ROLE_COMPONENT, "At"
     mAnchor = rangeAddress
+    ' A range replaces any Below or RightOf, as AtRect does.
+    mRelMode = REL_NONE
     Touch
     Set At = Me
 End Function
@@ -7133,16 +7287,30 @@ End Property
 
 Public Property Let InputValue(ByVal assignedText As String)
     Dim priorEvents As Boolean
+    Dim targetCell As Range
+    Dim writeError As Long
+    Dim writeDescription As String
 
     RequireRole ROLE_COMPONENT, "InputValue"
     If IsFloatField() Then
         mText = assignedText
         Touch
     Else
+        ' The cell is found before events go off, and events come back
+        ' even when the write fails (a protected or deleted sheet), since
+        ' Excel keeps them off for the whole session otherwise.
+        Set targetCell = InputCell(OwnerApp.Sheet)
         priorEvents = Application.EnableEvents
         Application.EnableEvents = False
-        InputCell(OwnerApp.Sheet).Value = assignedText
+        On Error Resume Next
+        targetCell.Value = assignedText
+        writeError = Err.Number
+        writeDescription = Err.Description
+        On Error GoTo 0
         Application.EnableEvents = priorEvents
+        If writeError <> 0 Then
+            RaiseError writeError, "InputValue", writeDescription
+        End If
     End If
     If LenB(mWritesToKey) > 0 Then
         If mKind = KIND_COMBO Then
@@ -7438,6 +7606,9 @@ Public Sub Remove()
         ReDimUI.ClearKeyboardFocus
     End If
     DeleteOwnShapes hostApp.Sheet
+    ' Controls placed Below or RightOf it stay where they are, rather than
+    ' failing every later draw for want of their anchor.
+    hostApp.PinPlacedAgainst mComponentId
     hostApp.ForgetComponent mComponentId
     ' A key it declared goes back to Excel, unless another control has it.
     If LenB(mShortcut) > 0 Or LenB(mAccessKey) > 0 Then ReDimUI.RefreshAccessKeys
@@ -7447,6 +7618,28 @@ Public Sub Remove()
     End If
     ' The members after it in its stack close the gap.
     If LenB(mStackId) > 0 Then hostApp.ReflowStackNow mStackId
+End Sub
+
+Friend Sub PinPlacedAgainst(ByVal targetComponentId As String)
+    Dim componentValue As ReDimUI
+
+    RequireRole ROLE_APP, "PinPlacedAgainst"
+    For Each componentValue In mComponents
+        componentValue.PinPlacement mSheet, targetComponentId
+    Next componentValue
+End Sub
+
+' A control placed relative to the one going: its place is worked out
+' against it one last time and kept as a fixed position.
+Friend Sub PinPlacement(ByVal hostSheet As Worksheet, ByVal goingId As String)
+    If mRelMode = REL_NONE Then Exit Sub
+    If StrComp(mRelTargetId, goingId, vbTextCompare) <> 0 Then Exit Sub
+    On Error Resume Next
+    ResolvePlacement hostSheet
+    On Error GoTo 0
+    mRelMode = REL_NONE
+    mRelTargetId = vbNullString
+    Touch
 End Sub
 
 Friend Sub ForgetComponent(ByVal targetComponentId As String)
@@ -8363,15 +8556,16 @@ End Sub
 
 ' What a click, or a keyboard pick standing in for one, runs after the
 ' component's own work: the async op when OnClickAsync registered one,
-' otherwise the OnClick or OnChange procedure, then any modal close and
-' navigation.
+' otherwise the OnClick or OnChange procedure, then any navigation. A
+' dialog's button closes the dialog first, so a handler that opens
+' another Confirm keeps it open and focus returns before it looks.
 Private Sub RunClickHandlers(ByVal hostApp As ReDimUI)
     If LenB(mAsyncClickProc) > 0 Then
         hostApp.StartAsyncClick Me, mAsyncClickProc
         Exit Sub
     End If
-    If LenB(mClickProc) > 0 Then Application.Run mClickProc
     If mCloseModalOnClick Then hostApp.CloseModal
+    If LenB(mClickProc) > 0 Then Application.Run mClickProc
     If LenB(mNavTargetId) > 0 Then ReDimUI.Navigate mNavTargetId
 End Sub
 
@@ -11515,11 +11709,10 @@ Private Sub ApplyFocusRing(ByVal hostSheet As Worksheet, ByVal themeValue As ReD
     Dim ringShape As Shape
     Dim ringKey As String
 
+    ' A control hidden or disabled while it has focus draws no ring; the
+    ' flush lets its focus go once the draw is done (ReleaseLostFocus).
     ringOn = ReDimUI.IsComponentFocused(mOwnerAppId, mComponentId)
-    If ringOn And Not IsFocusable() Then
-        ReDimUI.ClearKeyboardFocus
-        ringOn = False
-    End If
+    If ringOn Then ringOn = IsFocusable()
     If IsFloatField() Then Exit Sub
     If ringOn Then ringOn = OwnerApp.ShowsFocusRings
     If ringOn Then
@@ -18723,9 +18916,11 @@ Private Sub StepHistory(ByVal undoing As Boolean)
     mLastEditKind = vbNullString
 End Sub
 
+' AscW reads U+8000 and up as negative, so it is masked to a code point:
+' CJK and Hangul text would otherwise break a word at every character.
 Private Function IsWordChar(ByVal oneChar As String) As Boolean
     If LenB(oneChar) = 0 Then Exit Function
-    IsWordChar = (oneChar Like "[A-Za-z0-9_]") Or AscW(oneChar) > 127
+    IsWordChar = (oneChar Like "[A-Za-z0-9_]") Or (AscW(oneChar) And &HFFFF&) > 127
 End Function
 
 ' Ctrl+Left: back over spaces and punctuation, then over the word
@@ -19517,6 +19712,9 @@ Friend Sub RequestOpCancel()
         RaiseError ERROR_INVALID_OPERATION, "CancelAsync", _
             "Async op '" & mComponentId & "' was not built with WithCancellation."
     End If
+    ' An op at rest has nothing to cancel; cancelling its token would
+    ' cancel the next run the moment it started.
+    If Not mOpRunning Then Exit Sub
     mOpCts.Cancel
 End Sub
 
@@ -19530,6 +19728,7 @@ End Sub
 Private Sub FinishOp(ByVal hostApp As ReDimUI)
     Dim outcomeProc As String
     Dim outcomeState As String
+    Dim listenerFailure As String
 
     mOpRunning = False
     If mOpTask.IsFaulted Then
@@ -19545,8 +19744,24 @@ Private Sub FinishOp(ByVal hostApp As ReDimUI)
         outcomeState = "done"
         outcomeProc = mOpDoneProc
     End If
+    ' A cancelled token stays cancelled: the next run, and the Token read
+    ' for it, get a fresh one.
+    If Not mOpCts Is Nothing Then
+        If mOpCts.IsCancellationRequested Then Set mOpCts = ROneCOne.CancellationTokenSource
+    End If
     SetOpControlsBusy hostApp, False
-    If LenB(mOpStatusKey) > 0 Then hostApp.SetState mOpStatusKey, outcomeState
+    ' A listener on the tracked key that raises must not cost the op its
+    ' outcome handler; its error goes to the app's error sink.
+    If LenB(mOpStatusKey) > 0 Then
+        On Error Resume Next
+        hostApp.SetState mOpStatusKey, outcomeState
+        If Err.Number <> 0 Then
+            listenerFailure = "ReDim async op '" & mComponentId & _
+                "' state listener failed: " & Err.Description
+        End If
+        On Error GoTo 0
+        If LenB(listenerFailure) > 0 Then hostApp.ReportAppError listenerFailure
+    End If
     If mOpTask.IsFaulted Then
         hostApp.ReportAppError "ReDim async op '" & mComponentId & _
             "' failed: " & mOpLastError
@@ -19705,6 +19920,8 @@ Friend Sub TickJob( _
     startedPreciseMs = PreciseNowMs()
     Do
         stepDone = Application.Run(mJobStepProc)
+        ' A step that unmounted the job's app has stopped the job.
+        If Not mJobRunning Then Exit Sub
         If CBool(stepDone) Then
             FinishJob hostApp, mJobDoneProc
             Exit Sub
@@ -19723,6 +19940,20 @@ StepFailed:
     On Error GoTo 0
     FinishJob hostApp, mJobFailProc
     hostApp.ReportAppError failure
+End Sub
+
+' An op or job whose app unmounts stops where it is, running no outcome
+' handler, since the app it would report to is gone.
+Friend Sub AbandonWork()
+    If mOpRunning Then
+        mOpRunning = False
+        If Not mOpCts Is Nothing Then
+            mOpCts.Cancel
+            Set mOpCts = ROneCOne.CancellationTokenSource
+        End If
+    End If
+    mJobRunning = False
+    mJobCancelRequested = False
 End Sub
 
 Private Sub FinishJob(ByVal hostApp As ReDimUI, ByVal outcomeProc As String)
@@ -19940,6 +20171,12 @@ Private Sub RequireIdentifier( _
         If InStr(1, candidate, PART_SEPARATOR) > 0 Then
             RaiseError ERROR_INVALID_ARGUMENT, memberName, _
                 argumentName & " may not contain a double underscore."
+        End If
+        ' Shape names join ids with underscores, so an id's own underscore
+        ' at either end would read as the part separator.
+        If Left$(candidate, 1) = "_" Or Right$(candidate, 1) = "_" Then
+            RaiseError ERROR_INVALID_ARGUMENT, memberName, _
+                argumentName & " may not start or end with an underscore."
         End If
     End If
 End Sub

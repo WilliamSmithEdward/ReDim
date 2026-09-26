@@ -223,6 +223,47 @@ Public Function TestCancellation() As String
     TestCancellation = transcript
 End Function
 
+' A cancelled op runs again: its next start, and the Token read for it,
+' get a fresh token, and cancelling an op at rest changes nothing. An
+' app that unmounts stops its ops and jobs without their handlers.
+Public Function TestRunsAgainAfterCancel() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim transcript As String
+
+    Set host = NewCanvas()
+    gWorkRan = 0
+    gCancelRan = 0
+    gDoneRan = 0
+    ReDimUI.AutoPump False
+    Set app = ReDimUI.Mount(host, "async10")
+    app.Async("opr").WithCancellation.RunsProc("TestReDimAsync.RecordWork") _
+        .OnCancel("TestReDimAsync.RecordCancel").TracksState "st"
+    app.Render
+    app.Async("opr").Start
+    app.CancelAsync "opr"
+    ReDimUI.PumpOnce
+    transcript = "firstCanceled=" & app.State("st") & "/" & gCancelRan
+    transcript = transcript & "|freshToken=" & _
+        CStr(Not app.Async("opr").Token.IsCancellationRequested)
+    app.Async("opr").Start
+    ReDimUI.PumpOnce
+    transcript = transcript & "|runsAgain=" & app.State("st") & "/" & gWorkRan
+    app.CancelAsync "opr"
+    app.Async("opr").Start
+    ReDimUI.PumpOnce
+    transcript = transcript & "|idleCancelIgnored=" & app.State("st") & "/" & gWorkRan
+    gJobCounter = 0
+    app.Job("endless").Steps("TestReDimAsync.JobStepEndless") _
+        .JobOnCancel "TestReDimAsync.RecordCancel"
+    app.Job("endless").StartJob
+    app.Unmount True
+    transcript = transcript & "|unmountStops=" & CStr(Not app.Job("endless").JobIsRunning) & _
+        "/" & gCancelRan
+    ReDimUI.AutoPump True
+    TestRunsAgainAfterCancel = transcript
+End Function
+
 Public Function TestJobChunks() As String
     Dim app As ReDimUI
     Dim host As Worksheet

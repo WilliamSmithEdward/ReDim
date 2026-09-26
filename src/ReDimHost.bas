@@ -462,8 +462,15 @@ Private Sub RdxKillOrphanTimer()
 End Sub
 
 ' Best-effort rail: kill the pump when the hosting workbook closes so no
-' TIMERPROC outlives its VBA project.
+' TIMERPROC outlives its VBA project, and give every key back. The apps
+' stay mounted, as BeforeClose leaves them, in case the close is
+' cancelled at Excel's save prompt.
 Public Sub Auto_Close()
     RdxStopPump
-    ReDimUI.Shutdown
+    ReDimUI.HoldForClose
 End Sub
+
+' Whether the typing keys are captured for a focused control, for tests.
+Public Function RdxKeysCaptured() As Boolean
+    RdxKeysCaptured = gKeysBound
+End Function

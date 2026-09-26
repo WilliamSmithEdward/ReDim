@@ -32,7 +32,8 @@ A theme answers its tokens, for shapes of your own that should match the control
 `OnMutedColor`, `SuccessColor`, `DangerColor`, `WarningColor`, `BorderColor`, `CanvasColor`,
 `FontName`, and `BaseFontSize`, as in `ui.Theme.PrimaryColor`.
 
-App ids use letters and digits only. Component ids may add single underscores.
+App ids use letters and digits only. Component ids may add single underscores, though not
+at either end.
 
 ## Windows and navigation
 
@@ -82,7 +83,7 @@ framework. Also:
 | `PrepareCanvas` | Paint the sheet background and hide gridlines. |
 | `Toast messageText, ttlMs` | Transient card on a rail beside the content, clamped into the visible viewport, with a close button. A top toast too tall for the room below the rail lifts the rail, and a toast shown while its sheet is behind another fits to the window once the sheet is in front. Without `ttlMs` it stays long enough to read: three seconds plus 60 ms a character, from four seconds to twelve. The card is 240 points wide and as tall as its wrapped message, up to 160 points, where the message ends in an ellipsis. `.MinWidth` and `.MaxWidth` on the returned toast let it fit its words between the two, wrapping past the wider (a `MinWidth` under 240 lets a short message make a narrow toast), and `.MaxHeight` moves the cap. `Primary`, `Success`, `Warning`, or `Danger` gives it an info, success, warning, or error tone, an icon and a matching edge; `.Action "Undo", "Module.Proc"` adds a button that dismisses the toast and runs the handler, and keeps the toast four seconds longer, and `.ActionBorder rgb` colors that button's border, the accent until set. `.OnClick "Module.Proc"` runs when the card itself is clicked, with the toast as `ReDimUI.Sender`. Any click puts the toast away at once, and the close button runs no handler. A toast under the pointer stops counting down and keeps at least a second once the pointer leaves. Toasts stack by their heights, slide up on entrance, and when one leaves the survivors slide up to fill its place; modal chrome never shifts the rail. |
 | `ToastTray rangeAddress` | Pins the tray's top-left to a range, exactly and unclamped. |
-| `Confirm titleText, messageText, okProc, cancelProc, okText, cancelText` | Shapes-based modal. It takes keyboard focus: Enter confirms, Esc cancels, and Tab stays among its buttons. The buttons read the `OK` and `Cancel` [UI text](#ui-text) unless given words; `cancelText:=""` leaves Cancel out. |
+| `Confirm titleText, messageText, okProc, cancelProc, okText, cancelText` | Shapes-based modal. It takes keyboard focus: Enter confirms, Esc cancels, and Tab stays among its buttons. The buttons read the `OK` and `Cancel` [UI text](#ui-text) unless given words; `cancelText:=""` leaves Cancel out. A button closes the dialog and then runs its handler, so a handler may open another `Confirm`; focus goes back to the control that held it before the first. |
 | `FocusFirst` / `DefaultButton componentId` | Keyboard focus to the first control in Tab order; the button Enter clicks from controls that do not use Enter themselves. |
 | `ValidateAll` | Checks the form before a save: every enabled float field with `Required` or `Validates`, and every enabled `SelectBox`, `DatePicker`, or `RadioGroup` with `Required`, the way a commit does, whether it shows or sits on a Tabs or Expander panel not shown. Hidden and disabled fields are skipped. Each field that fails shows its message, and the first in Tab order takes focus, its tab turned to or its expander opened first. True when every field passes (see [Field rules](#field-rules)). |
 | `FocusRings ringsOn` | An accent ring around a focused control that is not a text field (see [Keyboard focus for every control](#keyboard-focus-for-every-control)). Off by default. |
@@ -96,7 +97,7 @@ framework. Also:
 | `OnError "Module.Proc"` | One-argument sink for swallowed handler failures. |
 | `TickFaultCount` / `ResetTickFaults` (on `ReDimUI`) | The pump and key dispatch trap errors silently by design; every trapped fault increments this factory counter. Read it in tests or diagnostics to prove a run was clean, reset it to scope a measurement. |
 | `ProtectSurface protectOn, allowCellSelection` | Opt-in app-sheet protection (UserInterfaceOnly): users cannot enter cell edit mode or drag shapes there, framework writes keep working, cell-anchored TextInput cells stay editable, and float fields type normally since they never enter cell edit. By default locked canvas cells are also unselectable - no selection rectangle on the app surface, no protected-cell warnings for stray keys - while unlocked TextInput cells stay selectable; pass `allowCellSelection:=True` to keep the whole grid selectable. OnKey capture (fields, HotKey) is unaffected. Protection state does not persist across reopen, so builds should call `ProtectSurface False` first and `ProtectSurface` after Render, as every demo does. Unmount unprotects. |
-| `Unmount deleteShapes` | Remove components (and shapes) and forget the app. |
+| `Unmount deleteShapes` | Remove components (and shapes) and forget the app. Its running ops and jobs stop without running their outcome handlers. |
 
 ## Component builders
 
@@ -105,7 +106,8 @@ All fluent, all return the component:
 - Geometry: `At("B2:D3")` anchors to a range and follows column widths on re-render;
   `AtRect(left, top, width, height)` uses points; `Below(otherId, gap)` and
   `RightOf(otherId, gap)` place relative to another component with `Sized(w, h)` for
-  dimensions. Circular relative chains raise a clear error. `InStack(stackId)` hands the
+  dimensions. The last of these called wins. Circular relative chains raise a clear
+  error. `InStack(stackId)` hands the
   position to a `Stack` (see [Layout](#layout)).
 - Content: `Text`, `FontSize`, `Bold`, `BusyText` (what a busy button shows, the
   `Working` [UI text](#ui-text) unless given; `BusyText ""` keeps the button's text).
@@ -209,7 +211,8 @@ All fluent, all return the component:
   or `""` and `Empty` while nothing is selected. `CurrentText` differs by kind: a SelectBox
   with nothing picked answers its placeholder, and a combo its typed text, where
   `SelectedText` answers only an item the text names exactly.
-- `Remove` deletes the component and its shapes.
+- `Remove` deletes the component and its shapes. Controls placed `Below` or `RightOf` it
+  stay where they are, as fixed positions.
 
 Handlers are zero-argument public procedures referenced as `"Module.Proc"`. Inside a handler,
 `ReDimUI.Sender` carries who fired and `ReDimUI.SenderPart` names the clicked sub-shape when a
@@ -836,9 +839,17 @@ keep the keys.
   the app's `HotKey` goes to whichever bound it last, and releasing either releases it.
   Since the tooltip names it, a shortcut keeps the pump reading the pointer while its
   sheet is in front, as a tooltip does. ReDim lists the keys it has bound in a hidden
-  workbook name, `rdm_bound_keys`, so `Shutdown`, which runs as the workbook closes,
-  releases them even after a reset of the VBA project lost ReDim's own record; a key left
-  bound by such a reset clicks nothing and goes back to Excel on its first press.
+  workbook name, `rdm_bound_keys`, so a workbook close or `Shutdown` releases them even
+  after a reset of the VBA project lost ReDim's own record; a key left bound by such a
+  reset clicks nothing and goes back to Excel on its first press, as do the typing keys a
+  focused field held.
+- A focused control takes the typing keys only while its app's sheet is in front: a
+  `Confirm` or `Focus` on a sheet behind another holds the focus and takes the keys when
+  its sheet comes forward. A focused control that hides or disables lets focus go, and a
+  field commits what was typed, as a click elsewhere would.
+- Closing the workbook stops the pump and gives every key back before Excel's save prompt,
+  but keeps the apps mounted: if the close is cancelled there, the next click or
+  selection in the workbook takes the keys and the pump back.
 
 | Control | Keys |
 |---|---|

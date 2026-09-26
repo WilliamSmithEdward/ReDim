@@ -31,6 +31,46 @@
 - A control whose draw raises no longer stops the app from drawing. Its
   id stayed in the dirty list, so every later `SetState` raised again
   and the controls after it never drew until the app was rebuilt.
+- Typing can no longer stay dead after an error. A handler that raised
+  while focus moved between fields left a flag up that kept every later
+  blur from releasing the keys, and a reset of the VBA project under a
+  focused field kept them captured with nothing focused; a key arriving
+  with nothing focused now gives them back.
+- A focused control takes the typing keys only while its sheet is in
+  front. A `Confirm` raised from an op on a sheet behind another took
+  the keys, so typing on the sheet in view did nothing and Enter
+  answered a dialog no one could see.
+- A `Confirm` opened from a dialog's OK or Cancel handler stays open:
+  the button now closes its dialog before running the handler, where it
+  closed the new one afterwards. Focus returns past both dialogs to the
+  control that held it before the first.
+- A focused field that hides or disables commits what was typed, running
+  `OnChange`, `WritesTo`, and its checks; the text was dropped.
+- Cancelling a workbook close at Excel's save prompt no longer leaves a
+  dead UI. The close forgot every app, so clicks did nothing until the
+  UI was rebuilt; it now stops the pump and gives the keys back, keeps
+  the apps, and resumes at the next click or selection in the workbook.
+- A cancelled async op runs again. Its token stayed cancelled, so every
+  later `Start` was cancelled at once; `CancelAsync` on an op at rest
+  now does nothing, and a finished cancel leaves a fresh token.
+- A `TracksState` listener that raises no longer costs an op its
+  `OnDone`, `OnFail`, or `OnCancel`, and an op whose tick faults no
+  longer holds up the ops after it.
+- `Unmount` stops the app's running ops and jobs, where they kept their
+  controls busy and a job step that unmounted its own app kept looping
+  against it.
+- Removing a control that others sit `Below` or `RightOf` leaves them
+  where they are; every later draw of theirs raised for want of the
+  anchor. `At` after `Below` or `RightOf` now replaces the relative
+  placement instead of drawing beside the old anchor.
+- `InputValue` on a cell-backed field turns Excel's events back on when
+  the cell write fails, where they stayed off for the session.
+- Word moves and deletes treat CJK and Hangul text as letters. Characters
+  from U+8000 up read as punctuation, so Ctrl+Backspace stopped at every
+  character.
+- A component id may not start or end with an underscore, which made its
+  part names split at the wrong place: clicks reached the wrong control
+  and `Render` swept its parts as leftovers.
 - A one-line face cut short ends in an ellipsis: an unfocused
   `TextInput` or `ComboBox`, a `SelectBox`, and a `DatePicker`. They
   stopped mid-word on one line, so "A very long selection" read as

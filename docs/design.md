@@ -107,7 +107,9 @@ Pump safety rails, in order of importance:
 - The callback body is a single guarded call; no error ever escapes into Excel
 - A consecutive-failure counter kills the timer after repeated faults
 - The timer stops when no animations, ops, jobs, toasts, or watches remain
-- `WorkbookBeforeClose` (Application events) and `ReDimUI.Shutdown` kill timers deterministically
+- `WorkbookBeforeClose` (Application events) and `ReDimUI.Shutdown` kill timers deterministically;
+  a close leaves the apps mounted and arms nothing until the user acts in the workbook again,
+  since the close can still be cancelled at the save prompt
 
 ## Theming
 

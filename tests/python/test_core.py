@@ -218,6 +218,29 @@ def test_writes_to_edges(run_core):
     assert facts["requiredClears"] == "True", "state filling a pick must clear Required"
 
 
+def test_focus_rails(run_core):
+    facts = parse_transcript(run_core("TestFocusRails"))
+    assert facts["captured"] == "True", "a focused field on the sheet in front takes the keys"
+    assert facts["handoff"] == "x/b", "moving focus must commit the field left"
+    assert facts["keysFreed"] == "True"
+    assert facts["strayFreed"] == "True", "a key with nothing focused must free the keys"
+    assert facts["behindFree"] == "True", "a field on a sheet behind must not take the keys"
+    assert facts["frontTakes"] == "True", "bringing its sheet forward must take them"
+    assert facts["secondOpen"] == "True/True", (
+        "a Confirm opened from a dialog's OK must stay open"
+    )
+    assert facts["focusBack"] == "b", "focus must return past both dialogs"
+    assert facts["hiddenCommits"] == "hi/True", "a focused field that hides must commit"
+    assert facts["depStays"] == "True", "removing an anchor must leave dependents in place"
+    assert facts["atReplaces"] == "True", "At must replace a Below placement"
+    assert facts["idEnds"] == (
+        "componentId may not start or end with an underscore."
+    )
+    assert facts["hangulWord"] == "True", "Hangul must count as word characters"
+    assert facts["heldKeepsApp"] == "True", "a held close must keep the apps mounted"
+    assert facts["clickResumes"] == "1", "a click after a held close must run"
+
+
 def test_theme_builders(run_core):
     facts = parse_transcript(run_core("TestThemeBuilders"))
     assert facts["tokens"] == "True", "each theme builder must set the tokens it names"

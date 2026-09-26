@@ -36,8 +36,10 @@ ui.Async("refresh").Start
 ```
 
 `RunsProc "Module.Proc"` wraps a workbook procedure instead of a task. `WithCancellation` gives
-the op a ROneCOne token source: `ui.CancelAsync "refresh"` cancels, `Token` exposes the token
-for task factories such as `ROneCOne.Task.Delay(5000, op.Token)`. Disabled controls show busy
+the op a ROneCOne token source: `ui.CancelAsync "refresh"` cancels a running op (an op at rest
+has nothing to cancel), `Token` exposes the token for task factories such as
+`ROneCOne.Task.Delay(5000, op.Token)`. A cancelled op finishes with a fresh token, so its next
+run, and a `Token` read for it, start uncancelled. Disabled controls show busy
 state (buttons swap to `BusyText`); everything restores on any terminal state. `OnCancel` names
 the handler a cancel runs, as `OnDone` and `OnFail` name theirs. `AsyncError(opId)` returns the
 failure message after a fault.
@@ -101,7 +103,10 @@ the job through its fail handler and the app error sink instead of surfacing a d
 - The armed timer id is stored in a workbook-scoped name. After VBA state loss, the next arm
   kills the orphan first.
 - `WorkbookBeforeClose` and `ReDimUI.Shutdown` stop the pump deterministically, so no TIMERPROC
-  outlives its project.
+  outlives its project. A close keeps the apps mounted in case it is cancelled at the save
+  prompt; nothing arms the pump again until the user clicks or selects in the workbook.
+- An op whose tick faults does not hold up the ops after it, and a `TracksState` listener that
+  raises does not cost the op its outcome handler; the error goes to the app's error sink.
 - `ReDimUI.AutoPump False` plus `ReDimUI.PumpOnce` gives tests a fully deterministic clock.
 
 ## Honest limits
