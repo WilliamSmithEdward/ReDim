@@ -104,6 +104,8 @@ End Sub
 
 Public Sub HookKeys()
     With SnakeApp()
+        ' Every new game hooks the arrows; the list starts over each time.
+        .ClearHotKeys
         .HotKey "{UP}", "SnakeGame.KeyUp"
         .HotKey "{DOWN}", "SnakeGame.KeyDown"
         .HotKey "{LEFT}", "SnakeGame.KeyLeft"
@@ -112,10 +114,7 @@ Public Sub HookKeys()
 End Sub
 
 Public Sub UnhookKeys()
-    Application.OnKey "{UP}"
-    Application.OnKey "{DOWN}"
-    Application.OnKey "{LEFT}"
-    Application.OnKey "{RIGHT}"
+    SnakeApp().ClearHotKeys
 End Sub
 
 Public Sub KeyUp()

@@ -276,7 +276,7 @@ Public Sub HandleAdd()
     spentOn = ui.DatePicker("when").PickedDate
     If IsEmpty(spentOn) Then spentOn = Date
     spent = CDbl(ui.TextInput("amount").InputValue)
-    spendKind = ui.SelectBox("category").CurrentText
+    spendKind = ui.SelectBox("category").SelectedText
     AppendExpense CDate(spentOn), spendKind, spent, ui.TextInput("note").InputValue
     ui.TextInput("amount").InputValue = vbNullString
     ui.TextInput("note").InputValue = vbNullString
