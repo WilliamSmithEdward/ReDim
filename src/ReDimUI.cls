@@ -1695,21 +1695,30 @@ Private Function CodeListAdd(ByVal codeList As String, ByVal keyCode As String) 
     CodeListAdd = codeList & keyCode & Chr$(1)
 End Function
 
+' The first app on the active sheet with a control declaring the key, as
+' a shortcut or an access key, clicks that control; True when one did.
+Private Function ActiveSheetActivates(ByVal keyText As String, ByVal byShortcut As Boolean) As Boolean
+    Dim appValue As ReDimUI
+
+    For Each appValue In mApps
+        If appValue.Sheet Is ActiveSheet Then
+            If appValue.ActivateDeclared(keyText, byShortcut) Then
+                ActiveSheetActivates = True
+                Exit Function
+            End If
+        End If
+    Next appValue
+End Function
+
 ' A shortcut: the first app on the active sheet with a control declaring
 ' it clicks that control.
 Friend Sub DispatchShortcut(ByVal keyCode As String)
-    Dim appValue As ReDimUI
-
     If Not IsFactory(Me) Then
         ReDimUI.DispatchShortcut keyCode
         Exit Sub
     End If
     EnsureFactory
-    For Each appValue In mApps
-        If appValue.Sheet Is ActiveSheet Then
-            If appValue.ActivateShortcut(keyCode) Then Exit Sub
-        End If
-    Next appValue
+    If ActiveSheetActivates(keyCode, True) Then Exit Sub
     ' Nothing on the sheet in front took the key. A binding left by a sheet
     ' change Excel did not report, or by a reset of the project, is set
     ' right, and a key that no control here declares goes back to Excel,
@@ -1730,7 +1739,6 @@ End Sub
 ' control, as it would with no control focused: only a field keeps its
 ' editing keys. True when a shortcut took the key.
 Friend Function DispatchCapturedChord(ByVal keyText As String) As Boolean
-    Dim appValue As ReDimUI
     Dim listedCodes() As String
     Dim idx As Long
 
@@ -1743,14 +1751,10 @@ Friend Function DispatchCapturedChord(ByVal keyText As String) As Boolean
     For idx = 0 To UBound(listedCodes)
         If LenB(listedCodes(idx)) > 0 Then
             If CodeListHas(mBoundShortcuts, listedCodes(idx)) Then
-                For Each appValue In mApps
-                    If appValue.Sheet Is ActiveSheet Then
-                        If appValue.ActivateShortcut(listedCodes(idx)) Then
-                            DispatchCapturedChord = True
-                            Exit Function
-                        End If
-                    End If
-                Next appValue
+                If ActiveSheetActivates(listedCodes(idx), True) Then
+                    DispatchCapturedChord = True
+                    Exit Function
+                End If
             End If
         End If
     Next idx
@@ -1768,18 +1772,12 @@ End Property
 ' Alt plus a letter: the first app on the active sheet with a control
 ' declaring it clicks that control.
 Friend Sub DispatchAccessKey(ByVal keyLetter As String)
-    Dim appValue As ReDimUI
-
     If Not IsFactory(Me) Then
         ReDimUI.DispatchAccessKey keyLetter
         Exit Sub
     End If
     EnsureFactory
-    For Each appValue In mApps
-        If appValue.Sheet Is ActiveSheet Then
-            If appValue.ActivateAccessKey(LCase$(keyLetter)) Then Exit Sub
-        End If
-    Next appValue
+    If ActiveSheetActivates(LCase$(keyLetter), False) Then Exit Sub
     ' As for a shortcut: the bindings are set right for the sheet in front,
     ' and a chord that no control here declares goes back to Excel, or to
     ' the shortcut that uses it.
@@ -6662,55 +6660,20 @@ End Function
 
 ' Reads an item source into a fresh Collection of strings. Accepts a 1D
 ' array, a Collection, a Range (one item per non-empty cell), or a
-' ROneCOne sequence. Centralized so every picker reader shares one shape
-' and the array test lives in exactly one guarded place.
+' ROneCOne sequence, as ReadRawSource reads them.
 Private Function ReadItemSource( _
     ByVal itemSource As Variant, _
     ByVal memberName As String _
 ) As Collection
     Dim gathered As Collection
     Dim entry As Variant
-    Dim area As Range
-    Dim cellValues As Variant
-    Dim rowIdx As Long
-    Dim colIdx As Long
-    Dim idx As Long
+    Dim fromRange As Boolean
 
+    fromRange = (TypeName(itemSource) = "Range")
     Set gathered = New Collection
-    If TypeName(itemSource) = "Range" Then
-        ' One Value read per area instead of one per cell, in the row-major
-        ' order For Each over the cells gives.
-        For Each area In itemSource.Areas
-            If area.CountLarge = 1 Then
-                If LenB(CStr(area.Value)) > 0 Then gathered.Add CStr(area.Value)
-            Else
-                cellValues = area.Value
-                For rowIdx = 1 To UBound(cellValues, 1)
-                    For colIdx = 1 To UBound(cellValues, 2)
-                        If LenB(CStr(cellValues(rowIdx, colIdx))) > 0 Then
-                            gathered.Add CStr(cellValues(rowIdx, colIdx))
-                        End If
-                    Next colIdx
-                Next rowIdx
-            End If
-        Next area
-    ElseIf TypeName(itemSource) = "Collection" Then
-        For Each entry In itemSource
-            gathered.Add CStr(entry)
-        Next entry
-    ElseIf TypeName(itemSource) = "ROneCOne" Then
-        ' A ROneCOne sequence enumerates like any other For Each source.
-        For Each entry In itemSource
-            gathered.Add CStr(entry)
-        Next entry
-    ElseIf IsArrayValue(itemSource) Then
-        For idx = LBound(itemSource) To UBound(itemSource)
-            gathered.Add CStr(itemSource(idx))
-        Next idx
-    Else
-        RaiseError ERROR_INVALID_ARGUMENT, memberName, memberName & _
-            " accepts an array, a Collection, a Range, or a ROneCOne sequence."
-    End If
+    For Each entry In ReadRawSource(itemSource, memberName)
+        If Not fromRange Or LenB(CStr(entry)) > 0 Then gathered.Add CStr(entry)
+    Next entry
     Set ReadItemSource = gathered
 End Function
 
@@ -7243,8 +7206,12 @@ Private Sub PairItemValues( _
     Next entry
 End Sub
 
-' Every entry of a source, empty ones included, with its own type: the
-' shape ReadItemSource reads, before it keeps only non-empty text.
+' Every entry of a source, empty ones included, with its own type:
+' ReadItemSource keeps the text of each, and of a range only the cells
+' that hold something. The one reader of sources, so the array test lives
+' in exactly one guarded place. A Range is read with one Value per area
+' instead of one per cell, in the row-major order For Each over the
+' cells gives.
 Private Function ReadRawSource( _
     ByVal anySource As Variant, _
     ByVal memberName As String _
@@ -7433,11 +7400,7 @@ Friend Sub SyncInputFromSheet(ByVal hostApp As ReDimUI, ByVal changed As Range)
             WriteOwnKey hostApp, cellText
         End If
     End If
-    If LenB(mClickProc) > 0 Then
-        On Error Resume Next
-        Application.Run mClickProc
-        On Error GoTo 0
-    End If
+    RunChangeHandler hostApp
     ' Combo auto-suggest at commit time, the moment Excel hands control
     ' back: an exact match takes the item and closes; partial matches drop
     ' the list filtered by what was typed; no match stays closed as free
@@ -8031,48 +7994,31 @@ Friend Function ShortcutCodes() As String
     Next componentValue
 End Function
 
-' Clicks the first control in creation order that declares the shortcut
-' and can take a click; while a modal is up, only its buttons count.
-Friend Function ActivateShortcut(ByVal keyCode As String) As Boolean
+' Clicks the first control in creation order that declares the key, as
+' its shortcut code or its access key letter, and can take a click;
+' while a modal is up, only its buttons count.
+Friend Function ActivateDeclared(ByVal keyText As String, ByVal byShortcut As Boolean) As Boolean
     Dim orderedId As Variant
     Dim componentValue As ReDimUI
     Dim trapped As Boolean
+    Dim declared As Boolean
 
-    RequireRole ROLE_APP, "ActivateShortcut"
+    RequireRole ROLE_APP, "ActivateDeclared"
     trapped = ModalUp()
     For Each orderedId In mComponentOrder
         If TryGetComponent(CStr(orderedId), componentValue) Then
-            If StrComp(componentValue.ShortcutCode, keyCode, vbTextCompare) = 0 Then
-                If componentValue.TakesShortcut Then
-                    If Not trapped Or Left$(componentValue.ComponentId, 4) = "mdl_" Then
-                        ReDimUI.DispatchShape componentValue.ShapeName
-                        ActivateShortcut = True
-                        Exit Function
-                    End If
-                End If
+            If byShortcut Then
+                declared = (StrComp(componentValue.ShortcutCode, keyText, vbTextCompare) = 0)
+                If declared Then declared = componentValue.TakesShortcut
+            Else
+                declared = (componentValue.AccessKeyLetter = keyText)
+                If declared Then declared = componentValue.IsFocusable
             End If
-        End If
-    Next orderedId
-End Function
-
-' Clicks the first control in creation order that declares the key and
-' can take a click; while a modal is up, only its buttons count.
-Friend Function ActivateAccessKey(ByVal keyLetter As String) As Boolean
-    Dim orderedId As Variant
-    Dim componentValue As ReDimUI
-    Dim trapped As Boolean
-
-    RequireRole ROLE_APP, "ActivateAccessKey"
-    trapped = ModalUp()
-    For Each orderedId In mComponentOrder
-        If TryGetComponent(CStr(orderedId), componentValue) Then
-            If componentValue.AccessKeyLetter = keyLetter Then
-                If componentValue.IsFocusable Then
-                    If Not trapped Or Left$(componentValue.ComponentId, 4) = "mdl_" Then
-                        ReDimUI.DispatchShape componentValue.ShapeName
-                        ActivateAccessKey = True
-                        Exit Function
-                    End If
+            If declared Then
+                If Not trapped Or Left$(componentValue.ComponentId, 4) = "mdl_" Then
+                    ReDimUI.DispatchShape componentValue.ShapeName
+                    ActivateDeclared = True
+                    Exit Function
                 End If
             End If
         End If
@@ -8374,11 +8320,7 @@ Private Sub CommitTransferChange(ByVal hostApp As ReDimUI)
     If LenB(mWritesToKey) > 0 Then
         WriteOwnKey hostApp, JoinedValues(mChosenItems, ", ")
     End If
-    If LenB(mClickProc) > 0 Then
-        On Error Resume Next
-        Application.Run mClickProc
-        On Error GoTo 0
-    End If
+    RunChangeHandler hostApp
 End Sub
 
 Friend Function CanClick() As Boolean
@@ -8618,6 +8560,15 @@ Friend Sub RunClickBehavior()
             Exit Sub
     End Select
     RunClickHandlers hostApp
+End Sub
+
+' A committed change's OnChange: a field's commit, a slider's release, a
+' transfer list's move. It runs with the control as ReDimUI.Sender, and
+' a failure goes to the app's error sink, where these paths once
+' swallowed it with no trace.
+Private Sub RunChangeHandler(ByVal hostApp As ReDimUI)
+    If LenB(mClickProc) = 0 Then Exit Sub
+    ReDimUI.RunHandlerAs hostApp, Me, mClickProc
 End Sub
 
 ' What a click, or a keyboard pick standing in for one, runs after the
@@ -10769,9 +10720,7 @@ Private Function SelectFilterKey(ByVal hostApp As ReDimUI, ByVal keyText As Stri
     Dim stepDirection As Long
     Dim pickedItem As Long
 
-    typedChar = keyText
-    If typedChar = "{APOS}" Then typedChar = "'"
-    If typedChar = "{QUOTE}" Then typedChar = """"
+    typedChar = TypedKeyChar(keyText)
     If typedChar = "{BS}" Then
         If Not mSelectOpen Or LenB(mSelectFilter) = 0 Then Exit Function
         SetSelectFilter Left$(mSelectFilter, Len(mSelectFilter) - 1)
@@ -12740,15 +12689,21 @@ Private Sub SetTableFilter(ByVal filterText As String)
     Touch
 End Sub
 
+' A typed key as the character it types: the two quote keys, which the
+' key table names since OnKey cannot pass them bare, and any other key
+' as itself.
+Private Function TypedKeyChar(ByVal keyText As String) As String
+    Select Case keyText
+        Case "{APOS}": TypedKeyChar = "'"
+        Case "{QUOTE}": TypedKeyChar = """"
+        Case Else: TypedKeyChar = keyText
+    End Select
+End Function
+
 ' Typing while the table has the keys builds its filter; Backspace
 ' takes a letter off.
 Private Function TypeTableFilter(ByVal keyText As String) As Boolean
-    Select Case keyText
-        Case "{APOS}"
-            keyText = "'"
-        Case "{QUOTE}"
-            keyText = """"
-    End Select
+    keyText = TypedKeyChar(keyText)
     If keyText = "{BS}" Then
         If LenB(mTableFilter) = 0 Then Exit Function
         SetTableFilter Left$(mTableFilter, Len(mTableFilter) - 1)
@@ -15907,12 +15862,7 @@ End Function
 Private Function TypeListFilter(ByVal keyText As String) As Boolean
     Dim filterText As String
 
-    Select Case keyText
-        Case "{APOS}"
-            keyText = "'"
-        Case "{QUOTE}"
-            keyText = """"
-    End Select
+    keyText = TypedKeyChar(keyText)
     If mKind = KIND_TRANSFER Then
         filterText = PanelFilter(mKeyPanel)
     Else
@@ -16387,11 +16337,7 @@ Friend Sub SlideToFraction( _
         Touch
     End If
     If fireChange Then
-        If LenB(mClickProc) > 0 Then
-            On Error Resume Next
-            Application.Run mClickProc
-            On Error GoTo 0
-        End If
+        RunChangeHandler hostApp
     End If
 End Sub
 
@@ -17326,11 +17272,7 @@ Friend Sub EndSlideDrag()
     mSlideSuppressUntilMs = GetTickCount64() + 400
     Touch
     If mValue <> mSlideValueAtEngage Then
-        If LenB(mClickProc) > 0 Then
-            On Error Resume Next
-            Application.Run mClickProc
-            On Error GoTo 0
-        End If
+        RunChangeHandler OwnerApp
     End If
 End Sub
 
@@ -18320,11 +18262,7 @@ Friend Sub BlurField(ByVal hostApp As ReDimUI, ByVal keepEdits As Boolean)
                     WriteOwnKey hostApp, mText
                 End If
             End If
-            If LenB(mClickProc) > 0 Then
-                On Error Resume Next
-                Application.Run mClickProc
-                On Error GoTo 0
-            End If
+            RunChangeHandler hostApp
         End If
     Else
         mText = mFieldTextAtFocus
@@ -18491,12 +18429,9 @@ Friend Sub HandleKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
             StepHistory True
         Case "{REDO}"
             StepHistory False
-        Case "{APOS}"
+        Case "{APOS}", "{QUOTE}"
             RecordUndo "type"
-            ReplaceSelection "'"
-        Case "{QUOTE}"
-            RecordUndo "type"
-            ReplaceSelection """"
+            ReplaceSelection TypedKeyChar(keyText)
         Case Else
             ' Named keys a field has no use for are dropped, not typed.
             If Len(keyText) > 1 And Left$(keyText, 1) = "{" Then Exit Sub

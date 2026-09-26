@@ -85,7 +85,10 @@
 - A handler failure names the procedure and what ran it ("ReDim handler
   error 13 in Orders.Save for component 'save': ..."), and without an
   `OnError` sink it also goes to the Immediate window, since the status
-  bar loses it at the next message.
+  bar loses it at the next message. An `OnChange` that fails from a
+  field's commit, a slider's release, or a transfer list's move now
+  reaches the sink too, with the control as `ReDimUI.Sender`; those
+  paths dropped the error without a trace.
 - A `RadioGroup` takes Page Up, Page Down, and letters, as a `SelectBox`
   does, and a `SlideBar` takes typed digits, as a `Stepper` does.
 - A `CheckList` or `TransferList` seeds its `WritesTo` key with its
