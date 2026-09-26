@@ -1819,3 +1819,20 @@ def test_field_edits(run_widgets):
     assert facts["errorCellReads"] == "#N/A/#N/A", "an error cell reads as the cell shows it"
     assert facts["breaksAsLf"] == "True", "line breaks from code become LF"
     assert facts["maskedRefusesCombo"] == "True", "Masked takes a TextInput alone"
+
+
+def test_ranges_and_values(run_widgets):
+    facts = parse_transcript(run_widgets("TestRangesAndValues"))
+    assert facts["opensInRange"] == "2026-03-10", (
+        "a calendar holding a date outside DateRange opens on the nearest day it allows"
+    )
+    assert facts["reversedRefused"] == "True", "DateRange refuses a latest day before the earliest"
+    assert facts["hiddenCloses"] == "True", "a DatePicker hidden open comes back closed"
+    assert facts["narrowedClamps"] == "5/True", (
+        "a Stepper stays inside a narrowed SliderRange and mutes the button at its end"
+    )
+    assert facts["hugeValue"] == "True/5", "a Value past the range draws, clamped"
+    assert facts["endReachesMax"] == "10/10", "End reaches the maximum whatever the step"
+    assert facts["progressAlt"] == "Progress, 100 percent"
+    assert facts["pulsed"] == "True"
+    assert facts["skeletonSettles"] == "True", "a Skeleton settles flat when motion stops"

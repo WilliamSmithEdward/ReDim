@@ -4841,8 +4841,12 @@ Private Sub TickHold(ByVal nowMs As LongLong, ByVal leftButtonDown As Boolean)
             End If
             If hitId = mHoldId And hitPart = mHoldPart Then
                 If TryGetComponent(mHoldId, componentValue) Then
-                    componentValue.RepeatPart Me, mHoldPart
-                    mHoldRepeats = mHoldRepeats + 1
+                    ' A control disabled, hidden, or busy since the press,
+                    ' by a handler or a listener, stops repeating.
+                    If componentValue.RepeatsPart(mHoldPart) Then
+                        componentValue.RepeatPart Me, mHoldPart
+                        mHoldRepeats = mHoldRepeats + 1
+                    End If
                 End If
             End If
             mHoldNextMs = nowMs + HoldRepeatMs()
@@ -5212,7 +5216,8 @@ End Property
 Friend Property Get IsTickable() As Boolean
     Select Case mKind
         Case KIND_SPINNER, KIND_TOAST, KIND_SLIDEBAR, KIND_INPUT, KIND_COMBO, _
-            KIND_SELECT, KIND_STEPPER, KIND_TRANSFER, KIND_SKELETON
+            KIND_SELECT, KIND_STEPPER, KIND_TRANSFER, KIND_SKELETON, KIND_TABLE, _
+            KIND_RADIO, KIND_CHECKLIST
             IsTickable = True
         Case KIND_TOGGLE, KIND_TABS
             ' Only while a knob or a tab bar glides.
@@ -5809,16 +5814,25 @@ Public Property Get PickedDate() As Variant
 End Property
 
 ' The earliest and latest days the calendar picks; days outside read
-' muted and take no clicks. A side left out stays open.
+' muted and take no clicks. A side left out stays open. A latest day
+' before the earliest raises, as SliderRange's reversed ends do, where
+' it left every day muted and the arrows dead.
 Public Function DateRange( _
     Optional ByVal earliest As Variant, _
     Optional ByVal latest As Variant _
 ) As ReDimUI
+    Dim earliestDay As Date
+    Dim latestDay As Date
+
     RequireKind KIND_DATE, "DateRange"
-    mDateEarliest = 0
-    mDateLatest = 0
-    If Not IsMissing(earliest) Then mDateEarliest = DayOnly(CDate(earliest))
-    If Not IsMissing(latest) Then mDateLatest = DayOnly(CDate(latest))
+    If Not IsMissing(earliest) Then earliestDay = DayOnly(CDate(earliest))
+    If Not IsMissing(latest) Then latestDay = DayOnly(CDate(latest))
+    If earliestDay <> 0 And latestDay <> 0 And latestDay < earliestDay Then
+        RaiseError ERROR_INVALID_ARGUMENT, "DateRange", _
+            "the latest day must not come before the earliest."
+    End If
+    mDateEarliest = earliestDay
+    mDateLatest = latestDay
     Touch
     Set DateRange = Me
 End Function
@@ -8873,6 +8887,19 @@ Friend Sub Apply( _
 
     RequireRole ROLE_COMPONENT, "Apply"
     ResolveBindings hostApp
+    ' A stepper's or slider's value stays inside SliderRange however it
+    ' was set: a range narrowed under it, or a Value past its ends, which
+    ' overflowed the face's whole number.
+    If mKind = KIND_STEPPER Or mKind = KIND_SLIDEBAR Then
+        If mValue < mSliderMin Then mValue = mSliderMin
+        If mValue > mSliderMax Then mValue = mSliderMax
+    End If
+    ' A control hidden with its list or calendar open closes it, which
+    ' otherwise sprang open again when the control showed.
+    If mSelectOpen And Not mVisible Then
+        mSelectOpen = False
+        mListHighlight = 0
+    End If
     ' Feature steps run only for controls that use the feature: VBA pays
     ' for each procedure's first call in a session, and a cold build
     ' paid for steps that had nothing to do.
@@ -8968,7 +8995,7 @@ Private Function AccessibleDescription() As String
             End If
             If mBusy Then described = described & ", " & Phrase(UI_ALT_BUSY)
         Case KIND_PROGRESS
-            described = Phrase(UI_ALT_PROGRESS, CLng(mValue / 5) * 5)
+            described = Phrase(UI_ALT_PROGRESS, CLng(ProgressPercent() / 5) * 5)
         Case KIND_SPINNER
             described = Phrase(UI_ALT_SPINNER)
         Case KIND_TOGGLE
@@ -9126,10 +9153,9 @@ Private Function TakeStateValue(ByVal hostApp As ReDimUI, ByRef stateValue As Va
             End If
             mChecked = CBool(stateValue)
         Case KIND_STEPPER, KIND_SLIDEBAR
+            ' Apply keeps the value inside the range once bindings resolve.
             If Not IsNumeric(stateValue) Then Exit Function
             mValue = CDbl(stateValue)
-            If mValue < mSliderMin Then mValue = mSliderMin
-            If mValue > mSliderMax Then mValue = mSliderMax
         Case KIND_DATE
             If IsEmpty(stateValue) Or IsNull(stateValue) Then
                 mValue = 0
@@ -10886,9 +10912,7 @@ Private Sub HandleSliderKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
     Dim smallStep As Double
     Dim pageStep As Double
 
-    If mSliderMax <= mSliderMin Then Exit Sub
     smallStep = mSliderStep
-    If smallStep <= 0 Then smallStep = (mSliderMax - mSliderMin) / 100
     pageStep = CLng((mSliderMax - mSliderMin) / 10 / smallStep) * smallStep
     If pageStep < smallStep Then pageStep = smallStep
     If keyText = "{ENTER}" Then
@@ -14007,11 +14031,11 @@ Private Sub OpenCalendar()
     Dim anchorDay As Date
 
     mSelectOpen = True
-    If mValue <> 0 Then
-        anchorDay = CDate(mValue)
-    Else
-        anchorDay = DayClamped(Date)
-    End If
+    ' The held date or today, moved into DateRange: a month with no day
+    ' the range allows had both arrows muted, stranding the mouse there.
+    anchorDay = Date
+    If mValue <> 0 Then anchorDay = CDate(mValue)
+    anchorDay = DayClamped(anchorDay)
     mCalendarMonth = DateSerial(Year(anchorDay), Month(anchorDay), 1)
     mCalendarCursor = anchorDay
     NoteListOpened
@@ -14559,9 +14583,12 @@ Private Sub SyncCalendarWeekdays( _
     Dim dayNo As Long
     Dim weekShape As Shape
 
+    ' Weekday counts from Sunday and WeekdayName from the system's first
+    ' day unless told, so both are told: on a Monday-first system the
+    ' names sat one column off the days.
     For dayNo = 1 To 7
         weekWords = weekWords & vbTab & _
-            Left$(WeekdayName(Weekday(gridStart + dayNo - 1), True), 2)
+            Left$(WeekdayName(Weekday(gridStart + dayNo - 1, vbSunday), True, vbSunday), 2)
     Next dayNo
     weekKey = PartsState(themeValue) & ":" & CStr(cardTop) & ":" & weekWords & _
         ":" & CStr(textSize)
@@ -15345,46 +15372,45 @@ Private Sub ApplyStepper( _
     ByVal hostSheet As Worksheet, _
     ByVal themeValue As ReDimUI _
 )
-    Dim minusButton As Shape
-    Dim plusButton As Shape
-    Dim buttonSize As Double
     Dim minusInk As Long
     Dim plusInk As Long
 
-    If ExtrasCurrent(PartsState(themeValue) & ":" & CStr(mValue) & _
-        ":" & PointerKey()) Then Exit Sub
+    ' The range is in the key: one narrowed to the value's side mutes a
+    ' button though the value held.
+    If ExtrasCurrent(PartsState(themeValue) & ":" & CStr(mValue) & ":" & CStr(mSliderMin) & _
+        ":" & CStr(mSliderMax) & ":" & PointerKey()) Then Exit Sub
     ' A button with no step left in its direction reads muted, as a list
     ' pager with nothing beyond it does.
     minusInk = ResolveDrawnInk(themeValue)
     plusInk = minusInk
     If mValue <= mSliderMin Then minusInk = themeValue.OnMutedColor
     If mValue >= mSliderMax Then plusInk = themeValue.OnMutedColor
-    buttonSize = mHeight
-    PlacePart mainShape, mLeft + buttonSize + 4, mTop, mWidth - 2 * (buttonSize + 4), mHeight
+    PlacePart mainShape, mLeft + mHeight + 4, mTop, mWidth - 2 * (mHeight + 4), mHeight
     mainShape.Visible = BoolToMso(mVisible)
     PaintPart mainShape, themeValue.SurfaceColor, themeValue.BorderColor, 1
     StyleGlyphText mainShape, CStr(CLng(mValue)), ResolveDrawnInk(themeValue), _
         IIf(mFontSize > 0, mFontSize, themeValue.BaseFontSize), themeValue
+    DrawStepButton hostSheet, themeValue, "minus", mLeft, "-", minusInk
+    DrawStepButton hostSheet, themeValue, "plus", mLeft + mWidth - mHeight, "+", plusInk
+End Sub
 
-    Set minusButton = EnsurePartShape(hostSheet, "minus", msoShapeRoundedRectangle)
-    PlacePart minusButton, mLeft, mTop, buttonSize, buttonSize
-    minusButton.Fill.Visible = msoTrue
-    minusButton.Fill.ForeColor.RGB = PointerTint(themeValue.MutedColor, _
-        ResolveDrawnInk(themeValue), "minus")
-    minusButton.Line.Visible = msoFalse
-    StyleGlyphText minusButton, "-", minusInk, _
-        themeValue.BaseFontSize + 2, themeValue
-    ShowPart minusButton, BoolToMso(mVisible)
+' A stepper's minus or plus square: a muted fill, tinted under the
+' pointer, and its glyph in the ink given.
+Private Sub DrawStepButton( _
+    ByVal hostSheet As Worksheet, _
+    ByVal themeValue As ReDimUI, _
+    ByVal partName As String, _
+    ByVal partLeft As Double, _
+    ByVal glyph As String, _
+    ByVal glyphInk As Long _
+)
+    Dim buttonShape As Shape
 
-    Set plusButton = EnsurePartShape(hostSheet, "plus", msoShapeRoundedRectangle)
-    PlacePart plusButton, mLeft + mWidth - buttonSize, mTop, buttonSize, buttonSize
-    plusButton.Fill.Visible = msoTrue
-    plusButton.Fill.ForeColor.RGB = PointerTint(themeValue.MutedColor, _
-        ResolveDrawnInk(themeValue), "plus")
-    plusButton.Line.Visible = msoFalse
-    StyleGlyphText plusButton, "+", plusInk, _
-        themeValue.BaseFontSize + 2, themeValue
-    ShowPart plusButton, BoolToMso(mVisible)
+    Set buttonShape = EnsurePartShape(hostSheet, partName, msoShapeRoundedRectangle)
+    PlacePart buttonShape, partLeft, mTop, mHeight, mHeight
+    PaintPart buttonShape, PointerTint(themeValue.MutedColor, ResolveDrawnInk(themeValue), partName)
+    StyleGlyphText buttonShape, glyph, glyphInk, themeValue.BaseFontSize + 2, themeValue
+    ShowPart buttonShape, BoolToMso(mVisible)
 End Sub
 
 Private Sub ApplyToggleKnob( _
@@ -15525,6 +15551,15 @@ Private Sub TickGlide(ByVal hostSheet As Worksheet, ByVal elapsedMs As Long)
     End With
 End Sub
 
+' A progress bar's value as the percent it shows, from 0 to 100; its
+' alternative text reads the same, where it read "150 percent" over a
+' full bar.
+Private Function ProgressPercent() As Double
+    ProgressPercent = mValue
+    If ProgressPercent < 0 Then ProgressPercent = 0
+    If ProgressPercent > 100 Then ProgressPercent = 100
+End Function
+
 Private Sub ApplyProgressFill( _
     ByVal hostSheet As Worksheet, _
     ByVal themeValue As ReDimUI _
@@ -15533,9 +15568,7 @@ Private Sub ApplyProgressFill( _
     Dim clamped As Double
 
     Set fillPart = EnsurePartShape(hostSheet, "fill", msoShapeRectangle)
-    clamped = mValue
-    If clamped < 0 Then clamped = 0
-    If clamped > 100 Then clamped = 100
+    clamped = ProgressPercent()
     fillPart.Left = mLeft
     fillPart.Top = mTop
     fillPart.Height = mHeight
@@ -16420,7 +16453,6 @@ Private Sub SyncSlideBubble( _
 End Sub
 
 Private Function SlideFraction() As Double
-    If mSliderMax <= mSliderMin Then Exit Function
     SlideFraction = (mValue - mSliderMin) / (mSliderMax - mSliderMin)
     If SlideFraction < 0 Then SlideFraction = 0
     If SlideFraction > 1 Then SlideFraction = 1
@@ -16439,14 +16471,14 @@ Friend Sub SlideToFraction( _
     If fraction < 0 Then fraction = 0
     If fraction > 1 Then fraction = 1
     rawValue = mSliderMin + fraction * (mSliderMax - mSliderMin)
-    If mSliderStep > 0 Then
-        snapped = mSliderMin + _
-            CLng((rawValue - mSliderMin) / mSliderStep) * mSliderStep
-    Else
-        snapped = rawValue
+    ' The nearest step, halves rounding up, or the far end itself when it
+    ' is nearer: a step that does not divide the range stopped End and a
+    ' drag to the end short of the maximum, and CLng's rounding to even
+    ' stopped some ranges a step shorter still.
+    snapped = mSliderMin + Int((rawValue - mSliderMin) / mSliderStep + 0.5) * mSliderStep
+    If snapped > mSliderMax Or mSliderMax - rawValue < Abs(rawValue - snapped) Then
+        snapped = mSliderMax
     End If
-    If snapped < mSliderMin Then snapped = mSliderMin
-    If snapped > mSliderMax Then snapped = mSliderMax
     ' A value that snaps back to where it was is no change: a click on
     ' the thumb, or a typed digit between steps, fires nothing.
     If snapped = mValue Then Exit Sub
@@ -16945,11 +16977,22 @@ Friend Sub ClearTooltipPart()
     On Error GoTo 0
 End Sub
 
-' True for a visible, enabled stepper or transfer list, whose presses the
-' pump watches while its sheet is in front.
+' True for a visible, enabled control with a part a held press repeats,
+' whose presses the pump watches while its sheet is in front: a stepper,
+' a transfer list, and a table, radio group, or check list while its
+' pagers show. An open list or calendar keeps a watch of its own. The
+' table's and lists' pagers repeated only when something else kept the
+' pump running.
 Friend Function NeedsPressWatch() As Boolean
-    If mKind <> KIND_STEPPER And mKind <> KIND_TRANSFER Then Exit Function
-    NeedsPressWatch = mVisible And mEnabled And Not mBusy
+    If Not mVisible Or Not mEnabled Or mBusy Then Exit Function
+    Select Case mKind
+        Case KIND_STEPPER, KIND_TRANSFER
+            NeedsPressWatch = True
+        Case KIND_TABLE
+            NeedsPressWatch = LenB(mAppliedTableFootSig) > 0 And mAppliedTableFootSig <> "?"
+        Case KIND_RADIO, KIND_CHECKLIST
+            NeedsPressWatch = LenB(mAppliedRowScrollSig) > 0
+    End Select
 End Function
 
 ' The parts a held press repeats.
@@ -19353,7 +19396,11 @@ Friend Function NeedsAnimation() As Boolean
         Case KIND_SPINNER
             NeedsAnimation = mVisible
         Case KIND_SKELETON
-            If mVisible Then NeedsAnimation = Not ReDimUI.MotionReduced
+            ' Motion reduced mid-pulse takes one more frame, to settle on
+            ' the flat fill rather than freeze partway to the surface.
+            If mVisible Then
+                NeedsAnimation = Not ReDimUI.MotionReduced Or mAppliedPulseStep <> 0
+            End If
         Case KIND_TOAST
             NeedsAnimation = (mSlideRemaining > 0 Or mToastExiting)
         Case KIND_TOGGLE, KIND_TABS

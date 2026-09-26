@@ -384,6 +384,27 @@
   state become the field's own, so Up, Down, Home, and End count them;
   End in an empty field, and Up or Down in an empty multi-line one,
   raised error 9 unseen. `Masked` raises on a ComboBox, as documented.
+- A DatePicker holding a date outside its `DateRange` opens on the
+  nearest day the range allows. It opened on the held month, where
+  every day was muted and both month arrows were dead. `DateRange`
+  with its latest day before its earliest raises, as `SliderRange`
+  with reversed ends does. A DatePicker hidden with its calendar open
+  comes back closed, where the calendar sprang open with it. The
+  weekday initials line up with their days when Windows starts the
+  week on Monday; they sat one column off.
+- A Stepper or SlideBar keeps its value inside `SliderRange`: a range
+  narrowed under it left the value outside, with the plus button live,
+  and a `Value` past a Long raised error 6 at every draw. A SlideBar's
+  End and a drag to the far end reach the maximum when the step does
+  not divide the range; they stopped a step short, and rounding to
+  even stopped some ranges two short.
+- A ProgressBar's alternative text reads the clamped percent, where
+  `Value 150` read "150 percent". A Skeleton settles on its flat fill
+  when motion becomes reduced mid-pulse; it froze partway.
+- Holding a table's pager, or a windowed RadioGroup's or CheckList's
+  paging arrow, repeats as documented; it repeated only while something
+  else kept the pump running. A hold stops repeating on a control that
+  turns disabled or busy under it.
 
 ## 1.0.2 - 2026-09-23
 

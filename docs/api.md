@@ -130,7 +130,10 @@ All fluent, all return the component:
   `DisabledReason(text)` says why a disabled control is disabled (see [Pointer](#pointer)).
 - Values: `Value(number)` (progress, slider, picker index), `Checked(flag)`,
   `SliderRange(min, max, step)`, which refuses a maximum at or below the minimum and a step
-  of zero or less.
+  of zero or less. A Stepper's or SlideBar's value stays inside its range: one narrowed
+  under it, or a `Value` past its ends, draws at the nearer end. A SlideBar snaps to the
+  nearest step from the minimum, or to the maximum itself when that is nearer, so its
+  end is always in reach.
 - Item lists (`SelectBox`, `ComboBox`, `RadioGroup`, `TransferList`, `CheckList`):
   `Items("A", "B", ...)` replaces; `ItemsFrom(source)` replaces from a 1D array, a
   Collection, a Range (one item per non-empty cell) or the 2D array its `Value` gives,
@@ -339,8 +342,9 @@ dependencies:
   `OnChange`. `DateRange earliest, latest` limits what picks, with either side left
   out; days outside read muted and take no clicks, the month arrows stop at the range's
   first and last month and read muted there, and the arrow and page keys stop at the
-  range's first and last day, where a calendar opened with no date starts when today lies
-  outside it. `PickDate` sets the date from code
+  range's first and last day, where a calendar opens when the date it holds, or today,
+  lies outside it. A latest day before the earliest raises an error. `PickDate` sets the
+  date from code
   and `Value 0` clears it, both writing nothing and firing nothing, and `PickedDate`
   reads it as a `Date`, or `Empty` while there is none. `BindValue` takes a `Date` or a
   date serial. The calendar is the control's list: one list is open per app, and a

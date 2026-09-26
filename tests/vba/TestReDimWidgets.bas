@@ -6864,3 +6864,79 @@ Public Function TestFieldEdits() As String
     ReDimUI.AutoPump True
     TestFieldEdits = transcript
 End Function
+
+' Ranges and values: a calendar opens inside DateRange, which refuses
+' reversed ends; a Stepper stays inside a SliderRange narrowed under it
+' and past any Value, its button muting at the new end; a SlideBar's End
+' reaches the maximum whatever the step; a DatePicker hidden open comes
+' back closed; a ProgressBar's text reads its clamped percent; and a
+' Skeleton settles flat when motion stops.
+Public Function TestRangesAndValues() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim transcript As String
+
+    ReDimUI.AutoPump False
+    ReDimUI.ReduceMotion False
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "wid93")
+    app.DatePicker("due").AtRect(24, 24, 140, 22).PickDate DateSerial(2026, 1, 15)
+    app.DatePicker("due").DateRange DateSerial(2026, 3, 10), DateSerial(2026, 3, 20)
+    app.Stepper("qty").AtRect(24, 300, 120, 24).SliderRange(0, 10, 1).Value 8
+    app.SlideBar("thirds").AtRect(220, 300, 160, 18).SliderRange(0, 10, 3).Value 0
+    app.SlideBar("fours").AtRect(220, 340, 160, 18).SliderRange(0, 10, 4).Value 0
+    app.ProgressBar("prog").AtRect(24, 340, 160, 10).Value 150
+    app.Skeleton("sk").AtRect 24, 380, 160, 30
+    app.Render
+
+    app.DatePicker("due").Focus
+    RdxKeyChar "{ALTDOWN}"
+    RdxKeyChar "{ENTER}"
+    transcript = "opensInRange=" & Format$(app.DatePicker("due").PickedDate, "yyyy-mm-dd")
+    On Error Resume Next
+    app.DatePicker("due").DateRange DateSerial(2026, 3, 20), DateSerial(2026, 3, 10)
+    transcript = transcript & "|reversedRefused=" & CStr(Err.Number <> 0)
+    Err.Clear
+    On Error GoTo 0
+    ReDimUI.EndKeyboardFocus
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid93_due"
+    app.DatePicker("due").Visible False
+    app.DatePicker("due").Visible True
+    transcript = transcript & "|hiddenCloses=" & CStr(Not ShapeExists(host, "rdm_wid93_due__cr1"))
+
+    app.Stepper("qty").SliderRange 0, 5
+    transcript = transcript & "|narrowedClamps=" & app.Stepper("qty").CurrentValue & "/" & _
+        CStr(InkOf(host, "rdm_wid93_qty__plus") = app.Theme.OnMutedColor)
+    On Error Resume Next
+    app.Stepper("qty").Value 3000000000#
+    transcript = transcript & "|hugeValue=" & CStr(Err.Number = 0) & "/" & _
+        app.Stepper("qty").CurrentValue
+    Err.Clear
+    On Error GoTo 0
+
+    app.SlideBar("thirds").Focus
+    RdxKeyChar "{END}"
+    app.SlideBar("fours").Focus
+    RdxKeyChar "{END}"
+    transcript = transcript & "|endReachesMax=" & app.SlideBar("thirds").CurrentValue & "/" & _
+        app.SlideBar("fours").CurrentValue
+    ReDimUI.EndKeyboardFocus
+
+    transcript = transcript & "|progressAlt=" & host.Shapes("rdm_wid93_prog").AlternativeText
+
+    ReDimUI.PumpOnce
+    Sleep 300
+    ReDimUI.PumpOnce
+    transcript = transcript & "|pulsed=" & CStr( _
+        host.Shapes("rdm_wid93_sk").Fill.ForeColor.RGB <> app.Theme.MutedColor)
+    ReDimUI.ReduceMotion True
+    Sleep 50
+    ReDimUI.PumpOnce
+    transcript = transcript & "|skeletonSettles=" & CStr( _
+        host.Shapes("rdm_wid93_sk").Fill.ForeColor.RGB = app.Theme.MutedColor)
+    ReDimUI.ReduceMotion
+    RdxReleaseKeys
+    ReDimUI.AutoPump True
+    TestRangesAndValues = transcript
+End Function
