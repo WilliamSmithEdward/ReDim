@@ -1058,6 +1058,10 @@ def test_pointer_effects(run_widgets):
     assert facts["buttonHover"] == "True", "a hovered button must tint"
     assert facts["buttonPressed"] == "True"
     assert facts["releaseHover"] == "True"
+    assert facts["tintDefaults"] == "8/16"
+    assert facts["tintNone"] == "True", "WithPointerTint 0 must leave the fill as it is"
+    assert facts["tintStronger"] == "True", "a stronger theme tint must move the fill further"
+    assert facts["tintRefusesRange"] == "True"
     assert facts["crossingNotPressed"] == "True", (
         "a press that went down elsewhere must not press what it crosses"
     )

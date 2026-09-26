@@ -1056,6 +1056,10 @@ Private mThemeBorder As Long
 Private mThemeCanvas As Long
 Private mThemeFontName As String
 Private mThemeFontSize As Double
+' How far PointerEffects moves a fill toward its ink, in percent: while
+' the pointer is on it, and while it is pressed.
+Private mThemeHoverTint As Double
+Private mThemePressTint As Double
 ' The look's number, new with the theme and with each With builder, which
 ' draw keys compare where they compared the theme's address; the factory
 ' counts them out, so no two looks share one.
@@ -17445,8 +17449,9 @@ Friend Sub FollowListPointer(ByVal partName As String)
 End Sub
 
 ' The pointer look of a fill: under PointerEffects it moves toward its
-' ink, 8 percent while the part is hovered and 16 while it is pressed,
-' the state layers Material Design draws.
+' ink by the theme's tints, 8 percent while the part is hovered and 16
+' while it is pressed unless WithPointerTint changed them, the state
+' layers Material Design draws.
 Private Function PointerTint( _
     ByVal baseColor As Long, _
     ByVal inkColor As Long, _
@@ -17455,11 +17460,13 @@ Private Function PointerTint( _
     PointerTint = baseColor
     If Not mHovered Or mHoveredPart <> partName Then Exit Function
     If Not mEnabled Or mBusy Then Exit Function
-    If mHoverPressed Then
-        PointerTint = BlendRgb(baseColor, inkColor, 0.16)
-    Else
-        PointerTint = BlendRgb(baseColor, inkColor, 0.08)
-    End If
+    With OwnerApp.Theme
+        If mHoverPressed Then
+            PointerTint = BlendRgb(baseColor, inkColor, .PressTintPercent / 100)
+        Else
+            PointerTint = BlendRgb(baseColor, inkColor, .HoverTintPercent / 100)
+        End If
+    End With
 End Function
 
 ' True when the pointer is on the part, for looks that are not tints.
@@ -20027,6 +20034,8 @@ Friend Sub ConfigureTheme( _
     mThemeCanvas = canvasRgb
     mThemeFontName = fontFace
     mThemeFontSize = fontPoints
+    mThemeHoverTint = 8
+    mThemePressTint = 16
     mThemeRevision = ReDimUI.NextThemeRevision
 End Sub
 
@@ -20104,6 +20113,14 @@ Public Property Get BaseFontSize() As Double
     BaseFontSize = mThemeFontSize
 End Property
 
+Public Property Get HoverTintPercent() As Double
+    HoverTintPercent = mThemeHoverTint
+End Property
+
+Public Property Get PressTintPercent() As Double
+    PressTintPercent = mThemePressTint
+End Property
+
 Public Function WithPrimary( _
     ByVal primaryRgb As Long, _
     ByVal onPrimaryRgb As Long _
@@ -20158,6 +20175,24 @@ Public Function WithCanvas(ByVal canvasRgb As Long) As ReDimUI
     EditTheme "WithCanvas"
     mThemeCanvas = canvasRgb
     Set WithCanvas = Me
+End Function
+
+' How far PointerEffects moves the fill under the pointer toward its ink,
+' in percent: hoverPercent while the pointer rests on it and pressPercent
+' while it is pressed, 8 and 16 unless set. 0 leaves the fill as it is.
+' A stronger tint lowers the contrast of the words on a tinted fill.
+Public Function WithPointerTint( _
+    ByVal hoverPercent As Double, _
+    ByVal pressPercent As Double _
+) As ReDimUI
+    EditTheme "WithPointerTint"
+    If hoverPercent < 0 Or hoverPercent > 100 Or pressPercent < 0 Or pressPercent > 100 Then
+        RaiseError ERROR_INVALID_ARGUMENT, "WithPointerTint", _
+            "the tints are percents from 0 to 100."
+    End If
+    mThemeHoverTint = hoverPercent
+    mThemePressTint = pressPercent
+    Set WithPointerTint = Me
 End Function
 
 ' =====================================================================

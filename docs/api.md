@@ -19,7 +19,7 @@ names the control that raised it.
 | `ReDimUI.PinPumpCursor pinOn` | Opt-in steady arrow cursor while the pump is armed. Off by default so interactive shapes keep their hover hand; turn on if busy-cursor flicker is visible on your hardware. |
 | `ReDimUI.AutoPump pumpOn` | Turn the wall-clock timer off for deterministic runs. |
 | `ReDimUI.Shutdown` | Kill the pump and forget every app, with its window registration and the back stack. Shapes stay. |
-| `ReDimUI.ThemeLight`, `ThemeDark`, `ThemeHighContrast` | Theme presets, a new theme each call; customize with `WithPrimary(fill, ink)`, `WithSurface(fill, ink)`, `WithMuted(fill, ink)`, `WithStatus(success, danger)`, `WithBorder(rgb)`, `WithCanvas(rgb)`, and `WithFont(face, points)`. High contrast is white and yellow on black, and every pairing the controls draw passes WCAG AA. |
+| `ReDimUI.ThemeLight`, `ThemeDark`, `ThemeHighContrast` | Theme presets, a new theme each call; customize with `WithPrimary(fill, ink)`, `WithSurface(fill, ink)`, `WithMuted(fill, ink)`, `WithStatus(success, danger)`, `WithBorder(rgb)`, `WithCanvas(rgb)`, `WithFont(face, points)`, and `WithPointerTint(hover, press)`, the percents `PointerEffects` moves a fill toward its ink (8 and 16 unless set). High contrast is white and yellow on black, and every pairing the controls draw passes WCAG AA. |
 | `ReDimUI.ThemeSystem` | The Windows look: `ThemeDark` while Windows apps use dark mode and `ThemeLight` otherwise, with the Windows accent color as the primary. The accent moves toward black on the light theme, or white on the dark one, until it clears 3:1 against the surface and 4.5:1 under its ink. Pair it with `ui.FollowSystemTheme` to keep up with changes. |
 | `ReDimUI.IconGlyph(name)` / `IconNames` / `IconFont` | The character that draws a named icon, for text of your own; the list of names (see [Icons](#icons)); and the Windows icon font they draw in, Segoe Fluent Icons where Windows 11 installed it and Segoe MDL2 Assets otherwise. |
 | `theme.ContrastReport` / `ReDimUI.ContrastRatio(foreRgb, backRgb)` | The report lists every color pairing the controls draw with its WCAG ratio, what it needs (4.5:1 for text, 3:1 for edges and the accent), and pass or fail; `ContrastRatio` computes one pair. |
@@ -30,7 +30,8 @@ names the control that raised it.
 A theme answers its tokens, for shapes of your own that should match the controls:
 `PrimaryColor`, `OnPrimaryColor`, `SurfaceColor`, `OnSurfaceColor`, `MutedColor`,
 `OnMutedColor`, `SuccessColor`, `DangerColor`, `WarningColor`, `BorderColor`, `CanvasColor`,
-`FontName`, and `BaseFontSize`, as in `ui.Theme.PrimaryColor`.
+`FontName`, `BaseFontSize`, `HoverTintPercent`, and `PressTintPercent`, as in
+`ui.Theme.PrimaryColor`.
 
 App ids use letters and digits only. Component ids may add single underscores, though not
 at either end. Ids starting with `mdl_` belong to `Confirm` and the command palette; an app
@@ -775,7 +776,9 @@ the pointer at most once a frame and act only while their sheet is in front.
 
 - Hover and press looks, with `ui.PointerEffects`: the fill under the pointer moves
   toward its ink, 8 percent on hover and 16 while the left button that went down on it
-  stays down, the state layers Material Design draws. A press that went down elsewhere
+  stays down, the state layers Material Design draws. The theme holds those two shares:
+  `ReDimUI.ThemeLight.WithPointerTint(12, 24)` makes the looks stronger, and 0 leaves a
+  fill as it is. A stronger tint lowers the contrast of the words on the tinted fill. A press that went down elsewhere
   presses nothing it crosses. Buttons, toggles, select, date, and field faces, stepper
   buttons, a slider's thumb, a transfer list's rows, move buttons, and paging arrows, a
   tab, a calendar's days and month arrows, and a table's headers, rows, and paging arrows

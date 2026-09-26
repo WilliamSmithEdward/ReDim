@@ -3634,6 +3634,13 @@ Private Function FillOf(ByVal host As Worksheet, ByVal shapeName As String) As L
     FillOf = host.Shapes(shapeName).Fill.ForeColor.RGB
 End Function
 
+' How far apart two colors are: the sum of their channels' differences.
+Private Function ColorGap(ByVal firstRgb As Long, ByVal secondRgb As Long) As Long
+    ColorGap = Abs((firstRgb And &HFF&) - (secondRgb And &HFF&)) _
+        + Abs(((firstRgb \ &H100&) And &HFF&) - ((secondRgb \ &H100&) And &HFF&)) _
+        + Abs(((firstRgb \ &H10000) And &HFF&) - ((secondRgb \ &H10000) And &HFF&))
+End Function
+
 ' Pointer effects: the control under the pointer takes a hover tint and a
 ' stronger one while the button that went down on it stays down; parts
 ' answer for themselves (a stepper's plus, a check-list row's box, a
@@ -3673,6 +3680,25 @@ Public Function TestPointerEffects() As String
     ReDimUI.PumpOnce
     transcript = transcript & "|releaseHover=" & _
         CStr(FillOf(host, "rdm_wid44_go") = hoverFill)
+
+    ' The theme holds the shares: none leaves the fill as it is, and a
+    ' stronger one moves it further than the default does.
+    transcript = transcript & "|tintDefaults=" & ReDimUI.ThemeLight.HoverTintPercent & "/" & _
+        ReDimUI.ThemeLight.PressTintPercent
+    app.SetTheme ReDimUI.ThemeLight.WithPointerTint(0, 0)
+    ReDimUI.PumpOnce
+    transcript = transcript & "|tintNone=" & CStr(FillOf(host, "rdm_wid44_go") = baseFill)
+    app.SetTheme ReDimUI.ThemeLight.WithPointerTint(30, 60)
+    ReDimUI.PumpOnce
+    transcript = transcript & "|tintStronger=" & CStr( _
+        ColorGap(FillOf(host, "rdm_wid44_go"), baseFill) > ColorGap(hoverFill, baseFill))
+    On Error Resume Next
+    app.Theme.WithPointerTint 120, 16
+    transcript = transcript & "|tintRefusesRange=" & CStr(Err.Number <> 0)
+    Err.Clear
+    On Error GoTo 0
+    app.SetTheme ReDimUI.ThemeLight
+    ReDimUI.PumpOnce
 
     ' A press that went down elsewhere does not press what it crosses.
     ReDimUI.OverridePointer 600, 300, True

@@ -443,6 +443,11 @@
 - `OnShow` and `OnHide` run with the app as `ReDimUI.SenderApp`, and a
   failure in one reaches `OnError`, where it was dropped without a
   trace.
+- `theme.WithPointerTint hover, press` sets how far `PointerEffects`
+  moves a fill toward its ink, in percent: 8 on hover and 16 while
+  pressed unless set, and 0 leaves the fill as it is. The theme answers
+  them as `HoverTintPercent` and `PressTintPercent`. `PointerEffects`
+  stays off by default.
 
 ## 1.0.2 - 2026-09-23
 
