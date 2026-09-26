@@ -818,7 +818,8 @@ the pointer at most once a frame and act only while their sheet is in front.
 
 Every interactive control takes keyboard focus: buttons, toggles, tick boxes, radio groups,
 steppers, sliders, selects, check lists, transfer lists, tab strips, date pickers, tables,
-images with a click handler, and float fields. Focus comes from the keyboard or from code: Tab and Shift+Tab walk the app's
+images whose click runs something (`OnClick`, `OnClickAsync`, or `NavigatesTo`), and float
+fields. Focus comes from the keyboard or from code: Tab and Shift+Tab walk the app's
 controls, `component.Focus` and `ui.FocusFirst` place it, and a modal takes it. A click
 focuses only a text field, since someone who clicks a button in Excel expects the grid to
 keep the keys.

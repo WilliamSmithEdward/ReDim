@@ -1848,3 +1848,15 @@ def test_layout_follows(run_widgets):
     assert facts["atRangeKeepsHeight"] == "True", "a stack placed At a range keeps its height"
     assert facts["gapCloses"] == "True", "a stack closes the gap InStack \"\" leaves"
     assert facts["switchKeepsWidth"] == "True", "a switch in a stretching stack keeps its width"
+
+
+def test_focus_and_windows(run_widgets):
+    facts = parse_transcript(run_widgets("TestFocusAndWindows"))
+    assert facts["dialogKeepsFocus"] == "True", (
+        "a Confirm a field's OnChange opens as Tab leaves it keeps the focus"
+    )
+    assert facts["closeCommits"] == "abc", "a workbook close commits the field being typed in"
+    assert facts["menuFitsFilter"] == "True", "a filtered menu fits its width to what it shows"
+    assert facts["rowRedrawn"] == "True", "a hand-deleted table row draws in full again"
+    assert facts["navigateActivates"] == "True", "Navigate to the shown window brings it forward"
+    assert facts["imageFocus"] == "True", "an Image that navigates takes focus"

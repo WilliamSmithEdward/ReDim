@@ -935,6 +935,9 @@ Private mListLeft As Double
 Private mListWidth As Double
 Private mListFitOffset As Long
 Private mListFitFace As String
+' The filter the menu was fitted under; typing that brings longer
+' commands into view fits it again.
+Private mListFitFilter As String
 ' Items as a String array (1-based), rebuilt by one For Each after any
 ' change: a VBA Collection read by index walks the list, so loops that
 ' indexed mItems went quadratic on long lists.
@@ -1119,6 +1122,12 @@ Friend Sub HoldForClose()
     End If
     EnsureFactory
     RdxStopPump
+    ' A field being typed in commits, as a click elsewhere would; cleared
+    ' without it, the text stayed on the field with WritesTo and OnChange
+    ' never told, and a cancelled close focused it again from there.
+    On Error Resume Next
+    EndKeyboardFocus
+    On Error GoTo 0
     ClearKeyboardFocus
     mCloseHeld = True
     On Error Resume Next
@@ -1244,6 +1253,9 @@ Friend Sub DispatchShape(ByVal clickedName As String)
     Dim targetAppId As String
     Dim targetComponentId As String
     Dim targetPart As String
+    Dim focusApp As ReDimUI
+    Dim commitError As Long
+    Dim commitDescription As String
 
     If Not IsFactory(Me) Then
         ReDimUI.DispatchShape clickedName
@@ -1275,7 +1287,19 @@ Friend Sub DispatchShape(ByVal clickedName As String)
             Or mFocusComponentId <> targetComponentId Then
             If Not componentValue.IsFloatField _
                 And Left$(targetComponentId, 4) <> "mdl_" Then
+                ' A listener on the field's key that fails as it commits
+                ' goes to its app's sink, and the click goes on; it went
+                ' nowhere, and took the click with it.
+                Set focusApp = FindKeyed(mApps, mFocusAppId)
+                On Error Resume Next
                 EndKeyboardFocus
+                commitError = Err.Number
+                commitDescription = Err.Description
+                On Error GoTo 0
+                If commitError <> 0 And Not focusApp Is Nothing Then
+                    focusApp.ReportAppError HandlerFailureText(Nothing, vbNullString, _
+                        commitError, commitDescription)
+                End If
             End If
         End If
     End If
@@ -1390,12 +1414,15 @@ Friend Sub SetKeyboardFocus(ByVal hostApp As ReDimUI, ByVal componentValue As Re
     Dim previousComponent As ReDimUI
     Dim leaveError As Long
     Dim leaveDescription As String
+    Dim focusBefore As String
+    Dim focusTaken As Boolean
 
     If Not IsFactory(Me) Then
         ReDimUI.SetKeyboardFocus hostApp, componentValue
         Exit Sub
     End If
     EnsureFactory
+    focusBefore = mFocusAppId & "|" & mFocusComponentId
     If LenB(mFocusComponentId) > 0 Then
         Set previousApp = FindKeyed(mApps, mFocusAppId)
         If Not previousApp Is Nothing Then
@@ -1415,13 +1442,23 @@ Friend Sub SetKeyboardFocus(ByVal hostApp As ReDimUI, ByVal componentValue As Re
             End If
         End If
     End If
-    mFocusAppId = hostApp.AppId
-    mFocusComponentId = componentValue.ComponentId
-    mCaretBlinkMs = SystemCaretBlinkMs()
-    ' Keys are captured only while the app's sheet is in front: a dialog
-    ' raised on a sheet behind must not swallow typing on the one in view.
-    SyncKeyCapture
-    RequestPump
+    ' A handler the commit ran may have given focus elsewhere, as a
+    ' Confirm does to its OK, or unmounted the app asking for it; either
+    ' stands, where focus went on to a control under the dialog, or to a
+    ' dead app with the keys still bound.
+    If LenB(mFocusComponentId) > 0 Then
+        focusTaken = (mFocusAppId & "|" & mFocusComponentId <> focusBefore)
+    End If
+    If Not focusTaken And HasApp(hostApp.AppId) Then
+        mFocusAppId = hostApp.AppId
+        mFocusComponentId = componentValue.ComponentId
+        mCaretBlinkMs = SystemCaretBlinkMs()
+        ' Keys are captured only while the app's sheet is in front: a
+        ' dialog raised on a sheet behind must not swallow typing on the
+        ' one in view.
+        SyncKeyCapture
+        RequestPump
+    End If
     ' The new control has the focus and draws as focused; what failed in
     ' the old one's commit goes to its app's error sink.
     If leaveError <> 0 Then
@@ -2054,13 +2091,17 @@ Friend Sub TickAll(Optional ByVal forceWork As Boolean = False)
         runWork = True
         mWorkDebtMs = 0
     Else
+        ' A frame counts 250 ms at most, clamped before CLng: after the
+        ' pump stood still for 25 days the gap overflowed a Long at every
+        ' frame, and the pump stopped for faults each time it started.
         If mLastTickPreciseMs = 0 Then
             elapsedMs = 16
+        ElseIf nowPreciseMs - mLastTickPreciseMs > 250 Then
+            elapsedMs = 250
         Else
             elapsedMs = CLng(nowPreciseMs - mLastTickPreciseMs)
         End If
         If elapsedMs < 1 Then elapsedMs = 1
-        If elapsedMs > 250 Then elapsedMs = 250
         mWorkDebtMs = mWorkDebtMs + elapsedMs
         If mWorkDebtMs >= 50 Then
             runWork = True
@@ -2403,7 +2444,13 @@ Private Sub NavigateCore(ByVal targetAppId As String, ByVal pushCurrent As Boole
     ' App ids ignore case; the windows list and the back stack hold each
     ' as it was mounted, so the target is compared in that spelling.
     targetAppId = targetApp.AppId
-    If mActiveWindowId = targetAppId Then Exit Sub
+    ' The window shown already comes to the front, as after the user went
+    ' to a sheet that is no window, and nothing else moves.
+    If mActiveWindowId = targetAppId Then
+        targetApp.Sheet.Visible = xlSheetVisible
+        targetApp.Sheet.Activate
+        Exit Sub
+    End If
     previousId = mActiveWindowId
     targetApp.Sheet.Visible = xlSheetVisible
     targetApp.Sheet.Activate
@@ -4446,9 +4493,48 @@ Public Sub HotKey(ByVal keyCode As String, ByVal handlerProc As String)
 End Sub
 
 Public Sub ClearHotKeys()
+    Dim hotKeyEntry As Variant
+
     RequireRole ROLE_APP, "ClearHotKeys"
     HoldHotKeys True
+    ' A key another app binds too, as two apps' CommandPalette each bind
+    ' Ctrl+Shift+P, goes back to that app, where unmounting one left the
+    ' key with Excel for both.
+    If Not mHotKeys Is Nothing Then
+        For Each hotKeyEntry In mHotKeys
+            ReDimUI.RebindHotKeyElsewhere CStr(hotKeyEntry(0)), mAppId
+        Next hotKeyEntry
+    End If
     Set mHotKeys = New Collection
+End Sub
+
+Friend Sub RebindHotKeyElsewhere(ByVal keyCode As String, ByVal releasingAppId As String)
+    Dim appValue As ReDimUI
+
+    If Not IsFactory(Me) Then
+        ReDimUI.RebindHotKeyElsewhere keyCode, releasingAppId
+        Exit Sub
+    End If
+    For Each appValue In mApps
+        If StrComp(appValue.AppId, releasingAppId, vbTextCompare) <> 0 Then
+            appValue.RebindHotKey keyCode
+        End If
+    Next appValue
+End Sub
+
+' Binds the key again when this app holds it.
+Friend Sub RebindHotKey(ByVal keyCode As String)
+    Dim hotKeyEntry As Variant
+
+    If mHotKeys Is Nothing Then Exit Sub
+    For Each hotKeyEntry In mHotKeys
+        If StrComp(CStr(hotKeyEntry(0)), keyCode, vbTextCompare) = 0 Then
+            On Error Resume Next
+            Application.OnKey keyCode, CStr(hotKeyEntry(1))
+            On Error GoTo 0
+            Exit Sub
+        End If
+    Next hotKeyEntry
 End Sub
 
 ' A workbook close lets the app's hot keys go before its code unloads,
@@ -13424,6 +13510,7 @@ Private Sub SyncTableRow( _
     Dim lookKey As String
     Dim priorParts() As String
     Dim priorLook() As String
+    Dim partMade As Boolean
     Dim rowShape As Shape
     Dim colNo As Long
 
@@ -13440,8 +13527,10 @@ Private Sub SyncTableRow( _
     If mAppliedTableRowStates(slotNo) = frameKey & Chr$(3) & lookKey Then Exit Sub
     priorParts = Split(mAppliedTableRowStates(slotNo) & Chr$(3), Chr$(3))
     mAppliedTableRowStates(slotNo) = frameKey & Chr$(3) & lookKey
-    Set rowShape = EnsurePartShape(hostSheet, "tr" & slotNo, msoShapeRectangle)
-    If priorParts(0) = frameKey Then
+    ' A row made anew, as after a hand deleted it, draws in full; its old
+    ' state only said what the lost shape had.
+    Set rowShape = EnsurePartShape(hostSheet, "tr" & slotNo, msoShapeRectangle, partMade)
+    If priorParts(0) = frameKey And Not partMade Then
         priorLook = Split(priorParts(1) & Chr$(2) & Chr$(2), Chr$(2))
         If priorLook(1) <> CStr(fillRgb) Then
             rowShape.Fill.Visible = BoolToMso(fillRgb >= 0)
@@ -13458,7 +13547,7 @@ Private Sub SyncTableRow( _
     PlacePart rowShape, mLeft + 1, mTop + 1 + slotNo * rowPitch, mWidth - 2, rowPitch
     PaintPart rowShape, fillRgb, themeValue.BorderColor, 0.5
     StyleTextPart rowShape, rowWords, msoAlignLeft, textSize, False, inkRgb, themeValue
-    If Split(priorParts(0) & Chr$(1), Chr$(1))(0) <> layoutKey Then
+    If Split(priorParts(0) & Chr$(1), Chr$(1))(0) <> layoutKey Or partMade Then
         ClearTabStops rowShape
         With rowShape.TextFrame2.TextRange.ParagraphFormat.TabStops
             If emptyNote Then
@@ -14669,6 +14758,7 @@ Private Sub SyncCalendarPart( _
     Dim priorParts() As String
     Dim priorLook() As String
     Dim partShape As Shape
+    Dim partMade As Boolean
 
     frameKey = CStr(themeValue.ThemeRevision) & ":" & CStr(partLeft) & ":" & CStr(partTop) & _
         ":" & CStr(partWidth) & ":" & CStr(partHeight) & ":" & CStr(textSize) & ":" & _
@@ -14678,8 +14768,8 @@ Private Sub SyncCalendarPart( _
     If mAppliedRowStates(stateSlot) = frameKey & Chr$(3) & lookKey Then Exit Sub
     priorParts = Split(mAppliedRowStates(stateSlot) & Chr$(3), Chr$(3))
     mAppliedRowStates(stateSlot) = frameKey & Chr$(3) & lookKey
-    Set partShape = EnsurePartShape(hostSheet, partName, msoShapeRoundedRectangle)
-    If priorParts(0) = frameKey Then
+    Set partShape = EnsurePartShape(hostSheet, partName, msoShapeRoundedRectangle, partMade)
+    If priorParts(0) = frameKey And Not partMade Then
         priorLook = Split(priorParts(1) & String$(5, Chr$(2)), Chr$(2))
         If priorLook(1) <> CStr(fillRgb) Then
             partShape.Fill.Visible = BoolToMso(fillRgb >= 0)
@@ -17778,7 +17868,8 @@ Private Sub SyncDropList( _
     If wanted = 0 Then
         mListWidth = 0
     ElseIf mIsMenu And (mListWidth = 0 Or mListFitOffset <> mListOffset _
-        Or mListFitFace <> CStr(mLeft) & ":" & CStr(mWidth)) Then
+        Or mListFitFace <> CStr(mLeft) & ":" & CStr(mWidth) _
+        Or mListFitFilter <> mSelectFilter) Then
         FitMenuWidth hostSheet, wanted
         ' The up pager drew before the rows; it follows the fitted width.
         SyncListPager hostSheet, themeValue, "optu", ChrW(9650), _
@@ -17945,6 +18036,7 @@ Private Sub FitMenuWidth(ByVal hostSheet As Worksheet, ByVal rowTotal As Long)
     mListWidth = fitWidth
     mListFitOffset = mListOffset
     mListFitFace = faceKey
+    mListFitFilter = mSelectFilter
     If Abs(fitLeft - drawnLeft) < 0.01 And Abs(fitWidth - drawnWidth) < 0.01 Then Exit Sub
     For idx = 1 To rowTotal
         With hostSheet.Shapes(ShapeName & PART_SEPARATOR & "opt" & idx)
@@ -18233,19 +18325,25 @@ Friend Function TakesShortcut() As Boolean
         Case KIND_INPUT, KIND_COMBO
             TakesShortcut = IsFloatField()
         Case KIND_IMAGE, KIND_LABEL, KIND_CARD
-            TakesShortcut = (LenB(mClickProc) > 0 Or LenB(mAsyncClickProc) > 0 _
-                Or LenB(mNavTargetId) > 0)
+            TakesShortcut = ClickRunsSomething()
     End Select
+End Function
+
+' Whether a click on the control runs anything: OnClick, OnClickAsync, or
+' NavigatesTo.
+Private Function ClickRunsSomething() As Boolean
+    ClickRunsSomething = LenB(mClickProc) > 0 Or LenB(mAsyncClickProc) > 0 _
+        Or LenB(mNavTargetId) > 0
 End Function
 
 ' Kinds that take keyboard focus: every interactive control, a text
 ' field only when it floats (a cell-backed one lives in the grid), and
-' an image only when it has a click handler.
+' an image only when a click on it runs something, an OnClickAsync or a
+' NavigatesTo as well as an OnClick.
 Friend Function IsFocusable() As Boolean
     If Not mVisible Or Not mEnabled Or mBusy Then Exit Function
-    ' An image takes focus when a click on it does something.
     If mKind = KIND_IMAGE Then
-        IsFocusable = (LenB(mClickProc) > 0)
+        IsFocusable = ClickRunsSomething()
     Else
         IsFocusable = IsInteractiveKind()
     End If

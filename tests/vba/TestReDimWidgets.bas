@@ -51,6 +51,11 @@ Public Sub RecordCommand()
     gLastCommand = ReDimUI.Sender.LastCommand
 End Sub
 
+' A field's OnChange that asks before going on, as a form's might.
+Public Sub ConfirmOnChange()
+    ReDimUI.SenderApp.Confirm "Sure?", "Keep this value?"
+End Sub
+
 ' An app command's handler: the sender app names it.
 Public Sub RecordAppCommand()
     gCommandCount = gCommandCount + 1
@@ -6990,4 +6995,91 @@ Public Function TestLayoutFollows() As String
         Abs(host.Shapes("rdm_wid94_tg").Width - 44) < 0.5)
     ReDimUI.AutoPump True
     TestLayoutFollows = transcript
+End Function
+
+' Focus and windows: a dialog a field's OnChange opens as Tab leaves it
+' keeps the focus; an Image that navigates takes focus; Navigate to the
+' window shown brings its sheet forward; a close commits the field being
+' typed in; a filtered menu fits its width to the commands it shows; and
+' a table row deleted by hand draws in full when it next changes.
+Public Function TestFocusAndWindows() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim transcript As String
+    Dim priorEvents As Boolean
+    Dim cmdNo As Long
+
+    ReDimUI.AutoPump False
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "wid95")
+    app.AsWindow
+    app.TextInput("f").AtRect(24, 24, 160, 22).OnChange "TestReDimWidgets.ConfirmOnChange"
+    app.Button("b").AtRect(24, 60, 100, 26).Text "Next"
+    app.TextInput("typed").AtRect(24, 100, 160, 22).WritesTo "typedState"
+    app.Table("t").AtRect(24, 140, 260, 100).Columns "Name", "Qty"
+    app.Table("t").AddRow "Pear", 3
+    app.Table("t").AddRow "Fig", 7
+    app.MenuButton("mb").AtRect(320, 24, 80, 24).Text("Menu").Filterable
+    For cmdNo = 1 To 9
+        app.MenuButton("mb").AddCommand "C" & cmdNo
+    Next cmdNo
+    app.MenuButton("mb").AddCommand "Export everything to a spreadsheet"
+    app.Render
+
+    app.TextInput("f").Focus
+    TypeText "x"
+    RdxKeyChar "{TAB}"
+    transcript = "dialogKeepsFocus=" & CStr(ReDimUI.IsComponentFocused("wid95", "mdl_ok"))
+    app.CloseModal
+    ReDimUI.EndKeyboardFocus
+
+    app.TextInput("typed").Focus
+    TypeText "abc"
+    ReDimUI.HoldForClose
+    transcript = transcript & "|closeCommits=" & CStr(app.State("typedState"))
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid95_b"
+
+    ' The menu opens fitted to its short first page, and the filter then
+    ' brings the long command to its first row.
+    app.MenuButton("mb").Focus
+    RdxKeyChar "{DOWN}"
+    RdxKeyChar "e"
+    If ShapeExists(host, "rdm_wid95_mb__opt1") Then
+        transcript = transcript & "|menuFitsFilter=" & CStr( _
+            host.Shapes("rdm_wid95_mb__opt1").Width > 150)
+    Else
+        transcript = transcript & "|menuFitsFilter=noRow"
+    End If
+    RdxKeyChar "{ESC}"
+    RdxKeyChar "{ESC}"
+    ReDimUI.EndKeyboardFocus
+
+    ' A row keeps the state it diffs against through Render; a change to
+    ' its look draws it again, in full when its shape had to be made anew.
+    If ShapeExists(host, "rdm_wid95_t__tr1") Then host.Shapes("rdm_wid95_t__tr1").Delete
+    app.Table("t").Value 1
+    If ShapeExists(host, "rdm_wid95_t__tr1") Then
+        transcript = transcript & "|rowRedrawn=" & CStr( _
+            InStr(host.Shapes("rdm_wid95_t__tr1").TextFrame2.TextRange.Text, "Pear") > 0 _
+            And host.Shapes("rdm_wid95_t__tr1").Width > 100)
+    Else
+        transcript = transcript & "|rowRedrawn=noRow"
+    End If
+
+    ReDimUI.Navigate "wid95"
+    priorEvents = Application.EnableEvents
+    Application.EnableEvents = True
+    NewCanvas
+    ReDimUI.Navigate "wid95"
+    transcript = transcript & "|navigateActivates=" & CStr(ActiveSheet Is host)
+    Application.EnableEvents = priorEvents
+
+    app.Image("pic").AtRect(420, 120, 40, 40).NavigatesTo "wid95"
+    app.Image("pic").Focus
+    transcript = transcript & "|imageFocus=" & CStr(ReDimUI.IsComponentFocused("wid95", "pic"))
+    ReDimUI.EndKeyboardFocus
+    RdxReleaseKeys
+    ReDimUI.AutoPump True
+    TestFocusAndWindows = transcript
 End Function

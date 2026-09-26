@@ -418,6 +418,28 @@
   stretching stack keeps its own width, where the switch ran the full
   width with its caption hanging past the stack. A circle through
   `InStack` names `InStack` in its error.
+- A `Confirm` that a field's `OnChange` opens as Tab or a click leaves
+  the field keeps the focus. Focus went on to the control under the
+  dialog, where Enter answered the dialog unseen; a handler that
+  unmounted the app left focus on a dead app with the keys bound. A
+  listener on the field's key that fails as a click commits it now
+  reaches `OnError`, and the click runs, where both were lost.
+- Closing the workbook commits the field being typed in, as a click
+  elsewhere would. The text stayed on the field with `WritesTo` and
+  `OnChange` never told, and a cancelled close focused it again from
+  there.
+- `Navigate` to the window already shown brings its sheet forward when
+  the user has moved to a sheet that is no window, as documented.
+  Unmounting one of two apps that bind the same hot key, as two apps'
+  `CommandPalette` do, gives the key back to the other rather than to
+  Excel.
+- An Image whose click runs an `OnClickAsync` or `NavigatesTo` takes
+  keyboard focus, as one with `OnClick` does. A Filterable MenuButton
+  fits its width again when a filter brings longer commands into view,
+  where they ran past it. A table row or calendar part deleted by hand
+  draws in full the next time it changes; it came back unstyled. A
+  pump that stood still for 25 days no longer faults at every frame on
+  restart.
 
 ## 1.0.2 - 2026-09-23
 
