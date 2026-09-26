@@ -7181,3 +7181,129 @@ Public Function TestFocusedFaceFits() As String
     ReDimUI.AutoPump True
     TestFocusedFaceFits = transcript
 End Function
+
+' Whether a text part's words stay inside it, between its margins.
+' Office's bound counts the paragraph's end as well, a space wide.
+Private Function TextHeld(ByVal host As Worksheet, ByVal shapeName As String) As Boolean
+    With host.Shapes(shapeName)
+        TextHeld = (.TextFrame2.TextRange.BoundWidth <= _
+            .Width - .TextFrame2.MarginLeft - .TextFrame2.MarginRight + 3.5)
+    End With
+End Function
+
+' Text that must fit is measured in the theme's font: a tab's label stays
+' whole when it fits and a wide one stays in its tab, a table cell of wide
+' letters is cut so the cells after it keep their columns, a cut sorted
+' header keeps its arrow, a badge is as wide as its letters, AutoGrow
+' counts the lines Office draws, list rows are cut to their control, and
+' a drop list is as wide as its longest item.
+Public Function TestTextFits() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim transcript As String
+    Dim rowCells() As String
+    Dim fieldShape As Shape
+    Dim headWords As String
+
+    ReDimUI.AutoPump False
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "wid97")
+    app.Tabs("tn").AtRect(24, 24, 300, 32).Items "Overview", "Settings", "Notifications", "Advanced"
+    app.Tabs("tw").AtRect(24, 70, 400, 32).Items "MMMMMMMM", "Wide", "iiiiiiii"
+    app.Table("tb").AtRect(24, 120, 330, 100).Columns "Name", "Description", "Qty"
+    app.Table("tb").AddRow "Pear", "a short note about pears", 3
+    app.Table("tb").AddRow "WWWWWWW", "WIDE CAPITAL LETTERS HERE", 12
+    app.Table("ts").AtRect(400, 120, 200, 60).Columns "Quantity on hand", "Notes"
+    app.Table("ts").ColumnWidths(70).SortBy 1
+    app.Badge("bw").AtRect(400, 200, 0, 18).Text "WWWW"
+    app.TextInput("ag").AtRect(24, 240, 220, 22).AutoGrow 6
+    app.TextInput("ag").InputValue = _
+        "the quick brown fox jumps over the lazy dog and keeps on running far away"
+    ' The third item is Japanese, which Segoe UI lacks, in a long line.
+    app.RadioGroup("rg").AtRect(280, 240, 140, 75).Items "Short", _
+        "A very long option that runs on and on", _
+        ChrW(&H65E5) & ChrW(&H672C) & ChrW(&H8A9E) & ChrW(&H306E) & ChrW(&H9577) & _
+        ChrW(&H3044) & ChrW(&H9078) & ChrW(&H629E) & ChrW(&H80A2) & ChrW(&H3067) & _
+        ChrW(&H3059) & ChrW(&H3002) & ChrW(&H65E5) & ChrW(&H672C) & ChrW(&H8A9E)
+    app.TransferList("tl").AtRect(24, 300, 360, 120).Items "Short", _
+        "A very long option that runs on and on"
+    app.SelectBox("sb").AtRect(24, 440, 120, 24).Items "Short", _
+        "A very long selection that runs on"
+    app.Render
+
+    transcript = "tabWhole=" & host.Shapes("rdm_wid97_tn__tb3").TextFrame2.TextRange.Text
+    transcript = transcript & "|tabHoldsWide=" & CStr(TextHeld(host, "rdm_wid97_tw__tb1"))
+    rowCells = Split(host.Shapes("rdm_wid97_tb__tr2").TextFrame2.TextRange.Text, vbTab)
+    transcript = transcript & "|cellCut=" & CStr(Right$(rowCells(1), 1) = ChrW(8230))
+    transcript = transcript & "|cellsInColumns=" & CStr(Abs( _
+        host.Shapes("rdm_wid97_tb__tr2").TextFrame2.TextRange.BoundWidth - _
+        host.Shapes("rdm_wid97_tb__tr1").TextFrame2.TextRange.BoundWidth) < 1)
+    headWords = host.Shapes("rdm_wid97_ts__th1").TextFrame2.TextRange.Text
+    transcript = transcript & "|headKeepsArrow=" & CStr(Right$(headWords, 1) = ChrW(9650) _
+        And InStr(headWords, ChrW(8230)) > 0 And TextHeld(host, "rdm_wid97_ts__th1"))
+    transcript = transcript & "|badgeHoldsWide=" & CStr(TextHeld(host, "rdm_wid97_bw"))
+    Set fieldShape = host.Shapes("rdm_wid97_ag")
+    transcript = transcript & "|growLines=" & fieldShape.TextFrame2.TextRange.Lines.Count & "/" & _
+        CStr(Int((fieldShape.Height - 6) / (app.Theme.BaseFontSize * 1.35) + 0.001))
+    transcript = transcript & "|radioRowCut=" & CStr( _
+        Right$(host.Shapes("rdm_wid97_rg__t2").TextFrame2.TextRange.Text, 1) = ChrW(8230) _
+        And TextHeld(host, "rdm_wid97_rg__t2"))
+    transcript = transcript & "|fallbackRowCut=" & CStr( _
+        Right$(host.Shapes("rdm_wid97_rg__t3").TextFrame2.TextRange.Text, 1) = ChrW(8230) _
+        And TextHeld(host, "rdm_wid97_rg__t3"))
+    transcript = transcript & "|transferRowCut=" & CStr( _
+        Right$(host.Shapes("rdm_wid97_tl__al2").TextFrame2.TextRange.Text, 1) = ChrW(8230) _
+        And TextHeld(host, "rdm_wid97_tl__al2"))
+    ReDimUI.DispatchShape "rdm_wid97_sb"
+    transcript = transcript & "|listFitsItem=" & CStr(TextHeld(host, "rdm_wid97_sb__opt2") _
+        And host.Shapes("rdm_wid97_sb__opt1").Width = host.Shapes("rdm_wid97_sb__opt2").Width _
+        And host.Shapes("rdm_wid97_sb__opt2").Width > 120)
+    ReDimUI.DispatchShape "rdm_wid97_sb"
+    ReDimUI.AutoPump True
+    TestTextFits = transcript
+End Function
+
+' A theme font Office spaces loosely keeps every line: Microsoft YaHei's
+' faces show their values, where they read as an ellipsis alone, and in
+' Meiryo an AutoGrow field holds its three lines and a focused multi-line
+' field shows the line being typed.
+Public Function TestTallFontLines() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim transcript As String
+    Dim fieldShape As Shape
+
+    ReDimUI.AutoPump False
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "wid98")
+    app.SetTheme ReDimUI.ThemeLight.WithFont("Microsoft YaHei", 11)
+    app.SelectBox("sb").AtRect(24, 24, 140, 24).Items("North", "South").Value 1
+    app.TextInput("ti").AtRect 24, 60, 140, 24
+    app.TextInput("ti").InputValue = "Ada"
+    app.Render
+    transcript = "faces=" & host.Shapes("rdm_wid98_sb").TextFrame2.TextRange.Text & "/" & _
+        host.Shapes("rdm_wid98_ti").TextFrame2.TextRange.Text
+
+    app.SetTheme ReDimUI.ThemeLight.WithFont("Meiryo", 11)
+    app.TextInput("ag").AtRect(24, 100, 220, 22).AutoGrow 6
+    app.TextInput("ag").InputValue = "one" & vbLf & "two" & vbLf & "three"
+    app.TextInput("ml").AtRect(260, 100, 220, 60).MultiLine
+    app.Render
+    Set fieldShape = host.Shapes("rdm_wid98_ag")
+    transcript = transcript & "|growHolds=" & CStr(fieldShape.TextFrame2.TextRange.BoundHeight <= _
+        fieldShape.Height - 6)
+    app.TextInput("ml").Focus
+    TypeText "one"
+    RdxKeyChar "{ENTER}"
+    TypeText "two"
+    RdxKeyChar "{ENTER}"
+    TypeText "three"
+    Set fieldShape = host.Shapes("rdm_wid98_ml")
+    transcript = transcript & "|typedLineShows=" & CStr(fieldShape.TextFrame2.TextRange _
+        .BoundHeight <= fieldShape.Height - 6 And InStr(fieldShape.TextFrame2.TextRange.Text, _
+        "three") > 0)
+    ReDimUI.EndKeyboardFocus
+    RdxReleaseKeys
+    ReDimUI.AutoPump True
+    TestTallFontLines = transcript
+End Function

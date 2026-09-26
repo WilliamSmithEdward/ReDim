@@ -59,8 +59,8 @@ Private Declare PtrSafe Function ReleaseDC Lib "user32" ( _
     ByVal windowHandle As LongPtr, ByVal deviceContext As LongPtr) As Long
 Private Declare PtrSafe Function GetDeviceCaps Lib "gdi32" ( _
     ByVal deviceContext As LongPtr, ByVal capabilityIndex As Long) As Long
-' Text measuring for a focused field's face, which Office cannot measure
-' before the text is written.
+' Text measuring, for text that must fit before Office lays it out: a
+' focused field's face, wrapped lines, tabs, cells, badges, and rows.
 Private Type RdxTextExtent
     extentX As Long
     extentY As Long
@@ -83,6 +83,9 @@ Private Declare PtrSafe Function DeleteDC Lib "gdi32" ( _
 Private Declare PtrSafe Function GetTextExtentPoint32W Lib "gdi32" ( _
     ByVal deviceContext As LongPtr, ByVal textPointer As LongPtr, ByVal charCount As Long, _
     ByRef textExtent As RdxTextExtent) As Long
+Private Declare PtrSafe Function GetGlyphIndicesW Lib "gdi32" ( _
+    ByVal deviceContext As LongPtr, ByVal textPointer As LongPtr, ByVal charCount As Long, _
+    ByVal glyphPointer As LongPtr, ByVal markFlags As Long) As Long
 Private Declare PtrSafe Function GetAsyncKeyState Lib "user32" ( _
     ByVal virtualKey As Long) As Integer
 Private Declare PtrSafe Function GetCaretBlinkTime Lib "user32" () As Long
@@ -154,6 +157,10 @@ Private Const CLICK_DEBOUNCE_MS As Long = 150
 Private Const UNMAPPABLE_POINTS As Double = -1E+18
 ' The em, in device units, the text measure builds its font at.
 Private Const TEXT_MEASURE_EM As Long = 1000
+' GetGlyphIndicesW's flag that marks a character the font lacks with
+' MISSING_GLYPH.
+Private Const GGI_MARK_NONEXISTING_GLYPHS As Long = 1
+Private Const MISSING_GLYPH As Integer = -1
 ' Points a focused face line leaves free at its right, where the measure
 ' and Office's own layout can part by a little.
 Private Const FACE_FIT_SLACK As Double = 3
@@ -425,6 +432,8 @@ Private mFramePointerY As Double
 Private mMeasureDc As LongPtr
 Private mMeasureFont As LongPtr
 Private mMeasureFontKey As String
+' The factory's line pitches Office gave each font, size, and weight.
+Private mLinePitches As Collection
 ' The caret blink interval Windows reported when a field last took
 ' focus; 0 when the user turned blinking off.
 Private mCaretBlinkMs As Long
@@ -826,6 +835,11 @@ Private mSortDescending As Boolean
 Private mTableOffset As Long
 Private mColumnEdges() As Double
 Private mColumnLayoutKey As String
+' Each data row's cells as cut to their columns, by row number, for the
+' column layout and font in mFittedRowsKey, so a redraw that only moves
+' the selection or the page measures nothing again.
+Private mFittedRows As Collection
+Private mFittedRowsKey As String
 Private mTableRowPitch As Double
 Private mTableSlots As Long
 Private mTableFooterOn As Boolean
@@ -962,15 +976,15 @@ Private mFilterable As Boolean
 Private mSelectFilter As String
 ' Set when the list opened upward for want of room below the face.
 Private mListFlipped As Boolean
-' A menu's rows run as wide as its widest command needs; 0 while the rows
-' take the face's span. The fit holds for the rows paged into view and the
-' button's place and width when it was made.
+' An open list's rows run as wide as its widest row needs; 0 while the
+' rows take the face's span. The fit holds for the rows paged into view
+' and the face's place and width when it was made.
 Private mListLeft As Double
 Private mListWidth As Double
 Private mListFitOffset As Long
 Private mListFitFace As String
-' The filter the menu was fitted under; typing that brings longer
-' commands into view fits it again.
+' The filter the list was fitted under; typing that brings longer rows
+' into view fits it again.
 Private mListFitFilter As String
 ' Items as a String array (1-based), rebuilt by one For Each after any
 ' change: a VBA Collection read by index walks the list, so loops that
@@ -9655,7 +9669,7 @@ Friend Sub EnsureGeometryResolved(ByVal hostSheet As Worksheet)
     mGeometryResolving = True
     On Error GoTo Unwind
     ResolveGeometry hostSheet
-    If mAutoGrowLines > 0 Or mGrowAdded <> 0 Then GrowToText
+    If mAutoGrowLines > 0 Or mGrowAdded <> 0 Then GrowToText hostSheet
     mGeometryResolving = False
     Exit Sub
 
@@ -9681,7 +9695,7 @@ End Property
 
 ' AutoGrow: a multi-line float field's height follows the lines its text
 ' takes, never below the height it was given and never past the cap.
-Private Sub GrowToText()
+Private Sub GrowToText(ByVal hostSheet As Worksheet)
     Dim resolvedSize As Double
     Dim baseHeight As Double
     Dim neededHeight As Double
@@ -9692,10 +9706,10 @@ Private Sub GrowToText()
     If mAutoGrowLines > 0 And mMultiLine And IsFloatField() Then
         resolvedSize = mFontSize
         If resolvedSize <= 0 Then resolvedSize = OwnerApp.Theme.BaseFontSize
-        lineTotal = WrappedLineCount(FaceCharsPerLine(resolvedSize))
+        lineTotal = WrappedLineCount(resolvedSize)
         If lineTotal > mAutoGrowLines Then lineTotal = mAutoGrowLines
-        If lineTotal * FaceLineHeight(resolvedSize) + 6 > neededHeight Then
-            neededHeight = lineTotal * FaceLineHeight(resolvedSize) + 6
+        If lineTotal * FaceLineHeight(hostSheet, resolvedSize) + 6 > neededHeight Then
+            neededHeight = lineTotal * FaceLineHeight(hostSheet, resolvedSize) + 6
         End If
     End If
     mGrowAdded = neededHeight - baseHeight
@@ -9703,27 +9717,77 @@ Private Sub GrowToText()
 End Sub
 
 ' The lines the text takes at rest, where a line longer than the face
-' holds wraps. The height counts them with focus too, though the editing
-' face scrolls a long line instead, so focus never resizes the field.
-Private Function WrappedLineCount(ByVal charsPerLine As Long) As Long
+' holds wraps as Office wraps it, measured in the field's font less a
+' sliver, so a count that errs adds a line rather than hiding one. The
+' height counts them with focus too, though the editing face cuts a
+' long line instead, so focus never resizes the field.
+Private Function WrappedLineCount(ByVal resolvedSize As Double) As Long
     Dim textLines() As String
     Dim lineNo As Long
-    Dim lineLength As Long
+    Dim wrapRoom As Double
+    Dim fontFace As String
 
     If LenB(mText) = 0 Then
         WrappedLineCount = 1
         Exit Function
     End If
+    wrapRoom = mWidth - 6 - FaceMarginRight() - FACE_FIT_SLACK
+    fontFace = OwnerApp.Theme.FontName
     textLines = Split(mText, vbLf)
     For lineNo = LBound(textLines) To UBound(textLines)
-        lineLength = Len(textLines(lineNo))
-        If lineLength <= charsPerLine Then
-            WrappedLineCount = WrappedLineCount + 1
-        Else
-            WrappedLineCount = WrappedLineCount + _
-                (lineLength + charsPerLine - 1) \ charsPerLine
-        End If
+        WrappedLineCount = WrappedLineCount + _
+            WrapLineCount(textLines(lineNo), wrapRoom, fontFace, resolvedSize)
     Next lineNo
+End Function
+
+' The lines one line of text takes wrapped to a width: each breaks after
+' the last space or hyphen that lets it fit, the spaces there hanging
+' past the edge, or inside a word too long for a line of its own.
+Private Function WrapLineCount( _
+    ByVal lineText As String, _
+    ByVal wrapRoom As Double, _
+    ByVal fontFace As String, _
+    ByVal resolvedSize As Double _
+) As Long
+    Dim lineStart As Long
+    Dim lowMark As Long
+    Dim highMark As Long
+    Dim midMark As Long
+    Dim breakAt As Long
+    Dim scanAt As Long
+
+    WrapLineCount = 1
+    lineStart = 1
+    Do While WordsWidth(RTrim$(Mid$(lineText, lineStart)), fontFace, resolvedSize, _
+        mFontBold) > wrapRoom
+        ' The longest stretch from the line's start that fits; a line
+        ' always takes at least one character.
+        lowMark = lineStart
+        highMark = Len(lineText)
+        Do While lowMark < highMark
+            midMark = (lowMark + highMark + 1) \ 2
+            If WordsWidth(RTrim$(Mid$(lineText, lineStart, midMark - lineStart + 1)), fontFace, _
+                resolvedSize, mFontBold) <= wrapRoom Then
+                lowMark = midMark
+            Else
+                highMark = midMark - 1
+            End If
+        Loop
+        breakAt = lowMark
+        If Mid$(lineText, lowMark + 1, 1) <> " " Then
+            For scanAt = lowMark To lineStart Step -1
+                If InStr(" -", Mid$(lineText, scanAt, 1)) > 0 Then
+                    breakAt = scanAt
+                    Exit For
+                End If
+            Next scanAt
+        End If
+        lineStart = breakAt + 1
+        Do While Mid$(lineText, lineStart, 1) = " "
+            lineStart = lineStart + 1
+        Loop
+        WrapLineCount = WrapLineCount + 1
+    Loop
 End Function
 
 Private Function EnsureShape(ByVal hostSheet As Worksheet) As Shape
@@ -10346,14 +10410,15 @@ End Function
 ' an ellipsis when long, so no line wraps), and ellipses at the edges
 ' mark trimmed content above and below. Each line is measured in the
 ' field's font to fit the width, where a width per character stops
-' ordinary text short of the edge and lets wide letters wrap; lines are
-' estimated at 1.35 of the font size.
+' ordinary text short of the edge and lets wide letters wrap, and the
+' rows count at the line height Office gives the font.
 ' The focused field's face: the text with the insertion bar at the
 ' caret (a space while the blink is off, so nothing shifts), windowed
 ' to what fits, with ellipses marking what is cut: the lines around the
 ' caret, and a long caret line trimmed around the caret. Fills mFaceMap,
 ' which selection painting and click-to-caret read.
 Private Function BuildFace( _
+    ByVal hostSheet As Worksheet, _
     ByVal resolvedSize As Double, _
     Optional ByVal ghostText As String _
 ) As String
@@ -10424,7 +10489,7 @@ Private Function BuildFace( _
     firstLine = 1
     lastLine = lineTotal
     If mMultiLine Then
-        maxLines = Int((mHeight - 6) / FaceLineHeight(resolvedSize) + 0.001)
+        maxLines = Int((mHeight - 6) / FaceLineHeight(hostSheet, resolvedSize) + 0.001)
         If maxLines < 1 Then maxLines = 1
         firstLine = caretLine - maxLines + 1
         If firstLine < 1 Then firstLine = 1
@@ -10499,7 +10564,7 @@ Private Sub FitFaceWindow( _
     windowStart = 1
     windowEnd = Len(lineText)
     If windowEnd = 0 Then Exit Sub
-    If FaceTextWidth(lineText, fontFace, resolvedSize) <= faceRoom Then Exit Sub
+    If WordsWidth(lineText, fontFace, resolvedSize, mFontBold) <= faceRoom Then Exit Sub
     windowEnd = 0
     If caretAt > 0 Then
         windowEnd = caretAt + 1
@@ -10548,24 +10613,76 @@ Private Function FaceWindowFits( _
     windowWords = Mid$(lineText, windowStart, windowEnd - windowStart + 1)
     If windowStart > 1 Then windowWords = ChrW(8230) & windowWords
     If windowEnd < Len(lineText) Then windowWords = windowWords & ChrW(8230)
-    FaceWindowFits = (FaceTextWidth(windowWords, fontFace, resolvedSize) <= faceRoom)
+    FaceWindowFits = (WordsWidth(windowWords, fontFace, resolvedSize, mFontBold) <= faceRoom)
 End Function
 
-' The width a face's words take in the field's font, or when they cannot
-' be measured, the estimate of 0.58 of the font size a character.
-Private Function FaceTextWidth( _
-    ByVal faceWords As String, _
+' The width words take in a font, measured, or when they cannot be
+' measured, an estimate of 0.58 of the font size a character.
+Private Function WordsWidth( _
+    ByVal someWords As String, _
     ByVal fontFace As String, _
-    ByVal resolvedSize As Double _
+    ByVal textSize As Double, _
+    ByVal wordsBold As Boolean _
 ) As Double
-    If LenB(faceWords) = 0 Then Exit Function
-    FaceTextWidth = ReDimUI.TextWidthPoints(faceWords, fontFace, resolvedSize, mFontBold)
-    If FaceTextWidth = 0 Then FaceTextWidth = Len(faceWords) * resolvedSize * 0.58
+    If LenB(someWords) = 0 Then Exit Function
+    WordsWidth = ReDimUI.TextWidthPoints(someWords, fontFace, textSize, wordsBold)
+    If WordsWidth = 0 Then WordsWidth = Len(someWords) * textSize * 0.58
+End Function
+
+' Words cut to fit a width, measured in a font: whole when they fit,
+' otherwise the longest start that fits before an ellipsis, the ellipsis
+' alone when no letter does, and nothing when not even it fits.
+Private Function FitWordsToWidth( _
+    ByVal someWords As String, _
+    ByVal roomPoints As Double, _
+    ByVal fontFace As String, _
+    ByVal textSize As Double, _
+    ByVal wordsBold As Boolean _
+) As String
+    Dim lowMark As Long
+    Dim highMark As Long
+    Dim midMark As Long
+
+    If WordsWidth(someWords, fontFace, textSize, wordsBold) <= roomPoints Then
+        FitWordsToWidth = someWords
+        Exit Function
+    End If
+    highMark = Len(someWords) - 1
+    Do While lowMark < highMark
+        midMark = (lowMark + highMark + 1) \ 2
+        If WordsWidth(RTrim$(Left$(someWords, midMark)) & ChrW(8230), fontFace, textSize, _
+            wordsBold) <= roomPoints Then
+            lowMark = midMark
+        Else
+            highMark = midMark - 1
+        End If
+    Loop
+    If lowMark = 0 And WordsWidth(ChrW(8230), fontFace, textSize, wordsBold) > roomPoints Then
+        Exit Function
+    End If
+    FitWordsToWidth = RTrim$(Left$(someWords, lowMark)) & ChrW(8230)
+End Function
+
+' A caption part's words cut to the part's width past its left inset, so
+' a long item ends in an ellipsis instead of running past its control.
+Private Function FittedCaption( _
+    ByVal captionText As String, _
+    ByVal captionWidth As Double, _
+    ByVal themeValue As ReDimUI _
+) As String
+    Dim resolvedSize As Double
+
+    resolvedSize = mFontSize
+    If resolvedSize <= 0 Then resolvedSize = themeValue.BaseFontSize
+    FittedCaption = FitWordsToWidth(captionText, captionWidth - 2, themeValue.FontName, _
+        resolvedSize, mFontBold)
 End Function
 
 ' Cuts a one-line face's text to the longest start that fits on one line
 ' with an ellipsis, measured from the drawn text: a face that holds its
-' text costs one read, and one that does not a few writes.
+' text costs one read, and one that does not a few writes. More than
+' half a line past the first is a second line, whatever the font's
+' line height.
 Private Sub FitFaceLine(ByVal faceShape As Shape, ByVal fullText As String, ByVal textSize As Double)
     Dim lineTall As Double
     Dim fitLow As Long
@@ -10574,7 +10691,7 @@ Private Sub FitFaceLine(ByVal faceShape As Shape, ByVal fullText As String, ByVa
 
     mFaceTrimmed = False
     If Len(fullText) < 2 Then Exit Sub
-    lineTall = textSize * 1.7
+    lineTall = FaceLineHeight(faceShape.Parent, textSize) * 1.5
     With faceShape.TextFrame2.TextRange
         If .BoundHeight <= lineTall Then Exit Sub
         fitLow = 0
@@ -10593,16 +10710,15 @@ Private Sub FitFaceLine(ByVal faceShape As Shape, ByVal fullText As String, ByVa
     mFaceTrimmed = True
 End Sub
 
-' The characters a face line holds and the height a line takes, both
-' estimated from the font size because they are needed before the text
-' is written.
-Private Function FaceCharsPerLine(ByVal resolvedSize As Double) As Long
-    FaceCharsPerLine = Int((mWidth - 6 - FaceMarginRight()) / (resolvedSize * 0.58))
-    If FaceCharsPerLine < 4 Then FaceCharsPerLine = 4
-End Function
-
-Private Function FaceLineHeight(ByVal resolvedSize As Double) As Double
-    FaceLineHeight = resolvedSize * 1.35
+' The height a face line takes, needed before the text is written: the
+' pitch Office gives the theme's font with a sliver over it, so Office
+' never finds a line a hair too tall to draw, and never less than 1.35
+' of the size, which Western fonts keep. Meiryo and Microsoft YaHei take
+' over 1.7 of theirs, where a field sized at 1.35 dropped its last line.
+Private Function FaceLineHeight(ByVal hostSheet As Worksheet, ByVal resolvedSize As Double) As Double
+    FaceLineHeight = ReDimUI.LinePitchPoints(hostSheet, OwnerApp.Theme.FontName, resolvedSize, _
+        mFontBold) * 1.01
+    If FaceLineHeight < resolvedSize * 1.35 Then FaceLineHeight = resolvedSize * 1.35
 End Function
 
 ' The selection shows as a highlight in the accent with accent ink. Excel
@@ -10724,9 +10840,9 @@ Private Sub ApplyText(ByVal mainShape As Shape, ByVal themeValue As ReDimUI)
         focusedField = ReDimUI.IsComponentFocused(mOwnerAppId, mComponentId)
         If focusedField Then
             If mKind = KIND_COMBO Then
-                shownText = BuildFace(resolvedSize, GhostRest(mainShape.Parent))
+                shownText = BuildFace(mainShape.Parent, resolvedSize, GhostRest(mainShape.Parent))
             Else
-                shownText = BuildFace(resolvedSize)
+                shownText = BuildFace(mainShape.Parent, resolvedSize)
             End If
         ElseIf LenB(mText) = 0 And LenB(mPlaceholder) > 0 Then
             shownText = mPlaceholder
@@ -11655,14 +11771,14 @@ Private Sub ApplyFieldNotes(ByVal hostSheet As Worksheet, ByVal themeValue As Re
         noteSize, mAppliedCountSig
 End Sub
 
-' The width a badge takes: its text and a little room, never narrower
-' than it is tall or than the width it was given.
+' The width a badge takes: its bold text as measured and a little room,
+' never narrower than it is tall or than the width it was given.
 Private Function BadgeSpan() As Double
     Dim textSize As Double
 
     textSize = mFontSize
-    If textSize <= 0 Then textSize = 9
-    BadgeSpan = Len(mText) * textSize * 0.62 + 12
+    If textSize <= 0 Then textSize = OwnerApp.Theme.BaseFontSize - 2
+    BadgeSpan = WordsWidth(mText, OwnerApp.Theme.FontName, textSize, True) + 12
     If BadgeSpan < mHeight Then BadgeSpan = mHeight
     If BadgeSpan < mWidth Then BadgeSpan = mWidth
 End Function
@@ -11684,7 +11800,7 @@ Private Sub ApplyBadgePart(ByVal hostSheet As Worksheet, ByVal themeValue As ReD
         DropPart hostSheet, "bd"
         Exit Sub
     End If
-    badgeSpanNow = Len(mBadgeText) * 9 * 0.62 + 10
+    badgeSpanNow = WordsWidth(mBadgeText, themeValue.FontName, 9, True) + 10
     If badgeSpanNow < 16 Then badgeSpanNow = 16
     Set badgeShape = EnsurePartShape(hostSheet, "bd", msoShapeRoundedRectangle)
     On Error Resume Next
@@ -12525,9 +12641,11 @@ Private Sub ApplyToastParts( _
     ' is set before the fit, since it moves where the words begin.
     mainShape.TextFrame2.MarginLeft = 8
     If LenB(mToastActionLabel) > 0 Then
-        ' Sized from the label; ink in surface text, since the accent
-        ' does not reach 4.5:1 as text on every theme's surface.
-        actionWidth = Len(mToastActionLabel) * resolvedSize * 0.62 + 14
+        ' Sized from the label as measured in bold, as it draws; ink in
+        ' surface text, since the accent does not reach 4.5:1 as text on
+        ' every theme's surface.
+        actionWidth = WordsWidth(mToastActionLabel, themeValue.FontName, resolvedSize - 1, _
+            True) + 20
         mainShape.TextFrame2.MarginRight = PAGER_TARGET + 11 + actionWidth
     Else
         mainShape.TextFrame2.MarginRight = PAGER_TARGET + 6
@@ -12904,9 +13022,10 @@ Private Sub ApplyTickBox( _
 End Sub
 
 ' A Tabs control: a rule along its foot, one tab per item sized to its
-' text (equal shares when the texts need more than the width, cut short
-' with an ellipsis where they do not fit), and an accent bar under the
-' tab shown.
+' text as measured in bold, as the tab shown draws it, so no tab changes
+' width with the one shown (equal shares when the texts need more than
+' the width, cut short with an ellipsis where they do not fit), and an
+' accent bar under the tab shown.
 Private Sub ApplyTabs( _
     ByVal mainShape As Shape, _
     ByVal hostSheet As Worksheet, _
@@ -12924,7 +13043,6 @@ Private Sub ApplyTabs( _
     Dim tabFill As Long
     Dim tabInk As Long
     Dim tabWords As String
-    Dim fitChars As Long
     Dim barMade As Boolean
     Dim barWidth As Double
     Dim glideBase As String
@@ -12944,7 +13062,7 @@ Private Sub ApplyTabs( _
         ReDim tabWidths(1 To tabTotal)
         ReDim mTabRights(1 To tabTotal)
         For idx = 1 To tabTotal
-            tabWidths(idx) = Len(mItemTexts(idx)) * textSize * 0.6 + 24
+            tabWidths(idx) = WordsWidth(mItemTexts(idx), themeValue.FontName, textSize, True) + 24
             widthSum = widthSum + tabWidths(idx)
         Next idx
         If widthSum > mWidth Then
@@ -12967,11 +13085,8 @@ Private Sub ApplyTabs( _
         tabShape.Fill.Visible = BoolToMso(tabFill <> themeValue.SurfaceColor)
         If tabFill <> themeValue.SurfaceColor Then tabShape.Fill.ForeColor.RGB = tabFill
         tabShape.Line.Visible = msoFalse
-        tabWords = mItemTexts(idx)
-        fitChars = Int((tabWidths(idx) - 8) / (textSize * 0.6))
-        If Len(tabWords) > fitChars And fitChars >= 2 Then
-            tabWords = Left$(tabWords, fitChars - 1) & ChrW(8230)
-        End If
+        tabWords = FitWordsToWidth(mItemTexts(idx), tabWidths(idx) - 8, themeValue.FontName, _
+            textSize, True)
         If idx = tabNow And mEnabled Then
             tabInk = themeValue.OnSurfaceColor
         Else
@@ -13424,23 +13539,21 @@ Private Function ColumnLeftEdge(ByVal colNo As Long) As Double
     If colNo > 1 Then ColumnLeftEdge = mColumnEdges(colNo - 1)
 End Function
 
-' A cell's text cut to its column with an ellipsis when it would run
-' into the next.
+' A cell's text cut to its column, as measured in the theme's font, with
+' an ellipsis when it would run into the next: past the next column's
+' tab stop, a row's later cells would each land a column to the right.
+' A sorted header keeps its arrow and gives up words instead.
 Private Function FitCellText( _
     ByVal cellWords As String, _
     ByVal cellSpan As Double, _
-    ByVal textSize As Double _
+    ByVal textSize As Double, _
+    ByVal fontFace As String, _
+    ByVal wordsBold As Boolean, _
+    Optional ByVal keptTail As String _
 ) As String
-    Dim fitChars As Long
-
-    fitChars = Int((cellSpan - 2 * TABLE_CELL_PAD) / (textSize * 0.55))
-    If Len(cellWords) > fitChars And fitChars >= 2 Then
-        FitCellText = Left$(cellWords, fitChars - 1) & ChrW(8230)
-    ElseIf Len(cellWords) > fitChars Then
-        FitCellText = vbNullString
-    Else
-        FitCellText = cellWords
-    End If
+    FitCellText = FitWordsToWidth(cellWords, cellSpan - 2 * TABLE_CELL_PAD - _
+        WordsWidth(keptTail, fontFace, textSize, wordsBold), fontFace, textSize, wordsBold) & _
+        keptTail
 End Function
 
 ' A table: header cells over its columns, a sort arrow on the sorted
@@ -13457,6 +13570,7 @@ Private Sub ApplyTable(ByVal hostSheet As Worksheet, ByVal themeValue As ReDimUI
     Dim displayNo As Long
     Dim sourceRow As Long
     Dim headWords As String
+    Dim sortMark As String
     Dim rowWords As String
     Dim layoutKey As String
     Dim rowFill As Long
@@ -13486,12 +13600,10 @@ Private Sub ApplyTable(ByVal hostSheet As Worksheet, ByVal themeValue As ReDimUI
     headInk = ResolveDrawnInk(themeValue)
     If mTableCols > 0 Then EnsureRowStates mAppliedTableHeadStates, mTableCols
     For colNo = 1 To mTableCols
-        headWords = mTableHeads(colNo)
-        If colNo = mSortColumn Then
-            headWords = headWords & " " & IIf(mSortDescending, ChrW(9660), ChrW(9650))
-        End If
-        headWords = FitCellText(headWords, mColumnEdges(colNo) - ColumnLeftEdge(colNo), _
-            textSize)
+        sortMark = vbNullString
+        If colNo = mSortColumn Then sortMark = " " & IIf(mSortDescending, ChrW(9660), ChrW(9650))
+        headWords = FitCellText(mTableHeads(colNo), mColumnEdges(colNo) - ColumnLeftEdge(colNo), _
+            textSize, themeValue.FontName, True, sortMark)
         headFill = PointerTint(themeValue.MutedColor, themeValue.OnSurfaceColor, _
             "th" & colNo)
         SyncTableCell hostSheet, themeValue, mAppliedTableHeadStates(colNo), "th" & colNo, _
@@ -13514,7 +13626,7 @@ Private Sub ApplyTable(ByVal hostSheet As Worksheet, ByVal themeValue As ReDimUI
         displayNo = mTableOffset + slotNo
         If displayNo <= mTableShownCount Then
             sourceRow = mTableShown(displayNo)
-            rowWords = TableRowWords(sourceRow, textSize)
+            rowWords = TableRowWords(sourceRow, textSize, themeValue.FontName)
             If sourceRow = CLng(mValue) Then
                 rowFill = themeValue.PrimaryColor
                 rowInk = themeValue.OnPrimaryColor
@@ -13551,14 +13663,34 @@ End Sub
 
 ' One row's cells joined for its shape: each cell after a tab, cut to
 ' its column, so the row's tab stops place them.
-Private Function TableRowWords(ByVal sourceRow As Long, ByVal textSize As Double) As String
+Private Function TableRowWords( _
+    ByVal sourceRow As Long, _
+    ByVal textSize As Double, _
+    ByVal fontFace As String _
+) As String
     Dim colNo As Long
+    Dim fitKey As String
+    Dim rowHeld As Boolean
 
+    ' The layout key moves with the data, the widths, the size, and the
+    ' formats, so a row's cut cells hold until one of them or the font
+    ' changes.
+    fitKey = mColumnLayoutKey & Chr$(1) & fontFace
+    If fitKey <> mFittedRowsKey Or mFittedRows Is Nothing Then
+        Set mFittedRows = New Collection
+        mFittedRowsKey = fitKey
+    End If
+    On Error Resume Next
+    TableRowWords = mFittedRows.Item(CStr(sourceRow))
+    rowHeld = (Err.Number = 0)
+    On Error GoTo 0
+    If rowHeld Then Exit Function
     For colNo = 1 To mTableCols
         TableRowWords = TableRowWords & vbTab & FitCellText( _
             TableCellText(colNo, mTableCells(colNo, sourceRow)), _
-            mColumnEdges(colNo) - ColumnLeftEdge(colNo), textSize)
+            mColumnEdges(colNo) - ColumnLeftEdge(colNo), textSize, fontFace, False)
     Next colNo
+    mFittedRows.Add TableRowWords, CStr(sourceRow)
 End Function
 
 ' A header cell: its own shape so a click knows the column.
@@ -15222,7 +15354,8 @@ Private Sub ApplyRadioGroup( _
         ShowPart dot, BoolToMso(mVisible And isPicked)
         Set captionShape = EnsurePartShape(hostSheet, "t" & idx, msoShapeRectangle)
         PlacePart captionShape, mLeft + circleSize + 8, rowTop, rowTextRoom, rowPitch
-        StyleCaptionPart captionShape, ItemAt(idx), themeValue
+        StyleCaptionPart captionShape, FittedCaption(ItemAt(idx), rowTextRoom, themeValue), _
+            themeValue
         ' A disabled item reads muted and takes no clicks.
         If Not ItemPickable(idx) Then
             captionShape.TextFrame2.TextRange.Font.Fill.ForeColor.RGB = themeValue.OnMutedColor
@@ -15376,6 +15509,7 @@ Private Sub ApplyCheckListParts( _
         Else
             headerText = Phrase(UI_SELECT_ALL_FILTERED, mPanelFilter(0), checkedTotal, shownTotal)
         End If
+        headerText = FittedCaption(headerText, mWidth - boxSize - 8, themeValue)
         headerKey = CStr(checkedTotal) & "/" & CStr(shownTotal) & _
             CStr(PointerLookCode("row0")) & Chr$(1) & headerText
         priorKey = mAppliedCheckHeaderSig
@@ -15464,7 +15598,8 @@ Private Sub ApplyCheckListParts( _
                         checkedFlags(idx), checkedFlags(idx), "row" & idx
                 End If
                 If Mid$(priorKey, 2) <> Mid$(rowKey, 2) Then
-                    captionShape.TextFrame2.TextRange.Text = ItemAt(idx)
+                    captionShape.TextFrame2.TextRange.Text = _
+                        FittedCaption(ItemAt(idx), rowTextRoom - boxSize, themeValue)
                 End If
             Else
                 If idx > 1 Then
@@ -15476,7 +15611,8 @@ Private Sub ApplyCheckListParts( _
                     checkedFlags(idx), checkedFlags(idx), "row" & idx
                 PlacePart captionShape, mLeft + boxSize + 8, rowTop, rowTextRoom - boxSize, _
                     rowPitch
-                StyleCaptionPart captionShape, ItemAt(idx), themeValue
+                StyleCaptionPart captionShape, _
+                    FittedCaption(ItemAt(idx), rowTextRoom - boxSize, themeValue), themeValue
                 ShowPart captionShape, BoolToMso(mVisible)
             End If
         End If
@@ -15872,10 +16008,12 @@ Private Sub ApplyTransferParts( _
     SyncMoveButtonInks hostSheet, themeValue
     SyncTransferDropTarget mainShape, hostSheet, themeValue
 
+    ' The chosen panel's header ends short of its Reorderable arrows.
     ApplyTransferHeader hostSheet, themeValue, "hl", mLeft, panelW, TRANSFER_HEADER_H, _
-        TransferHeaderText(0), mAppliedHeaderLeftSig
+        TransferHeaderText(0), panelW, mAppliedHeaderLeftSig
     ApplyTransferHeader hostSheet, themeValue, "hr", rightX, panelW, TRANSFER_HEADER_H, _
-        TransferHeaderText(1), mAppliedHeaderRightSig
+        TransferHeaderText(1), IIf(mReorderable, ReorderArrowLeft(rightX, panelW, 0) - rightX, _
+        panelW), mAppliedHeaderRightSig
     SyncTransferRows hostSheet, themeValue, 0, mItems, "al", _
         mLeft, panelTop, panelW, panelH, mPanelSel(0), mPanelOffset(0), _
         mAppliedPanelRows(0), mAppliedLeftRowStates
@@ -15921,17 +16059,18 @@ Private Sub ApplyTransferHeader( _
     ByVal headerWidth As Double, _
     ByVal headerHeight As Double, _
     ByVal headerText As String, _
+    ByVal wordsRoom As Double, _
     ByRef appliedKey As String _
 )
     Dim headerShape As Shape
     Dim headerKey As String
 
-    headerKey = PartsState(themeValue) & ":" & headerText
+    headerKey = PartsState(themeValue) & ":" & CStr(wordsRoom) & ":" & headerText
     If headerKey = appliedKey Then Exit Sub
     appliedKey = headerKey
     Set headerShape = EnsurePartShape(hostSheet, partName, msoShapeRectangle)
     PlacePart headerShape, headerLeft, mTop - 1, headerWidth, headerHeight
-    StyleCaptionPart headerShape, headerText, themeValue
+    StyleCaptionPart headerShape, FittedCaption(headerText, wordsRoom, themeValue), themeValue
     headerShape.Visible = BoolToMso(mVisible)
 End Sub
 
@@ -16496,7 +16635,10 @@ Private Sub SyncTransferRows( _
             rowInk = themeValue.OnSurfaceColor
         End If
         rowFill = PointerTint(rowFill, rowInk, partPrefix & idx)
-        rowText = GutterText(rowSelected, CStr(itemsRef.Item(itemIndex)))
+        ' Past its insets and the gutter, a long item ends in an ellipsis
+        ' instead of running into the move buttons and the other panel.
+        rowText = GutterText(rowSelected, FitWordsToWidth(CStr(itemsRef.Item(itemIndex)), _
+            rowWidth - 10 - LIST_GUTTER, themeValue.FontName, resolvedSize, False))
         rowKey = layoutKey & Chr$(1) & CStr(rowFill) & ":" & _
             CStr(rowInk) & ":" & rowText
         priorKey = rowStates(idx)
@@ -16660,7 +16802,7 @@ Private Sub SyncSlideBubble( _
     bubbleSize = mFontSize
     If bubbleSize <= 0 Then bubbleSize = themeValue.BaseFontSize
     bubbleSize = bubbleSize - 1
-    bubbleWidth = Len(bubbleText) * bubbleSize * 0.62 + 12
+    bubbleWidth = WordsWidth(bubbleText, themeValue.FontName, bubbleSize, True) + 12
     If bubbleWidth < 24 Then bubbleWidth = 24
     Set bubble = EnsurePartShape(hostSheet, "vb", msoShapeRoundedRectangle)
     bubble.Width = bubbleWidth
@@ -17765,23 +17907,116 @@ End Function
 ' The width in points a line of text takes in a font at a size, or 0 when
 ' it cannot be measured. GDI measures at a large em and the result
 ' scales, since at a field's size each character's advance would round
-' to a pixel. A focused field fits its face lines with it, before Office
-' has the text to lay out.
+' to a pixel. Text that must fit is measured with it before Office has
+' the text to lay out. A character the font lacks, such as Japanese in
+' Segoe UI, Office draws from a fallback font that GDI does not measure
+' alike; it counts a full em, which a CJK fallback takes, so such text
+' cuts a little early instead of running over.
 Friend Function TextWidthPoints( _
     ByVal lineText As String, _
     ByVal fontFace As String, _
     ByVal textSize As Double, _
     ByVal boldOn As Boolean _
 ) As Double
-    Dim fontKey As String
     Dim textExtent As RdxTextExtent
-    Dim newFont As LongPtr
+    Dim keptText As String
+    Dim missingTotal As Long
 
     If Not IsFactory(Me) Then
         TextWidthPoints = ReDimUI.TextWidthPoints(lineText, fontFace, textSize, boldOn)
         Exit Function
     End If
     If LenB(lineText) = 0 Then Exit Function
+    If Not SelectMeasureFont(fontFace, boldOn) Then Exit Function
+    keptText = FontHeldText(lineText, missingTotal)
+    If LenB(keptText) > 0 Then
+        If GetTextExtentPoint32W(mMeasureDc, StrPtr(keptText), Len(keptText), textExtent) = 0 Then
+            Exit Function
+        End If
+    End If
+    TextWidthPoints = (textExtent.extentX + missingTotal * TEXT_MEASURE_EM) * textSize / _
+        TEXT_MEASURE_EM
+End Function
+
+' The text less the characters the measure's font lacks, counted in
+' missingTotal. Printable ASCII is in every text font, so only other
+' text is checked.
+Private Function FontHeldText(ByVal lineText As String, ByRef missingTotal As Long) As String
+    Dim glyphIndices() As Integer
+    Dim charNo As Long
+
+    missingTotal = 0
+    FontHeldText = lineText
+    If Not lineText Like "*[! -~]*" Then Exit Function
+    ReDim glyphIndices(1 To Len(lineText))
+    If GetGlyphIndicesW(mMeasureDc, StrPtr(lineText), Len(lineText), VarPtr(glyphIndices(1)), _
+        GGI_MARK_NONEXISTING_GLYPHS) <> Len(lineText) Then Exit Function
+    FontHeldText = vbNullString
+    For charNo = 1 To Len(lineText)
+        If glyphIndices(charNo) = MISSING_GLYPH Then
+            missingTotal = missingTotal + 1
+        Else
+            FontHeldText = FontHeldText & Mid$(lineText, charNo, 1)
+        End If
+    Next charNo
+End Function
+
+' The points each line of text adds in a font at a size, as Office spaces
+' single lines, or 0 when it cannot be measured. Office spaces East Asian
+' fonts looser than their metrics say (Meiryo takes 1.95 of its size,
+' Microsoft YaHei 1.72, Segoe UI 1.33), so a scratch shape on the sheet
+' measures each font, size, and weight once a session.
+Friend Function LinePitchPoints( _
+    ByVal hostSheet As Worksheet, _
+    ByVal fontFace As String, _
+    ByVal textSize As Double, _
+    ByVal boldOn As Boolean _
+) As Double
+    Dim pitchKey As String
+    Dim scratchShape As Shape
+    Dim oneLine As Double
+
+    If Not IsFactory(Me) Then
+        LinePitchPoints = ReDimUI.LinePitchPoints(hostSheet, fontFace, textSize, boldOn)
+        Exit Function
+    End If
+    If mLinePitches Is Nothing Then Set mLinePitches = New Collection
+    pitchKey = fontFace & "|" & CStr(textSize) & "|" & CStr(boldOn)
+    On Error Resume Next
+    LinePitchPoints = mLinePitches.Item(pitchKey)
+    On Error GoTo 0
+    If LinePitchPoints > 0 Or hostSheet Is Nothing Then Exit Function
+    On Error GoTo MeasureFailed
+    Set scratchShape = hostSheet.Shapes.AddShape(msoShapeRectangle, 0, 0, 400, 200)
+    With scratchShape.TextFrame2
+        .WordWrap = msoFalse
+        .TextRange.Text = "Xg"
+        .TextRange.Font.Name = fontFace
+        .TextRange.Font.Size = textSize
+        .TextRange.Font.Bold = BoolToMso(boldOn)
+        oneLine = .TextRange.BoundHeight
+        .TextRange.Text = "Xg" & vbLf & "Xg"
+        LinePitchPoints = .TextRange.BoundHeight - oneLine
+    End With
+    If LinePitchPoints > 0 Then mLinePitches.Add LinePitchPoints, pitchKey
+
+DropScratch:
+    On Error Resume Next
+    If Not scratchShape Is Nothing Then scratchShape.Delete
+    Exit Function
+
+MeasureFailed:
+    LinePitchPoints = 0
+    Resume DropScratch
+End Function
+
+' Puts the font asked for into the text measure's device context, making
+' the context the first time and the font when it changes; False when
+' either cannot be made.
+Private Function SelectMeasureFont(ByVal fontFace As String, ByVal boldOn As Boolean) As Boolean
+    Dim fontKey As String
+    Dim newFont As LongPtr
+
     If mMeasureDc = 0 Then mMeasureDc = CreateCompatibleDC(0)
     If mMeasureDc = 0 Then Exit Function
     fontKey = fontFace & "|" & CStr(boldOn)
@@ -17796,10 +18031,7 @@ Friend Function TextWidthPoints( _
         mMeasureFont = newFont
         mMeasureFontKey = fontKey
     End If
-    If GetTextExtentPoint32W(mMeasureDc, StrPtr(lineText), Len(lineText), textExtent) = 0 Then
-        Exit Function
-    End If
-    TextWidthPoints = textExtent.extentX * textSize / TEXT_MEASURE_EM
+    SelectMeasureFont = True
 End Function
 
 ' Lets the text measure's device context go, then its font, which the
@@ -18025,10 +18257,10 @@ Private Sub SyncDropList( _
     Next idx
     If wanted = 0 Then
         mListWidth = 0
-    ElseIf mIsMenu And (mListWidth = 0 Or mListFitOffset <> mListOffset _
+    ElseIf mListWidth = 0 Or mListFitOffset <> mListOffset _
         Or mListFitFace <> CStr(mLeft) & ":" & CStr(mWidth) _
-        Or mListFitFilter <> mSelectFilter) Then
-        FitMenuWidth hostSheet, wanted
+        Or mListFitFilter <> mListMatchesFilter Then
+        FitListWidth hostSheet, wanted, themeValue.FontName, resolvedSize
         ' The up pager drew before the rows; it follows the fitted width.
         SyncListPager hostSheet, themeValue, "optu", ChrW(9650), _
             aboveCount, listPages, listTopAt, resolvedSize, mAppliedPagerUpSig
@@ -18135,8 +18367,8 @@ Private Sub SyncEmptyRow( _
     End If
 End Sub
 
-' Where an open list's rows run across: the face's span, or the width a
-' menu fitted to its commands.
+' Where an open list's rows run across: the face's span, or the width
+' the list fitted to its rows.
 Private Function ListSpanLeft() As Double
     If mListWidth > 0 Then
         ListSpanLeft = mListLeft
@@ -18153,14 +18385,24 @@ Private Function ListSpanWidth() As Double
     End If
 End Function
 
-' A menu runs as wide as its widest command needs, never narrower than
-' its button, and ends at the button's right edge instead when it would
-' pass the window's, as a native menu does. It measures the rows as they
-' draw and gives them the width at once. Rows paged into view can widen
-' an open menu but never narrow it, so it holds still while paging; a
-' button that moved or resized fits it afresh.
-Private Sub FitMenuWidth(ByVal hostSheet As Worksheet, ByVal rowTotal As Long)
+' An open list runs as wide as its widest row needs, never narrower than
+' its face, and ends at the face's right edge instead when it would pass
+' the window's, as a native menu does; a SelectBox's or a combo's long
+' item ran past the list's edge. A menu's rows, with their glyphs and
+' shortcuts, are read as drawn; an item row is its gutter and its item,
+' measured, in bold where a filter's match or a group header draws it,
+' which costs a combo's keystroke far less than reading each row from
+' Office. Rows paged or filtered into view can widen an open list but
+' never narrow it, so it holds still while paging; a face that moved or
+' resized fits it afresh.
+Private Sub FitListWidth( _
+    ByVal hostSheet As Worksheet, _
+    ByVal rowTotal As Long, _
+    ByVal fontFace As String, _
+    ByVal resolvedSize As Double _
+)
     Dim idx As Long
+    Dim itemIndex As Long
     Dim rowNeed As Double
     Dim fitWidth As Double
     Dim fitLeft As Double
@@ -18172,16 +18414,22 @@ Private Sub FitMenuWidth(ByVal hostSheet As Worksheet, ByVal rowTotal As Long)
     Dim viewWidth As Double
     Dim viewHeight As Double
 
-    ' The rows drew at the span the menu had until now.
+    ' The rows drew at the span the list had until now.
     drawnLeft = ListSpanLeft()
     drawnWidth = ListSpanWidth()
     faceKey = CStr(mLeft) & ":" & CStr(mWidth)
     fitWidth = mWidth
     If mListWidth > fitWidth And mListFitFace = faceKey Then fitWidth = mListWidth
     For idx = 1 To rowTotal
-        With hostSheet.Shapes(ShapeName & PART_SEPARATOR & "opt" & idx).TextFrame2
-            rowNeed = .TextRange.BoundWidth + .MarginLeft + .MarginRight + 6
-        End With
+        If mIsMenu Then
+            With hostSheet.Shapes(ShapeName & PART_SEPARATOR & "opt" & idx).TextFrame2
+                rowNeed = .TextRange.BoundWidth + .MarginLeft + .MarginRight + 6
+            End With
+        Else
+            itemIndex = CLng(mListMatches.Item(mListOffset + idx))
+            rowNeed = WordsWidth(ItemAt(itemIndex), fontFace, resolvedSize, _
+                IsGroupHeader(itemIndex) Or LenB(mListMatchesFilter) > 0) + LIST_GUTTER + 18
+        End If
         If rowNeed > fitWidth Then fitWidth = rowNeed
     Next idx
     fitLeft = mLeft
@@ -18194,7 +18442,7 @@ Private Sub FitMenuWidth(ByVal hostSheet As Worksheet, ByVal rowTotal As Long)
     mListWidth = fitWidth
     mListFitOffset = mListOffset
     mListFitFace = faceKey
-    mListFitFilter = mSelectFilter
+    mListFitFilter = mListMatchesFilter
     If Abs(fitLeft - drawnLeft) < 0.01 And Abs(fitWidth - drawnWidth) < 0.01 Then Exit Sub
     For idx = 1 To rowTotal
         With hostSheet.Shapes(ShapeName & PART_SEPARATOR & "opt" & idx)

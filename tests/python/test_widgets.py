@@ -1872,3 +1872,28 @@ def test_focused_face_fits(run_widgets):
         drawn, held, used = facts[name].split("/")
         assert drawn == held, f"{name}: a focused field's line must not wrap"
         assert int(used) >= 85, f"{name}: a focused field's line must reach its right edge"
+
+
+def test_text_fits(run_widgets):
+    facts = parse_transcript(run_widgets("TestTextFits"))
+    assert facts["tabWhole"] == "Notifications", "a tab label that fits is not cut"
+    assert facts["tabHoldsWide"] == "True", "a label of wide letters stays in its tab"
+    assert facts["cellCut"] == "True", "a cell of wide letters is cut to its column"
+    assert facts["cellsInColumns"] == "True", "the cells after a long one keep their columns"
+    assert facts["headKeepsArrow"] == "True", "a cut sorted header keeps its arrow"
+    assert facts["badgeHoldsWide"] == "True", "a badge is as wide as its letters"
+    drawn, slots = facts["growLines"].split("/")
+    assert drawn == slots, "AutoGrow grows to the lines Office draws, no more"
+    assert facts["radioRowCut"] == "True", "a long radio item ends in an ellipsis inside the group"
+    assert facts["fallbackRowCut"] == "True", (
+        "an item in letters the theme font lacks is cut to fit, measured as Office draws it"
+    )
+    assert facts["transferRowCut"] == "True", "a long transfer row ends in an ellipsis in its panel"
+    assert facts["listFitsItem"] == "True", "a drop list is as wide as its longest item"
+
+
+def test_tall_font_lines(run_widgets):
+    facts = parse_transcript(run_widgets("TestTallFontLines"))
+    assert facts["faces"] == "North/Ada", "a tall font's faces show their values"
+    assert facts["growHolds"] == "True", "AutoGrow holds every line in a tall font"
+    assert facts["typedLineShows"] == "True", "a focused multi-line field shows the typed line"

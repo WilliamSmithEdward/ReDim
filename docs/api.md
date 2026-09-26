@@ -277,7 +277,9 @@ dependencies:
   `Filterable`, letters jump to an item. It works on a `MenuButton` as well. The list
   windows to `ListRows` rows (eight by default): opening scrolls the selection into view, and
   clickable pager rows at the list edges (arrow plus the count beyond that edge) page the
-  window, drawn whenever the list is longer than its window. Picking a new item writes the
+  window, drawn whenever the list is longer than its window. The open list runs as wide as
+  its longest item needs, never narrower than the face, and ends at the face's right edge
+  when it would pass the window's; a `ComboBox` list does the same. Picking a new item writes the
   `WritesTo` state and fires `OnChange`; re-picking the selected item only closes the
   list, the same rule `RadioGroup` follows for its selected row. `ItemEnabled(position,
   False)` leaves an item showing but out of reach: it reads muted, a click on it does
@@ -376,7 +378,8 @@ dependencies:
   targets, that page the window, repeat while held, and read muted with nothing beyond
   them. The keys move the window with the check list's cursor or the radio group's
   selection, and Page Up and Page Down page a windowed check list. A list whose rows fit
-  draws as before.
+  draws as before. An item too long for the control's width ends in an ellipsis inside
+  it, as a `TransferList` row and a panel header do, and keeps its whole text.
 - `Image`: a picture as a control - a rounded rectangle whose fill is the picture, so it
   clicks, adopts, and snaps back like everything else, and the picture embeds in the
   workbook. `Source(path)` takes a file path (no URLs) and loads once per distinct path;
@@ -399,8 +402,8 @@ dependencies:
   face keeps the menu's own `Text` and looks like a button in its variant, `Secondary` by
   default, with a caret. The menu runs as wide as its widest command needs, never
   narrower than the button, and ends at the button's right edge when it would pass the
-  window's. It shares the drop list's windowing, keys, and dismissal, and `ClearItems`
-  drops the commands.
+  window's, as a `SelectBox` or `ComboBox` list does with a long item. It shares the drop
+  list's windowing, keys, and dismissal, and `ClearItems` drops the commands.
 - `Expander`: a collapsible section. Its header shows a chevron and its `Text` in bold;
   a click, or Space and Enter while it has the keys, opens and closes it, and Right opens
   and Left closes. Controls join its panel with `InExpander "adv"`, the same as
@@ -432,8 +435,9 @@ ui.Sparkline("errors").AtRect(120, 50, 120, 30).Danger.ValuesFrom Array(2, 8, 3,
   and holds still when motion is reduced. Give it the rectangle the content will take,
   and hide it with `Visible False` when the data arrives.
 - `Tabs`: a tab strip, one tab per item from `Items`, `ItemsFrom`, and the item APIs.
-  Each tab is as wide as its text; when the texts need more than the strip's width the
-  tabs share it equally and a text that does not fit ends in an ellipsis. The tab shown
+  Each tab is as wide as its text in bold, so no tab changes width with the one shown;
+  when the texts need more than the strip's width the tabs share it equally and a text
+  that does not fit ends in an ellipsis. The tab shown
   is bold over an accent bar that glides to the tab shown, the first by default;
   `Value(n)` shows tab n and
   `CurrentValue` reads it. A click, or Left and Right (wrapping) and Home and End while
@@ -463,7 +467,8 @@ ui.TickBox("beta").AtRect(24, 70, 200, 18).Text("Beta features").OnTab "tabs", 2
   shows a column through a `Format$` pattern. A column whose filled cells are all numbers
   or dates aligns right, header included; text aligns left and cells too long for their
   column end in an ellipsis. A click on a header sorts by that column, ascending and then
-  descending, with an arrow on the header; the sort is stable, numbers and dates sort by
+  descending, with an arrow on the header, which a header cut short keeps; the sort is
+  stable, numbers and dates sort by
   value ahead of text, text sorts without case, and empty cells sort last either way.
   `SortBy n, descending` sorts from code and `SortBy 0` restores the order the rows came
   in; sorting writes nothing and fires nothing. A click on a row selects it: it fills
@@ -517,12 +522,14 @@ Focus mechanics, all automatic:
   item. A `MultiLine` TextInput follows textarea conventions
   instead: Enter inserts a newline and keeps focus, while Tab, Ctrl+Enter, and clicking
   away commit; the value carries its newlines into state. Size the rectangle for the
-  lines you expect - roughly 15 points per line plus 6 points of margin; a line that
-  cannot fully fit is not drawn at all, which reads as a missing line. Or let
-  `AutoGrow(maxLines)` size it: the field grows a line at a time from the height it was
-  given, up to `maxLines` lines (six by default), shrinks back as lines go, and moves
-  anything placed `Below` it. At rest a line too long for the field wraps, and the
-  height counts the wrapped lines, so the field keeps one height with focus or without.
+  lines you expect - roughly 15 points per line plus 6 points of margin at 11 points,
+  more in a font Office spaces loosely, such as Meiryo or Microsoft YaHei at about 1.7
+  times its size; a line that cannot fully fit is not drawn at all, which reads as a
+  missing line. Or let `AutoGrow(maxLines)` size it: the field grows a line at a time
+  from the height it was given, at the line height Office gives the theme's font, up to
+  `maxLines` lines (six by default), shrinks back as lines go, and moves anything placed
+  `Below` it. At rest a line too long for the field wraps, and the height counts the
+  lines as Office wraps them, so the field keeps one height with focus or without.
   `AutoGrow` turns `MultiLine` on.
 - Overflow follows the caret. Shape text cannot scroll, so a focused field renders the
   tail window of its buffer - the last lines that fit (multi-line) or the rightmost

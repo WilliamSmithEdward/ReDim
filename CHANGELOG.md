@@ -453,6 +453,35 @@
   ordinary text ended in an ellipsis a fifth or more short of the right
   edge, and a line of wide letters such as W ran over and wrapped. The
   face now measures its text in the theme's font, bold included.
+- Tabs measure their labels in the theme's font, in bold as the tab
+  shown draws them, so no tab changes width with the one shown. A label
+  that fit ended in an ellipsis ("Notificat..." in a strip of four),
+  from a guessed width per character, and a label of wide letters ran
+  past its tab.
+- Table cells are cut to their columns as measured. A cell of wide
+  letters ran past its column, and every cell after it in the row
+  landed a column to the right. A sorted header cut short keeps its
+  arrow, which went first.
+- A badge, a button's count badge, the slider's value bubble, and a
+  toast's action button are as wide as their words as measured, where
+  wide letters ran past them.
+- AutoGrow counts the lines Office wraps its text into. Ordinary text
+  grew a blank line, and wide text could lose its last line.
+- A long item ends in an ellipsis inside a `RadioGroup`, `CheckList`,
+  or `TransferList` row, where it ran past the control and, in a
+  transfer list, into the other panel. A `SelectBox` or `ComboBox` list
+  runs as wide as its longest item, as a menu does, where the item ran
+  past the list.
+- Characters the theme's font lacks, such as Japanese in Segoe UI,
+  measure a full em, as Office's fallback font draws them, so such text
+  is cut a little early rather than running over.
+- Themes in fonts Office spaces loosely keep every line. With Microsoft
+  YaHei or Malgun Gothic every `TextInput`, `ComboBox`, `SelectBox`,
+  and `DatePicker` face showed an ellipsis alone, and with those or
+  Meiryo and Yu Gothic, which take 1.7 to 1.95 of their size a line,
+  an AutoGrow field dropped its last line and a focused multi-line
+  field hid the line being typed. Line heights come from Office, once
+  a session for each font, size, and weight.
 
 ## 1.0.2 - 2026-09-23
 
