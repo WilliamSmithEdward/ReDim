@@ -63,32 +63,6 @@ Public Function StopPump() As Boolean
     End If
 End Function
 
-Public Function GetTicks() As Long
-    GetTicks = gTickCount
-End Function
-
-Public Function GetPumpErrors() As Long
-    GetPumpErrors = gPumpErrors
-End Function
-
-Public Function StartDelayTask(ByVal delayMs As Long) As String
-    Set gTask = ROneCOne.Task.Delay(delayMs)
-    gTaskDoneTick = 0
-    StartDelayTask = gTask.Status
-End Function
-
-Public Function GetTaskStatus() As String
-    If gTask Is Nothing Then
-        GetTaskStatus = "NoTask"
-    Else
-        GetTaskStatus = gTask.Status
-    End If
-End Function
-
-Public Function GetTaskDoneTick() As Long
-    GetTaskDoneTick = gTaskDoneTick
-End Function
-
 Public Function SetGlobal(ByVal value As Long) As Long
     gTickCount = value
     SetGlobal = gTickCount

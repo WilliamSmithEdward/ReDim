@@ -843,8 +843,10 @@ Private mAppliedIconGlyph As String
 ' signature it was drawn with.
 Private mBadgeText As String
 Private mAppliedBadgeSig As String
-' A Toggle's caption part as last drawn, empty while it has none.
+' A Toggle's caption part as last drawn, empty while it has none, and
+' the room it takes right of the switch, which a stack counts.
 Private mAppliedToggleCaptionSig As String
+Private mToggleCaptionRoom As Double
 ' A control that follows its WritesTo key takes the key's value at its
 ' next draw: set when code writes the key and when the app renders, and
 ' left clear when the control's own write is what changed it, so a pick
@@ -6365,7 +6367,7 @@ End Property
 
 Public Property Get CurrentText() As String
     RequireRole ROLE_COMPONENT, "CurrentText"
-    CurrentText = ResolveText(OwnerApp)
+    CurrentText = ResolveText()
 End Property
 
 ' The selected item's text on a SelectBox, ComboBox, RadioGroup, or Tabs,
@@ -7474,10 +7476,6 @@ End Property
 
 Friend Property Get ToastVisualTop() As Double
     If mKind = KIND_TOAST Then ToastVisualTop = mTop + mSlideRemaining
-End Property
-
-Friend Property Get IsToastExiting() As Boolean
-    IsToastExiting = (mKind = KIND_TOAST And mToastExiting)
 End Property
 
 ' An expired or dismissed toast fades for a beat instead of popping out
@@ -9801,7 +9799,7 @@ Private Function ResolveTextColor(ByVal themeValue As ReDimUI) As Long
     End Select
 End Function
 
-Friend Function ResolveText(ByVal hostApp As ReDimUI) As String
+Private Function ResolveText() As String
     Dim busyWords As String
 
     If mBusy And mKind = KIND_BUTTON Then
@@ -10126,7 +10124,7 @@ Private Sub ApplyText(ByVal mainShape As Shape, ByVal themeValue As ReDimUI)
     If (mKind = KIND_INPUT Or mKind = KIND_COMBO) And Not IsFloatField() Then
         Exit Sub
     End If
-    shownText = ResolveText(Nothing)
+    shownText = ResolveText()
     ' An icon leads the text, or stands alone.
     If LenB(mIconGlyph) > 0 Then
         If LenB(shownText) > 0 Then
@@ -12065,7 +12063,7 @@ End Sub
 Private Function ToastPartsKey(ByVal themeValue As ReDimUI, ByVal visualTop As Double) As String
     ToastPartsKey = PartsState(themeValue) & ":" & ToastIcon() & ":" & mToastActionLabel & _
         ":" & CStr(mToastActionBorder) & ":" & CStr(visualTop) & ":" & CStr(mToastMinWidth) & _
-        ":" & CStr(mToastMaxWidth) & ":" & CStr(mToastMaxHeight) & Chr$(2) & ResolveText(Nothing)
+        ":" & CStr(mToastMaxWidth) & ":" & CStr(mToastMaxHeight) & Chr$(2) & ResolveText()
 End Function
 
 ' The card fits its message: as wide as the words need between MinWidth
@@ -12096,7 +12094,7 @@ Private Sub FitToastCard(ByVal cardShape As Shape)
     If mToastTextCut Then
         With cardShape.TextFrame2.TextRange
             inkRgb = .Characters(.Length, 1).Font.Fill.ForeColor.RGB
-            .Text = ResolveText(Nothing)
+            .Text = ResolveText()
             .Font.Fill.ForeColor.RGB = inkRgb
         End With
         mToastTextCut = False
@@ -13557,6 +13555,9 @@ Friend Sub MeasureFlow( _
         flowHeight = mHeight
     Else
         flowWidth = mWidth
+        ' A Toggle's caption sits past its width; the room is known once
+        ' drawn, and the change queues the stack's reflow (NoteFlow).
+        If mKind = KIND_TOGGLE Then flowWidth = flowWidth + mToggleCaptionRoom
         flowHeight = mHeight
     End If
     rowAbove = CaptionRoom(themeValue)
@@ -15365,7 +15366,9 @@ End Sub
 
 ' A Toggle's Text: a caption right of the switch, sized to its words,
 ' that flips the switch when clicked, as a TickBox's caption does. It
-' lies outside the control's width, which stays the switch's.
+' lies outside the control's width, which stays the switch's; a stack
+' counts the room it takes (MeasureFlow), so a stack running across
+' starts the next member past it.
 Private Sub ApplyToggleCaption(ByVal hostSheet As Worksheet, ByVal themeValue As ReDimUI)
     Dim captionShape As Shape
     Dim captionKey As String
@@ -15377,6 +15380,7 @@ Private Sub ApplyToggleCaption(ByVal hostSheet As Worksheet, ByVal themeValue As
     mAppliedToggleCaptionSig = captionKey
     If LenB(captionKey) = 0 Then
         DropPart hostSheet, "lbl"
+        mToggleCaptionRoom = 0
         Exit Sub
     End If
     Set captionShape = EnsurePartShape(hostSheet, "lbl", msoShapeRectangle)
@@ -15389,6 +15393,7 @@ Private Sub ApplyToggleCaption(ByVal hostSheet As Worksheet, ByVal themeValue As
         MarkAccessKey captionShape, mText
     End If
     captionShape.Width = captionShape.TextFrame2.TextRange.BoundWidth + 8
+    mToggleCaptionRoom = 8 + captionShape.Width
     captionShape.Visible = msoTrue
     captionShape.OnAction = mAppliedOnAction
 End Sub
@@ -16554,12 +16559,12 @@ Friend Sub TickPressDrag(ByVal hostApp As ReDimUI, ByVal buttonDown As Boolean)
     If mKind <> KIND_SLIDEBAR Then Exit Sub
     If mSlideTracking Then
         If Not mVisible Or Not mEnabled Then
-            EndSlideDrag hostApp
+            EndSlideDrag
         ElseIf buttonDown Then
             fraction = CursorTrackFraction()
             If fraction >= 0 Then ContinueSlideDrag hostApp, fraction
         Else
-            EndSlideDrag hostApp
+            EndSlideDrag
         End If
     ElseIf buttonDown And Not mSlidePrevButtonDown Then
         ' Sheet points on a sheet behind the active one are not under
@@ -17454,7 +17459,7 @@ End Sub
 
 ' Release: fire OnChange once if the session moved the value, and swallow
 ' the OnAction click Excel is about to deliver for the same release.
-Friend Sub EndSlideDrag(ByVal hostApp As ReDimUI)
+Friend Sub EndSlideDrag()
     If Not mSlideTracking Then Exit Sub
     mSlideTracking = False
     mSlideSuppressUntilMs = GetTickCount64() + 400

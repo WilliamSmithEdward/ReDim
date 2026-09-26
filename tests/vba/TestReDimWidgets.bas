@@ -801,7 +801,7 @@ Public Function TestSlideDrag() As String
     transcript = transcript & "|liveValue=" & app.State("level")
     transcript = transcript & "|noChangeDuringHold=" & CStr(gChangeCount = 0)
 
-    probe.EndSlideDrag app
+    probe.EndSlideDrag
     transcript = transcript & "|releasedFiredChange=" & CStr(gChangeCount = 1)
     transcript = transcript & "|thumbWhiteAgain=" & _
         CStr(thumbShape.Fill.ForeColor.RGB = RGB(255, 255, 255))
@@ -814,7 +814,7 @@ Public Function TestSlideDrag() As String
     ' A no-movement session fires nothing.
     Sleep 500
     probe.BeginSlideDrag app, 0.9
-    probe.EndSlideDrag app
+    probe.EndSlideDrag
     transcript = transcript & "|noMoveNoChange=" & CStr(gChangeCount = 1)
     ReDimUI.AutoPump True
     TestSlideDrag = transcript
@@ -5997,10 +5997,17 @@ Public Function TestToggleCaption() As String
     Set app = ReDimUI.Mount(host, "wid83")
     app.Toggle("dark").AtRect(24, 24, 44, 22).Text("Dark mode").WritesTo "darkMode"
     app.Toggle("bare").AtRect 24, 60, 44, 22
+    app.Stack("row").AtRect(24, 120, 0, 0).Across.Gap 10
+    app.Toggle("inRow").Sized(44, 22).Text("Wide caption here").InStack "row"
+    app.Label("after").Sized(60, 18).Text("Next").InStack "row"
     app.Render
     With host.Shapes("rdm_wid83_dark__lbl")
         transcript = "captionRight=" & CStr(.Left >= 24 + 44 And _
             .TextFrame2.TextRange.Text = "Dark mode" And .Width < 120)
+    End With
+    With host.Shapes("rdm_wid83_inRow__lbl")
+        transcript = transcript & "|stackClears=" & CStr(host.Shapes("rdm_wid83_after").Left _
+            >= .Left + .Width + 9)
     End With
     transcript = transcript & "|bareHasNone=" & CStr(Not ShapeExists(host, "rdm_wid83_bare__lbl"))
     ReDimUI.DispatchShape "rdm_wid83_dark__lbl"

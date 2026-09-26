@@ -72,7 +72,6 @@ Private Const PUMP_ID_NAME As String = "rdm_pump_id"
 Private gTimerId As LongPtr
 Private gInTick As Boolean
 Private gConsecutiveErrors As Long
-Private gTickCount As LongLong
 Private gTimerResolutionRaised As Boolean
 Private gPinCursor As Boolean
 Private gCursorPinned As Boolean
@@ -345,7 +344,6 @@ Public Sub RdxPumpCallback( _
     If gInTick Then Exit Sub
     gInTick = True
     On Error Resume Next
-    gTickCount = gTickCount + 1
     ReDimUI.TickAll
     If Err.Number <> 0 Then
         gConsecutiveErrors = gConsecutiveErrors + 1
@@ -418,10 +416,6 @@ End Sub
 
 Public Function RdxPumpArmed() As Boolean
     RdxPumpArmed = (gTimerId <> 0)
-End Function
-
-Public Function RdxTickCount() As LongLong
-    RdxTickCount = gTickCount
 End Function
 
 ' Deterministic single tick for tests and debugging: one nominal 50 ms

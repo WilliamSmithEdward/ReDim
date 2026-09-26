@@ -71,6 +71,12 @@
 - A component id may not start or end with an underscore, which made its
   part names split at the wrong place: clicks reached the wrong control
   and `Render` swept its parts as leftovers.
+- A `Toggle` with a caption in a `Stack` running across takes the
+  caption's room, where the next member drew over the caption.
+- Dead code goes: the unused `RdxTickCount` in `ReDimHost` and its
+  counter, an unused toast reader, parameters two procedures never read
+  (`CurrentText` looked up its app for nothing), and five spike-test
+  helpers no test calls.
 - A one-line face cut short ends in an ellipsis: an unfocused
   `TextInput` or `ComboBox`, a `SelectBox`, and a `DatePicker`. They
   stopped mid-word on one line, so "A very long selection" read as

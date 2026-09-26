@@ -1616,6 +1616,9 @@ def test_row_list_window(run_widgets):
 def test_toggle_caption(run_widgets):
     facts = parse_transcript(run_widgets("TestToggleCaption"))
     assert facts["captionRight"] == "True", "a Toggle's Text must caption it on the right"
+    assert facts["stackClears"] == "True", (
+        "a stack running across must start the next member past the caption"
+    )
     assert facts["bareHasNone"] == "True", "a Toggle without Text draws no caption"
     assert facts["captionFlips"] == "True", "a click on the caption must flip the switch"
     assert facts["altLeads"] == "Dark mode, Switch, on"
