@@ -844,19 +844,19 @@ Public Function TestSlideMapping() As String
     ActiveWindow.ScrollRow = 1
     ActiveWindow.Zoom = 100
     fixedPx = CLng(ActiveWindow.PointsToScreenPixelsX(0)) + 500
-    p1 = probe.ScreenXToSheetPoints(fixedPx)
-    span100 = probe.ScreenXToSheetPoints(fixedPx + 300) - p1
+    p1 = probe.ScreenToSheetPoints(fixedPx, False)
+    span100 = probe.ScreenToSheetPoints(fixedPx + 300, False) - p1
 
     ActiveWindow.ScrollColumn = 15
     scrollDeltaPts = ActiveWindow.VisibleRange.Left
-    p2 = probe.ScreenXToSheetPoints(fixedPx)
+    p2 = probe.ScreenToSheetPoints(fixedPx, False)
     transcript = "scrollShiftMatches=" & _
         CStr(Abs((p2 - p1) - scrollDeltaPts) < 1)
 
     ActiveWindow.ScrollColumn = 1
     ActiveWindow.Zoom = 150
-    span150 = probe.ScreenXToSheetPoints(fixedPx + 300) - _
-        probe.ScreenXToSheetPoints(fixedPx)
+    span150 = probe.ScreenToSheetPoints(fixedPx + 300, False) - _
+        probe.ScreenToSheetPoints(fixedPx, False)
     transcript = transcript & "|zoomScales=" & _
         CStr(Abs(span150 - span100 / 1.5) < span100 * 0.03)
     transcript = transcript & "|span100Sane=" & _

@@ -1065,7 +1065,7 @@ Public Function Mount( _
     End If
     EnsureFactory
     If mExcelApp Is Nothing Then Set mExcelApp = Application
-    Set appValue = FindApp(targetAppId)
+    Set appValue = FindKeyed(mApps, targetAppId)
     If appValue Is Nothing Then
         Set appValue = New ReDimUI
         appValue.ConfigureApp targetAppId, hostSheet
@@ -1166,12 +1166,6 @@ Private Sub mExcelApp_SheetSelectionChange(ByVal Sh As Object, ByVal Target As R
     End If
     CheckSystemLook
 End Sub
-
-Private Function FindApp(ByVal targetAppId As String) As ReDimUI
-    On Error Resume Next
-    Set FindApp = mApps.Item(targetAppId)
-    On Error GoTo 0
-End Function
 
 Public Property Get App(ByVal targetAppId As String) As ReDimUI
     Dim appValue As ReDimUI
@@ -1356,7 +1350,7 @@ Friend Sub DispatchKey(ByVal keyText As String)
     End If
     ' The keypad's decimal key types the separator Excel would.
     If keyText = "{DECIMAL}" Then keyText = DecimalMark()
-    Set appValue = FindApp(mFocusAppId)
+    Set appValue = FindKeyed(mApps, mFocusAppId)
     If appValue Is Nothing Then
         ClearKeyboardFocus
         Exit Sub
@@ -1384,7 +1378,7 @@ Friend Sub SetKeyboardFocus(ByVal hostApp As ReDimUI, ByVal componentValue As Re
     End If
     EnsureFactory
     If LenB(mFocusComponentId) > 0 Then
-        Set previousApp = FindApp(mFocusAppId)
+        Set previousApp = FindKeyed(mApps, mFocusAppId)
         If Not previousApp Is Nothing Then
             Set previousComponent = _
                 previousApp.PeekComponent(mFocusComponentId)
@@ -1423,7 +1417,7 @@ Private Sub SyncKeyCapture()
     Dim appValue As ReDimUI
 
     If LenB(mFocusComponentId) = 0 Then Exit Sub
-    Set appValue = FindApp(mFocusAppId)
+    Set appValue = FindKeyed(mApps, mFocusAppId)
     If appValue Is Nothing Then Exit Sub
     If SheetInFront(appValue) Then
         RdxBindKeys
@@ -1811,7 +1805,7 @@ Friend Sub EndKeyboardFocus()
         Exit Sub
     End If
     If LenB(mFocusComponentId) = 0 Then Exit Sub
-    Set focusApp = FindApp(mFocusAppId)
+    Set focusApp = FindKeyed(mApps, mFocusAppId)
     If Not focusApp Is Nothing Then
         Set focusedValue = focusApp.PeekComponent(mFocusComponentId)
     End If
@@ -1916,8 +1910,8 @@ Friend Function FramePointer(ByRef pointsX As Double, ByRef pointsY As Double) A
             mFramePointerY = mPointerY
             mFramePointerState = 1
         ElseIf GetCursorPos(screenPoint) <> 0 Then
-            mFramePointerX = ScreenXToSheetPoints(screenPoint.pixelX)
-            mFramePointerY = ScreenYToSheetPoints(screenPoint.pixelY)
+            mFramePointerX = ScreenToSheetPoints(screenPoint.pixelX, False)
+            mFramePointerY = ScreenToSheetPoints(screenPoint.pixelY, True)
             If mFramePointerX <> UNMAPPABLE_POINTS _
                 And mFramePointerY <> UNMAPPABLE_POINTS Then
                 mFramePointerState = 1
@@ -5293,11 +5287,7 @@ End Function
 ' and committing moves to Tab, Ctrl+Enter, or clicking away. Esc still
 ' reverts. Size the rectangle for the lines you expect.
 Public Function MultiLine(Optional ByVal multiLineOn As Boolean = True) As ReDimUI
-    RequireRole ROLE_COMPONENT, "MultiLine"
-    If mKind <> KIND_INPUT Then
-        RaiseError ERROR_INVALID_OPERATION, "MultiLine", _
-            "MultiLine applies to TextInput only."
-    End If
+    RequireKind KIND_INPUT, "MultiLine"
     mMultiLine = multiLineOn
     Touch
     Set MultiLine = Me
@@ -5308,11 +5298,7 @@ End Function
 ' components placed Below it move with it. AutoGrow turns MultiLine on,
 ' and 0 turns growing off.
 Public Function AutoGrow(Optional ByVal maxLines As Long = 6) As ReDimUI
-    RequireRole ROLE_COMPONENT, "AutoGrow"
-    If mKind <> KIND_INPUT Then
-        RaiseError ERROR_INVALID_OPERATION, "AutoGrow", _
-            "AutoGrow applies to TextInput only."
-    End If
+    RequireKind KIND_INPUT, "AutoGrow"
     If maxLines < 0 Then
         RaiseError ERROR_INVALID_ARGUMENT, "AutoGrow", _
             "maxLines must be 0 or more."
@@ -5640,11 +5626,7 @@ End Function
 ' and otherwise goes back to the text the field had when focus arrived.
 ' A cell-backed combo's cell is Excel's to restrict, with data validation.
 Public Function RestrictToItems(Optional ByVal restrictOn As Boolean = True) As ReDimUI
-    RequireRole ROLE_COMPONENT, "RestrictToItems"
-    If mKind <> KIND_COMBO Then
-        RaiseError ERROR_INVALID_OPERATION, "RestrictToItems", _
-            "RestrictToItems applies to ComboBox only."
-    End If
+    RequireKind KIND_COMBO, "RestrictToItems"
     mRestrictToItems = restrictOn
     Set RestrictToItems = Me
 End Function
@@ -5700,11 +5682,7 @@ End Function
 ' The text lines a Skeleton stands in for, drawn as bars with the last
 ' one shorter; 0 draws one block.
 Public Function SkeletonLines(ByVal lineCount As Long) As ReDimUI
-    RequireRole ROLE_COMPONENT, "SkeletonLines"
-    If mKind <> KIND_SKELETON Then
-        RaiseError ERROR_INVALID_OPERATION, "SkeletonLines", _
-            "SkeletonLines applies to Skeleton only."
-    End If
+    RequireKind KIND_SKELETON, "SkeletonLines"
     If lineCount < 0 Then lineCount = 0
     mSkeletonLines = lineCount
     Touch
@@ -5715,7 +5693,7 @@ End Function
 ' written to WritesTo and OnChange does not fire. Any time of day is
 ' dropped; Value 0 clears the date.
 Public Function PickDate(ByVal chosenDate As Date) As ReDimUI
-    RequireDatePicker "PickDate"
+    RequireKind KIND_DATE, "PickDate"
     mValue = CDbl(DayOnly(chosenDate))
     If mValidationLive Then RecheckPick OwnerApp
     Touch
@@ -5724,7 +5702,7 @@ End Function
 
 ' The date a DatePicker holds, as a Date, or Empty while none is picked.
 Public Property Get PickedDate() As Variant
-    RequireDatePicker "PickedDate"
+    RequireKind KIND_DATE, "PickedDate"
     If mValue <> 0 Then PickedDate = CDate(mValue)
 End Property
 
@@ -5734,7 +5712,7 @@ Public Function DateRange( _
     Optional ByVal earliest As Variant, _
     Optional ByVal latest As Variant _
 ) As ReDimUI
-    RequireDatePicker "DateRange"
+    RequireKind KIND_DATE, "DateRange"
     mDateEarliest = 0
     mDateLatest = 0
     If Not IsMissing(earliest) Then mDateEarliest = DayOnly(CDate(earliest))
@@ -5746,7 +5724,7 @@ End Function
 ' The face's Format$ pattern, such as "yyyy-mm-dd" or "d mmm yyyy";
 ' the system's short date by default, and "" goes back to it.
 Public Function DateFormat(ByVal formatPattern As String) As ReDimUI
-    RequireDatePicker "DateFormat"
+    RequireKind KIND_DATE, "DateFormat"
     mDateFormat = formatPattern
     Touch
     Set DateFormat = Me
@@ -5757,7 +5735,7 @@ End Function
 Public Function Columns(ParamArray heads() As Variant) As ReDimUI
     Dim colNo As Long
 
-    RequireTable "Columns"
+    RequireKind KIND_TABLE, "Columns"
     ResizeTableColumns UBound(heads) - LBound(heads) + 1
     For colNo = 1 To mTableCols
         mTableHeads(colNo) = CStr(heads(LBound(heads) + colNo - 1))
@@ -5773,7 +5751,7 @@ Public Function AddRow(ParamArray rowCells() As Variant) As ReDimUI
     Dim colNo As Long
     Dim valueTotal As Long
 
-    RequireTable "AddRow"
+    RequireKind KIND_TABLE, "AddRow"
     valueTotal = UBound(rowCells) - LBound(rowCells) + 1
     If mTableCols = 0 Then ResizeTableColumns valueTotal
     If mTableCols = 0 Then
@@ -5810,7 +5788,7 @@ Public Function TableFrom( _
     Dim skipRows As Long
     Dim rankFailed As Boolean
 
-    RequireTable "TableFrom"
+    RequireKind KIND_TABLE, "TableFrom"
     If IsObject(tableSource) Then
         If Not TypeOf tableSource Is Range Then rankFailed = True
     ElseIf Not IsArrayValue(tableSource) Then
@@ -5868,7 +5846,7 @@ End Function
 
 ' Drops every row and the selection; the columns stay.
 Public Function ClearRows() As ReDimUI
-    RequireTable "ClearRows"
+    RequireKind KIND_TABLE, "ClearRows"
     mTableRows = 0
     mValue = 0
     mTableOffset = 0
@@ -5881,7 +5859,7 @@ End Function
 Public Function ColumnWidths(ParamArray columnPoints() As Variant) As ReDimUI
     Dim colNo As Long
 
-    RequireTable "ColumnWidths"
+    RequireKind KIND_TABLE, "ColumnWidths"
     For colNo = 1 To mTableCols
         mColumnPoints(colNo) = 0
         If colNo <= UBound(columnPoints) - LBound(columnPoints) + 1 Then
@@ -5899,7 +5877,7 @@ Public Function ColumnFormat( _
     ByVal columnNumber As Long, _
     ByVal formatPattern As String _
 ) As ReDimUI
-    RequireTable "ColumnFormat"
+    RequireKind KIND_TABLE, "ColumnFormat"
     If columnNumber >= 1 And columnNumber <= mTableCols Then
         mColumnFormats(columnNumber) = formatPattern
         mColumnLayoutKey = vbNullString
@@ -5914,7 +5892,7 @@ Public Function SortBy( _
     ByVal columnNumber As Long, _
     Optional ByVal sortDescending As Boolean = False _
 ) As ReDimUI
-    RequireTable "SortBy"
+    RequireKind KIND_TABLE, "SortBy"
     If columnNumber < 0 Or columnNumber > mTableCols Then columnNumber = 0
     mSortColumn = columnNumber
     mSortDescending = sortDescending And columnNumber > 0
@@ -5926,7 +5904,7 @@ End Function
 
 ' The words the empty row shows while the table holds no rows.
 Public Function EmptyText(ByVal emptyWords As String) As ReDimUI
-    RequireTable "EmptyText"
+    RequireKind KIND_TABLE, "EmptyText"
     mTableEmptyText = emptyWords
     Touch
     Set EmptyText = Me
@@ -5936,7 +5914,7 @@ End Function
 ' selected row while the table has the keys, runs, with the table as
 ' ReDimUI.Sender and the row in its CurrentValue.
 Public Function OnRowOpen(ByVal handlerProc As String) As ReDimUI
-    RequireTable "OnRowOpen"
+    RequireKind KIND_TABLE, "OnRowOpen"
     mRowOpenProc = handlerProc
     Set OnRowOpen = Me
 End Function
@@ -5945,7 +5923,7 @@ End Function
 ' keys: a row shows when any of its cells, as shown, holds the text,
 ' case aside. "" shows every row.
 Public Function FilterRows(ByVal filterText As String) As ReDimUI
-    RequireTable "FilterRows"
+    RequireKind KIND_TABLE, "FilterRows"
     SetTableFilter filterText
     Set FilterRows = Me
 End Function
@@ -5958,7 +5936,7 @@ Public Function ExportTo(ByVal exportAnchor As Range) As ReDimUI
     Dim rowNo As Long
     Dim colNo As Long
 
-    RequireTable "ExportTo"
+    RequireKind KIND_TABLE, "ExportTo"
     If mTableCols = 0 Then
         Set ExportTo = Me
         Exit Function
@@ -5977,19 +5955,19 @@ End Function
 
 ' The rows the table shows under its filter, in order.
 Public Property Get ShownRowCount() As Long
-    RequireTable "ShownRowCount"
+    RequireKind KIND_TABLE, "ShownRowCount"
     EnsureTableShown
     ShownRowCount = mTableShownCount
 End Property
 
 Public Property Get RowCount() As Long
-    RequireTable "RowCount"
+    RequireKind KIND_TABLE, "RowCount"
     RowCount = mTableRows
 End Property
 
 ' A cell's value by its row as the rows came in, whatever the sort.
 Public Property Get CellValue(ByVal rowNumber As Long, ByVal columnNumber As Long) As Variant
-    RequireTable "CellValue"
+    RequireKind KIND_TABLE, "CellValue"
     If rowNumber < 1 Or rowNumber > mTableRows _
         Or columnNumber < 1 Or columnNumber > mTableCols Then
         RaiseError ERROR_INVALID_ARGUMENT, "CellValue", "No such cell."
@@ -5999,30 +5977,14 @@ End Property
 
 ' The column the rows are sorted by, 0 for the order they came in.
 Public Property Get SortColumn() As Long
-    RequireTable "SortColumn"
+    RequireKind KIND_TABLE, "SortColumn"
     SortColumn = mSortColumn
 End Property
 
 Public Property Get SortedDescending() As Boolean
-    RequireTable "SortedDescending"
+    RequireKind KIND_TABLE, "SortedDescending"
     SortedDescending = mSortDescending
 End Property
-
-Private Sub RequireTable(ByVal memberName As String)
-    RequireRole ROLE_COMPONENT, memberName
-    If mKind <> KIND_TABLE Then
-        RaiseError ERROR_INVALID_OPERATION, memberName, _
-            memberName & " applies to Table only."
-    End If
-End Sub
-
-Private Sub RequireDatePicker(ByVal memberName As String)
-    RequireRole ROLE_COMPONENT, memberName
-    If mKind <> KIND_DATE Then
-        RaiseError ERROR_INVALID_OPERATION, memberName, _
-            memberName & " applies to DatePicker only."
-    End If
-End Sub
 
 ' A float TextInput or ComboBox shows this hint in muted ink while it is
 ' empty, focused or not.
@@ -6188,7 +6150,7 @@ End Function
 
 ' The points between a stack's members.
 Public Function Gap(ByVal gapPoints As Double) As ReDimUI
-    RequireStackKind "Gap"
+    RequireKind KIND_STACK, "Gap"
     mStackGap = gapPoints
     MarkStackStale
     Touch
@@ -6197,7 +6159,7 @@ End Function
 
 ' The points between a stack's edges and its members.
 Public Function Padding(ByVal paddingPoints As Double) As ReDimUI
-    RequireStackKind "Padding"
+    RequireKind KIND_STACK, "Padding"
     mStackPadding = paddingPoints
     MarkStackStale
     Touch
@@ -6207,7 +6169,7 @@ End Function
 ' Runs the members left to right instead of top to bottom, their tops
 ' aligned below the tallest caption among them.
 Public Function Across(Optional ByVal acrossOn As Boolean = True) As ReDimUI
-    RequireStackKind "Across"
+    RequireKind KIND_STACK, "Across"
     mStackAcross = acrossOn
     MarkStackStale
     Touch
@@ -6216,7 +6178,7 @@ End Function
 
 ' A stack running down gives its members its own width, less padding.
 Public Function Stretch(Optional ByVal stretchOn As Boolean = True) As ReDimUI
-    RequireStackKind "Stretch"
+    RequireKind KIND_STACK, "Stretch"
     mStackStretch = stretchOn
     MarkStackStale
     Touch
@@ -6226,11 +6188,7 @@ End Function
 ' Opens or closes an expander from code: its panel shows or hides, and
 ' nothing is written or fired.
 Public Function Expanded(Optional ByVal expandedOn As Boolean = True) As ReDimUI
-    RequireRole ROLE_COMPONENT, "Expanded"
-    If mKind <> KIND_EXPANDER Then
-        RaiseError ERROR_INVALID_OPERATION, "Expanded", _
-            "Expanded applies to Expander only."
-    End If
+    RequireKind KIND_EXPANDER, "Expanded"
     mChecked = expandedOn
     Touch
     Set Expanded = Me
@@ -6255,26 +6213,13 @@ Friend Sub OfferPaletteEntries(ByVal hostApp As ReDimUI, ByVal entryTexts As Col
         End If
     ElseIf mIsMenu And Not mCommandOrder Is Nothing Then
         For Each commandWords In mCommandOrder
-            If ItemPickable(ItemIndexOf(CStr(commandWords))) Then
+            If ItemPickable(ExactItemMatch(CStr(commandWords))) Then
                 hostApp.AddPaletteEntry entryTexts, mText & ": " & CStr(commandWords), _
                     "menu" & vbTab & mComponentId & vbTab & CStr(commandWords)
             End If
         Next commandWords
     End If
 End Sub
-
-' The item number of an item's text, 0 when no item has it.
-Private Function ItemIndexOf(ByVal itemText As String) As Long
-    Dim idx As Long
-
-    EnsureItemTexts
-    For idx = 1 To ItemCount
-        If StrComp(mItemTexts(idx), itemText, vbTextCompare) = 0 Then
-            ItemIndexOf = idx
-            Exit Function
-        End If
-    Next idx
-End Function
 
 Friend Sub MarkMenu()
     If mIsMenu Then Exit Sub
@@ -6376,14 +6321,6 @@ Private Sub StyleMenuRow( _
     rowLetters.Font.Name = themeValue.FontName
     If Left$(rowText, 1) <> vbTab And Mid$(rowText, 2, 1) = vbTab Then
         rowLetters.Characters(1, 1).Font.Name = ReDimUI.IconFont
-    End If
-End Sub
-
-Private Sub RequireStackKind(ByVal memberName As String)
-    RequireRole ROLE_COMPONENT, memberName
-    If mKind <> KIND_STACK Then
-        RaiseError ERROR_INVALID_OPERATION, memberName, _
-            memberName & " applies to Stack only."
     End If
 End Sub
 
@@ -6705,11 +6642,7 @@ Public Function ValuesFrom(ByVal valueSource As Variant) As ReDimUI
     Dim entry As Variant
     Dim kept As Long
 
-    RequireRole ROLE_COMPONENT, "ValuesFrom"
-    If mKind <> KIND_SPARKLINE Then
-        RaiseError ERROR_INVALID_OPERATION, "ValuesFrom", _
-            "ValuesFrom applies to Sparkline only."
-    End If
+    RequireKind KIND_SPARKLINE, "ValuesFrom"
     Set gathered = ReadItemSource(valueSource, "ValuesFrom")
     Erase mSparkValues
     If gathered.Count > 0 Then
@@ -6853,11 +6786,7 @@ End Function
 ' chosen order is part of the value, so a move writes WritesTo and
 ' fires OnChange.
 Public Function Reorderable(Optional ByVal reorderOn As Boolean = True) As ReDimUI
-    RequireRole ROLE_COMPONENT, "Reorderable"
-    If mKind <> KIND_TRANSFER Then
-        RaiseError ERROR_INVALID_OPERATION, "Reorderable", _
-            "Reorderable applies to TransferList only."
-    End If
+    RequireKind KIND_TRANSFER, "Reorderable"
     mReorderable = reorderOn
     Touch
     Set Reorderable = Me
@@ -7042,8 +6971,7 @@ End Function
 ' counts it and later item numbers count past it, and it cannot be
 ' picked.
 Public Function AddGroup(ByVal groupCaption As String) As ReDimUI
-    RequireRole ROLE_COMPONENT, "AddGroup"
-    RequireSelectKind "AddGroup"
+    RequireKind KIND_SELECT, "AddGroup"
     If mItems Is Nothing Then Set mItems = New Collection
     mItems.Add groupCaption
     If mGroupHeaders Is Nothing Then Set mGroupHeaders = New Collection
@@ -7054,6 +6982,16 @@ Public Function AddGroup(ByVal groupCaption As String) As ReDimUI
 End Function
 
 ' A text field's builders raise on other kinds rather than do nothing.
+' A member of one kind raises on a component of any other, naming the
+' kind it belongs to.
+Private Sub RequireKind(ByVal kindCode As Long, ByVal memberName As String)
+    RequireRole ROLE_COMPONENT, memberName
+    If mKind <> kindCode Then
+        RaiseError ERROR_INVALID_OPERATION, memberName, _
+            memberName & " applies to " & KindName(kindCode) & " only."
+    End If
+End Sub
+
 Private Sub RequireFieldKind(ByVal memberName As String)
     If mKind <> KIND_INPUT And mKind <> KIND_COMBO Then
         RaiseError ERROR_INVALID_OPERATION, memberName, _
@@ -7067,13 +7005,6 @@ Private Function IsPickKind() As Boolean
     IsPickKind = (mKind = KIND_SELECT And Not mIsMenu) Or mKind = KIND_DATE _
         Or mKind = KIND_RADIO
 End Function
-
-Private Sub RequireSelectKind(ByVal memberName As String)
-    If mKind <> KIND_SELECT Then
-        RaiseError ERROR_INVALID_OPERATION, memberName, _
-            memberName & " applies to SelectBox only."
-    End If
-End Sub
 
 Private Sub ForgetItemMarks()
     Set mDisabledItems = Nothing
@@ -7108,29 +7039,46 @@ Private Function IsGroupHeader(ByVal itemNumber As Long) As Boolean
     IsGroupHeader = TransferSelectionHas(mGroupHeaders, itemNumber)
 End Function
 
-' The pickable item nearest a target in one direction, else in the
-' other; 0 when nothing in the list can be picked.
-Private Function PickableNear(ByVal aimItem As Long, ByVal stepDirection As Long) As Long
-    Dim itemTotal As Long
+' The pickable row nearest a target in one direction, else in the
+' other; 0 when no row can be picked. The rows are the list's items, or
+' with matchList the matches a filter leaves, each naming its item.
+Private Function PickableNear( _
+    ByVal aimRow As Long, _
+    ByVal stepDirection As Long, _
+    Optional ByVal matchList As Collection _
+) As Long
+    Dim rowTotal As Long
     Dim probe As Long
 
-    itemTotal = ItemCount
-    If itemTotal = 0 Then Exit Function
-    If aimItem < 1 Then aimItem = 1
-    If aimItem > itemTotal Then aimItem = itemTotal
+    If matchList Is Nothing Then
+        rowTotal = ItemCount
+    Else
+        rowTotal = matchList.Count
+    End If
+    If rowTotal = 0 Then Exit Function
+    If aimRow < 1 Then aimRow = 1
+    If aimRow > rowTotal Then aimRow = rowTotal
     If stepDirection = 0 Then stepDirection = 1
-    For probe = aimItem To IIf(stepDirection > 0, itemTotal, 1) Step stepDirection
-        If ItemPickable(probe) Then
+    For probe = aimRow To IIf(stepDirection > 0, rowTotal, 1) Step stepDirection
+        If RowPickable(probe, matchList) Then
             PickableNear = probe
             Exit Function
         End If
     Next probe
-    For probe = aimItem To IIf(stepDirection > 0, 1, itemTotal) Step -stepDirection
-        If ItemPickable(probe) Then
+    For probe = aimRow To IIf(stepDirection > 0, 1, rowTotal) Step -stepDirection
+        If RowPickable(probe, matchList) Then
             PickableNear = probe
             Exit Function
         End If
     Next probe
+End Function
+
+Private Function RowPickable(ByVal rowNumber As Long, ByVal matchList As Collection) As Boolean
+    If matchList Is Nothing Then
+        RowPickable = ItemPickable(rowNumber)
+    Else
+        RowPickable = ItemPickable(CLng(matchList.Item(rowNumber)))
+    End If
 End Function
 
 Public Property Get ItemTextAt(ByVal itemNumber As Long) As String
@@ -7149,16 +7097,18 @@ End Property
 ' The position of a TransferList's chosen item with this text, ignoring
 ' case, or 0 when it is not chosen.
 Public Property Get ChosenPosition(ByVal itemText As String) As Long
-    Dim idx As Long
+    Dim chosenText As Variant
+    Dim chosenAt As Long
 
     RequireRole ROLE_COMPONENT, "ChosenPosition"
     If mChosenItems Is Nothing Then Exit Property
-    For idx = 1 To mChosenItems.Count
-        If StrComp(CStr(mChosenItems.Item(idx)), itemText, vbTextCompare) = 0 Then
-            ChosenPosition = idx
+    For Each chosenText In mChosenItems
+        chosenAt = chosenAt + 1
+        If StrComp(CStr(chosenText), itemText, vbTextCompare) = 0 Then
+            ChosenPosition = chosenAt
             Exit Property
         End If
-    Next idx
+    Next chosenText
 End Property
 
 ' The item's value, or its text when it has none.
@@ -9414,7 +9364,7 @@ Private Function CreateShapeForKind(ByVal hostSheet As Worksheet) As Shape
         Case KIND_LABEL
             Set mainShape = hostSheet.Shapes.AddTextbox( _
                 msoTextOrientationHorizontal, mLeft, mTop, mWidth, mHeight)
-        Case KIND_CARD
+        Case KIND_CARD, KIND_IMAGE
             Set mainShape = hostSheet.Shapes.AddShape( _
                 msoShapeRoundedRectangle, mLeft, mTop, mWidth, mHeight)
             mainShape.Adjustments(1) = 0.08
@@ -9440,42 +9390,27 @@ Private Function CreateShapeForKind(ByVal hostSheet As Worksheet) As Shape
                 msoShapeRoundedRectangle, mLeft, mTop + mSlideRemaining, _
                 mWidth, mHeight)
             mainShape.Adjustments(1) = 0.2
-        Case KIND_SELECT, KIND_DATE
+        Case KIND_SELECT, KIND_DATE, KIND_STEPPER, KIND_INPUT, KIND_COMBO
             Set mainShape = hostSheet.Shapes.AddShape( _
                 msoShapeRoundedRectangle, mLeft, mTop, mWidth, mHeight)
             mainShape.Adjustments(1) = 0.15
-        Case KIND_TICKBOX
+        Case KIND_TICKBOX, KIND_CHECKLIST
+            ' A check list's main shape is its first row's box; extras own
+            ' its geometry.
             Set mainShape = hostSheet.Shapes.AddShape( _
                 msoShapeRoundedRectangle, mLeft, mTop, 14, 14)
             mainShape.Adjustments(1) = 0.2
         Case KIND_RADIO
             Set mainShape = hostSheet.Shapes.AddShape( _
                 msoShapeOval, mLeft, mTop, 14, 14)
-        Case KIND_STEPPER
-            Set mainShape = hostSheet.Shapes.AddShape( _
-                msoShapeRoundedRectangle, mLeft, mTop, mWidth, mHeight)
-            mainShape.Adjustments(1) = 0.15
         Case KIND_SLIDEBAR
             Set mainShape = hostSheet.Shapes.AddShape( _
                 msoShapeRoundedRectangle, mLeft, mTop, mWidth, 6)
             mainShape.Adjustments(1) = 0.5
-        Case KIND_INPUT, KIND_COMBO
-            Set mainShape = hostSheet.Shapes.AddShape( _
-                msoShapeRoundedRectangle, mLeft, mTop, mWidth, mHeight)
-            mainShape.Adjustments(1) = 0.15
         Case KIND_TRANSFER
             ' The main shape is the left panel; extras own its geometry.
             Set mainShape = hostSheet.Shapes.AddShape( _
                 msoShapeRoundedRectangle, mLeft, mTop, 100, 100)
-            mainShape.Adjustments(1) = 0.08
-        Case KIND_CHECKLIST
-            ' The main shape is the first row's box; extras own geometry.
-            Set mainShape = hostSheet.Shapes.AddShape( _
-                msoShapeRoundedRectangle, mLeft, mTop, 14, 14)
-            mainShape.Adjustments(1) = 0.2
-        Case KIND_IMAGE
-            Set mainShape = hostSheet.Shapes.AddShape( _
-                msoShapeRoundedRectangle, mLeft, mTop, mWidth, mHeight)
             mainShape.Adjustments(1) = 0.08
         Case KIND_SKELETON
             Set mainShape = hostSheet.Shapes.AddShape( _
@@ -10871,29 +10806,11 @@ Private Sub SetSelectFilter(ByVal filterText As String)
     Touch
 End Sub
 
-' The match nearest a target, in one direction and then the other, whose
-' item can be picked; 0 when none can.
+' The match nearest a target whose item can be picked; 0 when none can,
+' or no filter has built the matches.
 Private Function PickableMatchNear(ByVal aimMatch As Long, ByVal stepDirection As Long) As Long
-    Dim matchTotal As Long
-    Dim probe As Long
-
     If mListMatches Is Nothing Then Exit Function
-    matchTotal = mListMatches.Count
-    If matchTotal = 0 Then Exit Function
-    If aimMatch < 1 Then aimMatch = 1
-    If aimMatch > matchTotal Then aimMatch = matchTotal
-    For probe = aimMatch To IIf(stepDirection > 0, matchTotal, 1) Step stepDirection
-        If ItemPickable(CLng(mListMatches.Item(probe))) Then
-            PickableMatchNear = probe
-            Exit Function
-        End If
-    Next probe
-    For probe = aimMatch To IIf(stepDirection > 0, 1, matchTotal) Step -stepDirection
-        If ItemPickable(CLng(mListMatches.Item(probe))) Then
-            PickableMatchNear = probe
-            Exit Function
-        End If
-    Next probe
+    PickableMatchNear = PickableNear(aimMatch, stepDirection, mListMatches)
 End Function
 
 ' The item an open select's highlight stands on: its match's item while
@@ -16781,9 +16698,9 @@ Private Function PointerPoints( _
         Exit Function
     End If
     If GetCursorPos(screenPoint) = 0 Then Exit Function
-    pointsX = ScreenXToSheetPoints(screenPoint.pixelX)
+    pointsX = ScreenToSheetPoints(screenPoint.pixelX, False)
     If pointsX = UNMAPPABLE_POINTS Then Exit Function
-    pointsY = ScreenYToSheetPoints(screenPoint.pixelY)
+    pointsY = ScreenToSheetPoints(screenPoint.pixelY, True)
     If pointsY = UNMAPPABLE_POINTS Then Exit Function
     PointerPoints = True
 End Function
@@ -17675,7 +17592,7 @@ Private Function CursorTrackFraction() As Double
     CursorTrackFraction = -1
     If Not ReDimUI.PointerOverride(cursorPoints, overriddenY) Then
         If GetCursorPos(screenPoint) = 0 Then Exit Function
-        cursorPoints = ScreenXToSheetPoints(screenPoint.pixelX)
+        cursorPoints = ScreenToSheetPoints(screenPoint.pixelX, False)
         If cursorPoints = UNMAPPABLE_POINTS Then Exit Function
     End If
     If mWidth <= 0 Then Exit Function
@@ -17684,27 +17601,33 @@ Private Function CursorTrackFraction() As Double
     If CursorTrackFraction > 1 Then CursorTrackFraction = 1
 End Function
 
-' Maps a screen pixel X to absolute sheet points. PointsToScreenPixelsX is
-' misnamed on current Excel builds: its input is document PIXELS (measured
-' slope exactly 1 at any zoom, while scrolling shifts the origin by the
-' true pixels-per-point). The conversion is therefore chosen empirically:
-' if the measured slope matches DPI times zoom it is a real points input;
-' if the slope is 1 the input is pixels and DPI times zoom converts. Under
-' either contract (px - f(0)) / conversion yields absolute points, scroll
-' already accounted for by f(0).
-Friend Function ScreenXToSheetPoints(ByVal screenX As Long) As Double
+' Maps a screen pixel to absolute sheet points along one axis.
+' PointsToScreenPixelsX and Y are misnamed on current Excel builds: their
+' input is document PIXELS (measured slope exactly 1 at any zoom, while
+' scrolling shifts the origin by the true pixels-per-point). The
+' conversion is therefore chosen empirically: if the measured slope
+' matches DPI times zoom it is a real points input; if the slope is 1
+' the input is pixels and DPI times zoom converts. Under either contract
+' (px - f(0)) / conversion yields absolute points, scroll already
+' accounted for by f(0).
+Friend Function ScreenToSheetPoints(ByVal screenPx As Long, ByVal alongY As Boolean) As Double
     Dim originPx As Double
     Dim referencePx As Double
     Dim measuredSlope As Double
     Dim dpiSlope As Double
     Dim pixelsPerPoint As Double
 
-    ScreenXToSheetPoints = UNMAPPABLE_POINTS
+    ScreenToSheetPoints = UNMAPPABLE_POINTS
     On Error GoTo Unmappable
-    originPx = ActiveWindow.PointsToScreenPixelsX(0)
-    referencePx = ActiveWindow.PointsToScreenPixelsX(1000)
+    If alongY Then
+        originPx = ActiveWindow.PointsToScreenPixelsY(0)
+        referencePx = ActiveWindow.PointsToScreenPixelsY(1000)
+    Else
+        originPx = ActiveWindow.PointsToScreenPixelsX(0)
+        referencePx = ActiveWindow.PointsToScreenPixelsX(1000)
+    End If
     measuredSlope = (referencePx - originPx) / 1000#
-    dpiSlope = ScreenPixelsPerPoint()
+    dpiSlope = ScreenPixelsPerPoint(alongY)
     On Error GoTo 0
     If measuredSlope <= 0 Or dpiSlope <= 0 Then Exit Function
     If Abs(measuredSlope - dpiSlope) < 0.02 Then
@@ -17714,71 +17637,35 @@ Friend Function ScreenXToSheetPoints(ByVal screenX As Long) As Double
     Else
         pixelsPerPoint = measuredSlope
     End If
-    ScreenXToSheetPoints = (screenX - originPx) / pixelsPerPoint
+    ScreenToSheetPoints = (screenPx - originPx) / pixelsPerPoint
     Exit Function
 
 Unmappable:
-    ScreenXToSheetPoints = UNMAPPABLE_POINTS
+    ScreenToSheetPoints = UNMAPPABLE_POINTS
 End Function
 
-Friend Function ScreenYToSheetPoints(ByVal screenY As Long) As Double
-    Dim originPx As Double
-    Dim referencePx As Double
-    Dim measuredSlope As Double
-    Dim dpiSlope As Double
-    Dim pixelsPerPoint As Double
+' Screen pixels per sheet point along one axis: the display's DPI, read
+' once, times the window's zoom.
+Private Function ScreenPixelsPerPoint(ByVal alongY As Boolean) As Double
+    Static dotsPerInchX As Double
+    Static dotsPerInchY As Double
+    Dim dotsPerInch As Double
+    Dim deviceContext As LongPtr
 
-    ScreenYToSheetPoints = UNMAPPABLE_POINTS
-    On Error GoTo Unmappable
-    originPx = ActiveWindow.PointsToScreenPixelsY(0)
-    referencePx = ActiveWindow.PointsToScreenPixelsY(1000)
-    measuredSlope = (referencePx - originPx) / 1000#
-    dpiSlope = ScreenPixelsPerPointY()
-    On Error GoTo 0
-    If measuredSlope <= 0 Or dpiSlope <= 0 Then Exit Function
-    If Abs(measuredSlope - dpiSlope) < 0.02 Then
-        pixelsPerPoint = measuredSlope
-    ElseIf Abs(measuredSlope - 1#) < 0.02 Then
-        pixelsPerPoint = dpiSlope
+    If dotsPerInchX = 0 Then
+        deviceContext = GetDC(0)
+        If deviceContext <> 0 Then
+            dotsPerInchX = GetDeviceCaps(deviceContext, LOGPIXELSX)
+            dotsPerInchY = GetDeviceCaps(deviceContext, LOGPIXELSY)
+            ReleaseDC 0, deviceContext
+        End If
+        If dotsPerInchX = 0 Then dotsPerInchX = 96
+        If dotsPerInchY = 0 Then dotsPerInchY = 96
+    End If
+    If alongY Then
+        dotsPerInch = dotsPerInchY
     Else
-        pixelsPerPoint = measuredSlope
-    End If
-    ScreenYToSheetPoints = (screenY - originPx) / pixelsPerPoint
-    Exit Function
-
-Unmappable:
-    ScreenYToSheetPoints = UNMAPPABLE_POINTS
-End Function
-
-Private Function ScreenPixelsPerPointY() As Double
-    Static dotsPerInch As Double
-    Dim deviceContext As LongPtr
-
-    If dotsPerInch = 0 Then
-        deviceContext = GetDC(0)
-        If deviceContext <> 0 Then
-            dotsPerInch = GetDeviceCaps(deviceContext, LOGPIXELSY)
-            ReleaseDC 0, deviceContext
-        End If
-        If dotsPerInch = 0 Then dotsPerInch = 96
-    End If
-    On Error Resume Next
-    ScreenPixelsPerPointY = dotsPerInch / 72# * ActiveWindow.Zoom / 100#
-    On Error GoTo 0
-    If ScreenPixelsPerPointY = 0 Then ScreenPixelsPerPointY = dotsPerInch / 72#
-End Function
-
-Private Function ScreenPixelsPerPoint() As Double
-    Static dotsPerInch As Double
-    Dim deviceContext As LongPtr
-
-    If dotsPerInch = 0 Then
-        deviceContext = GetDC(0)
-        If deviceContext <> 0 Then
-            dotsPerInch = GetDeviceCaps(deviceContext, LOGPIXELSX)
-            ReleaseDC 0, deviceContext
-        End If
-        If dotsPerInch = 0 Then dotsPerInch = 96
+        dotsPerInch = dotsPerInchX
     End If
     On Error Resume Next
     ScreenPixelsPerPoint = dotsPerInch / 72# * ActiveWindow.Zoom / 100#
@@ -18890,7 +18777,6 @@ End Sub
 Private Sub ComboListNav(ByVal hostApp As ReDimUI, ByVal rowDelta As Long)
     Dim matchCount As Long
     Dim currentItem As Long
-    Dim stepDirection As Long
     Dim probe As Long
 
     If Not mSelectOpen Then OpenDropList hostApp.Sheet
@@ -18916,20 +18802,8 @@ Private Sub ComboListNav(ByVal hostApp As ReDimUI, ByVal rowDelta As Long)
     If mListHighlight > matchCount Then mListHighlight = matchCount
     ' The highlight passes over disabled items: on in the direction of
     ' the move, else back from the end it reached.
-    stepDirection = IIf(rowDelta < 0, -1, 1)
-    probe = mListHighlight
-    Do While probe >= 1 And probe <= matchCount
-        If ItemPickable(CLng(mListMatches.Item(probe))) Then Exit Do
-        probe = probe + stepDirection
-    Loop
-    If probe < 1 Or probe > matchCount Then
-        probe = mListHighlight
-        Do While probe >= 1 And probe <= matchCount
-            If ItemPickable(CLng(mListMatches.Item(probe))) Then Exit Do
-            probe = probe - stepDirection
-        Loop
-    End If
-    If probe >= 1 And probe <= matchCount Then mListHighlight = probe
+    probe = PickableNear(mListHighlight, IIf(rowDelta < 0, -1, 1), mListMatches)
+    If probe > 0 Then mListHighlight = probe
     If mListHighlight > mListOffset + mListRows Then
         mListOffset = mListHighlight - mListRows
     ElseIf mListHighlight <= mListOffset Then
