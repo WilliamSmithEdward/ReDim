@@ -523,6 +523,9 @@ Private mBindVisibleInvert As Boolean
 Private mBindEnabledKey As String
 Private mBindEnabledInvert As Boolean
 Private mWritesToKey As String
+' Any value the caller attaches to a control, op, or job, read back from
+' ReDimUI.Sender so one handler can serve several of them.
+Private mTag As Variant
 Private mLastClickMs As LongLong
 Private mExpiresAtMs As LongLong
 Private mToastActionLabel As String
@@ -1276,13 +1279,52 @@ Friend Sub DispatchShape(ByVal clickedName As String)
 
 HandlerFailed:
     Dim failure As String
-    failure = "ReDim handler error " & Err.Number & ": " & Err.Description
+    failure = HandlerFailureText(componentValue, componentValue.ClickHandlerName, _
+        Err.Number, Err.Description)
     On Error GoTo 0
     Set mSenderApp = Nothing
     Set mSenderComponent = Nothing
     mSenderPartName = vbNullString
     appValue.ReportAppError failure
 End Sub
+
+' A handler failure as the error sink or status bar reports it, naming
+' the procedure and what ran it: "ReDim handler error 13 in Orders.Save
+' for component 'save': Type mismatch".
+Private Function HandlerFailureText( _
+    ByVal senderValue As ReDimUI, _
+    ByVal handlerProc As String, _
+    ByVal errNumber As Long, _
+    ByVal errText As String _
+) As String
+    HandlerFailureText = "ReDim handler error " & errNumber
+    If LenB(handlerProc) > 0 Then HandlerFailureText = HandlerFailureText & " in " & handlerProc
+    If Not senderValue Is Nothing Then
+        HandlerFailureText = HandlerFailureText & " for " & senderValue.SenderWords
+    End If
+    HandlerFailureText = HandlerFailureText & ": " & errText
+End Function
+
+' What a handler ran for, in an error message.
+Friend Property Get SenderWords() As String
+    Select Case mRole
+        Case ROLE_ASYNC_OP
+            SenderWords = "async op '" & mComponentId & "'"
+        Case ROLE_JOB
+            SenderWords = "job '" & mComponentId & "'"
+        Case Else
+            SenderWords = "component '" & mComponentId & "'"
+    End Select
+End Property
+
+' The procedure a click runs, for an error message about it.
+Friend Property Get ClickHandlerName() As String
+    If LenB(mAsyncClickProc) > 0 Then
+        ClickHandlerName = mAsyncClickProc
+    Else
+        ClickHandlerName = mClickProc
+    End If
+End Property
 
 Public Property Get SenderPart() As String
     SenderPart = ReDimUI.FactorySenderPart
@@ -1434,12 +1476,50 @@ Friend Sub RunHandlerAs( _
     Set mSenderComponent = priorComponent
     Exit Sub
 HandlerFailed:
-    failure = "ReDim handler error " & Err.Number & ": " & Err.Description
+    failure = HandlerFailureText(componentValue, handlerProc, Err.Number, Err.Description)
     On Error GoTo 0
     Set mSenderApp = priorApp
     Set mSenderComponent = priorComponent
     hostApp.ReportAppError failure
 End Sub
+
+' Runs a job's step with the job as ReDimUI.Sender, so a step shared by
+' several jobs reads its TagValue, and returns what the step returned.
+' A failure goes back to the job, which finishes through OnFail.
+Friend Function RunStepAs( _
+    ByVal hostApp As ReDimUI, _
+    ByVal senderValue As ReDimUI, _
+    ByVal stepProc As String _
+) As Variant
+    Dim priorApp As ReDimUI
+    Dim priorComponent As ReDimUI
+    Dim failNumber As Long
+    Dim failSource As String
+    Dim failDescription As String
+
+    If Not IsFactory(Me) Then
+        RunStepAs = ReDimUI.RunStepAs(hostApp, senderValue, stepProc)
+        Exit Function
+    End If
+    Set priorApp = mSenderApp
+    Set priorComponent = mSenderComponent
+    Set mSenderApp = hostApp
+    Set mSenderComponent = senderValue
+    On Error GoTo StepFailed
+    RunStepAs = Application.Run(stepProc)
+    On Error GoTo 0
+    Set mSenderApp = priorApp
+    Set mSenderComponent = priorComponent
+    Exit Function
+StepFailed:
+    failNumber = Err.Number
+    failSource = Err.Source
+    failDescription = Err.Description
+    On Error GoTo 0
+    Set mSenderApp = priorApp
+    Set mSenderComponent = priorComponent
+    Err.Raise failNumber, failSource, failDescription
+End Function
 
 ' Binds Alt plus each access key the active sheet's apps declare and
 ' releases the rest, so the chords belong to ReDim only while an app
@@ -4364,6 +4444,9 @@ Friend Sub ForgetApp(ByVal targetAppId As String)
     ForgetWindow targetAppId
 End Sub
 
+' A failure goes to the app's OnError procedure; without one it shows on
+' the status bar, which the next status replaces, and in the Immediate
+' window, where a developer finds it afterwards.
 Friend Sub ReportAppError(ByVal messageText As String)
     RequireRole ROLE_APP, "ReportAppError"
     If LenB(mErrorHandlerProc) > 0 Then
@@ -4372,6 +4455,7 @@ Friend Sub ReportAppError(ByVal messageText As String)
         On Error GoTo 0
     Else
         Application.StatusBar = messageText
+        Debug.Print messageText
     End If
 End Sub
 
@@ -4922,17 +5006,14 @@ Private Function FindKeyed( _
     On Error GoTo 0
 End Function
 
+' An op or job never created has nothing to cancel, as one at rest has
+' nothing: a reset that cancels every job needs no error trap.
 Public Sub CancelAsync(ByVal opId As String)
     Dim opValue As ReDimUI
 
     RequireRole ROLE_APP, "CancelAsync"
     Set opValue = FindKeyed(mAsyncOps, opId)
-    If opValue Is Nothing Then
-        RaiseError ERROR_NOT_FOUND, "CancelAsync", _
-            "No async op is named '" & opId & "'."
-    Else
-        opValue.RequestOpCancel
-    End If
+    If Not opValue Is Nothing Then opValue.RequestOpCancel
 End Sub
 
 Public Sub CancelJob(ByVal jobId As String)
@@ -4940,12 +5021,7 @@ Public Sub CancelJob(ByVal jobId As String)
 
     RequireRole ROLE_APP, "CancelJob"
     Set jobValue = FindKeyed(mJobs, jobId)
-    If jobValue Is Nothing Then
-        RaiseError ERROR_NOT_FOUND, "CancelJob", _
-            "No job is named '" & jobId & "'."
-    Else
-        jobValue.RequestJobCancel
-    End If
+    If Not jobValue Is Nothing Then jobValue.RequestJobCancel
 End Sub
 
 Public Function AsyncError(ByVal opId As String) As String
@@ -4956,12 +5032,6 @@ Public Function AsyncError(ByVal opId As String) As String
     If Not opValue Is Nothing Then AsyncError = opValue.OpLastError
 End Function
 
-Friend Function IsOpRunning(ByVal opId As String) As Boolean
-    Dim opValue As ReDimUI
-
-    Set opValue = FindKeyed(mAsyncOps, opId)
-    If Not opValue Is Nothing Then IsOpRunning = opValue.OpIsRunning
-End Function
 
 ' =====================================================================
 ' Component configuration and fluent surface
@@ -6496,6 +6566,31 @@ Public Function BindEnabled( _
     Set BindEnabled = Me
 End Function
 
+' Attaches a value to a control, op, or job; a handler reads it from
+' ReDimUI.Sender.TagValue, so three feeds can share one Start button
+' handler.
+Public Function Tag(ByVal attachedValue As Variant) As ReDimUI
+    RequireTaggable "Tag"
+    AssignVariant mTag, attachedValue
+    Set Tag = Me
+End Function
+
+Public Property Get TagValue() As Variant
+    RequireTaggable "TagValue"
+    If IsObject(mTag) Then
+        Set TagValue = mTag
+    Else
+        TagValue = mTag
+    End If
+End Property
+
+Private Sub RequireTaggable(ByVal memberName As String)
+    If mRole = ROLE_COMPONENT Or mRole = ROLE_ASYNC_OP Or mRole = ROLE_JOB Then Exit Sub
+    RaiseError ERROR_INVALID_OPERATION, memberName, _
+        memberName & " applies to a component, an async op, or a job; this value is " & _
+        RoleWords(mRole) & "."
+End Sub
+
 Public Function WritesTo(ByVal stateKey As String) As ReDimUI
     RequireRole ROLE_COMPONENT, "WritesTo"
     If StrComp(mWritesToKey, stateKey, vbTextCompare) <> 0 Then mFollowPending = True
@@ -7041,6 +7136,29 @@ End Function
 Public Property Get ItemTextAt(ByVal itemNumber As Long) As String
     RequireRole ROLE_COMPONENT, "ItemTextAt"
     ItemTextAt = ItemAt(itemNumber)
+End Property
+
+' The position of the first item with this text, ignoring case, or 0
+' when there is none: a TransferList's available side, or any list's
+' items.
+Public Property Get ItemPosition(ByVal itemText As String) As Long
+    RequireRole ROLE_COMPONENT, "ItemPosition"
+    ItemPosition = ExactItemMatch(itemText)
+End Property
+
+' The position of a TransferList's chosen item with this text, ignoring
+' case, or 0 when it is not chosen.
+Public Property Get ChosenPosition(ByVal itemText As String) As Long
+    Dim idx As Long
+
+    RequireRole ROLE_COMPONENT, "ChosenPosition"
+    If mChosenItems Is Nothing Then Exit Property
+    For idx = 1 To mChosenItems.Count
+        If StrComp(CStr(mChosenItems.Item(idx)), itemText, vbTextCompare) = 0 Then
+            ChosenPosition = idx
+            Exit Property
+        End If
+    Next idx
 End Property
 
 ' The item's value, or its text when it has none.
@@ -8968,18 +9086,37 @@ Private Function ItemPositionOf(ByRef stateValue As Variant) As Long
     Next idx
 End Function
 
+' Whether the control seeds the key it writes: every control that follows
+' its key, and a check list or transfer list, which writes its joined
+' list one way.
+Private Function SeedsWritesTo() As Boolean
+    If FollowsWritesTo() Then
+        SeedsWritesTo = True
+    ElseIf LenB(mWritesToKey) > 0 Then
+        SeedsWritesTo = (mKind = KIND_CHECKLIST Or mKind = KIND_TRANSFER)
+    End If
+End Function
+
 ' A key with no value takes what the control shows, silently, as if the
 ' build had set it with SetStateDefault before any listener could care:
 ' a switch's True or False, a number, a picked date, a picked item's
-' value or text, or a field's text. Nothing picked, or an empty field,
-' leaves the key unset. Controls bound to the key redraw with it.
+' value or text, a field's text, or a list's joined checks or picks.
+' Nothing picked, or an empty field, leaves the key unset. Controls
+' bound to the key redraw with it.
 Friend Sub SeedWritesTo(ByVal hostApp As ReDimUI)
     Dim seedValue As Variant
     Dim namedItem As Long
 
-    If Not FollowsWritesTo() Then Exit Sub
+    If Not SeedsWritesTo() Then Exit Sub
     If hostApp.HasState(mWritesToKey) Then Exit Sub
     Select Case mKind
+        Case KIND_CHECKLIST
+            seedValue = CheckedJoined()
+            If LenB(seedValue) = 0 Then Exit Sub
+        Case KIND_TRANSFER
+            If mChosenItems Is Nothing Then Exit Sub
+            seedValue = JoinedValues(mChosenItems, ", ")
+            If LenB(seedValue) = 0 Then Exit Sub
         Case KIND_TOGGLE, KIND_TICKBOX, KIND_EXPANDER
             seedValue = mChecked
         Case KIND_STEPPER, KIND_SLIDEBAR
@@ -9023,6 +9160,8 @@ Private Sub ResolveBindings(ByVal hostApp As ReDimUI)
             TakeStateValue hostApp, followed
         End If
         mFollowPending = False
+    ElseIf SeedsWritesTo() Then
+        SeedWritesTo hostApp
     End If
     If LenB(mBindTextKey) > 0 Then
         If hostApp.HasState(mBindTextKey) Then
@@ -10350,8 +10489,6 @@ Private Sub ActivateByKey()
     ReDimUI.DispatchShape ShapeName
 End Sub
 
-' Arrows move the selection itself, wrapping at the ends; each move
-' writes the state and fires OnChange as a click would.
 ' Left and Right move to the tab beside, wrapping at the ends; Home and
 ' End go to the first and last. The tab shown follows the keys.
 Private Sub HandleTabsKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
@@ -10378,13 +10515,20 @@ Private Sub HandleTabsKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
     If SelectTab(hostApp, aimTab) Then RunClickHandlers hostApp
 End Sub
 
+' The keys move the selection itself, and each move writes the state and
+' fires OnChange as a click would. Every move passes over disabled
+' items. The arrows wrap; Page Up and Page Down move a window's worth of
+' rows in a long group, or to the ends in a short one; letters jump by
+' name, as in a SelectBox.
 Private Sub HandleRadioKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
     Dim itemTotal As Long
     Dim aimRow As Long
+    Dim shownTotal As Long
+    Dim windowRows As Long
+    Dim pageRows As Long
 
     itemTotal = ItemCount
     If itemTotal = 0 Then Exit Sub
-    ' Every move passes over disabled items; the arrows wrap.
     Select Case keyText
         Case "{UP}", "{LEFT}"
             aimRow = RadioStep(-1)
@@ -10394,10 +10538,28 @@ Private Sub HandleRadioKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
             aimRow = PickableNear(1, 1)
         Case "{END}"
             aimRow = PickableNear(itemTotal, -1)
+        Case "{PGUP}", "{PGDN}"
+            RowListWindow shownTotal, windowRows
+            pageRows = itemTotal
+            If windowRows < itemTotal Then pageRows = windowRows - 1
+            If pageRows < 1 Then pageRows = 1
+            If keyText = "{PGUP}" Then
+                aimRow = CLng(mValue) - pageRows
+                If aimRow < 1 Then aimRow = 1
+                aimRow = PickableNear(aimRow, -1)
+                If aimRow = 0 Then aimRow = PickableNear(1, 1)
+            Else
+                aimRow = CLng(mValue) + pageRows
+                If aimRow > itemTotal Then aimRow = itemTotal
+                aimRow = PickableNear(aimRow, 1)
+                If aimRow = 0 Then aimRow = PickableNear(itemTotal, -1)
+            End If
         Case " "
             If CLng(mValue) = 0 Then aimRow = PickableNear(1, 1)
         Case "{ENTER}"
             hostApp.ClickDefaultButton
+        Case Else
+            aimRow = TypeAheadItem(keyText, CLng(mValue))
     End Select
     If aimRow = 0 Then Exit Sub
     RevealListRow aimRow
@@ -10459,21 +10621,26 @@ Private Sub HandleStepperKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
             hostApp.ClickDefaultButton
             Exit Sub
         Case Else
-            ' Digits typed within a second of each other build a number,
-            ' as in an up-down control's edit box; a minus leads it when
-            ' the range goes below zero.
-            If Not (keyText Like "[0-9]" Or (keyText = "-" And mSliderMin < 0)) Then Exit Sub
-            If GetTickCount64() - mTypeAheadMs > 1000 Then mTypeAhead = vbNullString
-            mTypeAheadMs = GetTickCount64()
-            If keyText = "-" Then
-                mTypeAhead = "-"
-                Exit Sub
-            End If
-            mTypeAhead = mTypeAhead & keyText
-            aimValue = CDbl(mTypeAhead)
+            If Not TypedNumber(keyText, aimValue) Then Exit Sub
     End Select
     If SetStepperValue(hostApp, aimValue) Then RunClickHandlers hostApp
 End Sub
+
+' Digits typed within a second of each other build a number, as in an
+' up-down control's edit box; a minus leads it when the range goes below
+' zero. True with the number typed so far, for a Stepper or SlideBar.
+Private Function TypedNumber(ByVal keyText As String, ByRef typedValue As Double) As Boolean
+    If Not (keyText Like "[0-9]" Or (keyText = "-" And mSliderMin < 0)) Then Exit Function
+    If GetTickCount64() - mTypeAheadMs > 1000 Then mTypeAhead = vbNullString
+    mTypeAheadMs = GetTickCount64()
+    If keyText = "-" Then
+        mTypeAhead = "-"
+        Exit Function
+    End If
+    mTypeAhead = mTypeAhead & keyText
+    typedValue = CDbl(mTypeAhead)
+    TypedNumber = True
+End Function
 
 ' Clamps to the range and, when the value moves, writes it and its
 ' state. True when it moved; the caller runs the handlers.
@@ -10488,7 +10655,8 @@ Private Function SetStepperValue(ByVal hostApp As ReDimUI, ByVal aimValue As Dou
 End Function
 
 ' Arrows move a step, Page Up and Page Down a tenth of the range (in
-' whole steps), Home and End the ends; each change fires OnChange.
+' whole steps), Home and End the ends, and typed digits set the value,
+' as a Stepper's do; each change fires OnChange.
 Private Sub HandleSliderKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
     Dim aimValue As Double
     Dim smallStep As Double
@@ -10516,7 +10684,7 @@ Private Sub HandleSliderKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
             hostApp.ClickDefaultButton
             Exit Sub
         Case Else
-            Exit Sub
+            If Not TypedNumber(keyText, aimValue) Then Exit Sub
     End Select
     If aimValue < mSliderMin Then aimValue = mSliderMin
     If aimValue > mSliderMax Then aimValue = mSliderMax
@@ -17092,7 +17260,7 @@ Friend Sub EndHold(ByVal hostApp As ReDimUI, ByVal repeated As Boolean)
     End If
     Exit Sub
 HandlerFailed:
-    hostApp.ReportAppError "ReDim handler error " & Err.Number & ": " & Err.Description
+    hostApp.ReportAppError HandlerFailureText(Me, mClickProc, Err.Number, Err.Description)
 End Sub
 
 ' The second click on the same row within the Windows double-click time
@@ -19707,6 +19875,21 @@ Friend Property Get OpIsRunning() As Boolean
     OpIsRunning = mOpRunning
 End Property
 
+' Whether the op or job is running now: started and not yet finished,
+' failed, or cancelled.
+Public Property Get IsRunning() As Boolean
+    Select Case mRole
+        Case ROLE_ASYNC_OP
+            IsRunning = mOpRunning
+        Case ROLE_JOB
+            IsRunning = mJobRunning
+        Case Else
+            RaiseError ERROR_INVALID_OPERATION, "IsRunning", _
+                "IsRunning applies to an async op or a job; this value is " & _
+                RoleWords(mRole) & "."
+    End Select
+End Property
+
 Friend Property Get OpLastError() As String
     OpLastError = mOpLastError
 End Property
@@ -19907,7 +20090,7 @@ Friend Sub TickJob( _
     If mJobPaceMs > 0 Then
         If nowMs - mJobLastStepMs < CLngLng(mJobPaceMs) Then Exit Sub
         mJobLastStepMs = nowMs
-        stepDone = Application.Run(mJobStepProc)
+        stepDone = ReDimUI.RunStepAs(hostApp, Me, mJobStepProc)
         If CBool(stepDone) Then FinishJob hostApp, mJobDoneProc
         On Error GoTo 0
         Exit Sub
@@ -19924,7 +20107,7 @@ Friend Sub TickJob( _
     Dim startedPreciseMs As Double
     startedPreciseMs = PreciseNowMs()
     Do
-        stepDone = Application.Run(mJobStepProc)
+        stepDone = ReDimUI.RunStepAs(hostApp, Me, mJobStepProc)
         ' A step that unmounted the job's app has stopped the job.
         If Not mJobRunning Then Exit Sub
         If CBool(stepDone) Then

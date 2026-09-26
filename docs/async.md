@@ -42,7 +42,9 @@ has nothing to cancel), `Token` exposes the token for task factories such as
 run, and a `Token` read for it, start uncancelled. Disabled controls show busy
 state (buttons swap to `BusyText`); everything restores on any terminal state. `OnCancel` names
 the handler a cancel runs, as `OnDone` and `OnFail` name theirs. `AsyncError(opId)` returns the
-failure message after a fault.
+failure message after a fault. `ui.Async("refresh").IsRunning` says whether the op is running
+now, so a second click can wait for the first run; `ui.Job(id).IsRunning` does the same for a
+job. Cancelling an op or job that was never created does nothing, as it does for one at rest.
 
 An outcome handler runs with the op as `ReDimUI.Sender`, so it reads the result without a
 module variable holding the task, and an error inside it goes to the app's `OnError` sink
@@ -72,7 +74,9 @@ ui.Job("import").Steps("Demo.ImportChunk").BudgetMs(15) _
 ui.Job("import").StartJob
 ```
 
-The step procedure is a zero-argument `Function` returning `True` when finished. Budget mode
+The step procedure is a zero-argument `Function` returning `True` when finished. It runs with
+the job as `ReDimUI.Sender`, so a step shared by several jobs tells them apart by the job's
+`Tag`, as the Mission Control demo's three feeds do. Budget mode
 repeats the step inside each tick until the budget elapses. Paced mode runs at most one step per
 interval, the right shape for game loops and animations, and the pace can change while running:
 

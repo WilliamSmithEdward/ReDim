@@ -203,6 +203,10 @@ def test_writes_to_edges(run_core):
     assert facts["seedShown"] == "Volume 40", (
         "a label drawn before the control that seeds its key must show the seed"
     )
+    assert facts["listsSeed"] == "Alpha, Charlie/Dee", (
+        "a check list and a transfer list must seed their keys on the first render"
+    )
+    assert facts["positions"] == "2/1/0", "ItemPosition and ChosenPosition ignore case"
     assert facts["sharedValueKept"] == "2/1", (
         "a pick among items sharing a value must stay on the item picked"
     )

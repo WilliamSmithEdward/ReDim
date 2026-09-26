@@ -46,7 +46,7 @@ Public Function SmokeMission() As String
     Set app = MissionApp()
     transcript = "components=" & app.ComponentCount
 
-    HandleStartFeed1
+    ReDimUI.DispatchShape "rdm_mission_start1"
     transcript = transcript & "|feed1Running=" & CStr(app.State("feed1Running"))
     transcript = transcript & "|launchDisabled=" & _
         CStr(Not app.Button("launch").IsEnabled)
@@ -59,7 +59,8 @@ Public Function SmokeMission() As String
         CStr(app.State("feed1Pct") > 0)
     transcript = transcript & "|rowsMoved=" & CStr(app.State("rowsLoaded") > 0)
 
-    HandleCancelFeed1
+    Sleep 250
+    ReDimUI.DispatchShape "rdm_mission_cancel1"
     ReDimUI.PumpOnce
     transcript = transcript & "|canceledStatus=" & app.State("feed1Status")
     transcript = transcript & "|startReEnabled=" & CStr(app.State("feed1Idle"))
@@ -240,7 +241,7 @@ Public Function SmokePokeDex() As String
             ShapeThere("DexBrowse", "rdm_dexbrowse_statb6") And _
             ShapeThere("DexBrowse", "rdm_dexbrowse_nvb_dexteam"))
     transcript = transcript & "|fetchKicked=" & _
-        CStr(ReDimUI.App("dexbrowse").IsOpRunning("names"))
+        CStr(ReDimUI.App("dexbrowse").Async("names").IsRunning)
 
     ReDimUI.DispatchShape "rdm_dexbrowse_nvb_dexteam"
     transcript = transcript & "|teamActive=" & _
@@ -307,7 +308,7 @@ Public Function SmokePokeDex() As String
     transcript = transcript & "|absentFile=" & _
         CStr(Not ROneCOne.File.Exists(tempFile))
     transcript = transcript & "|spriteIdle=" & _
-        CStr(Not ReDimUI.App("dexbrowse").IsOpRunning("sprite"))
+        CStr(Not ReDimUI.App("dexbrowse").Async("sprite").IsRunning)
     RdxReleaseKeys
     RdxStopPump
     ReDimUI.AutoPump True

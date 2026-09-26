@@ -2875,6 +2875,12 @@ Public Function TestControlKeys() As String
     RdxKeyChar "{UP}"
     transcript = transcript & "|radioWraps=" & app.State("sizeState")
     transcript = transcript & "|radioFires=" & gChangeCount
+    RdxKeyChar "m"
+    transcript = transcript & "|radioLetter=" & app.State("sizeState")
+    RdxKeyChar "{PGUP}"
+    transcript = transcript & "|radioPageUp=" & app.State("sizeState")
+    RdxKeyChar "{PGDN}"
+    transcript = transcript & "|radioPageDown=" & app.State("sizeState")
 
     RdxKeyChar "{TAB}"
     RdxKeyChar "{UP}"
@@ -2892,6 +2898,9 @@ Public Function TestControlKeys() As String
     transcript = transcript & "|slider=" & CStr(app.SlideBar("vol").CurrentValue)
     RdxKeyChar "{END}"
     transcript = transcript & "|sliderEnd=" & CStr(app.SlideBar("vol").CurrentValue)
+    RdxKeyChar "3"
+    RdxKeyChar "5"
+    transcript = transcript & "|sliderTyped=" & CStr(app.SlideBar("vol").CurrentValue)
 
     RdxKeyChar "{TAB}"
     transcript = transcript & "|cursorDrawn=" & _

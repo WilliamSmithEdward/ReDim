@@ -169,7 +169,7 @@ Public Sub NewGame()
     HookKeys
     ui.Job("loop").Steps("SnakeGame.GameStep").PacedMs(150) _
         .JobOnDone "SnakeGame.GameOver"
-    If Not ui.Job("loop").JobIsRunning Then ui.Job("loop").StartJob
+    If Not ui.Job("loop").IsRunning Then ui.Job("loop").StartJob
 End Sub
 
 ' One paced step is one movement frame. Returning True ends the job, which

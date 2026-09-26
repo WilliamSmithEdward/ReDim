@@ -92,8 +92,8 @@ framework. Also:
 | `CommandPalette paletteKey` / `OpenCommandPalette` | Turns on the command palette and binds its key, Ctrl+Shift+P unless another OnKey code is given (`""` binds none); `OpenCommandPalette` opens it from code (see [Command palette](#command-palette)). |
 | `FollowSystemTheme followOn` | The app takes `ReDimUI.ThemeSystem` now, and again whenever Windows switches between light and dark mode or changes its accent. The app notices as its sheets activate, the selection moves, or the pump runs, reading the registry at most every two seconds. Called before `Render`, it sets the theme without rendering early. `False` stops following and keeps the theme in place. |
 | `CloseModal` | Hide the modal set. |
-| `Async(opId)` / `CancelAsync opId` / `AsyncError(opId)` | Async ops (see [async.md](async.md)). |
-| `Job(jobId)` / `CancelJob jobId` | Chunked or paced background work. |
+| `Async(opId)` / `CancelAsync opId` / `AsyncError(opId)` | Async ops (see [async.md](async.md)); `Async(opId).IsRunning` reads whether one runs now. |
+| `Job(jobId)` / `CancelJob jobId` | Chunked or paced background work; `Job(jobId).IsRunning` reads whether it runs now. |
 | `OnError "Module.Proc"` | One-argument sink for swallowed handler failures. |
 | `TickFaultCount` / `ResetTickFaults` (on `ReDimUI`) | The pump and key dispatch trap errors silently by design; every trapped fault increments this factory counter. Read it in tests or diagnostics to prove a run was clean, reset it to scope a measurement. |
 | `ProtectSurface protectOn, allowCellSelection` | Opt-in app-sheet protection (UserInterfaceOnly): users cannot enter cell edit mode or drag shapes there, framework writes keep working, cell-anchored TextInput cells stay editable, and float fields type normally since they never enter cell edit. By default locked canvas cells are also unselectable - no selection rectangle on the app surface, no protected-cell warnings for stray keys - while unlocked TextInput cells stay selectable; pass `allowCellSelection:=True` to keep the whole grid selectable. OnKey capture (fields, HotKey) is unaffected. Protection state does not persist across reopen, so builds should call `ProtectSurface False` first and `ProtectSurface` after Render, as every demo does. Unmount unprotects. |
@@ -134,7 +134,8 @@ All fluent, all return the component:
   `Items("A", "B", ...)` replaces; `ItemsFrom(source)` replaces from a 1D array, a
   Collection, a Range (one item per non-empty cell), or a ROneCOne sequence;
   `AddItem(text, atPosition)` appends or inserts; `RemoveItem(indexOrText)`; `ClearItems`;
-  read back with `ItemCount` and `ItemTextAt(position)`. The selected item survives inserts
+  read back with `ItemCount` and `ItemTextAt(position)`, and `ItemPosition(text)` finds
+  an item by its text, ignoring case (0 for none). The selected item survives inserts
   and unrelated removals; removing it clears the selection to the placeholder. A
   `RadioGroup` or `CheckList` left with no items shows nothing until items return.
   Programmatic mutations re-render but do not write `WritesTo` state or fire `OnChange`;
@@ -184,11 +185,15 @@ All fluent, all return the component:
   `SelectBox`, `RadioGroup`, or `Tabs` the first item whose value or text the key holds
   (`Empty` or `Null` picks none), and a float `TextInput` or `ComboBox` its text, except
   while it has the keys. A value the control cannot show leaves it as it is. A `CheckList`
-  or `TransferList` writes a joined list and does not follow, nor does a cell-backed
-  field, whose value is its cell. `BindValue(key)` follows a different key one way; on a
+  or `TransferList` writes a joined list and does not follow, though it seeds an unset key
+  with its checks or picks on the first render; nor does a cell-backed field, whose value
+  is its cell. `BindValue(key)` follows a different key one way; on a
   `SelectBox`, `RadioGroup`, or `Tabs` a number is a position and a text names an item.
   State keys ignore case in bindings as in the store.
 - Behavior: `OnClick "Module.Proc"`, `OnClickAsync "Module.Proc"`, `OnChange "Module.Proc"`.
+  `Tag(value)` attaches any value to a control, and to an async op or job too; a handler
+  reads it as `ReDimUI.Sender.TagValue`, so one procedure can serve three Start buttons
+  instead of three one-line wrappers.
 - Keyboard: `TabIndex(n)` orders Tab, `Focus` gives the control keyboard focus,
   `AccessKey(letter)` binds Alt+letter for a button or tick box, `Shortcut(keyCode)` binds
   a keyboard shortcut such as `"^s"` for Ctrl+S that clicks the control, and `Clearable`
@@ -268,7 +273,8 @@ dependencies:
 - `TransferList`: a dual listbox - two panels with counted headers, selectable rows, and
   four move buttons (`>`, `>>`, `<`, `<<`), each muted while it has nothing to move. `Items`/`ItemsFrom` and the item APIs feed the
   available side, `ChosenFrom` seeds the chosen side, `Captions` names the headers, and
-  `ChosenCount`/`ChosenTextAt` read the result. Rows multi-select by click-to-toggle:
+  `ChosenCount`/`ChosenTextAt` read the result, with `ChosenPosition(text)` finding a
+  chosen item by its text (0 when not chosen). Rows multi-select by click-to-toggle:
   each plain click adds or removes that row from the panel's selection, and `>`/`<` move
   every selected row in list order. (Ctrl+click cannot exist on a drawn control - Excel
   reserves modifier-clicks on macro shapes for selecting the shape itself, the same rule
@@ -855,14 +861,14 @@ keep the keys.
 |---|---|
 | Button, Image | Space or Enter clicks. |
 | Toggle, TickBox | Space toggles. |
-| RadioGroup | Arrows move the selection, wrapping at the ends; Home and End jump. Each move fires `OnChange`. |
+| RadioGroup | Arrows move the selection, wrapping at the ends; Home and End jump; Page Up and Page Down move a window's worth of rows in a group that scrolls, or to the ends in one that does not; letters jump to the next item that starts with them, as in a SelectBox. Every move passes over disabled items and fires `OnChange`. |
 | Tabs | Left and Right, or Ctrl+Page Up and Ctrl+Page Down, show the tab beside, wrapping at the ends; Home and End jump. Each move fires `OnChange`. |
 | Expander | Space or Enter opens or closes it; Right opens and Left closes. Each change fires `OnChange`. |
 | MenuButton | Closed: Space, Enter, Down, Up, Alt+Down, or F4 opens the menu with the first command highlighted. Open: the arrows, Page Up, Page Down, Home, and End move the highlight past disabled commands and headers, letters jump by name, Enter or Space runs the highlighted command, and Esc, F4, Alt+Up, or Tab closes. |
 | Table | Up and Down move the selection a row in the order shown, Page Up and Page Down a page, Home and End to the first and last row; the rows scroll to keep it in view, and each move fires `OnChange`. Other characters filter the rows, Backspace takes one off, and Esc clears the filter. Ctrl+C copies the selected row or the rows shown, and Enter opens the selected row when the table has `OnRowOpen`. |
 | DatePicker | Closed: Alt+Down, F4, Space, or Down opens the calendar on the date held, or today. Open: Left and Right move a day, Up and Down a week, Page Up and Page Down a month, Ctrl+Page Up and Ctrl+Page Down a year, Home and End to the month's first and last day; Enter or Space picks the day reached, and Esc, F4, or Alt+Up closes. A dashed ring marks the day reached. |
 | Stepper | Up and Right step up, Down and Left step down, Page Up and Page Down step ten times, Home and End jump to the range ends. Digits typed within a second of each other set the value, clamped to the range, a minus leading them when the range goes below zero. Each change fires `OnChange`. |
-| SlideBar | Arrows move a step, Page Up and Page Down a tenth of the range in whole steps, Home and End go to the ends. |
+| SlideBar | Arrows move a step, Page Up and Page Down a tenth of the range in whole steps, Home and End go to the ends. Digits typed within a second of each other set the value, as a Stepper's do. |
 | SelectBox | Closed: arrows, Home, End, Page Up, and Page Down change the selection, and Space, Alt+Down, or F4 opens the list. Open: they move the highlight; Enter, Space, or Alt+Up takes it, Tab takes it and moves on, and Esc or F4 closes. Letters jump to the next item that starts with them, open or closed: letters typed within a second build a prefix, and one letter typed again steps through its items. Every move passes over disabled items and group headers. With `Filterable`, letters filter the open list instead (see SelectBox). |
 | CheckList | Up and Down move the row cursor, the select-all header included; Home and End jump; Page Up and Page Down page a windowed list (see Long lists) and jump to the ends otherwise; Space toggles the cursor's row; Ctrl+A checks every row that shows. Other characters filter the list, Backspace takes one off, and Esc clears the filter. |
 | TransferList | Up and Down move the row cursor, Left and Right switch panels, Space toggles the cursor's row in the selection, and Enter moves the panel's selection across, or the cursor's row when nothing is selected; Ctrl+A selects every row of the cursor's panel that shows. Other characters filter the cursor's panel, Backspace takes one off, and Esc clears the filter. With `Reorderable`, Alt+Up and Alt+Down move the chosen side's selection. |

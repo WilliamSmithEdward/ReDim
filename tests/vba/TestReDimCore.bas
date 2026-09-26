@@ -707,9 +707,17 @@ Public Function TestWritesToEdges() As String
     app.DatePicker("due").AtRect(24, 150, 150, 24).WritesTo "due"
     app.Toggle("dark").AtRect(24, 190, 44, 22).WritesTo "dark"
     app.SelectBox("kind").AtRect(200, 60, 140, 22).Items("A", "B").Required.WritesTo "kind"
+    app.CheckList("opts").AtRect(360, 24, 150, 80).Items("Alpha", "Bravo", "Charlie") _
+        .CheckedFrom(Array("Alpha", "Charlie")).WritesTo "opts"
+    app.TransferList("crew").AtRect(200, 240, 360, 140).Items("Ann", "Ben", "Cy") _
+        .ChosenFrom(Array("Dee")).WritesTo "crew"
     app.OnStateChanged "dark", "TestReDimCore.CoreReadToggle"
     app.Render
     transcript = "seedShown=" & app.Label("volText").CurrentText
+    transcript = transcript & "|listsSeed=" & app.State("opts") & "/" & app.State("crew")
+    transcript = transcript & "|positions=" & app.TransferList("crew").ItemPosition("ben") & _
+        "/" & app.TransferList("crew").ChosenPosition("DEE") & "/" & _
+        app.TransferList("crew").ChosenPosition("Ann")
     ReDimUI.DispatchShape "rdm_core11_size__t2"
     transcript = transcript & "|sharedValueKept=" & app.RadioGroup("size").CurrentValue & _
         "/" & app.State("size")

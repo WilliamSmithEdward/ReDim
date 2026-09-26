@@ -73,6 +73,27 @@
   and `Render` swept its parts as leftovers.
 - A `Toggle` with a caption in a `Stack` running across takes the
   caption's room, where the next member drew over the caption.
+- `Async(id).IsRunning` and `Job(id).IsRunning` read whether an op or
+  job runs now; the demos used undocumented Friend members, which a
+  project referencing ReDim cannot call. `CancelAsync` and `CancelJob`
+  on an id never created do nothing, so a reset that cancels every job
+  needs no error trap.
+- `Tag(value)` attaches a value to a control, op, or job, read back as
+  `ReDimUI.Sender.TagValue`; a job's step now runs with the job as the
+  sender. The Mission Control demo's twelve one-line feed handlers
+  become four.
+- A handler failure names the procedure and what ran it ("ReDim handler
+  error 13 in Orders.Save for component 'save': ..."), and without an
+  `OnError` sink it also goes to the Immediate window, since the status
+  bar loses it at the next message.
+- A `RadioGroup` takes Page Up, Page Down, and letters, as a `SelectBox`
+  does, and a `SlideBar` takes typed digits, as a `Stepper` does.
+- A `CheckList` or `TransferList` seeds its `WritesTo` key with its
+  checks or picks on the first render, as the other controls do; the
+  Widget Gallery drops its two hand-written seeds.
+- `ItemPosition(text)` finds an item by its text and `ChosenPosition(text)`
+  a transfer list's chosen item; the ReDex demo's catch check loses its
+  two search loops.
 - Dead code goes: the unused `RdxTickCount` in `ReDimHost` and its
   counter, an unused toast reader, parameters two procedures never read
   (`CurrentText` looked up its app for nothing), and five spike-test

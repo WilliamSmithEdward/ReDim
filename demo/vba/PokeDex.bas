@@ -256,7 +256,7 @@ Public Sub HandleBrowseShown()
 
     Set ui = ReDimUI.App("dexbrowse")
     If CBool(ui.StateOrDefault("namesLoaded", False)) Then Exit Sub
-    If ui.IsOpRunning("names") Then Exit Sub
+    If ui.Async("names").IsRunning Then Exit Sub
     Set gNamesTask = ROneCOne.HttpClient.GetStringAsync( _
         API_BASE & "?limit=" & DEX_MAX)
     With ui.Async("names")
@@ -344,7 +344,7 @@ Private Sub FetchByPath(ByVal pathPart As String)
         Exit Sub
     End If
     Set ui = ReDimUI.App("dexbrowse")
-    If ui.IsOpRunning("detail") Then Exit Sub
+    If ui.Async("detail").IsRunning Then Exit Sub
     gFlightPath = pathPart
     Set gDetailTask = ROneCOne.HttpClient.GetStringAsync(API_BASE & pathPart)
     With ui.Async("detail")
@@ -521,7 +521,7 @@ End Sub
 
 Private Sub StartSpriteFetch(ByVal ui As ReDimUI)
     If gSpriteWantId = 0 Then Exit Sub
-    If ui.IsOpRunning("sprite") Then Exit Sub
+    If ui.Async("sprite").IsRunning Then Exit Sub
     gSpriteFlightId = gSpriteWantId
     Set gSpriteTask = ROneCOne.HttpClient.DownloadFileAsync( _
         gSpriteWantUrl, SpritePath(gSpriteFlightId))
@@ -606,26 +606,21 @@ Public Sub CatchCurrent()
     Dim browseApp As ReDimUI
     Dim teamApp As ReDimUI
     Dim caughtName As String
-    Dim idx As Long
 
     Set browseApp = ReDimUI.App("dexbrowse")
     caughtName = CStr(browseApp.StateOrDefault("pokeName", ""))
     If InStr(caughtName, "  ") = 0 Then Exit Sub
     caughtName = Mid$(caughtName, InStr(caughtName, "  ") + 2)
     Set teamApp = ReDimUI.App("dexteam")
-    For idx = 1 To teamApp.TransferList("team").ItemCount
-        If teamApp.TransferList("team").ItemTextAt(idx) = caughtName Then
-            browseApp.Toast caughtName & " is already in your box.", 3000
-            Exit Sub
-        End If
-    Next idx
+    If teamApp.TransferList("team").ItemPosition(caughtName) > 0 Then
+        browseApp.Toast caughtName & " is already in your box.", 3000
+        Exit Sub
+    End If
     ' The party is the chosen side; a Pokemon moved there is caught too.
-    For idx = 1 To teamApp.TransferList("team").ChosenCount
-        If teamApp.TransferList("team").ChosenTextAt(idx) = caughtName Then
-            browseApp.Toast caughtName & " is already in your party.", 3000
-            Exit Sub
-        End If
-    Next idx
+    If teamApp.TransferList("team").ChosenPosition(caughtName) > 0 Then
+        browseApp.Toast caughtName & " is already in your party.", 3000
+        Exit Sub
+    End If
     teamApp.TransferList("team").AddItem caughtName
     browseApp.Toast "Gotcha! " & caughtName & " was caught!", 3500
 End Sub

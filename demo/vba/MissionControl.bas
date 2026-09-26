@@ -109,12 +109,13 @@ Private Sub BuildFeedPanel(ByVal ui As ReDimUI, ByVal feed As Long)
         .BindText keyPrefix & "Status"
     ui.ProgressBar("prg" & feed).AtRect(180, panelTop + 20, 240, 12) _
         .BindValue keyPrefix & "Pct"
+    ' Each feed's buttons carry its number, so one handler serves all three.
     ui.Button("start" & feed).AtRect(436, panelTop + 12, 64, 28) _
         .Text("Start").Primary.BindEnabled(keyPrefix & "Idle") _
-        .OnClick "MissionControl.HandleStartFeed" & feed
+        .OnClick("MissionControl.HandleStartFeed").Tag feed
     ui.Button("cancel" & feed).AtRect(508, panelTop + 12, 64, 28) _
         .Text("Cancel").Secondary.BindEnabled(keyPrefix & "Running") _
-        .OnClick "MissionControl.HandleCancelFeed" & feed
+        .OnClick("MissionControl.HandleCancelFeed").Tag feed
 End Sub
 
 Private Function FeedKey(ByVal feed As Long) As String
@@ -153,7 +154,6 @@ Public Sub HandleThemeToggle()
     Else
         ui.SetTheme ReDimUI.ThemeLight
     End If
-    ui.PrepareCanvas
 End Sub
 
 Public Sub HandleLaunchAll()
@@ -163,28 +163,12 @@ Public Sub HandleLaunchAll()
     MissionApp().Toast "All feeds launched.", 2500
 End Sub
 
-Public Sub HandleStartFeed1()
-    StartFeed 1
+Public Sub HandleStartFeed()
+    StartFeed CLng(ReDimUI.Sender.TagValue)
 End Sub
 
-Public Sub HandleStartFeed2()
-    StartFeed 2
-End Sub
-
-Public Sub HandleStartFeed3()
-    StartFeed 3
-End Sub
-
-Public Sub HandleCancelFeed1()
-    MissionApp().CancelJob "job1"
-End Sub
-
-Public Sub HandleCancelFeed2()
-    MissionApp().CancelJob "job2"
-End Sub
-
-Public Sub HandleCancelFeed3()
-    MissionApp().CancelJob "job3"
+Public Sub HandleCancelFeed()
+    MissionApp().CancelJob "job" & ReDimUI.Sender.TagValue
 End Sub
 
 Public Sub HandleResetRequest()
@@ -199,9 +183,7 @@ Public Sub HandleResetConfirmed()
 
     Set ui = MissionApp()
     For feed = 1 To 3
-        On Error Resume Next
         ui.CancelJob "job" & feed
-        On Error GoTo 0
         ResetFeedState ui, feed
     Next feed
     gRowsLoaded = 0
@@ -218,43 +200,35 @@ Private Sub StartFeed(ByVal feed As Long)
 
     Set ui = MissionApp()
     keyPrefix = FeedKey(feed)
-    If ui.Job("job" & feed).JobIsRunning Then Exit Sub
+    If ui.Job("job" & feed).IsRunning Then Exit Sub
     gFeedPct(feed) = 0
     ui.SetState keyPrefix & "Pct", 0
     ui.SetState keyPrefix & "Status", "Loading"
     ui.SetState keyPrefix & "Idle", False
     ui.SetState keyPrefix & "Running", True
     ui.SetState "anyRunning", True
-    ui.Job("job" & feed).Steps("MissionControl.FeedStep" & feed) _
+    ' The job carries its feed's number too: its step and outcome handlers
+    ' read it from ReDimUI.Sender.
+    ui.Job("job" & feed).Tag(feed).Steps("MissionControl.FeedStep") _
         .PacedMs(50 + feed * 30) _
-        .JobOnDone("MissionControl.FeedDone" & feed) _
-        .JobOnCancel "MissionControl.FeedCanceled" & feed
+        .JobOnDone("MissionControl.FeedDone") _
+        .JobOnCancel "MissionControl.FeedCanceled"
     ui.Job("job" & feed).StartJob
 End Sub
 
 ' One paced step is one arriving chunk: an instant progress increment with
 ' no blocking work, so the pump's duty cycle stays negligible.
-Private Function FeedStep(ByVal feed As Long) As Boolean
+Public Function FeedStep() As Boolean
     Dim ui As ReDimUI
+    Dim feed As Long
 
     Set ui = MissionApp()
+    feed = CLng(ReDimUI.Sender.TagValue)
     gFeedPct(feed) = gFeedPct(feed) + 1 + (feed Mod 3)
     gRowsLoaded = gRowsLoaded + 25 + feed * 5
     ui.SetState FeedKey(feed) & "Pct", gFeedPct(feed)
     ui.SetState "rowsLoaded", gRowsLoaded
     FeedStep = (gFeedPct(feed) >= 100)
-End Function
-
-Public Function FeedStep1() As Boolean
-    FeedStep1 = FeedStep(1)
-End Function
-
-Public Function FeedStep2() As Boolean
-    FeedStep2 = FeedStep(2)
-End Function
-
-Public Function FeedStep3() As Boolean
-    FeedStep3 = FeedStep(3)
 End Function
 
 Private Sub FeedFinished(ByVal feed As Long, ByVal finalStatus As String)
@@ -267,7 +241,7 @@ Private Sub FeedFinished(ByVal feed As Long, ByVal finalStatus As String)
     ui.SetState FeedKey(feed) & "Idle", True
     ui.SetState FeedKey(feed) & "Running", False
     For otherFeed = 1 To 3
-        If ui.Job("job" & otherFeed).JobIsRunning Then anyRunning = True
+        If ui.Job("job" & otherFeed).IsRunning Then anyRunning = True
     Next otherFeed
     ui.SetState "anyRunning", anyRunning
     If finalStatus = "Complete" Then
@@ -280,26 +254,10 @@ Private Sub FeedFinished(ByVal feed As Long, ByVal finalStatus As String)
     End If
 End Sub
 
-Public Sub FeedDone1()
-    FeedFinished 1, "Complete"
+Public Sub FeedDone()
+    FeedFinished CLng(ReDimUI.Sender.TagValue), "Complete"
 End Sub
 
-Public Sub FeedDone2()
-    FeedFinished 2, "Complete"
-End Sub
-
-Public Sub FeedDone3()
-    FeedFinished 3, "Complete"
-End Sub
-
-Public Sub FeedCanceled1()
-    FeedFinished 1, "Canceled"
-End Sub
-
-Public Sub FeedCanceled2()
-    FeedFinished 2, "Canceled"
-End Sub
-
-Public Sub FeedCanceled3()
-    FeedFinished 3, "Canceled"
+Public Sub FeedCanceled()
+    FeedFinished CLng(ReDimUI.Sender.TagValue), "Canceled"
 End Sub

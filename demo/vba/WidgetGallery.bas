@@ -133,10 +133,7 @@ Public Sub BuildWidgetGallery()
 
     BuildNewSection ui
 
-    ' Each control seeds the key it writes on the first render; the check
-    ' list and transfer list, which write joined lists, are seeded here.
-    ui.SetState "crew", "Barbara"
-    ui.SetState "options", "Auto-save"
+    ' Each control seeds the key it writes on the first render.
     ui.SetState "lastAction", "none yet"
     ui.SetState "oplog", "no run yet"
     WireInspector ui

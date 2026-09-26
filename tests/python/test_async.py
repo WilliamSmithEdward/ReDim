@@ -59,13 +59,23 @@ def test_cancellation(run_async):
 
 def test_runs_again_after_cancel(run_async):
     facts = parse_transcript(run_async("TestRunsAgainAfterCancel"))
-    assert facts["firstCanceled"] == "canceled/1"
+    assert facts["runningRead"] == "True", "IsRunning must read a started op"
+    assert facts["firstCanceled"] == "canceled/1/False", (
+        "a cancel must finish the op, and cancelling an id never made must not raise"
+    )
     assert facts["freshToken"] == "True", "a finished cancel must leave a fresh token"
     assert facts["runsAgain"] == "done/1", "a cancelled op must run on its next start"
     assert facts["idleCancelIgnored"] == "done/2", "cancelling an op at rest changes nothing"
     assert facts["unmountStops"] == "True/1", (
         "unmounting stops the app's jobs without running their handlers"
     )
+
+
+def test_tags_reach_handlers(run_async):
+    facts = parse_transcript(run_async("TestTagsReachHandlers"))
+    assert facts["buttonTag"] == "fromButton", "a click handler must read its button's Tag"
+    assert facts["stepTag"] == "7", "a job step must run with the job as Sender"
+    assert facts["doneTag"] == "7", "a job's outcome handler must read the job's Tag"
 
 
 def test_job_chunks(run_async):

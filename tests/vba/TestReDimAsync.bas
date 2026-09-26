@@ -19,6 +19,8 @@ Private gCancelRan As Long
 Private gDuringWorkBusy As Boolean
 Private gJobCounter As Long
 Private gResultSeen As Variant
+Private gTagSeen As String
+Private gStepTag As String
 
 Private Function NewCanvas() As Worksheet
     Set NewCanvas = ActiveWorkbook.Worksheets.Add
@@ -45,6 +47,39 @@ End Sub
 Public Sub ReadResult()
     gResultSeen = ReDimUI.Sender.Task.Result
 End Sub
+
+Public Sub RecordTag()
+    gTagSeen = CStr(ReDimUI.Sender.TagValue)
+End Sub
+
+Public Function TaggedStep() As Boolean
+    gStepTag = CStr(ReDimUI.Sender.TagValue)
+    TaggedStep = True
+End Function
+
+' A Tag reaches the handlers through ReDimUI.Sender: a button's click, a
+' job's step, and the job's outcome handler.
+Public Function TestTagsReachHandlers() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim transcript As String
+
+    gTagSeen = vbNullString
+    gStepTag = vbNullString
+    Set host = NewCanvas()
+    ReDimUI.AutoPump False
+    Set app = ReDimUI.Mount(host, "async11")
+    app.Button("go").At("B2:C3").Text("Go").OnClick("TestReDimAsync.RecordTag").Tag "fromButton"
+    app.Job("tagged").Tag(7).Steps("TestReDimAsync.TaggedStep").JobOnDone "TestReDimAsync.RecordTag"
+    app.Render
+    ReDimUI.DispatchShape "rdm_async11_go"
+    transcript = "buttonTag=" & gTagSeen
+    app.Job("tagged").StartJob
+    ReDimUI.PumpOnce
+    transcript = transcript & "|stepTag=" & gStepTag & "|doneTag=" & gTagSeen
+    ReDimUI.AutoPump True
+    TestTagsReachHandlers = transcript
+End Function
 
 Public Function JobStepSmall() As Boolean
     gJobCounter = gJobCounter + 1
@@ -224,8 +259,9 @@ Public Function TestCancellation() As String
 End Function
 
 ' A cancelled op runs again: its next start, and the Token read for it,
-' get a fresh token, and cancelling an op at rest changes nothing. An
-' app that unmounts stops its ops and jobs without their handlers.
+' get a fresh token, and cancelling an op at rest, or an id never made,
+' changes nothing. IsRunning reads the op's run. An app that unmounts
+' stops its ops and jobs without their handlers.
 Public Function TestRunsAgainAfterCancel() As String
     Dim app As ReDimUI
     Dim host As Worksheet
@@ -241,9 +277,13 @@ Public Function TestRunsAgainAfterCancel() As String
         .OnCancel("TestReDimAsync.RecordCancel").TracksState "st"
     app.Render
     app.Async("opr").Start
+    transcript = "runningRead=" & CStr(app.Async("opr").IsRunning)
     app.CancelAsync "opr"
+    app.CancelAsync "neverMade"
+    app.CancelJob "neverMade"
     ReDimUI.PumpOnce
-    transcript = "firstCanceled=" & app.State("st") & "/" & gCancelRan
+    transcript = transcript & "|firstCanceled=" & app.State("st") & "/" & gCancelRan & "/" & _
+        CStr(app.Async("opr").IsRunning)
     transcript = transcript & "|freshToken=" & _
         CStr(Not app.Async("opr").Token.IsCancellationRequested)
     app.Async("opr").Start
@@ -258,7 +298,7 @@ Public Function TestRunsAgainAfterCancel() As String
         .JobOnCancel "TestReDimAsync.RecordCancel"
     app.Job("endless").StartJob
     app.Unmount True
-    transcript = transcript & "|unmountStops=" & CStr(Not app.Job("endless").JobIsRunning) & _
+    transcript = transcript & "|unmountStops=" & CStr(Not app.Job("endless").IsRunning) & _
         "/" & gCancelRan
     ReDimUI.AutoPump True
     TestRunsAgainAfterCancel = transcript
@@ -286,7 +326,7 @@ Public Function TestJobChunks() As String
     transcript = transcript & "|chunked=" & _
         CStr(firstTickCount >= 1 And firstTickCount < 5)
     safety = 0
-    Do While app.Job("imp").JobIsRunning And safety < 20
+    Do While app.Job("imp").IsRunning And safety < 20
         ReDimUI.PumpOnce
         safety = safety + 1
     Loop
@@ -318,7 +358,7 @@ Public Function TestJobCancel() As String
     transcript = transcript & "|cancelRan=" & gCancelRan
     transcript = transcript & "|stoppedEarly=" & CStr(gJobCounter < 1000)
     transcript = transcript & "|stillRunning=" & _
-        CStr(app.Job("big").JobIsRunning)
+        CStr(app.Job("big").IsRunning)
     ReDimUI.AutoPump True
     TestJobCancel = transcript
 End Function
