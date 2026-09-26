@@ -620,20 +620,18 @@ Private mAppliedDropPanel As Long
 ' arrows, and the signature they were drawn with.
 Private mReorderable As Boolean
 Private mAppliedReorderSig As String
-' Type-to-filter while a transfer or check list has the keys: each
-' transfer panel's filter and the check list's; a counter every item
-' change bumps; and the item numbers each filtered transfer panel
-' shows, with the key they were read under.
-Private mFilterLeft As String
-Private mFilterRight As String
-Private mFilterCheck As String
+' Type-to-filter while a transfer or check list has the keys. A list's
+' panels are numbered 0 (the items; a check list has only this one) and
+' 1 (a transfer list's chosen side). Each panel's filter; a counter every
+' item change bumps; and the item numbers each filtered panel shows,
+' with the key they were read under (two arrays, since VBA copies an
+' array it hands around).
+Private mPanelFilter(0 To 1) As String
 Private mItemsVersion As Long
 Private mShownLeft() As Long
 Private mShownRight() As Long
-Private mShownLeftCount As Long
-Private mShownRightCount As Long
-Private mShownLeftKey As String
-Private mShownRightKey As String
+Private mShownCount(0 To 1) As Long
+Private mShownKey(0 To 1) As String
 Private mItems As Collection
 ' Transfer list: the right-hand (chosen) side and its selections. mItems
 ' carries the left-hand (available) side, so the item APIs work unchanged.
@@ -641,8 +639,7 @@ Private mItems As Collection
 ' shapes for selecting the shape itself (the macro never runs), so rows
 ' multi-select by plain click-to-toggle instead of a modifier.
 Private mChosenItems As Collection
-Private mSelLeft As Collection
-Private mSelRight As Collection
+Private mPanelSel(0 To 1) As Collection
 ' Checkbox list: the set of checked row indices, and whether the
 ' select-all header row renders (on by default).
 Private mCheckedSet As Collection
@@ -945,12 +942,9 @@ Private mItemTextsCurrent As Boolean
 Private mFilterPristine As Boolean
 Private mListOffset As Long
 Private mListHighlight As Long
-Private mLeftOffset As Long
-Private mRightOffset As Long
-Private mCaptionLeft As String
-Private mCaptionRight As String
-Private mAppliedLeftRows As Long
-Private mAppliedRightRows As Long
+Private mPanelOffset(0 To 1) As Long
+Private mPanelCaption(0 To 1) As String
+Private mAppliedPanelRows(0 To 1) As Long
 Private mSliderMin As Long
 Private mSliderMax As Long
 Private mSliderStep As Long
@@ -6695,7 +6689,7 @@ Public Function ChosenFrom( _
     If Not IsMissing(valueSource) Then
         PairItemValues itemSource, valueSource, "ChosenFrom"
     End If
-    Set mSelRight = New Collection
+    Set mPanelSel(1) = New Collection
     Touch
     Set ChosenFrom = Me
 End Function
@@ -6856,8 +6850,8 @@ Public Function Captions( _
     ByVal rightText As String _
 ) As ReDimUI
     RequireRole ROLE_COMPONENT, "Captions"
-    mCaptionLeft = leftText
-    mCaptionRight = rightText
+    mPanelCaption(0) = leftText
+    mPanelCaption(1) = rightText
     Touch
     Set Captions = Me
 End Function
@@ -7909,8 +7903,8 @@ Private Sub EnsureTransferCollections()
         ItemsChanged
     End If
     If mChosenItems Is Nothing Then Set mChosenItems = New Collection
-    If mSelLeft Is Nothing Then Set mSelLeft = New Collection
-    If mSelRight Is Nothing Then Set mSelRight = New Collection
+    If mPanelSel(0) Is Nothing Then Set mPanelSel(0) = New Collection
+    If mPanelSel(1) Is Nothing Then Set mPanelSel(1) = New Collection
 End Sub
 
 ' True when floating chrome above the canvas claims the point, asked by
@@ -8333,16 +8327,12 @@ Private Sub TransferSelected(ByVal hostApp As ReDimUI, ByVal rightward As Boolea
     Dim entry As Variant
     Dim idx As Long
     Dim anySelected As Boolean
+    Dim fromPanel As Long
 
-    If rightward Then
-        Set sourceItems = mItems
-        Set targetItems = mChosenItems
-        Set selectionSet = mSelLeft
-    Else
-        Set sourceItems = mChosenItems
-        Set targetItems = mItems
-        Set selectionSet = mSelRight
-    End If
+    fromPanel = IIf(rightward, 0, 1)
+    Set sourceItems = ItemsOfPanel(fromPanel)
+    Set targetItems = ItemsOfPanel(1 - fromPanel)
+    Set selectionSet = mPanelSel(fromPanel)
     If sourceItems.Count = 0 Or selectionSet.Count = 0 Then Exit Sub
     ReDim selectedFlags(1 To sourceItems.Count)
     ReDim movingFlags(1 To sourceItems.Count)
@@ -8352,7 +8342,7 @@ Private Sub TransferSelected(ByVal hostApp As ReDimUI, ByVal rightward As Boolea
         End If
     Next entry
     ' A row the filter hides keeps its selection but stays put.
-    shownTotal = TransferShownRows(IIf(rightward, 0, 1), shownItems)
+    shownTotal = PanelShownRows(fromPanel, shownItems)
     For idx = 1 To shownTotal
         If selectedFlags(shownItems(idx)) Then
             movingFlags(shownItems(idx)) = True
@@ -8376,13 +8366,8 @@ Private Sub TransferSelected(ByVal hostApp As ReDimUI, ByVal rightward As Boolea
             If selectedFlags(idx) Then keptSelection.Add kept.Count
         End If
     Next entry
-    If rightward Then
-        Set mItems = kept
-        Set mSelLeft = keptSelection
-    Else
-        Set mChosenItems = kept
-        Set mSelRight = keptSelection
-    End If
+    SetItemsOfPanel fromPanel, kept
+    Set mPanelSel(fromPanel) = keptSelection
     ItemsChanged
     Touch
     CommitTransferChange hostApp
@@ -8393,43 +8378,50 @@ Private Sub TransferAll(ByVal hostApp As ReDimUI, ByVal rightward As Boolean)
     Dim shownItems() As Long
     Dim shownTotal As Long
     Dim idx As Long
+    Dim fromPanel As Long
+    Dim targetItems As Collection
 
+    fromPanel = IIf(rightward, 0, 1)
     ' A filtered side moves every row it shows, as a selection would.
-    If LenB(PanelFilter(IIf(rightward, 0, 1))) > 0 Then
-        shownTotal = TransferShownRows(IIf(rightward, 0, 1), shownItems)
+    If LenB(PanelFilter(fromPanel)) > 0 Then
+        shownTotal = PanelShownRows(fromPanel, shownItems)
         If shownTotal = 0 Then Exit Sub
-        If rightward Then
-            Set mSelLeft = New Collection
-            For idx = 1 To shownTotal
-                mSelLeft.Add shownItems(idx)
-            Next idx
-        Else
-            Set mSelRight = New Collection
-            For idx = 1 To shownTotal
-                mSelRight.Add shownItems(idx)
-            Next idx
-        End If
+        Set mPanelSel(fromPanel) = New Collection
+        For idx = 1 To shownTotal
+            mPanelSel(fromPanel).Add shownItems(idx)
+        Next idx
         TransferSelected hostApp, rightward
         Exit Sub
     End If
-    If rightward Then
-        If mItems.Count = 0 Then Exit Sub
-        For Each entry In mItems
-            mChosenItems.Add CStr(entry)
-        Next entry
-        Set mItems = New Collection
-    Else
-        If mChosenItems.Count = 0 Then Exit Sub
-        For Each entry In mChosenItems
-            mItems.Add CStr(entry)
-        Next entry
-        Set mChosenItems = New Collection
-    End If
+    If ItemsOfPanel(fromPanel).Count = 0 Then Exit Sub
+    Set targetItems = ItemsOfPanel(1 - fromPanel)
+    For Each entry In ItemsOfPanel(fromPanel)
+        targetItems.Add CStr(entry)
+    Next entry
+    SetItemsOfPanel fromPanel, New Collection
     ItemsChanged
-    Set mSelLeft = New Collection
-    Set mSelRight = New Collection
+    Set mPanelSel(0) = New Collection
+    Set mPanelSel(1) = New Collection
     Touch
     CommitTransferChange hostApp
+End Sub
+
+' A transfer panel's items: the available side is mItems, which the item
+' API reads, and the chosen side mChosenItems.
+Private Function ItemsOfPanel(ByVal panelIndex As Long) As Collection
+    If panelIndex = 0 Then
+        Set ItemsOfPanel = mItems
+    Else
+        Set ItemsOfPanel = mChosenItems
+    End If
+End Function
+
+Private Sub SetItemsOfPanel(ByVal panelIndex As Long, ByVal panelList As Collection)
+    If panelIndex = 0 Then
+        Set mItems = panelList
+    Else
+        Set mChosenItems = panelList
+    End If
 End Sub
 
 ' A user transfer writes the chosen list (joined with a comma and space)
@@ -8571,36 +8563,20 @@ Friend Sub RunClickBehavior()
         Case KIND_TRANSFER
             Dim transferPart As String
             Dim transferRow As Long
+            Dim clickedPanel As Long
             transferPart = clickedPart
             EnsureTransferCollections
             If transferPart = "alu" Or transferPart = "ald" _
                 Or transferPart = "clu" Or transferPart = "cld" Then
                 PageTransferPanel transferPart
-            ElseIf Left$(transferPart, 2) = "al" Then
-                If IsNumeric(Mid$(transferPart, 3)) Then
-                    ' Window rows map through the scroll offset and the
-                    ' filter.
-                    transferRow = TransferShownItem(0, mLeftOffset + CLng(Mid$(transferPart, 3)))
-                    If transferRow = 0 Then Exit Sub
-                    If RowDoubleClicked(transferPart) Then
-                        MoveTransferRow hostApp, True, transferRow
-                    Else
-                        TransferSelectionToggle mSelLeft, transferRow
-                        PlaceKeyCursor 0, transferRow
-                        Touch
-                    End If
-                End If
-            ElseIf Left$(transferPart, 2) = "cl" Then
-                If IsNumeric(Mid$(transferPart, 3)) Then
-                    transferRow = TransferShownItem(1, mRightOffset + CLng(Mid$(transferPart, 3)))
-                    If transferRow = 0 Then Exit Sub
-                    If RowDoubleClicked(transferPart) Then
-                        MoveTransferRow hostApp, False, transferRow
-                    Else
-                        TransferSelectionToggle mSelRight, transferRow
-                        PlaceKeyCursor 1, transferRow
-                        Touch
-                    End If
+            ElseIf TransferRowOf(transferPart, clickedPanel, transferRow) Then
+                ' Window rows map through the scroll offset and the filter.
+                If RowDoubleClicked(transferPart) Then
+                    MoveTransferRow hostApp, (clickedPanel = 0), transferRow
+                Else
+                    TransferSelectionToggle mPanelSel(clickedPanel), transferRow
+                    PlaceKeyCursor clickedPanel, transferRow
+                    Touch
                 End If
             ElseIf transferPart = "mvr" Then
                 TransferSelected hostApp, True
@@ -11096,10 +11072,10 @@ Private Sub HandleCheckListKey(ByVal hostApp As ReDimUI, ByVal keyText As String
     If ItemCount = 0 Then Exit Sub
     If TypeListFilter(keyText) Then Exit Sub
     firstRow = IIf(mSelectAllRow, 0, 1)
-    shownTotal = CheckShownCount()
+    shownTotal = PanelShownCount(0)
     ' The cursor walks shown rows (0 is select-all); aimRow is a shown
     ' position until the end, where it turns back into an item.
-    aimRow = CheckShownPosition(mKeyRow)
+    aimRow = PanelShownPosition(0, mKeyRow)
     Select Case keyText
         Case "{UP}"
             aimRow = aimRow - 1
@@ -11134,55 +11110,44 @@ Private Sub HandleCheckListKey(ByVal hostApp As ReDimUI, ByVal keyText As String
     End Select
     If aimRow < firstRow Then aimRow = firstRow
     If aimRow > shownTotal Then aimRow = shownTotal
-    PlaceKeyCursor 0, IIf(aimRow = 0, 0, CheckShownItem(aimRow))
+    PlaceKeyCursor 0, IIf(aimRow = 0, 0, PanelShownItem(0, aimRow))
     RevealListRow aimRow
     Touch
 End Sub
 
-' Toggles one row, or with row 0 the select-all header: from mixed or
-' none it checks everything, from all it clears. Writes the state and
-' moves the keyboard cursor there. True when anything toggled; the
-' caller runs the handlers.
 ' Select-all under a filter: unchecks the rows that show when all of
 ' them are checked, else checks them; hidden rows keep their checks.
 Private Sub ToggleShownChecks()
-    Dim idx As Long
+    Dim shownPos As Long
     Dim allChecked As Boolean
-    Dim anyShown As Boolean
 
+    If PanelShownCount(0) = 0 Then Exit Sub
     allChecked = True
-    For idx = 1 To ItemCount
-        If InStr(1, ItemAt(idx), mFilterCheck, vbTextCompare) > 0 Then
-            anyShown = True
-            If Not TransferSelectionHas(mCheckedSet, idx) Then allChecked = False
+    For shownPos = 1 To PanelShownCount(0)
+        If Not TransferSelectionHas(mCheckedSet, PanelShownItem(0, shownPos)) Then
+            allChecked = False
         End If
-    Next idx
-    If Not anyShown Then Exit Sub
-    For idx = 1 To ItemCount
-        If InStr(1, ItemAt(idx), mFilterCheck, vbTextCompare) > 0 Then
-            If TransferSelectionHas(mCheckedSet, idx) = allChecked Then
-                TransferSelectionToggle mCheckedSet, idx
-            End If
+    Next shownPos
+    For shownPos = 1 To PanelShownCount(0)
+        If TransferSelectionHas(mCheckedSet, PanelShownItem(0, shownPos)) = allChecked Then
+            TransferSelectionToggle mCheckedSet, PanelShownItem(0, shownPos)
         End If
-    Next idx
+    Next shownPos
 End Sub
 
 ' Ctrl+A: checks every row that shows, with or without a select-all
 ' header, and never clears, as Ctrl+A selects all in a native list. True
 ' when a row changed; the caller runs the handlers.
 Private Function CheckAllShown(ByVal hostApp As ReDimUI) As Boolean
-    Dim idx As Long
+    Dim shownPos As Long
 
     EnsureCheckedSet
-    For idx = 1 To ItemCount
-        If LenB(mFilterCheck) = 0 _
-            Or InStr(1, ItemAt(idx), mFilterCheck, vbTextCompare) > 0 Then
-            If Not TransferSelectionHas(mCheckedSet, idx) Then
-                TransferSelectionToggle mCheckedSet, idx
-                CheckAllShown = True
-            End If
+    For shownPos = 1 To PanelShownCount(0)
+        If Not TransferSelectionHas(mCheckedSet, PanelShownItem(0, shownPos)) Then
+            TransferSelectionToggle mCheckedSet, PanelShownItem(0, shownPos)
+            CheckAllShown = True
         End If
-    Next idx
+    Next shownPos
     If Not CheckAllShown Then Exit Function
     If LenB(mWritesToKey) > 0 Then
         WriteOwnKey hostApp, CheckedJoined()
@@ -11190,6 +11155,10 @@ Private Function CheckAllShown(ByVal hostApp As ReDimUI) As Boolean
     Touch
 End Function
 
+' Toggles one row, or with row 0 the select-all header: from mixed or
+' none it checks everything, from all it clears. Writes the state and
+' moves the keyboard cursor there. True when anything toggled; the
+' caller runs the handlers.
 Private Function ToggleCheckRow(ByVal hostApp As ReDimUI, ByVal checkRow As Long) As Boolean
     Dim rowNumber As Long
 
@@ -11197,7 +11166,7 @@ Private Function ToggleCheckRow(ByVal hostApp As ReDimUI, ByVal checkRow As Long
     If ItemCount = 0 Then Exit Function
     If checkRow = 0 Then
         If Not mSelectAllRow Then Exit Function
-        If LenB(mFilterCheck) > 0 Then
+        If LenB(mPanelFilter(0)) > 0 Then
             ToggleShownChecks
         ElseIf mCheckedSet.Count = ItemCount Then
             Set mCheckedSet = New Collection
@@ -11241,14 +11210,14 @@ Private Sub HandleTransferKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
     rowsShown = TransferRowCapacity()
     ' The cursor walks the rows the panel shows; aimRow is a shown
     ' position until the end, where it turns back into an item.
-    aimRow = TransferShownPosition(mKeyPanel, mKeyRow)
+    aimRow = PanelShownPosition(mKeyPanel, mKeyRow)
     Select Case keyText
         Case "{ALTUP}", "{ALTDOWN}"
             ' Alt+Up and Alt+Down reorder the chosen side from its rows,
             ' and the window follows the cursor's row.
             If Not mReorderable Or mKeyPanel <> 1 Then Exit Sub
             ReorderChosen hostApp, (keyText = "{ALTUP}")
-            aimRow = TransferShownPosition(mKeyPanel, mKeyRow)
+            aimRow = PanelShownPosition(mKeyPanel, mKeyRow)
         Case "{UP}"
             aimRow = aimRow - 1
         Case "{DOWN}"
@@ -11256,7 +11225,7 @@ Private Sub HandleTransferKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
         Case "{HOME}"
             aimRow = 1
         Case "{END}"
-            aimRow = TransferShownCount(mKeyPanel)
+            aimRow = PanelShownCount(mKeyPanel)
         Case "{PGUP}"
             aimRow = aimRow - rowsShown
         Case "{PGDN}"
@@ -11267,62 +11236,45 @@ Private Sub HandleTransferKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
             mKeyPanel = 1
         Case " "
             If mKeyRow >= 1 And mKeyRow <= TransferPanelCount(mKeyPanel) Then
-                If mKeyPanel = 0 Then
-                    TransferSelectionToggle mSelLeft, mKeyRow
-                Else
-                    TransferSelectionToggle mSelRight, mKeyRow
-                End If
+                TransferSelectionToggle mPanelSel(mKeyPanel), mKeyRow
                 Touch
             End If
             Exit Sub
         Case "{SELECTALL}"
             ' Ctrl+A selects every row the cursor's panel shows.
-            For shownPos = 1 To TransferShownCount(mKeyPanel)
-                itemNo = TransferShownItem(mKeyPanel, shownPos)
-                If mKeyPanel = 0 Then
-                    If Not TransferSelectionHas(mSelLeft, itemNo) Then
-                        TransferSelectionToggle mSelLeft, itemNo
-                    End If
-                ElseIf Not TransferSelectionHas(mSelRight, itemNo) Then
-                    TransferSelectionToggle mSelRight, itemNo
+            For shownPos = 1 To PanelShownCount(mKeyPanel)
+                itemNo = PanelShownItem(mKeyPanel, shownPos)
+                If Not TransferSelectionHas(mPanelSel(mKeyPanel), itemNo) Then
+                    TransferSelectionToggle mPanelSel(mKeyPanel), itemNo
                 End If
             Next shownPos
             Touch
             Exit Sub
         Case "{ENTER}"
             If mKeyRow >= 1 And mKeyRow <= TransferPanelCount(mKeyPanel) Then
-                If mKeyPanel = 0 Then
-                    If mSelLeft.Count = 0 Then mSelLeft.Add mKeyRow
-                Else
-                    If mSelRight.Count = 0 Then mSelRight.Add mKeyRow
-                End If
+                If mPanelSel(mKeyPanel).Count = 0 Then mPanelSel(mKeyPanel).Add mKeyRow
                 TransferSelected hostApp, (mKeyPanel = 0)
             End If
         Case Else
             Exit Sub
     End Select
-    rowTotal = TransferShownCount(mKeyPanel)
+    rowTotal = PanelShownCount(mKeyPanel)
     If aimRow > rowTotal Then aimRow = rowTotal
     If aimRow < 1 Then aimRow = IIf(rowTotal > 0, 1, 0)
-    PlaceKeyCursor mKeyPanel, TransferShownItem(mKeyPanel, aimRow)
+    PlaceKeyCursor mKeyPanel, PanelShownItem(mKeyPanel, aimRow)
     ' The panel window follows the cursor.
-    If mKeyPanel = 0 Then
-        If aimRow > mLeftOffset + rowsShown Then mLeftOffset = aimRow - rowsShown
-        If aimRow >= 1 And aimRow <= mLeftOffset Then mLeftOffset = aimRow - 1
-    Else
-        If aimRow > mRightOffset + rowsShown Then mRightOffset = aimRow - rowsShown
-        If aimRow >= 1 And aimRow <= mRightOffset Then mRightOffset = aimRow - 1
+    If aimRow > mPanelOffset(mKeyPanel) + rowsShown Then
+        mPanelOffset(mKeyPanel) = aimRow - rowsShown
+    End If
+    If aimRow >= 1 And aimRow <= mPanelOffset(mKeyPanel) Then
+        mPanelOffset(mKeyPanel) = aimRow - 1
     End If
     Touch
 End Sub
 
 Private Function TransferPanelCount(ByVal panelIndex As Long) As Long
     EnsureTransferCollections
-    If panelIndex = 0 Then
-        TransferPanelCount = mItems.Count
-    Else
-        TransferPanelCount = mChosenItems.Count
-    End If
+    TransferPanelCount = ItemsOfPanel(panelIndex).Count
 End Function
 
 ' Clearable's button: a small muted circle with an x inside the face's
@@ -14840,7 +14792,7 @@ Private Sub RowListWindow(ByRef shownTotal As Long, ByRef windowRows As Long)
     Dim headerRows As Long
 
     If mKind = KIND_CHECKLIST Then
-        shownTotal = CheckShownCount()
+        shownTotal = PanelShownCount(0)
         If mSelectAllRow Then headerRows = 1
     Else
         shownTotal = ItemCount
@@ -15104,7 +15056,7 @@ Private Sub ApplyCheckListParts( _
     PruneTransferSelection mCheckedSet, rowTotal
     ' A filter lays the rows out anew: it is part of the layout.
     layoutKey = PartsState(themeValue) & ":" & CStr(mSelectAllRow) & _
-        ":" & CStr(rowTotal) & Chr$(1) & mFilterCheck
+        ":" & CStr(rowTotal) & Chr$(1) & mPanelFilter(0)
     fullPass = Not (mAppliedValid And layoutKey = mAppliedCheckSig)
     If fullPass Then
         ' The row states drawn under the old layout say which rows exist
@@ -15124,16 +15076,11 @@ Private Sub ApplyCheckListParts( _
     ' Each item's row under the filter, 0 when hidden; the header counts
     ' the rows that show.
     ReDim shownAt(1 To rowTotal)
-    For idx = 1 To rowTotal
-        If LenB(mFilterCheck) = 0 Then
-            shownAt(idx) = idx
-        ElseIf InStr(1, ItemAt(idx), mFilterCheck, vbTextCompare) > 0 Then
-            shownTotal = shownTotal + 1
-            shownAt(idx) = shownTotal
-        End If
+    shownTotal = PanelShownCount(0)
+    For idx = 1 To shownTotal
+        shownAt(PanelShownItem(0, idx)) = idx
     Next idx
-    If LenB(mFilterCheck) = 0 Then
-        shownTotal = rowTotal
+    If LenB(mPanelFilter(0)) = 0 Then
         checkedTotal = mCheckedSet.Count
     Else
         For idx = 1 To rowTotal
@@ -15153,10 +15100,10 @@ Private Sub ApplyCheckListParts( _
     If boxSize < 10 Then boxSize = 10
 
     If mSelectAllRow Then
-        If LenB(mFilterCheck) = 0 Then
+        If LenB(mPanelFilter(0)) = 0 Then
             headerText = Phrase(UI_SELECT_ALL, checkedTotal, shownTotal)
         Else
-            headerText = Phrase(UI_SELECT_ALL_FILTERED, mFilterCheck, checkedTotal, shownTotal)
+            headerText = Phrase(UI_SELECT_ALL_FILTERED, mPanelFilter(0), checkedTotal, shownTotal)
         End If
         headerKey = CStr(checkedTotal) & "/" & CStr(shownTotal) & _
             CStr(PointerLookCode("row0")) & Chr$(1) & headerText
@@ -15603,18 +15550,16 @@ Private Sub ApplyTransferParts( _
     Dim btnTop As Double
     Dim rightPanel As Shape
     Dim layoutKey As String
+    Dim panelNo As Long
 
     EnsureTransferCollections
-    PruneTransferSelection mSelLeft, mItems.Count
-    PruneTransferSelection mSelRight, mChosenItems.Count
-    If mLeftOffset > TransferShownCount(0) - TransferRowCapacity() Then
-        mLeftOffset = TransferShownCount(0) - TransferRowCapacity()
-    End If
-    If mLeftOffset < 0 Then mLeftOffset = 0
-    If mRightOffset > TransferShownCount(1) - TransferRowCapacity() Then
-        mRightOffset = TransferShownCount(1) - TransferRowCapacity()
-    End If
-    If mRightOffset < 0 Then mRightOffset = 0
+    For panelNo = 0 To 1
+        PruneTransferSelection mPanelSel(panelNo), ItemsOfPanel(panelNo).Count
+        If mPanelOffset(panelNo) > PanelShownCount(panelNo) - TransferRowCapacity() Then
+            mPanelOffset(panelNo) = PanelShownCount(panelNo) - TransferRowCapacity()
+        End If
+        If mPanelOffset(panelNo) < 0 Then mPanelOffset(panelNo) = 0
+    Next panelNo
     TransferLayout panelW, panelTop, panelH, rightX, btnX, btnTop
 
     layoutKey = PartsState(themeValue)
@@ -15655,16 +15600,16 @@ Private Sub ApplyTransferParts( _
     ApplyTransferHeader hostSheet, themeValue, "hr", rightX, panelW, TRANSFER_HEADER_H, _
         TransferHeaderText(1), mAppliedHeaderRightSig
     SyncTransferRows hostSheet, themeValue, 0, mItems, "al", _
-        mLeft, panelTop, panelW, panelH, mSelLeft, mLeftOffset, _
-        mAppliedLeftRows, mAppliedLeftRowStates
+        mLeft, panelTop, panelW, panelH, mPanelSel(0), mPanelOffset(0), _
+        mAppliedPanelRows(0), mAppliedLeftRowStates
     SyncTransferRows hostSheet, themeValue, 1, mChosenItems, "cl", _
-        rightX, panelTop, panelW, panelH, mSelRight, mRightOffset, _
-        mAppliedRightRows, mAppliedRightRowStates
+        rightX, panelTop, panelW, panelH, mPanelSel(1), mPanelOffset(1), _
+        mAppliedPanelRows(1), mAppliedRightRowStates
     ApplyTransferScroller hostSheet, themeValue, "alu", "ald", _
-        mLeft, panelTop, panelW, panelH, TransferShownCount(0), mLeftOffset, _
+        mLeft, panelTop, panelW, panelH, PanelShownCount(0), mPanelOffset(0), _
         TransferRowCapacity(), mAppliedScrollLeftSig
     ApplyTransferScroller hostSheet, themeValue, "clu", "cld", _
-        rightX, panelTop, panelW, panelH, TransferShownCount(1), mRightOffset, _
+        rightX, panelTop, panelW, panelH, PanelShownCount(1), mPanelOffset(1), _
         TransferRowCapacity(), mAppliedScrollRightSig
     SyncReorderButtons hostSheet, themeValue, rightX, panelW
     SyncTransferPartTint hostSheet, themeValue
@@ -15674,9 +15619,9 @@ Private Sub ApplyTransferParts( _
     Dim cursorRow As Long
     Dim cursorWidth As Double
     If mKeyRow > TransferPanelCount(mKeyPanel) Then mKeyRow = TransferPanelCount(mKeyPanel)
-    cursorItems = TransferShownCount(mKeyPanel)
-    cursorRow = TransferShownPosition(mKeyPanel, mKeyRow)
-    If cursorRow > 0 Then cursorRow = cursorRow - IIf(mKeyPanel = 0, mLeftOffset, mRightOffset)
+    cursorItems = PanelShownCount(mKeyPanel)
+    cursorRow = PanelShownPosition(mKeyPanel, mKeyRow)
+    If cursorRow > 0 Then cursorRow = cursorRow - mPanelOffset(mKeyPanel)
     cursorWidth = panelW - 6
     If cursorItems > TransferRowCapacity() Then
         cursorWidth = cursorWidth - PAGER_TARGET - 2
@@ -15852,15 +15797,15 @@ Private Sub ReorderChosen(ByVal hostApp As ReDimUI, ByVal upward As Boolean)
         idx = idx + 1
         texts(idx) = CStr(entry)
     Next entry
-    For Each entry In mSelRight
+    For Each entry In mPanelSel(1)
         If CLng(entry) >= 1 And CLng(entry) <= itemTotal Then marked(CLng(entry)) = True
     Next entry
-    If mSelRight.Count = 0 Then
+    If mPanelSel(1).Count = 0 Then
         If mKeyPanel <> 1 Or mKeyRow < 1 Or mKeyRow > itemTotal Then Exit Sub
         marked(mKeyRow) = True
         cursorOnly = True
     End If
-    shownTotal = TransferShownRows(1, shownRows)
+    shownTotal = PanelShownRows(1, shownRows)
     If shownTotal < 2 Then Exit Sub
     If upward Then
         For idx = 2 To shownTotal
@@ -15887,9 +15832,9 @@ Private Sub ReorderChosen(ByVal hostApp As ReDimUI, ByVal upward As Boolean)
         rebuilt.Add texts(idx)
     Next idx
     Set mChosenItems = rebuilt
-    Set mSelRight = New Collection
+    Set mPanelSel(1) = New Collection
     For idx = 1 To itemTotal
-        If marked(idx) And Not cursorOnly Then mSelRight.Add idx
+        If marked(idx) And Not cursorOnly Then mPanelSel(1).Add idx
     Next idx
     Touch
     CommitTransferChange hostApp
@@ -15922,75 +15867,69 @@ End Sub
 
 ' The item numbers a transfer panel shows, in order, into shownItems;
 ' returns how many.
-Private Function TransferShownRows(ByVal panelIndex As Long, ByRef shownItems() As Long) As Long
+Private Function PanelShownRows(ByVal panelIndex As Long, ByRef shownItems() As Long) As Long
     Dim shownTotal As Long
     Dim idx As Long
 
-    shownTotal = TransferShownCount(panelIndex)
+    shownTotal = PanelShownCount(panelIndex)
     If shownTotal = 0 Then Exit Function
     ReDim shownItems(1 To shownTotal)
     For idx = 1 To shownTotal
-        shownItems(idx) = TransferShownItem(panelIndex, idx)
+        shownItems(idx) = PanelShownItem(panelIndex, idx)
     Next idx
-    TransferShownRows = shownTotal
+    PanelShownRows = shownTotal
 End Function
 
 Private Function PanelFilter(ByVal panelIndex As Long) As String
-    If panelIndex = 0 Then
-        PanelFilter = mFilterLeft
-    Else
-        PanelFilter = mFilterRight
-    End If
+    PanelFilter = mPanelFilter(panelIndex)
 End Function
 
 ' How many rows a transfer panel shows: all its items, or with a filter
 ' those whose text holds it.
-Private Function TransferShownCount(ByVal panelIndex As Long) As Long
+Private Function PanelShownCount(ByVal panelIndex As Long) As Long
     If LenB(PanelFilter(panelIndex)) = 0 Then
-        TransferShownCount = TransferPanelCount(panelIndex)
+        PanelShownCount = TransferPanelCount(panelIndex)
         Exit Function
     End If
     EnsureShownRows panelIndex
-    If panelIndex = 0 Then
-        TransferShownCount = mShownLeftCount
-    Else
-        TransferShownCount = mShownRightCount
-    End If
+    PanelShownCount = mShownCount(panelIndex)
 End Function
 
 ' The item number at a shown position, 0 past the end.
-Private Function TransferShownItem(ByVal panelIndex As Long, ByVal shownPosition As Long) As Long
+Private Function PanelShownItem(ByVal panelIndex As Long, ByVal shownPosition As Long) As Long
     If shownPosition < 1 Then Exit Function
     If LenB(PanelFilter(panelIndex)) = 0 Then
         If shownPosition <= TransferPanelCount(panelIndex) Then
-            TransferShownItem = shownPosition
+            PanelShownItem = shownPosition
         End If
         Exit Function
     End If
     EnsureShownRows panelIndex
+    If shownPosition > mShownCount(panelIndex) Then Exit Function
+    ' The two shown lists stay apart: VBA hands arrays around by copy.
     If panelIndex = 0 Then
-        If shownPosition <= mShownLeftCount Then TransferShownItem = mShownLeft(shownPosition)
+        PanelShownItem = mShownLeft(shownPosition)
     Else
-        If shownPosition <= mShownRightCount Then TransferShownItem = mShownRight(shownPosition)
+        PanelShownItem = mShownRight(shownPosition)
     End If
 End Function
 
 ' The shown position of an item, 0 when the filter hides it.
-Private Function TransferShownPosition(ByVal panelIndex As Long, ByVal itemIndex As Long) As Long
+Private Function PanelShownPosition(ByVal panelIndex As Long, ByVal itemIndex As Long) As Long
     Dim shownTotal As Long
     Dim idx As Long
 
     If itemIndex < 1 Then Exit Function
     If LenB(PanelFilter(panelIndex)) = 0 Then
         If itemIndex <= TransferPanelCount(panelIndex) Then
-            TransferShownPosition = itemIndex
+            PanelShownPosition = itemIndex
         End If
         Exit Function
     End If
-    shownTotal = TransferShownCount(panelIndex)
+    shownTotal = PanelShownCount(panelIndex)
     For idx = 1 To shownTotal
-        If TransferShownItem(panelIndex, idx) = itemIndex Then
-            TransferShownPosition = idx
+        If PanelShownItem(panelIndex, idx) = itemIndex Then
+            PanelShownPosition = idx
             Exit Function
         End If
     Next idx
@@ -16008,19 +15947,11 @@ Private Sub EnsureShownRows(ByVal panelIndex As Long)
     Dim idx As Long
 
     EnsureTransferCollections
-    If panelIndex = 0 Then
-        Set panelItems = mItems
-    Else
-        Set panelItems = mChosenItems
-    End If
+    Set panelItems = ItemsOfPanel(panelIndex)
     filterText = PanelFilter(panelIndex)
     cacheKey = filterText & Chr$(1) & CStr(mItemsVersion) & ":" & _
         CStr(ObjPtr(panelItems)) & ":" & CStr(panelItems.Count)
-    If panelIndex = 0 Then
-        If cacheKey = mShownLeftKey Then Exit Sub
-    ElseIf cacheKey = mShownRightKey Then
-        Exit Sub
-    End If
+    If cacheKey = mShownKey(panelIndex) Then Exit Sub
     ReDim shownItems(0 To panelItems.Count)
     For Each entry In panelItems
         idx = idx + 1
@@ -16031,13 +15962,11 @@ Private Sub EnsureShownRows(ByVal panelIndex As Long)
     Next entry
     If panelIndex = 0 Then
         mShownLeft = shownItems
-        mShownLeftCount = shownTotal
-        mShownLeftKey = cacheKey
     Else
         mShownRight = shownItems
-        mShownRightCount = shownTotal
-        mShownRightKey = cacheKey
     End If
+    mShownCount(panelIndex) = shownTotal
+    mShownKey(panelIndex) = cacheKey
 End Sub
 
 ' A panel's header: its caption and count, and with a filter the
@@ -16045,18 +15974,15 @@ End Sub
 Private Function TransferHeaderText(ByVal panelIndex As Long) As String
     Dim captionText As String
 
-    If panelIndex = 0 Then
-        captionText = mCaptionLeft
-        If LenB(captionText) = 0 Then captionText = Phrase(UI_AVAILABLE)
-    Else
-        captionText = mCaptionRight
-        If LenB(captionText) = 0 Then captionText = Phrase(UI_SELECTED)
+    captionText = mPanelCaption(panelIndex)
+    If LenB(captionText) = 0 Then
+        captionText = Phrase(IIf(panelIndex = 0, UI_AVAILABLE, UI_SELECTED))
     End If
     If LenB(PanelFilter(panelIndex)) = 0 Then
         TransferHeaderText = captionText & " (" & TransferPanelCount(panelIndex) & ")"
     Else
         TransferHeaderText = Phrase(UI_PANEL_FILTERED, captionText, PanelFilter(panelIndex), _
-            TransferShownCount(panelIndex), TransferPanelCount(panelIndex))
+            PanelShownCount(panelIndex), TransferPanelCount(panelIndex))
     End If
 End Function
 
@@ -16068,11 +15994,8 @@ Private Function TypeListFilter(ByVal keyText As String) As Boolean
     Dim filterText As String
 
     keyText = TypedKeyChar(keyText)
-    If mKind = KIND_TRANSFER Then
-        filterText = PanelFilter(mKeyPanel)
-    Else
-        filterText = mFilterCheck
-    End If
+    ' A check list is one panel, 0, where its cursor always is.
+    filterText = PanelFilter(mKeyPanel)
     If keyText = "{BS}" Then
         If LenB(filterText) = 0 Then Exit Function
         filterText = Left$(filterText, Len(filterText) - 1)
@@ -16088,28 +16011,22 @@ End Function
 ' Sets the filter of the transfer panel the cursor is in, or of the
 ' check list, and rewinds to its first row.
 Private Sub SetListFilter(ByVal filterText As String)
+    mPanelFilter(mKeyPanel) = filterText
+    ' The window goes back to the top, so the first row left showing is
+    ' in view: a transfer panel's window, or the check list's.
     If mKind = KIND_TRANSFER Then
-        If mKeyPanel = 0 Then
-            mFilterLeft = filterText
-            mLeftOffset = 0
-        Else
-            mFilterRight = filterText
-            mRightOffset = 0
-        End If
-        PlaceKeyCursor mKeyPanel, TransferShownItem(mKeyPanel, 1)
+        mPanelOffset(mKeyPanel) = 0
     Else
-        mFilterCheck = filterText
-        PlaceKeyCursor 0, CheckShownItem(1)
+        mListOffset = 0
     End If
+    PlaceKeyCursor mKeyPanel, PanelShownItem(mKeyPanel, 1)
     Touch
 End Sub
 
 ' Esc on a filtered list clears the filter first. True when it did.
 Private Function ClearListFilter() As Boolean
-    If mKind = KIND_TRANSFER Then
+    If mKind = KIND_TRANSFER Or mKind = KIND_CHECKLIST Then
         If LenB(PanelFilter(mKeyPanel)) = 0 Then Exit Function
-    ElseIf mKind = KIND_CHECKLIST Then
-        If LenB(mFilterCheck) = 0 Then Exit Function
     ElseIf mKind = KIND_TABLE Then
         If LenB(mTableFilter) = 0 Then Exit Function
         SetTableFilter vbNullString
@@ -16125,60 +16042,6 @@ Private Function ClearListFilter() As Boolean
     End If
     SetListFilter vbNullString
     ClearListFilter = True
-End Function
-
-' The item a check list shows at a row position, counting from 1 below
-' any select-all row; 0 past the end.
-Private Function CheckShownItem(ByVal shownPosition As Long) As Long
-    Dim idx As Long
-    Dim seen As Long
-
-    If shownPosition < 1 Then Exit Function
-    If LenB(mFilterCheck) = 0 Then
-        If shownPosition <= ItemCount Then CheckShownItem = shownPosition
-        Exit Function
-    End If
-    For idx = 1 To ItemCount
-        If InStr(1, ItemAt(idx), mFilterCheck, vbTextCompare) > 0 Then
-            seen = seen + 1
-            If seen = shownPosition Then
-                CheckShownItem = idx
-                Exit Function
-            End If
-        End If
-    Next idx
-End Function
-
-' How many rows a check list shows under its filter.
-Private Function CheckShownCount() As Long
-    Dim idx As Long
-
-    If LenB(mFilterCheck) = 0 Then
-        CheckShownCount = ItemCount
-        Exit Function
-    End If
-    For idx = 1 To ItemCount
-        If InStr(1, ItemAt(idx), mFilterCheck, vbTextCompare) > 0 Then
-            CheckShownCount = CheckShownCount + 1
-        End If
-    Next idx
-End Function
-
-' A check list item's row position under the filter, 0 when hidden.
-Private Function CheckShownPosition(ByVal itemIndex As Long) As Long
-    Dim idx As Long
-
-    If itemIndex < 1 Or itemIndex > ItemCount Then Exit Function
-    If LenB(mFilterCheck) = 0 Then
-        CheckShownPosition = itemIndex
-        Exit Function
-    End If
-    If InStr(1, ItemAt(itemIndex), mFilterCheck, vbTextCompare) = 0 Then Exit Function
-    For idx = 1 To itemIndex
-        If InStr(1, ItemAt(idx), mFilterCheck, vbTextCompare) > 0 Then
-            CheckShownPosition = CheckShownPosition + 1
-        End If
-    Next idx
 End Function
 
 ' The move button or paging arrow under the pointer takes the pointer
@@ -16218,10 +16081,10 @@ Private Sub SyncMoveButtonInks(ByVal hostSheet As Worksheet, ByVal themeValue As
     Dim idx As Long
 
     EnsureTransferCollections
-    canMove(1) = mSelLeft.Count > 0
-    canMove(2) = TransferShownCount(0) > 0
-    canMove(3) = mSelRight.Count > 0
-    canMove(4) = TransferShownCount(1) > 0
+    canMove(1) = mPanelSel(0).Count > 0
+    canMove(2) = PanelShownCount(0) > 0
+    canMove(3) = mPanelSel(1).Count > 0
+    canMove(4) = PanelShownCount(1) > 0
     inkKey = CStr(ObjPtr(themeValue)) & ":" & CStr(mEnabled)
     For idx = 1 To 4
         inkKey = inkKey & IIf(canMove(idx), "1", "0")
@@ -16298,7 +16161,7 @@ Private Sub SyncTransferRows( _
     Dim layoutKey As String
     Dim shownTotal As Long
 
-    shownTotal = TransferShownCount(panelIndex)
+    shownTotal = PanelShownCount(panelIndex)
     wanted = shownTotal - scrollOffset
     If wanted > Int((panelH - 6) / TRANSFER_ROW_H) Then
         wanted = Int((panelH - 6) / TRANSFER_ROW_H)
@@ -16316,7 +16179,7 @@ Private Sub SyncTransferRows( _
         CStr(panelTop) & ":" & CStr(rowWidth)
     EnsureRowStates rowStates, wanted
     For idx = 1 To wanted
-        itemIndex = TransferShownItem(panelIndex, scrollOffset + idx)
+        itemIndex = PanelShownItem(panelIndex, scrollOffset + idx)
         rowSelected = TransferSelectionHas(selectionSet, itemIndex)
         If rowSelected Then
             rowFill = themeValue.PrimaryColor
@@ -16776,7 +16639,7 @@ Private Function RowListPartAt(ByVal pointsX As Double, ByVal pointsY As Double)
     If slot < 1 Or slot > windowRows Then Exit Function
     slot = slot + mListOffset
     ' A check list's rows below the filter's last show nothing.
-    If mKind = KIND_CHECKLIST Then slot = CheckShownItem(slot)
+    If mKind = KIND_CHECKLIST Then slot = PanelShownItem(0, slot)
     If slot >= 1 And slot <= ItemCount Then RowListPartAt = "row" & slot
 End Function
 
@@ -16848,10 +16711,10 @@ Private Function TransferPartAt(ByVal pointsX As Double, ByVal pointsY As Double
         End Select
     ElseIf pointsX >= mLeft And pointsX <= mLeft + panelW Then
         TransferPartAt = TransferPanelPartAt("al", mLeft, panelTop, panelW, _
-            panelH, TransferShownCount(0), mLeftOffset, pointsX, pointsY)
+            panelH, PanelShownCount(0), mPanelOffset(0), pointsX, pointsY)
     ElseIf pointsX >= rightX And pointsX <= rightX + panelW Then
         TransferPartAt = TransferPanelPartAt("cl", rightX, panelTop, panelW, _
-            panelH, TransferShownCount(1), mRightOffset, pointsX, pointsY)
+            panelH, PanelShownCount(1), mPanelOffset(1), pointsX, pointsY)
     End If
 End Function
 
@@ -17140,13 +17003,11 @@ Private Sub MoveTransferRow( _
     Dim keptSelection As Collection
     Dim soleRow As Collection
     Dim entry As Variant
+    Dim fromPanel As Long
 
     EnsureTransferCollections
-    If rightward Then
-        Set priorSelection = mSelLeft
-    Else
-        Set priorSelection = mSelRight
-    End If
+    fromPanel = IIf(rightward, 0, 1)
+    Set priorSelection = mPanelSel(fromPanel)
     Set keptSelection = New Collection
     For Each entry In priorSelection
         If CLng(entry) < itemIndex Then
@@ -17157,17 +17018,9 @@ Private Sub MoveTransferRow( _
     Next entry
     Set soleRow = New Collection
     soleRow.Add itemIndex
-    If rightward Then
-        Set mSelLeft = soleRow
-    Else
-        Set mSelRight = soleRow
-    End If
+    Set mPanelSel(fromPanel) = soleRow
     TransferSelected hostApp, rightward
-    If rightward Then
-        Set mSelLeft = keptSelection
-    Else
-        Set mSelRight = keptSelection
-    End If
+    Set mPanelSel(fromPanel) = keptSelection
     Touch
 End Sub
 
@@ -17220,11 +17073,7 @@ Private Sub TickTransferDrag(ByVal hostApp As ReDimUI, ByVal buttonDown As Boole
         SetDropPanel 0
         If mRowDragMode = 2 And pointerKnown Then
             If TransferPanelAt(pointsX, pointsY) = 1 - mRowDragPanel Then
-                If mRowDragPanel = 0 Then
-                    rowSelected = TransferSelectionHas(mSelLeft, mRowDragFrom)
-                Else
-                    rowSelected = TransferSelectionHas(mSelRight, mRowDragFrom)
-                End If
+                rowSelected = TransferSelectionHas(mPanelSel(mRowDragPanel), mRowDragFrom)
                 If rowSelected Then
                     TransferSelected hostApp, (mRowDragPanel = 0)
                 Else
@@ -17249,13 +17098,12 @@ Private Function TransferRowOf( _
     Select Case Left$(partName, 2)
         Case "al"
             panelAt = 0
-            rowAt = TransferShownItem(0, mLeftOffset + CLng(Mid$(partName, 3)))
         Case "cl"
             panelAt = 1
-            rowAt = TransferShownItem(1, mRightOffset + CLng(Mid$(partName, 3)))
         Case Else
             Exit Function
     End Select
+    rowAt = PanelShownItem(panelAt, mPanelOffset(panelAt) + CLng(Mid$(partName, 3)))
     TransferRowOf = (rowAt > 0)
 End Function
 
@@ -17290,18 +17138,14 @@ Private Sub SelectTransferRange( _
     Dim stepDirection As Long
 
     Set rangeRows = New Collection
-    fromRow = TransferShownPosition(panelIndex, fromRow)
-    rowNo = TransferShownPosition(panelIndex, toRow)
+    fromRow = PanelShownPosition(panelIndex, fromRow)
+    rowNo = PanelShownPosition(panelIndex, toRow)
     If fromRow = 0 Or rowNo = 0 Then Exit Sub
     stepDirection = IIf(rowNo >= fromRow, 1, -1)
     For rowNo = fromRow To rowNo Step stepDirection
-        rangeRows.Add TransferShownItem(panelIndex, rowNo)
+        rangeRows.Add PanelShownItem(panelIndex, rowNo)
     Next rowNo
-    If panelIndex = 0 Then
-        Set mSelLeft = rangeRows
-    Else
-        Set mSelRight = rangeRows
-    End If
+    Set mPanelSel(panelIndex) = rangeRows
     PlaceKeyCursor panelIndex, toRow
     Touch
 End Sub
@@ -17341,27 +17185,26 @@ Private Sub SyncTransferDropTarget( _
     mAppliedDropPanel = mDropPanel
 End Sub
 
-' A transfer panel's paging arrow moves its window a page less a row.
+' A transfer panel's paging arrow moves its window a page less a row:
+' "alu" and "ald" page the available panel, "clu" and "cld" the chosen.
 Private Sub PageTransferPanel(ByVal partName As String)
     Dim transferPage As Long
+    Dim panelIndex As Long
 
-    EnsureTransferCollections
-    transferPage = TransferRowCapacity() - 1
-    If transferPage < 1 Then transferPage = 1
     Select Case partName
-        Case "alu"
-            mLeftOffset = mLeftOffset - transferPage
-            If mLeftOffset < 0 Then mLeftOffset = 0
-        Case "ald"
-            mLeftOffset = mLeftOffset + transferPage
-        Case "clu"
-            mRightOffset = mRightOffset - transferPage
-            If mRightOffset < 0 Then mRightOffset = 0
-        Case "cld"
-            mRightOffset = mRightOffset + transferPage
+        Case "alu", "ald"
+            panelIndex = 0
+        Case "clu", "cld"
+            panelIndex = 1
         Case Else
             Exit Sub
     End Select
+    EnsureTransferCollections
+    transferPage = TransferRowCapacity() - 1
+    If transferPage < 1 Then transferPage = 1
+    If Right$(partName, 1) = "u" Then transferPage = -transferPage
+    mPanelOffset(panelIndex) = mPanelOffset(panelIndex) + transferPage
+    If mPanelOffset(panelIndex) < 0 Then mPanelOffset(panelIndex) = 0
     Touch
 End Sub
 

@@ -479,6 +479,9 @@ def test_review_fixes(run_widgets):
     assert facts["toastSkips"] == "True", "a toast must not take an app's toast_1"
     assert facts["exportLiteral"] == "True", "ExportTo must write text as text"
     assert facts["formatFilter"] == "0/1", "a new column format must filter anew"
+    assert facts["filterRewinds"] == "True", (
+        "a check list's filter must bring its first match into view"
+    )
 
 
 def test_multi_line_input(run_widgets):

@@ -146,6 +146,10 @@
   there, by text. `ItemsFrom` cleared them, and `Items` kept them by
   position, on whatever item came to sit there.
 - A check list's boxes take the pressed look a tick box has.
+- Typing a filter into a scrolled check list brings its first match
+  into view; the window stayed where it was, over rows the filter hid.
+  A check list's filter also reads its rows from the cache a transfer
+  panel uses, where each key press scanned every item up to five times.
 - Dead code goes: the unused `RdxTickCount` in `ReDimHost` and its
   counter, an unused toast reader, parameters two procedures never read
   (`CurrentText` looked up its app for nothing), and five spike-test

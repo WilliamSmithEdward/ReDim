@@ -1502,6 +1502,8 @@ Public Function TestReviewFixes() As String
     Dim host As Worksheet
     Dim transcript As String
     Dim lineOrder As Long
+    Dim longItems(1 To 30) As String
+    Dim itemNo As Long
 
     ReDimUI.AutoPump False
     Set host = NewCanvas()
@@ -1577,6 +1579,17 @@ Public Function TestReviewFixes() As String
     transcript = transcript & "|formatFilter=" & app.Table("dt").ShownRowCount
     app.Table("dt").ColumnFormat 1, "mmm d"
     transcript = transcript & "/" & app.Table("dt").ShownRowCount
+
+    For itemNo = 1 To 30
+        longItems(itemNo) = "Item " & itemNo
+    Next itemNo
+    app.CheckList("long").AtRect(360, 300, 160, 80).ItemsFrom longItems
+    app.CheckList("long").Focus
+    RdxKeyChar "{END}"
+    RdxKeyChar "1"
+    transcript = transcript & "|filterRewinds=" & _
+        CStr(host.Shapes("rdm_wid84_long__t1").Visible = msoTrue)
+    ReDimUI.ClearKeyboardFocus
     app.Unmount True
     TestReviewFixes = transcript
 End Function
