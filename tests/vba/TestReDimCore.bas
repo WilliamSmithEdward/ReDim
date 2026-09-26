@@ -11,6 +11,7 @@ Private gClickCount As Long
 Private gLastSenderId As String
 Private gLastSenderApp As String
 Private gNavLog As String
+Private gListenerSaw As String
 
 Private Function NewCanvas() As Worksheet
     Set NewCanvas = ActiveWorkbook.Worksheets.Add
@@ -656,7 +657,7 @@ Public Function TestWritesToFollows() As String
     app.TextInput("name").AtRect(24, 140, 150, 22).WritesTo "name"
     app.Render
     transcript = "seeded=" & CStr(app.State("darkMode") = True And app.State("qty") = 0 _
-        And app.State("name") = "" And Not app.HasState("size")) & "/" & gClickCount
+        And Not app.HasState("name") And Not app.HasState("size")) & "/" & gClickCount
     app.SetState "darkMode", False
     transcript = transcript & "|follows=" & CStr(Not app.Toggle("dark").IsChecked) & "/" & gClickCount
     app.SetState "size", 20
@@ -680,6 +681,74 @@ Public Function TestWritesToFollows() As String
     app.Unmount True
     TestWritesToFollows = transcript
 End Function
+
+' WritesTo at its edges: a label bound to a seeded key shows the seed,
+' keys match in any case, a pick among items sharing a value stays on
+' the item picked, Empty and Null clear a pick without breaking later
+' draws, a same-key BindValue keeps the clamp, a date comes from a
+' numeric string, a setter is overruled by the next write of its key,
+' a listener reads the value the control now shows, and a Required
+' message goes once state fills the control.
+Public Function TestWritesToEdges() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim transcript As String
+
+    ReDimUI.AutoPump False
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "core11")
+    app.Label("volText").AtRect(200, 24, 120, 18).BindText "vol", "Volume {0}"
+    app.RadioGroup("size").AtRect(24, 24, 140, 70).WritesTo "size"
+    app.RadioGroup("size").AddItem "Small", , 1
+    app.RadioGroup("size").AddItem "Tiny", , 1
+    app.RadioGroup("size").AddItem "None", , 0
+    app.Stepper("vol").AtRect(24, 110, 120, 24).SliderRange(0, 100, 1).Value(40) _
+        .WritesTo("Vol").BindValue "Vol"
+    app.DatePicker("due").AtRect(24, 150, 150, 24).WritesTo "due"
+    app.Toggle("dark").AtRect(24, 190, 44, 22).WritesTo "dark"
+    app.SelectBox("kind").AtRect(200, 60, 140, 22).Items("A", "B").Required.WritesTo "kind"
+    app.OnStateChanged "dark", "TestReDimCore.CoreReadToggle"
+    app.Render
+    transcript = "seedShown=" & app.Label("volText").CurrentText
+    ReDimUI.DispatchShape "rdm_core11_size__t2"
+    transcript = transcript & "|sharedValueKept=" & app.RadioGroup("size").CurrentValue & _
+        "/" & app.State("size")
+    app.SetState "size", 0
+    transcript = transcript & "|zeroNames=" & app.RadioGroup("size").CurrentValue
+    app.SetState "size", Empty
+    transcript = transcript & "|emptyClears=" & app.RadioGroup("size").CurrentValue
+    app.SetState "size", 0
+    app.SetState "size", Null
+    transcript = transcript & "|nullClears=" & app.RadioGroup("size").CurrentValue
+    app.SetState "vol", 30
+    transcript = transcript & "|drawsAfterNull=" & app.Stepper("vol").CurrentValue & "/" & _
+        app.Label("volText").CurrentText
+    app.SetState "vol", 150
+    transcript = transcript & "|clampKept=" & app.Stepper("vol").CurrentValue
+    app.SetState "due", "46287"
+    transcript = transcript & "|dateFromText=" & CStr(app.DatePicker("due").PickedDate = _
+        CDate(46287#))
+    app.SetState "due", 1E+20
+    transcript = transcript & "|hugeIgnored=" & CStr(app.DatePicker("due").PickedDate = _
+        CDate(46287#))
+    app.SetState "dark", True
+    transcript = transcript & "|listenerSees=" & gListenerSaw
+    app.Toggle("dark").Checked False
+    app.SetState "dark", True
+    transcript = transcript & "|writeOverrules=" & CStr(app.Toggle("dark").IsChecked)
+    app.ValidateAll
+    RdxReleaseKeys
+    ReDimUI.ClearKeyboardFocus
+    app.SetState "kind", "B"
+    transcript = transcript & "|requiredClears=" & _
+        CStr(Not ShapeExistsCore(host, "rdm_core11_kind__me"))
+    app.Unmount True
+    TestWritesToEdges = transcript
+End Function
+
+Public Sub CoreReadToggle()
+    gListenerSaw = CStr(ReDimUI.App("core11").Toggle("dark").IsChecked)
+End Sub
 
 ' The theme builders set every color a theme holds, each read back by
 ' its token, and building on a preset leaves the next preset untouched.

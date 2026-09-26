@@ -198,6 +198,26 @@ def test_writes_to_follows(run_core):
     assert facts["renderKeepsState"] == "True", "Render must show the value in play"
 
 
+def test_writes_to_edges(run_core):
+    facts = parse_transcript(run_core("TestWritesToEdges"))
+    assert facts["seedShown"] == "Volume 40", (
+        "a label drawn before the control that seeds its key must show the seed"
+    )
+    assert facts["sharedValueKept"] == "2/1", (
+        "a pick among items sharing a value must stay on the item picked"
+    )
+    assert facts["zeroNames"] == "3"
+    assert facts["emptyClears"] == "0", "Empty must clear the pick, not name an item valued 0"
+    assert facts["nullClears"] == "0"
+    assert facts["drawsAfterNull"] == "30/Volume 30", "a Null key must not stop later draws"
+    assert facts["clampKept"] == "100", "a same-key BindValue must not undo the clamp"
+    assert facts["dateFromText"] == "True", "a numeric string must name a date"
+    assert facts["hugeIgnored"] == "True", "a number past the date range must be ignored"
+    assert facts["listenerSees"] == "True", "a listener must read the value the control shows"
+    assert facts["writeOverrules"] == "True", "writing the key must overrule a setter"
+    assert facts["requiredClears"] == "True", "state filling a pick must clear Required"
+
+
 def test_theme_builders(run_core):
     facts = parse_transcript(run_core("TestThemeBuilders"))
     assert facts["tokens"] == "True", "each theme builder must set the tokens it names"

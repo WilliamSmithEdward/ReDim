@@ -72,7 +72,7 @@ framework. Also:
 | `SetStateDefault key, value` | Sets only when the key has no value; the right form for initial values. |
 | (persistence) | The state store is deliberately in-memory and session-scoped; ReDim ships no persistence. Durability belongs to the host application: walk the store with `StateKeys` and `State`, save wherever fits (a hidden sheet, workbook names, a file), and reseed on build with `SetStateDefault`, which never clobbers a value already in play. `ROneCOne.Json.Serialize`/`Deserialize` are available if JSON is the format of choice. |
 | `HotKey keyCode, "Module.Proc"` / `ClearHotKeys` | Application.OnKey with cleanup on Unmount and Shutdown. |
-| `OnStateChanged key, "Module.Proc"` | Zero-argument listener runs after the key changes. `Array("a", "b")` in place of the key listens on each; a listener already on a key is not added again, so a build that runs twice still fires it once. |
+| `OnStateChanged key, "Module.Proc"` | Zero-argument listener runs after the key changes and the controls bound to it redraw, so a listener reading one sees the new value (inside `BeginUpdate`, the redraw waits for `EndUpdate`). `Array("a", "b")` in place of the key listens on each; a listener already on a key is not added again, so a build that runs twice still fires it once. |
 | `BeginUpdate` / `EndUpdate` | Batch several changes into one flush. |
 | `Render` | Mark everything dirty and paint. Call once after building the UI. |
 | `FlushDirty` | Paint the components changed since the last paint, now. A change outside `BeginUpdate` paints on its own, so code rarely needs it. |
@@ -172,15 +172,20 @@ All fluent, all return the component:
 - `WritesTo(key)` goes both ways. A user's change writes the key, and the control follows
   the key: `SetState "darkMode", True` flips a switch that writes `darkMode`, firing no
   `OnChange`. On the first render a key with no value takes the control's, as
-  `SetStateDefault` would, with no listener run; a key that has one shows on the control,
-  so a rebuild keeps the value in play over the one the build declares. A `Toggle`,
-  `TickBox`, or `Expander` follows `True` and `False`, a `Stepper` or `SlideBar` a number
-  (clamped), a `DatePicker` a `Date`, a `SelectBox`, `RadioGroup`, or `Tabs` the item whose
-  value or text the key holds, and a float `TextInput` or `ComboBox` its text, except
-  while it has the keys. A `CheckList` or `TransferList` writes a joined list and does not
-  follow, nor does a cell-backed field, whose value is its cell. `BindValue(key)` follows
-  a different key one way; on a `SelectBox`, `RadioGroup`, or `Tabs` a number is a
-  position and a text names an item.
+  `SetStateDefault` would, with no listener run, and controls bound to the key show it; an
+  empty field or a pick with nothing picked leaves the key unset. A key that has a value
+  shows on the control at every `Render`, so a rebuild keeps the value in play over the one
+  the build declares. A setter such as `Checked` or `Value` changes the control until the
+  key is next written or the app renders; to change a following control for good, set its
+  key. A `Toggle`, `TickBox`, or `Expander` follows `True` and `False`, a `Stepper` or
+  `SlideBar` a number (clamped), a `DatePicker` a `Date` or a date serial number, a
+  `SelectBox`, `RadioGroup`, or `Tabs` the first item whose value or text the key holds
+  (`Empty` or `Null` picks none), and a float `TextInput` or `ComboBox` its text, except
+  while it has the keys. A value the control cannot show leaves it as it is. A `CheckList`
+  or `TransferList` writes a joined list and does not follow, nor does a cell-backed
+  field, whose value is its cell. `BindValue(key)` follows a different key one way; on a
+  `SelectBox`, `RadioGroup`, or `Tabs` a number is a position and a text names an item.
+  State keys ignore case in bindings as in the store.
 - Behavior: `OnClick "Module.Proc"`, `OnClickAsync "Module.Proc"`, `OnChange "Module.Proc"`.
 - Keyboard: `TabIndex(n)` orders Tab, `Focus` gives the control keyboard focus,
   `AccessKey(letter)` binds Alt+letter for a button or tick box, `Shortcut(keyCode)` binds

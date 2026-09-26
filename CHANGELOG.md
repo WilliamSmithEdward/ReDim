@@ -15,6 +15,22 @@
   group, or tab strip now takes an item's text as well as a position.
   The demos drop their seeding lines and hand-written loads, and the
   Expense Tracker's budget stays a number instead of turning into text.
+  Every write of the key moves the control, even to the value it
+  already held, so a switch changed with `Checked` goes back when code
+  writes the key; a pick among items sharing a value stays on the item
+  picked; `Empty` and `Null` clear a pick; a date comes from a serial
+  number or a numeric string; state filling a `Required` pick clears
+  its message; and a label bound to a seeded key shows the seed, even
+  one drawn before the control that seeds it.
+- An `OnStateChanged` listener runs after the controls bound to the key
+  redraw, so one reading `SelectedText` or `IsChecked` sees the new
+  value rather than the old one.
+- Bindings match state keys in any case, as the state store does:
+  `WritesTo "Paused"` followed by `SetState "paused"` updated the value
+  but never redrew the control.
+- A control whose draw raises no longer stops the app from drawing. Its
+  id stayed in the dirty list, so every later `SetState` raised again
+  and the controls after it never drew until the app was rebuilt.
 - A one-line face cut short ends in an ellipsis: an unfocused
   `TextInput` or `ComboBox`, a `SelectBox`, and a `DatePicker`. They
   stopped mid-word on one line, so "A very long selection" read as
