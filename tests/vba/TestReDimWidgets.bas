@@ -6788,3 +6788,79 @@ Public Function TestThemeRestyle() As String
     ReDimUI.AutoPump True
     TestThemeRestyle = transcript
 End Function
+
+' Field edits: a key the field refuses leaves its selection alone; the
+' clear button is an undo step; Esc restores the check's verdict with
+' the text; a combo's item follows state; an error value in a backing
+' cell reads as the cell shows it; line breaks from code become LF; and
+' Masked takes a TextInput alone.
+Public Function TestFieldEdits() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim transcript As String
+    Dim priorEvents As Boolean
+
+    gInputCount = 0
+    ReDimUI.AutoPump False
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "wid92")
+    app.TextInput("num").AtRect(24, 24, 160, 22).Numeric _
+        .OnInput "TestReDimWidgets.RecordInput"
+    app.TextInput("q").AtRect(24, 60, 160, 22).Clearable
+    app.TextInput("mail").AtRect(24, 96, 160, 22).Validates "TestReDimWidgets.CheckEmail"
+    app.ComboBox("fruit").AtRect(24, 132, 160, 22).Items("Apple", "Banana").WritesTo "fruit"
+    app.TextInput("cellField").At("F10").WritesTo "cellState"
+    app.TextInput("lines").AtRect(220, 24, 160, 60).MultiLine
+    app.Render
+
+    app.TextInput("num").Focus
+    TypeText "123"
+    RdxKeyChar "{SELECTALL}"
+    RdxKeyChar "a"
+    transcript = "refusedKeepsSelection=" & app.TextInput("num").InputValue & "/" & gInputCount
+    ReDimUI.EndKeyboardFocus
+
+    app.TextInput("q").Focus
+    TypeText "hello"
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid92_q__cx"
+    RdxKeyChar "{UNDO}"
+    transcript = transcript & "|clearUndoes=" & app.TextInput("q").InputValue
+    ReDimUI.EndKeyboardFocus
+
+    app.TextInput("mail").Focus
+    TypeText "bad"
+    RdxKeyChar "{ENTER}"
+    app.TextInput("mail").Focus
+    BackspaceAll app.TextInput("mail")
+    TypeText "a@b"
+    RdxKeyChar "{ESC}"
+    transcript = transcript & "|escRestoresVerdict=" & app.TextInput("mail").InputValue & _
+        "/" & app.TextInput("mail").ValidationError
+
+    app.ComboBox("fruit").Focus
+    RdxKeyChar "{DOWN}"
+    RdxKeyChar "{ENTER}"
+    app.SetState "fruit", "Banana"
+    transcript = transcript & "|comboItemFollows=" & app.ComboBox("fruit").CurrentValue & _
+        "/" & app.ComboBox("fruit").InputValue
+
+    priorEvents = Application.EnableEvents
+    Application.EnableEvents = True
+    host.Range("F10").Formula = "=NA()"
+    Application.EnableEvents = priorEvents
+    transcript = transcript & "|errorCellReads=" & app.TextInput("cellField").InputValue & _
+        "/" & CStr(app.State("cellState"))
+
+    app.TextInput("lines").InputValue = "a" & vbCr & "b" & vbCrLf & "c"
+    transcript = transcript & "|breaksAsLf=" & CStr( _
+        app.TextInput("lines").InputValue = "a" & vbLf & "b" & vbLf & "c")
+    On Error Resume Next
+    app.ComboBox("fruit").Masked
+    transcript = transcript & "|maskedRefusesCombo=" & CStr(Err.Number <> 0)
+    Err.Clear
+    On Error GoTo 0
+    RdxReleaseKeys
+    ReDimUI.AutoPump True
+    TestFieldEdits = transcript
+End Function

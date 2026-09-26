@@ -1804,3 +1804,18 @@ def test_theme_restyle(run_widgets):
     assert facts["batchDraws"] == "new"
     assert facts["tonedWordsInk"] == "True", "a toned toast's new words keep the ink color"
     assert facts["multiLineTop"] == "True", "MultiLine after a draw anchors the text to the top"
+
+
+def test_field_edits(run_widgets):
+    facts = parse_transcript(run_widgets("TestFieldEdits"))
+    assert facts["refusedKeepsSelection"] == "123/3", (
+        "a key a Numeric field refuses must leave the selection and fire nothing"
+    )
+    assert facts["clearUndoes"] == "hello", "Ctrl+Z after the clear button brings the text back"
+    assert facts["escRestoresVerdict"] == "bad/Needs an @", (
+        "Esc restores the text and the verdict it had at focus"
+    )
+    assert facts["comboItemFollows"] == "2/Banana", "a combo's item follows its WritesTo key"
+    assert facts["errorCellReads"] == "#N/A/#N/A", "an error cell reads as the cell shows it"
+    assert facts["breaksAsLf"] == "True", "line breaks from code become LF"
+    assert facts["maskedRefusesCombo"] == "True", "Masked takes a TextInput alone"

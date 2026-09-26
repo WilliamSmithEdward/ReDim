@@ -958,6 +958,10 @@ Private mSlideSuppressUntilMs As LongLong
 ' Whether the slider's value bubble is drawn.
 Private mAppliedBubble As Boolean
 Private mFieldTextAtFocus As String
+' The check's verdict when focus arrived, which Esc puts back with the
+' text, so a failing text restored reads as failing.
+Private mErrorAtFocus As String
+Private mErrorLiveAtFocus As Boolean
 Private mFieldSelAtFocus As String
 ' The grid selection an open list's watch compares against; empty until
 ' the watch's first frame records it.
@@ -5702,8 +5706,7 @@ End Function
 ' Copying and cutting take nothing; the text still reads through
 ' InputValue and writes to WritesTo.
 Public Function Masked(Optional ByVal maskedOn As Boolean = True) As ReDimUI
-    RequireRole ROLE_COMPONENT, "Masked"
-    RequireFieldKind "Masked"
+    RequireKind KIND_INPUT, "Masked"
     mMasked = maskedOn
     Touch
     Set Masked = Me
@@ -6831,20 +6834,20 @@ Private Function ReadItemSource( _
     Set gathered = New Collection
     For Each entry In ReadRawSource(itemSource, memberName)
         If Not IsNull(entry) And Not IsEmpty(entry) Then
-            entryText = SourceEntryText(entry)
+            entryText = ValueWords(entry)
             If Not fromRange Or LenB(entryText) > 0 Then gathered.Add entryText
         End If
     Next entry
     Set ReadItemSource = gathered
 End Function
 
-' An entry's words as an item: an error value as its cell shows it,
-' "#N/A" where CStr gave "Error 2042".
-Private Function SourceEntryText(ByVal entry As Variant) As String
+' A value's words, an item's or a cell's: an error value as its cell
+' shows it, "#N/A" where CStr gave "Error 2042".
+Private Function ValueWords(ByVal entry As Variant) As String
     If IsError(entry) Then
-        SourceEntryText = ErrorCellText(entry)
+        ValueWords = ErrorCellText(entry)
     Else
-        SourceEntryText = CStr(entry)
+        ValueWords = CStr(entry)
     End If
 End Function
 
@@ -7159,7 +7162,6 @@ Public Function AddGroup(ByVal groupCaption As String) As ReDimUI
     Set AddGroup = Me
 End Function
 
-' A text field's builders raise on other kinds rather than do nothing.
 ' A member of one kind raises on a component of any other, naming the
 ' kind it belongs to.
 Private Sub RequireKind(ByVal kindCode As Long, ByVal memberName As String)
@@ -7170,6 +7172,7 @@ Private Sub RequireKind(ByVal kindCode As Long, ByVal memberName As String)
     End If
 End Sub
 
+' A text field's builders raise on other kinds rather than do nothing.
 Private Sub RequireFieldKind(ByVal memberName As String)
     If mKind <> KIND_INPUT And mKind <> KIND_COMBO Then
         RaiseError ERROR_INVALID_OPERATION, memberName, _
@@ -7418,7 +7421,7 @@ Private Sub PairItemValues( _
     For Each entry In rawTexts
         idx = idx + 1
         If Not IsObject(entry) And Not IsNull(entry) Then
-            StoreItemValue SourceEntryText(entry), pairedValues(idx)
+            StoreItemValue ValueWords(entry), pairedValues(idx)
         End If
     Next entry
 End Sub
@@ -7524,7 +7527,7 @@ Public Property Get InputValue() As String
     If IsFloatField() Then
         InputValue = mText
     Else
-        InputValue = CStr(InputCell(OwnerApp.Sheet).Value)
+        InputValue = ValueWords(InputCell(OwnerApp.Sheet).Value)
     End If
 End Property
 
@@ -7536,7 +7539,9 @@ Public Property Let InputValue(ByVal assignedText As String)
 
     RequireRole ROLE_COMPONENT, "InputValue"
     If IsFloatField() Then
-        mText = assignedText
+        mText = LfBreaks(assignedText)
+        ' A combo's item follows its text, which its open list marks.
+        If mKind = KIND_COMBO Then mValue = ExactItemMatch(mText)
         Touch
     Else
         ' The cell is found before events go off, and events come back
@@ -7598,7 +7603,7 @@ Friend Sub SyncInputFromSheet(ByVal hostApp As ReDimUI, ByVal changed As Range)
     On Error GoTo 0
     If cell Is Nothing Then Exit Sub
     If Application.Intersect(cell, changed) Is Nothing Then Exit Sub
-    cellText = CStr(cell.Value)
+    cellText = ValueWords(cell.Value)
     If LenB(mWritesToKey) > 0 Then
         If mKind = KIND_COMBO Then
             WriteOwnKey hostApp, ItemStateValue(cellText)
@@ -9147,15 +9152,17 @@ Private Function TakeStateValue(ByVal hostApp As ReDimUI, ByRef stateValue As Va
             End If
         Case KIND_INPUT, KIND_COMBO
             If ReDimUI.IsComponentFocused(mOwnerAppId, mComponentId) Then Exit Function
-            ' A combo writes a named item's value; it shows the item.
+            ' A combo writes a named item's value; it shows the item, and
+            ' takes it as its item, which its open list marks.
             If mKind = KIND_COMBO Then namedItem = ItemPositionOf(stateValue)
             If namedItem > 0 Then
                 mText = ItemAt(namedItem)
             ElseIf IsNull(stateValue) Then
                 mText = vbNullString
             Else
-                mText = CStr(stateValue)
+                mText = LfBreaks(ValueWords(stateValue))
             End If
+            If mKind = KIND_COMBO Then mValue = namedItem
             mCaretPos = Len(mText)
             mSelAnchor = mCaretPos
     End Select
@@ -11926,8 +11933,11 @@ Private Sub ClearFieldText(ByVal hostApp As ReDimUI)
     If Not ReDimUI.IsComponentFocused(hostApp.AppId, mComponentId) Then
         FocusField hostApp, False
     End If
+    ' Ctrl+Z brings the text back, as after deleting it by hand.
+    If LenB(mText) > 0 Then RecordUndo "clear"
     mText = vbNullString
     mCaretPos = 0
+    mSelAnchor = 0
     If mKind = KIND_COMBO Then
         mValue = 0
         OpenComboMatches
@@ -18128,7 +18138,7 @@ Private Function FieldTextNow(ByVal hostSheet As Worksheet) As String
     End If
     On Error Resume Next
     Set cell = InputCell(hostSheet)
-    If Not cell Is Nothing Then FieldTextNow = CStr(cell.Value)
+    If Not cell Is Nothing Then FieldTextNow = ValueWords(cell.Value)
     On Error GoTo 0
 End Function
 
@@ -18262,6 +18272,8 @@ Friend Sub FocusField(ByVal hostApp As ReDimUI, Optional ByVal openList As Boole
     If Not IsFloatField() Then Exit Sub
     mOffPressPending = False
     mFieldTextAtFocus = mText
+    mErrorAtFocus = mValidationError
+    mErrorLiveAtFocus = mValidationLive
     mFieldSelAtFocus = CurrentSelectionKey()
     mCaretPos = Len(mText)
     mSelAnchor = mCaretPos
@@ -18341,7 +18353,12 @@ Friend Sub BlurField(ByVal hostApp As ReDimUI, ByVal keepEdits As Boolean)
             RunChangeHandler hostApp
         End If
     Else
+        ' The text, its check's verdict, and a combo's item go back to
+        ' what they were when focus arrived.
         mText = mFieldTextAtFocus
+        mValidationError = mErrorAtFocus
+        mValidationLive = mErrorLiveAtFocus
+        If mKind = KIND_COMBO Then mValue = ExactItemMatch(mText)
     End If
     mSelectOpen = False
     Touch
@@ -18377,8 +18394,7 @@ Friend Sub HandleKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
             ' Enter is a newline and committing moves to Tab,
             ' Ctrl+Enter, or clicking away.
             If mMultiLine Then
-                RecordUndo "type"
-                ReplaceSelection vbLf
+                InsertTyped "type", vbLf
             ElseIf mKind = KIND_COMBO And mSelectOpen _
                 And mListHighlight >= 1 Then
                 ' A keyboard pick commits exactly like a mouse pick,
@@ -18507,23 +18523,25 @@ Friend Sub HandleKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
                 End If
             End If
         Case "{PASTE}"
+            ' A copied cell brings a line break after its text, which is
+            ' not the user's: an empty cell pasted a space.
             pastedText = ReadClipboardText()
-            If LenB(pastedText) > 0 Then
-                RecordUndo "paste"
-                ReplaceSelection pastedText
+            If Right$(pastedText, 2) = vbCrLf Then
+                pastedText = Left$(pastedText, Len(pastedText) - 2)
+            ElseIf Right$(pastedText, 1) = vbLf Then
+                pastedText = Left$(pastedText, Len(pastedText) - 1)
             End If
+            InsertTyped "paste", pastedText
         Case "{UNDO}"
             StepHistory True
         Case "{REDO}"
             StepHistory False
         Case "{APOS}", "{QUOTE}"
-            RecordUndo "type"
-            ReplaceSelection TypedKeyChar(keyText)
+            InsertTyped "type", TypedKeyChar(keyText)
         Case Else
             ' Named keys a field has no use for are dropped, not typed.
             If Len(keyText) > 1 And Left$(keyText, 1) = "{" Then Exit Sub
-            RecordUndo "type"
-            ReplaceSelection keyText
+            InsertTyped "type", keyText
     End Select
     mCaretOn = True
     mCaretAccumMs = 0
@@ -18597,6 +18615,17 @@ Private Function SelLength() As Long
     SelLength = Abs(mCaretPos - mSelAnchor)
 End Function
 
+' Types or pastes over the selection as one undo step. Text the field
+' admits none of, a letter in a Numeric field or anything past a full
+' MaxLength, changes nothing, where it deleted the selection it was
+' typed over and still cleared the redo.
+Private Sub InsertTyped(ByVal editKind As String, ByVal givenText As String)
+    If LenB(FieldAdmits(givenText, Left$(mText, SelStart()), _
+        Mid$(mText, SelStart() + SelLength() + 1))) = 0 Then Exit Sub
+    RecordUndo editKind
+    ReplaceSelection givenText
+End Sub
+
 ' Replaces the selection, or inserts at the caret when there is none,
 ' with what the field admits of the given text; the caret lands after
 ' it with nothing selected.
@@ -18612,22 +18641,24 @@ Private Sub ReplaceSelection(ByVal insertText As String)
     mSelAnchor = mCaretPos
 End Sub
 
+' A field's line breaks are LF alone; text from code, state, or the
+' clipboard can bring CR or CRLF, which the caret and line moves do not
+' count as breaks.
+Private Function LfBreaks(ByVal givenText As String) As String
+    LfBreaks = Replace(Replace(givenText, vbCrLf, vbLf), vbCr, vbLf)
+End Function
+
 ' What a field takes of typed or pasted text, given the text around
-' the insertion: CR and CRLF become line breaks, a trailing break (a
-' copied cell brings one) is dropped, a single-line field turns breaks
-' and tabs into spaces, Numeric keeps what a number can hold, and
-' MaxLength cuts what does not fit.
+' the insertion: CR and CRLF become line breaks, a single-line field
+' turns breaks and tabs into spaces, Numeric keeps what a number can
+' hold, and MaxLength cuts what does not fit.
 Private Function FieldAdmits( _
     ByVal givenText As String, _
     ByVal keptBefore As String, _
     ByVal keptAfter As String _
 ) As String
     Dim room As Long
-    givenText = Replace(givenText, vbCrLf, vbLf)
-    givenText = Replace(givenText, vbCr, vbLf)
-    If Len(givenText) > 1 And Right$(givenText, 1) = vbLf Then
-        givenText = Left$(givenText, Len(givenText) - 1)
-    End If
+    givenText = LfBreaks(givenText)
     If Not mMultiLine Then
         givenText = Replace(givenText, vbLf, " ")
         givenText = Replace(givenText, vbTab, " ")
@@ -18869,6 +18900,8 @@ Private Sub MoveCaretLine(ByVal lineDelta As Long)
     Dim walk As Long
 
     hardLines = Split(mText, vbLf)
+    ' One line, or none in an empty field, has no other to move to.
+    If UBound(hardLines) < 1 Then Exit Sub
     CaretLineCol lineIndex, lineStart, caretColumn
     targetLine = lineIndex + lineDelta
     If targetLine < 0 Then targetLine = 0
@@ -18884,22 +18917,19 @@ Private Sub MoveCaretLine(ByVal lineDelta As Long)
     mCaretPos = newPos + caretColumn
 End Sub
 
+' Home and End: the caret goes to the start of its line, just past the
+' break before it, or to its end, just short of the break after it.
 Private Sub MoveCaretLineEdge(ByVal toEnd As Boolean)
-    Dim hardLines() As String
-    Dim lineIndex As Long
-    Dim lineStart As Long
-    Dim caretColumn As Long
-    Dim newPos As Long
-    Dim walk As Long
+    Dim lineBreak As Long
 
-    hardLines = Split(mText, vbLf)
-    CaretLineCol lineIndex, lineStart, caretColumn
-    newPos = 0
-    For walk = 0 To lineIndex - 1
-        newPos = newPos + Len(hardLines(walk)) + 1
-    Next walk
-    If toEnd Then newPos = newPos + Len(hardLines(lineIndex))
-    mCaretPos = newPos
+    mCaretPos = InStrRev(Left$(mText, mCaretPos), vbLf)
+    If Not toEnd Then Exit Sub
+    lineBreak = InStr(mCaretPos + 1, mText, vbLf)
+    If lineBreak = 0 Then
+        mCaretPos = Len(mText)
+    Else
+        mCaretPos = lineBreak - 1
+    End If
 End Sub
 
 ' Outside-press blur for whichever control holds keyboard focus,

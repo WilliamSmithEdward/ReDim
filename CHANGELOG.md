@@ -369,6 +369,21 @@
   `MultiLine` or `AutoGrow` set after a field first drew anchors its
   text to the top. `ContrastReport` lists two more pairings the
   controls draw: a Warning button's ink and a validation message.
+- A key a text field refuses changes nothing. A letter typed over a
+  selection in a `Numeric` field, or anything past a full `MaxLength`,
+  deleted the selection, fired `OnInput`, and cleared the redo. Pasting
+  a copied empty cell pastes nothing, where it typed a space.
+- The clear button is an undo step, so Ctrl+Z brings the text back.
+  Esc restores the check's verdict with the text, so a failing text
+  put back shows its message again.
+- A ComboBox's item follows its text when code, state, or Esc sets it,
+  so its open list marks the right row and `CurrentValue` names it.
+- An error value in a cell-backed field's cell reads as the cell shows
+  it, `#N/A`, in `InputValue`, `WritesTo`, and the combo list's
+  filter, where it read "Error 2042". Line breaks written from code or
+  state become the field's own, so Up, Down, Home, and End count them;
+  End in an empty field, and Up or Down in an empty multi-line one,
+  raised error 9 unseen. `Masked` raises on a ComboBox, as documented.
 
 ## 1.0.2 - 2026-09-23
 
