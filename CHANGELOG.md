@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0.3 - 2026-09-25
+## 1.0.3 - 2026-09-26
 
 - `WritesTo` goes both ways: a control follows the key it writes.
   `SetState` on the key moves the control, firing no `OnChange`, so New
@@ -491,6 +491,7 @@
   release adds, a tab each for two-way state, lists, forms, the look,
   and async work and errors, beside a log that says what each action
   did.
+- Requires ROneCOne 1.9.1 or later, and is tested against 1.10.1.
 
 ## 1.0.2 - 2026-09-23
 
