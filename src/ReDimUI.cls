@@ -997,6 +997,7 @@ Private mGeometryResolving As Boolean
 ' fully restyled exactly once. Geometry is deliberately absent: it diffs
 ' against the live shape so manual drags are corrected.
 Private mAppliedValid As Boolean
+Private mAppliedThemeRevision As Long
 Private mAppliedText As String
 Private mAppliedFill As Long
 Private mAppliedTextColor As Long
@@ -1044,6 +1045,11 @@ Private mThemeBorder As Long
 Private mThemeCanvas As Long
 Private mThemeFontName As String
 Private mThemeFontSize As Double
+' The look's number, new with the theme and with each With builder, which
+' draw keys compare where they compared the theme's address; the factory
+' counts them out, so no two looks share one.
+Private mThemeRevision As Long
+Private mThemeRevisionsIssued As Long
 
 ' =====================================================================
 ' Factory surface
@@ -2554,6 +2560,10 @@ Public Function ContrastReport() As String
             mThemeOnPrimary, mThemeSuccess, 4.5) & vbLf & _
         ContrastLine("Danger button", "OnPrimary on Danger", _
             mThemeOnPrimary, mThemeDanger, 4.5) & vbLf & _
+        ContrastLine("Warning button", "OnPrimary on Warning", _
+            mThemeOnPrimary, WarningColor, 4.5) & vbLf & _
+        ContrastLine("Error text", "Danger on Canvas", _
+            mThemeDanger, mThemeCanvas, 4.5) & vbLf & _
         ContrastLine("Muted fill text", "OnSurface on Muted", _
             mThemeOnSurface, mThemeMuted, 4.5) & vbLf & _
         ContrastLine("Secondary text", "OnMuted on Surface", _
@@ -3125,8 +3135,9 @@ Public Function Toast( _
     Loop While TryGetComponent("toast_" & mToastCounter, toastValue)
     Set toastValue = GetOrCreateComponent("toast_" & mToastCounter, KIND_TOAST)
     toastValue.ConfigureToast messageText, ttlMs, NextToastSlot()
-    NotifyDirty toastValue.ComponentId
-    If mRendered Then FlushDirty
+    ' Inside BeginUpdate the toast draws with the batch at EndUpdate,
+    ' where flushing here drew the batch's changes half done.
+    NotifyComponentTouched toastValue.ComponentId
     ReDimUI.RequestPump
     Set Toast = toastValue
 End Function
@@ -4156,7 +4167,11 @@ Public Function SetTheme(ByVal themeValue As ReDimUI) As ReDimUI
         mSheet.Cells.Interior.Color = mTheme.CanvasColor
         On Error GoTo 0
     End If
-    Render
+    ' Before the first Render the theme is only recorded. Rendering then
+    ' swept the sheet's saved shapes before any control claimed them,
+    ' drew each later builder call as it ran, and seeded WritesTo keys
+    ' from values the build had yet to set.
+    If mRendered Then Render
     Set SetTheme = Me
 End Function
 
@@ -4211,22 +4226,12 @@ Friend Property Get ShowsFocusRings() As Boolean
     ShowsFocusRings = mFocusRings
 End Property
 
-' Takes the Windows look when it differs from the one the app last took.
-' Before the first Render the theme is only recorded, so following the
-' look during a build does not render early.
+' Takes the Windows look when it differs from the one the app last took;
+' SetTheme only records it before the first Render.
 Friend Sub MatchSystemLook(ByVal lookKey As String)
     If lookKey = mAppliedSystemLook Then Exit Sub
     mAppliedSystemLook = lookKey
-    If mRendered Then
-        SetTheme ReDimUI.ThemeSystem
-        Exit Sub
-    End If
-    Set mTheme = ReDimUI.ThemeSystem
-    If mCanvasPainted Then
-        On Error Resume Next
-        mSheet.Cells.Interior.Color = mTheme.CanvasColor
-        On Error GoTo 0
-    End If
+    SetTheme ReDimUI.ThemeSystem
 End Sub
 
 ' Registers this app as a window: its sheet participates in Navigate and
@@ -4464,8 +4469,10 @@ End Sub
 Friend Sub ReleaseAppResources()
     RequireRole ROLE_APP, "ReleaseAppResources"
     ClearHotKeys
-    ' A tooltip showing now would stay on the sheet, and be saved with it.
+    ' A tooltip showing now would stay on the sheet, and be saved with it,
+    ' as would the hover look of the control under the pointer.
     HideTooltip
+    ClearPointerTarget
 End Sub
 
 ' Removes every component shape and unregisters the app.
@@ -4479,7 +4486,7 @@ Public Sub Unmount(Optional ByVal deleteShapes As Boolean = True)
     For Each workValue In mJobs
         workValue.AbandonWork
     Next workValue
-    ClearHotKeys
+    ReleaseAppResources
     If ReDimUI.FocusedComponentId <> vbNullString Then
         If ReDimUI.IsComponentFocused(mAppId, ReDimUI.FocusedComponentId) Then
             ReDimUI.ClearKeyboardFocus
@@ -5368,6 +5375,9 @@ End Function
 Public Function MultiLine(Optional ByVal multiLineOn As Boolean = True) As ReDimUI
     RequireKind KIND_INPUT, "MultiLine"
     mMultiLine = multiLineOn
+    ' The face anchors its text to the top or the middle only when styled
+    ' in full, as a field drawn once before this call is not.
+    mAppliedValid = False
     Touch
     Set MultiLine = Me
 End Function
@@ -5384,6 +5394,7 @@ Public Function AutoGrow(Optional ByVal maxLines As Long = 6) As ReDimUI
     End If
     mAutoGrowLines = maxLines
     If maxLines > 0 Then mMultiLine = True
+    mAppliedValid = False
     Touch
     Set AutoGrow = Me
 End Function
@@ -8871,6 +8882,13 @@ Friend Sub Apply( _
         End If
     End If
     wasApplied = mAppliedValid
+    ' A theme swapped, or edited in place, restyles the control in full:
+    ' its diffs compare fills and words, and a look can change a border
+    ' or a font and keep those.
+    If mAppliedThemeRevision <> themeValue.ThemeRevision Then
+        mAppliedThemeRevision = themeValue.ThemeRevision
+        mAppliedValid = False
+    End If
     growBefore = mGrowAdded
     EnsureGeometryResolved hostSheet
     Set mainShape = EnsureShape(hostSheet)
@@ -10512,9 +10530,10 @@ Private Sub ApplyText(ByVal mainShape As Shape, ByVal themeValue As ReDimUI)
     textChanged = (Not mAppliedValid) Or (mAppliedText <> shownText)
     If textChanged Then
         ' Replaced text takes its first character's font, which an icon
-        ' holds in the icon font.
+        ' holds in the icon font, and a toned toast's icon in the tone's
+        ' color, which the toast's words then took.
         If LenB(mAppliedText) = 0 Or LenB(shownText) = 0 _
-            Or LenB(mIconGlyph) > 0 Then
+            Or LenB(mIconGlyph) > 0 Or mKind = KIND_TOAST Then
             mustRestyle = True
         End If
         mainShape.TextFrame2.TextRange.Text = shownText
@@ -12547,7 +12566,7 @@ End Function
 ' The state every composite part depends on: theme, geometry, visibility,
 ' enablement, and font. Kinds append their own state to it.
 Private Function PartsState(ByVal themeValue As ReDimUI) As String
-    PartsState = CStr(ObjPtr(themeValue)) & ":" & CStr(mLeft) & ":" & _
+    PartsState = CStr(themeValue.ThemeRevision) & ":" & CStr(mLeft) & ":" & _
         CStr(mTop) & ":" & CStr(mWidth) & ":" & CStr(mHeight) & ":" & _
         CStr(mVisible) & ":" & CStr(mEnabled) & ":" & CStr(mFontSize) & _
         ":" & CStr(mFontBold) & ":" & mAppliedOnAction
@@ -12605,6 +12624,9 @@ Friend Sub ForgetPartSignatures()
     mAppliedSparkSig = vbNullString
     mGlidePart = vbNullString
     mAppliedIndicatorTab = 0
+    ' An Image's picture is its main shape's fill, which a shape made
+    ' anew lacks.
+    mAppliedImageSource = vbNullString
 End Sub
 
 ' Box at the left edge, check glyph inside it when checked, caption filling
@@ -14293,7 +14315,7 @@ Private Sub SyncCalendarMark( _
         If markMade And behindWeeks Then RestackCalendarFill hostSheet
         Exit Sub
     End If
-    lookKey = CStr(ObjPtr(themeValue)) & ":" & CStr(fillRgb) & ":" & CStr(ringRgb) & ":" & _
+    lookKey = CStr(themeValue.ThemeRevision) & ":" & CStr(fillRgb) & ":" & CStr(ringRgb) & ":" & _
         CStr(ringDashed) & ":" & mAppliedOnAction
     placeKey = CStr(cellNo) & ":" & CStr(mLeft) & ":" & CStr(gridTop)
     If mAppliedRowStates(stateSlot) = lookKey & Chr$(3) & placeKey Then Exit Sub
@@ -14395,7 +14417,7 @@ Private Sub SyncCalendarWeek( _
         If (todayCell - 1) \ 7 + 1 = weekNo Then todayColumn = (todayCell - 1) Mod 7 + 1
     End If
     stateSlot = CAL_SLOT_WEEK1 + weekNo - 1
-    frameKey = CStr(ObjPtr(themeValue)) & ":" & CStr(mLeft) & ":" & CStr(gridTop) & ":" & _
+    frameKey = CStr(themeValue.ThemeRevision) & ":" & CStr(mLeft) & ":" & CStr(gridTop) & ":" & _
         CStr(textSize) & ":" & mAppliedOnAction
     lookKey = weekWords & Chr$(2) & mutedDays & Chr$(2) & CStr(heldColumn) & Chr$(2) & _
         CStr(todayColumn) & Chr$(2) & CStr(themeValue.OnSurfaceColor) & ":" & _
@@ -14579,7 +14601,7 @@ Private Sub SyncCalendarPart( _
     Dim priorLook() As String
     Dim partShape As Shape
 
-    frameKey = CStr(ObjPtr(themeValue)) & ":" & CStr(partLeft) & ":" & CStr(partTop) & _
+    frameKey = CStr(themeValue.ThemeRevision) & ":" & CStr(partLeft) & ":" & CStr(partTop) & _
         ":" & CStr(partWidth) & ":" & CStr(partHeight) & ":" & CStr(textSize) & ":" & _
         mAppliedOnAction
     lookKey = partWords & Chr$(2) & CStr(fillRgb) & Chr$(2) & CStr(inkRgb) & Chr$(2) & _
@@ -16074,7 +16096,7 @@ Private Sub SyncMoveButtonInks(ByVal hostSheet As Worksheet, ByVal themeValue As
     canMove(2) = PanelShownCount(0) > 0
     canMove(3) = ShowsSelection(1)
     canMove(4) = PanelShownCount(1) > 0
-    inkKey = CStr(ObjPtr(themeValue)) & ":" & CStr(mEnabled)
+    inkKey = CStr(themeValue.ThemeRevision) & ":" & CStr(mEnabled)
     For idx = 1 To 4
         inkKey = inkKey & IIf(canMove(idx), "1", "0")
     Next idx
@@ -17534,7 +17556,7 @@ Private Sub SyncDropList( _
     ' Keystrokes and repaints that leave the visible list identical (same
     ' window, rows, highlight, selection, direction, geometry, and theme)
     ' skip the shape work entirely.
-    listSig = CStr(ObjPtr(themeValue)) & ":" & CStr(wanted) & ":" & _
+    listSig = CStr(themeValue.ThemeRevision) & ":" & CStr(wanted) & ":" & _
         CStr(mValue) & ":" & CStr(mListOffset) & ":" & _
         CStr(mListHighlight) & ":" & CStr(aboveCount) & ":" & _
         CStr(belowCount) & ":" & CStr(listPages) & ":" & CStr(showEmpty) & ":" & _
@@ -19241,10 +19263,14 @@ Friend Sub DeleteOwnShapes(ByVal hostSheet As Worksheet)
     ForgetPartSignatures
 End Sub
 
+' Whether the control may have parts beside its main shape: every
+' composite kind, and a label, card, or spinner that drew a caption, a
+' hint or message, or a badge.
 Private Function HasParts() As Boolean
     Select Case mKind
         Case KIND_LABEL, KIND_CARD, KIND_SPINNER, KIND_OVERLAY
-            HasParts = False
+            HasParts = LenB(mAppliedCaptionSig) > 0 Or LenB(mAppliedHintSig) > 0 _
+                Or LenB(mAppliedMessageSig) > 0 Or LenB(mAppliedBadgeSig) > 0
         Case Else
             HasParts = True
     End Select
@@ -19809,6 +19835,23 @@ Friend Sub ConfigureTheme( _
     mThemeCanvas = canvasRgb
     mThemeFontName = fontFace
     mThemeFontSize = fontPoints
+    mThemeRevision = ReDimUI.NextThemeRevision
+End Sub
+
+Friend Function NextThemeRevision() As Long
+    mThemeRevisionsIssued = mThemeRevisionsIssued + 1
+    NextThemeRevision = mThemeRevisionsIssued
+End Function
+
+Friend Property Get ThemeRevision() As Long
+    ThemeRevision = mThemeRevision
+End Property
+
+' A With builder's check and mark: the theme role, and a new revision, so
+' controls drawn in the old look repaint.
+Private Sub EditTheme(ByVal memberName As String)
+    RequireRole ROLE_THEME, memberName
+    mThemeRevision = ReDimUI.NextThemeRevision
 End Sub
 
 Public Property Get PrimaryColor() As Long
@@ -19873,7 +19916,7 @@ Public Function WithPrimary( _
     ByVal primaryRgb As Long, _
     ByVal onPrimaryRgb As Long _
 ) As ReDimUI
-    RequireRole ROLE_THEME, "WithPrimary"
+    EditTheme "WithPrimary"
     mThemePrimary = primaryRgb
     mThemeOnPrimary = onPrimaryRgb
     Set WithPrimary = Me
@@ -19883,7 +19926,7 @@ Public Function WithFont( _
     ByVal fontFace As String, _
     ByVal fontPoints As Double _
 ) As ReDimUI
-    RequireRole ROLE_THEME, "WithFont"
+    EditTheme "WithFont"
     mThemeFontName = fontFace
     mThemeFontSize = fontPoints
     Set WithFont = Me
@@ -19893,34 +19936,34 @@ End Function
 ' it where the pair goes together, so a custom theme needs no Friend
 ' calls. ContrastReport checks the result.
 Public Function WithSurface(ByVal surfaceRgb As Long, ByVal onSurfaceRgb As Long) As ReDimUI
-    RequireRole ROLE_THEME, "WithSurface"
+    EditTheme "WithSurface"
     mThemeSurface = surfaceRgb
     mThemeOnSurface = onSurfaceRgb
     Set WithSurface = Me
 End Function
 
 Public Function WithMuted(ByVal mutedRgb As Long, ByVal onMutedRgb As Long) As ReDimUI
-    RequireRole ROLE_THEME, "WithMuted"
+    EditTheme "WithMuted"
     mThemeMuted = mutedRgb
     mThemeOnMuted = onMutedRgb
     Set WithMuted = Me
 End Function
 
 Public Function WithStatus(ByVal successRgb As Long, ByVal dangerRgb As Long) As ReDimUI
-    RequireRole ROLE_THEME, "WithStatus"
+    EditTheme "WithStatus"
     mThemeSuccess = successRgb
     mThemeDanger = dangerRgb
     Set WithStatus = Me
 End Function
 
 Public Function WithBorder(ByVal borderRgb As Long) As ReDimUI
-    RequireRole ROLE_THEME, "WithBorder"
+    EditTheme "WithBorder"
     mThemeBorder = borderRgb
     Set WithBorder = Me
 End Function
 
 Public Function WithCanvas(ByVal canvasRgb As Long) As ReDimUI
-    RequireRole ROLE_THEME, "WithCanvas"
+    EditTheme "WithCanvas"
     mThemeCanvas = canvasRgb
     Set WithCanvas = Me
 End Function

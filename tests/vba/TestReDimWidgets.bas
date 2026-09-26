@@ -6708,3 +6708,83 @@ Public Function TestItemEdits() As String
     ReDimUI.AutoPump True
     TestItemEdits = transcript
 End Function
+
+' Themes and redraws: SetTheme before the first Render only records the
+' theme; a theme that changes only a border, a font, or the primary, or
+' one edited in place, restyles what it touches; Remove takes a label's
+' caption and badge; a hand-deleted Image gets its picture back; a toast
+' waits for its batch; a toned toast keeps its words in ink; MultiLine
+' set after a draw anchors the text to the top.
+Public Function TestThemeRestyle() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim transcript As String
+    Dim imgPath As String
+    Dim toastValue As ReDimUI
+    Dim toastName As String
+
+    ReDimUI.AutoPump False
+    Set host = NewCanvas()
+    imgPath = Environ$("TEMP") & "\rdm_img_restyle.png"
+    ExportColorPng host, imgPath, RGB(31, 111, 76)
+    Set app = ReDimUI.Mount(host, "wid91")
+    app.SetTheme ReDimUI.ThemeLight
+    app.Toggle("dark").AtRect(24, 24, 44, 22).WritesTo("darkMode").Text("Dark").Checked True
+    transcript = "noEarlyDraw=" & CStr(Not ShapeExists(host, "rdm_wid91_dark"))
+    app.Card("card").AtRect(24, 60, 200, 60).Text "Card"
+    app.Spinner("spin").AtRect 240, 60, 26, 26
+    app.Label("lb").AtRect(24, 160, 120, 20).Text("Named").Caption("Name").BadgeText "3"
+    app.Image("pic").AtRect(300, 24, 80, 60).Source imgPath
+    app.TextInput("note").AtRect 24, 200, 200, 60
+    app.Label("msg").AtRect(240, 160, 120, 20).BindText "msg"
+    app.SetState "msg", "old"
+    app.Render
+    transcript = transcript & "|seededAfterBuild=" & CStr(app.State("darkMode")) & "/" & _
+        CStr(app.Toggle("dark").IsChecked)
+
+    app.SetTheme ReDimUI.ThemeLight.WithBorder(RGB(255, 0, 0))
+    transcript = transcript & "|borderOnly=" & CStr( _
+        host.Shapes("rdm_wid91_card").Line.ForeColor.RGB = RGB(255, 0, 0))
+    app.SetTheme ReDimUI.ThemeLight.WithFont("Georgia", 11)
+    transcript = transcript & "|fontOnly=" & _
+        host.Shapes("rdm_wid91_card").TextFrame2.TextRange.Font.Name
+    app.SetTheme ReDimUI.ThemeLight.WithPrimary(RGB(200, 0, 0), RGB(255, 255, 255))
+    transcript = transcript & "|spinnerPrimary=" & CStr( _
+        host.Shapes("rdm_wid91_spin").Fill.ForeColor.RGB = RGB(200, 0, 0))
+    app.Theme.WithSurface app.Theme.SurfaceColor, RGB(9, 9, 9)
+    app.SetTheme app.Theme
+    transcript = transcript & "|editedInPlace=" & CStr( _
+        InkOf(host, "rdm_wid91_lb__fc") = RGB(9, 9, 9))
+
+    app.Label("lb").Remove
+    transcript = transcript & "|removeTakesParts=" & CStr( _
+        Not ShapeExists(host, "rdm_wid91_lb__fc") And Not ShapeExists(host, "rdm_wid91_lb__bd"))
+    host.Shapes("rdm_wid91_pic").Delete
+    app.Render
+    transcript = transcript & "|pictureBack=" & CStr( _
+        host.Shapes("rdm_wid91_pic").Fill.Type = msoFillPicture)
+
+    app.BeginUpdate
+    app.SetState "msg", "new"
+    Set toastValue = app.Toast("Saved", 60000)
+    transcript = transcript & "|toastWaits=" & _
+        host.Shapes("rdm_wid91_msg").TextFrame2.TextRange.Text
+    app.EndUpdate
+    transcript = transcript & "|batchDraws=" & _
+        host.Shapes("rdm_wid91_msg").TextFrame2.TextRange.Text
+    toastName = "rdm_wid91_" & toastValue.ComponentId
+    toastValue.Primary
+    toastValue.Text "Done now"
+    transcript = transcript & "|tonedWordsInk=" & CStr( _
+        host.Shapes(toastName).TextFrame2.TextRange.Characters(4, 1).Font.Fill.ForeColor.RGB _
+            = app.Theme.OnSurfaceColor)
+
+    app.TextInput("note").MultiLine
+    transcript = transcript & "|multiLineTop=" & CStr( _
+        host.Shapes("rdm_wid91_note").TextFrame2.VerticalAnchor = msoAnchorTop)
+    On Error Resume Next
+    Kill imgPath
+    On Error GoTo 0
+    ReDimUI.AutoPump True
+    TestThemeRestyle = transcript
+End Function

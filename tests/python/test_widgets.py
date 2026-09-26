@@ -746,7 +746,7 @@ def test_accessibility(run_widgets):
     assert facts["highContrastFails"] == "0", (
         "every pairing in the high-contrast theme must pass WCAG AA"
     )
-    assert facts["reportLines"] == "9"
+    assert facts["reportLines"] == "11"
     assert facts["knobOnAccent"] == "True"
 
 
@@ -1786,3 +1786,21 @@ def test_item_edits(run_widgets):
     assert facts["hiddenSelectionMutes"] == "True", (
         "> reads muted while every selected row is filtered out"
     )
+
+
+def test_theme_restyle(run_widgets):
+    facts = parse_transcript(run_widgets("TestThemeRestyle"))
+    assert facts["noEarlyDraw"] == "True", "SetTheme before the first Render must not draw"
+    assert facts["seededAfterBuild"] == "True/True", (
+        "a WritesTo key seeds from the finished build, not from the first builder call"
+    )
+    assert facts["borderOnly"] == "True", "a theme that changes only the border repaints it"
+    assert facts["fontOnly"] == "Georgia", "a theme that changes only the font restyles text"
+    assert facts["spinnerPrimary"] == "True"
+    assert facts["editedInPlace"] == "True", "a theme edited in place repaints the parts"
+    assert facts["removeTakesParts"] == "True", "Remove takes a label's caption and badge"
+    assert facts["pictureBack"] == "True", "a hand-deleted Image gets its picture back"
+    assert facts["toastWaits"] == "old", "a toast inside BeginUpdate waits for EndUpdate"
+    assert facts["batchDraws"] == "new"
+    assert facts["tonedWordsInk"] == "True", "a toned toast's new words keep the ink color"
+    assert facts["multiLineTop"] == "True", "MultiLine after a draw anchors the text to the top"

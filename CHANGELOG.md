@@ -346,6 +346,29 @@
   keeps its work. A busy SlideBar takes no press.
 - Select-all on a filtered check list with no rows showing fires
   nothing, where it fired `OnChange` for no change.
+- `SetTheme` before the first `Render` only records the theme. It
+  rendered the empty app, which swept the sheet's saved shapes before
+  any control claimed them, drew every later builder call as it ran,
+  and seeded each `WritesTo` key before the build set its value, so
+  `.WritesTo("dark").Checked(True)` came up off. The Pokedex demo
+  builds in that order.
+- A theme change restyles everything it touches. Controls compared only
+  their fill, so a theme that changed the border or the font alone kept
+  the old ones, and a theme changed in place with its `With` builders
+  kept every caption, hint, badge, and list row in the old colors.
+  Each theme and each `With` builder now takes a new revision that the
+  draw keys compare.
+- `Remove` on a Label, Card, or Spinner takes its caption, hint, and
+  badge, which stayed on the sheet. An Image whose shape was deleted by
+  hand gets its picture back at the next draw; it came back blank.
+  `Unmount False` puts away a showing tooltip and the hover look, as
+  shutting down does, so neither is saved with the workbook.
+- A `Toast` inside `BeginUpdate` draws with the batch at `EndUpdate`,
+  where it drew the batch's changes half done. New words on a toast
+  with a tone keep the ink color; they took the icon's tone color.
+  `MultiLine` or `AutoGrow` set after a field first drew anchors its
+  text to the top. `ContrastReport` lists two more pairings the
+  controls draw: a Warning button's ink and a validation message.
 
 ## 1.0.2 - 2026-09-23
 
