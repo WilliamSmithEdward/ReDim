@@ -107,8 +107,10 @@ All fluent, all return the component:
 - Geometry: `At("B2:D3")` anchors to a range and follows column widths on re-render;
   `AtRect(left, top, width, height)` uses points; `Below(otherId, gap)` and
   `RightOf(otherId, gap)` place relative to another component with `Sized(w, h)` for
-  dimensions. The last of these called wins. Circular relative chains raise a clear
-  error. `InStack(stackId)` hands the
+  dimensions. The last of these called wins. A control placed against another follows it
+  whenever that one moves or resizes, by a builder, its stack, or text it grows to, and
+  `RightOf` starts past a badge's pill and a switch's caption. Circular relative chains
+  raise a clear error. `InStack(stackId)` hands the
   position to a `Stack` (see [Layout](#layout)).
 - Content: `Text`, `FontSize`, `Bold`, `BusyText` (what a busy button shows, the
   `Working` [UI text](#ui-text) unless given; `BusyText ""` keeps the button's text).
@@ -689,7 +691,8 @@ no message shows, so a message that comes and goes moves nothing.
   `BindVisible`, a hidden tab, or a closed `Expander` hid it. When a member grows,
   shrinks, gains a caption, or hides, the members after it move once the change has
   drawn. Only members whose place changed are redrawn.
-- `Stretch` gives the controls the stack's width, less padding.
+- `Stretch` gives the controls the stack's width, less padding; a stack inside and a
+  `Toggle` keep their own. `Stretch False` gives each member its own width back.
 - `Across` runs the members left to right, their tops level below the tallest caption
   among them.
 - The stack's height follows its content, and so does its width when it runs across or

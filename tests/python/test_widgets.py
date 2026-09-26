@@ -1836,3 +1836,15 @@ def test_ranges_and_values(run_widgets):
     assert facts["progressAlt"] == "Progress, 100 percent"
     assert facts["pulsed"] == "True"
     assert facts["skeletonSettles"] == "True", "a Skeleton settles flat when motion stops"
+
+
+def test_layout_follows(run_widgets):
+    facts = parse_transcript(run_widgets("TestLayoutFollows"))
+    assert facts["belowFollows"] == "True", (
+        "a control placed Below another moves when that one resizes after Render"
+    )
+    assert facts["rightOfPastPill"] == "True", "RightOf starts past a badge's pill"
+    assert facts["stretchEnds"] == "True", "Stretch False gives members their width back"
+    assert facts["atRangeKeepsHeight"] == "True", "a stack placed At a range keeps its height"
+    assert facts["gapCloses"] == "True", "a stack closes the gap InStack \"\" leaves"
+    assert facts["switchKeepsWidth"] == "True", "a switch in a stretching stack keeps its width"

@@ -405,6 +405,19 @@
   paging arrow, repeats as documented; it repeated only while something
   else kept the pump running. A hold stops repeating on a control that
   turns disabled or busy under it.
+- A control placed `Below` or `RightOf` another follows it whenever
+  that one moves or resizes: `AtRect` or `Sized` after `Render`, its
+  stack moving it, or an Expander opening. Only a field's growth moved
+  it before. `RightOf` starts past a badge's pill and a switch's
+  caption, where it drew over them.
+- `Stretch False` gives each member its own width back at once, where
+  members whose place held stayed wide until `Render`. A stack placed
+  `At` a range keeps its laid-out height at every draw; it shrank to the
+  range. `InStack ""` closes the gap the member leaves, and a nested
+  stack's resize reflows the stack around it at once. A `Toggle` in a
+  stretching stack keeps its own width, where the switch ran the full
+  width with its caption hanging past the stack. A circle through
+  `InStack` names `InStack` in its error.
 
 ## 1.0.2 - 2026-09-23
 

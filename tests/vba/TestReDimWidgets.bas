@@ -6940,3 +6940,54 @@ Public Function TestRangesAndValues() As String
     ReDimUI.AutoPump True
     TestRangesAndValues = transcript
 End Function
+
+' Layout that follows: a control placed Below another moves when that
+' one resizes after Render; RightOf starts past a badge's pill; a stretch
+' that ends gives members their width back at once; a stack placed At a
+' range keeps its laid-out height; a stack closes the gap a member leaves;
+' and a switch in a stretching stack keeps its own width.
+Public Function TestLayoutFollows() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim transcript As String
+    Dim g2TopBefore As Double
+
+    ReDimUI.AutoPump False
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "wid94")
+    app.Button("anchor").AtRect(24, 24, 100, 30).Text "Anchor"
+    app.Button("dep").Below("anchor", 10).Sized(100, 30).Text "Dep"
+    app.Badge("bd").AtRect(24, 120, 0, 18).Text "Overdue now"
+    app.Label("next").RightOf("bd", 4).Sized(60, 18).Text "Next"
+    app.Stack("col").AtRect(24, 180, 200, 0).Stretch
+    app.Label("wide").Sized(60, 18).Text("Wide").InStack "col"
+    app.Stack("rng").At("J2:M2").Gap 6
+    app.Label("r1").Sized(60, 18).Text("One").InStack "rng"
+    app.Label("r2").Sized(60, 18).Text("Two").InStack "rng"
+    app.Stack("gap").AtRect(300, 180, 150, 0).Gap 6
+    app.Label("g1").Sized(60, 18).Text("G1").InStack "gap"
+    app.Label("g2").Sized(60, 18).Text("G2").InStack "gap"
+    app.Stack("sw").AtRect(300, 300, 220, 0).Stretch
+    app.Toggle("tg").Sized(44, 22).Text("Wifi").InStack "sw"
+    app.Render
+
+    app.Button("anchor").AtRect 24, 24, 100, 60
+    transcript = "belowFollows=" & CStr(Abs(host.Shapes("rdm_wid94_dep").Top - 94) < 0.5)
+    transcript = transcript & "|rightOfPastPill=" & CStr( _
+        host.Shapes("rdm_wid94_next").Left >= host.Shapes("rdm_wid94_bd").Left + _
+            host.Shapes("rdm_wid94_bd").Width + 3.5)
+    app.Stack("col").Stretch False
+    transcript = transcript & "|stretchEnds=" & CStr( _
+        Abs(host.Shapes("rdm_wid94_wide").Width - 60) < 0.5)
+    app.Render
+    transcript = transcript & "|atRangeKeepsHeight=" & CStr( _
+        host.Shapes("rdm_wid94_rng").Height > 36)
+    g2TopBefore = host.Shapes("rdm_wid94_g2").Top
+    app.Label("g1").InStack ""
+    transcript = transcript & "|gapCloses=" & CStr( _
+        host.Shapes("rdm_wid94_g2").Top < g2TopBefore - 1)
+    transcript = transcript & "|switchKeepsWidth=" & CStr( _
+        Abs(host.Shapes("rdm_wid94_tg").Width - 44) < 0.5)
+    ReDimUI.AutoPump True
+    TestLayoutFollows = transcript
+End Function

@@ -884,6 +884,7 @@ Private mStackLaidGen As Long
 Private mStackLaidLeft As Double
 Private mStackLaidTop As Double
 Private mStackLaidWidth As Double
+Private mStackLaidHeight As Double
 Private mStackSlotIds() As String
 Private mStackSlotLefts() As Double
 Private mStackSlotTops() As Double
@@ -1002,6 +1003,9 @@ Private mGeometryResolving As Boolean
 ' against the live shape so manual drags are corrected.
 Private mAppliedValid As Boolean
 Private mAppliedThemeRevision As Long
+' The bounds the control last drew at, which Below and RightOf placements
+' read; empty until its first draw.
+Private mAppliedBoundsKey As String
 Private mAppliedText As String
 Private mAppliedFill As Long
 Private mAppliedTextColor As Long
@@ -3669,10 +3673,13 @@ Friend Sub ReflowStackNow(ByVal stackId As String)
         stackValue.LeaveStack vbNullString
         stackValue.ReflowMembers mSheet, mTheme, Me
     End If
+    ' A stack inside another queued the outer one's reflow as it resized,
+    ' which waited for an unrelated flush.
+    ProcessPendingReflows
 End Sub
 
-' Components placed Below or RightOf one that changed size follow it, and
-' the ones placed against those follow in turn.
+' Components placed Below or RightOf one that moved or changed size follow
+' it; each one's draw moves the ones placed against it in turn.
 Friend Sub ReapplyDependents(ByVal anchorId As String)
     Dim componentValue As ReDimUI
 
@@ -3680,7 +3687,6 @@ Friend Sub ReapplyDependents(ByVal anchorId As String)
     For Each componentValue In mComponents
         If StrComp(componentValue.PlacedRelativeTo, anchorId, vbTextCompare) = 0 Then
             componentValue.Apply mSheet, mTheme, Me
-            ReapplyDependents componentValue.ComponentId
         End If
     Next componentValue
 End Sub
@@ -6260,6 +6266,9 @@ Public Function InStack(ByVal stackId As String) As ReDimUI
     If LenB(mStackId) > 0 Then
         If hostApp.TryGetComponent(mStackId, stackValue) Then
             stackValue.LeaveStack mComponentId
+            ' The stack it leaves closes the gap, where it kept the gap
+            ' and its old height until something else redrew it.
+            hostApp.NotifyComponentTouched mStackId
         End If
     End If
     RestoreOwnWidth
@@ -7839,8 +7848,10 @@ Friend Property Get BoundsTop() As Double
     BoundsTop = mTop
 End Property
 
+' A control placed RightOf this one starts past a badge's pill and a
+' switch's caption, where it drew over them.
 Friend Property Get BoundsRight() As Double
-    BoundsRight = mLeft + mWidth
+    BoundsRight = mLeft + DrawnSpan()
 End Property
 
 Friend Sub MarkCloseModalOnClick()
@@ -8882,8 +8893,7 @@ Friend Sub Apply( _
     ByVal hostApp As ReDimUI _
 )
     Dim mainShape As Shape
-    Dim wasApplied As Boolean
-    Dim growBefore As Double
+    Dim boundsKey As String
 
     RequireRole ROLE_COMPONENT, "Apply"
     ResolveBindings hostApp
@@ -8913,7 +8923,6 @@ Friend Sub Apply( _
             mIconGlyph = ReDimUI.IconGlyph("ChevronRight")
         End If
     End If
-    wasApplied = mAppliedValid
     ' A theme swapped, or edited in place, restyles the control in full:
     ' its diffs compare fills and words, and a look can change a border
     ' or a font and keep those.
@@ -8921,7 +8930,6 @@ Friend Sub Apply( _
         mAppliedThemeRevision = themeValue.ThemeRevision
         mAppliedValid = False
     End If
-    growBefore = mGrowAdded
     EnsureGeometryResolved hostSheet
     Set mainShape = EnsureShape(hostSheet)
     ApplyGeometry mainShape
@@ -8949,11 +8957,17 @@ Friend Sub Apply( _
     End If
     ApplyAltText mainShape
     mAppliedValid = True
-    ' A field that grew or shrank since it was drawn moves what is placed
-    ' against it; a first draw leaves that to the render in progress.
-    If wasApplied And Abs(mGrowAdded - growBefore) > 0.01 Then
+    ' A control that moved or resized since it was drawn, by a builder, by
+    ' its stack, or by text it grew to, moves what is placed against it;
+    ' a first draw leaves that to the render in progress. Only a field's
+    ' growth moved them.
+    boundsKey = CStr(BoundsLeft) & ":" & CStr(BoundsTop) & ":" & CStr(BoundsRight) & _
+        ":" & CStr(BoundsHeight)
+    If LenB(mAppliedBoundsKey) > 0 And boundsKey <> mAppliedBoundsKey Then
+        mAppliedBoundsKey = boundsKey
         hostApp.ReapplyDependents mComponentId
     End If
+    mAppliedBoundsKey = boundsKey
     If mKind = KIND_TABS Or mKind = KIND_EXPANDER Then SyncTabPanels hostApp
     If mKind = KIND_STACK Then MoveStackMembers hostSheet, themeValue, hostApp
     If LenB(mStackId) > 0 Then NoteFlow hostApp, themeValue
@@ -9432,7 +9446,6 @@ Private Function PlaceInStack(ByVal hostSheet As Worksheet) As Boolean
     Dim slotTop As Double
     Dim slotSpan As Double
 
-    If LenB(mStackId) = 0 Then Exit Function
     If Not OwnerApp.TryGetComponent(mStackId, stackValue) Then Exit Function
     stackValue.EnsureGeometryResolved hostSheet
     If stackValue.StackSlot(mComponentId, slotLeft, slotTop, slotSpan) Then
@@ -9507,9 +9520,17 @@ BadAnchor:
         "'" & mAnchor & "' is not a valid range on sheet '" & hostSheet.Name & "'."
 End Sub
 
-' The builder that set this control's relative placement.
+' The builder that set this control's placement against another: a
+' circle that runs through a stack names InStack, where it said Below.
 Private Function RelModeName() As String
-    If mRelMode = REL_RIGHT_OF Then RelModeName = "RightOf" Else RelModeName = "Below"
+    Select Case mRelMode
+        Case REL_RIGHT_OF
+            RelModeName = "RightOf"
+        Case REL_BELOW
+            RelModeName = "Below"
+        Case Else
+            RelModeName = "InStack"
+    End Select
 End Function
 
 ' Relative chains resolve the anchor's geometry first. The flag turns a
@@ -13729,14 +13750,10 @@ Friend Sub MeasureFlow( _
     If Not flowShown Then Exit Sub
     If mKind = KIND_STACK Then
         LayOutStack themeValue, 0, 0, False, flowWidth, flowHeight
-    ElseIf mKind = KIND_BADGE Then
-        flowWidth = BadgeSpan()
-        flowHeight = mHeight
     Else
-        flowWidth = mWidth
-        ' A Toggle's caption sits past its width; the room is known once
-        ' drawn, and the change queues the stack's reflow (NoteFlow).
-        If mKind = KIND_TOGGLE Then flowWidth = flowWidth + mToggleCaptionRoom
+        ' A Toggle's caption room is known once drawn, and the change
+        ' queues the stack's reflow (NoteFlow).
+        flowWidth = DrawnSpan()
         flowHeight = mHeight
     End If
     rowAbove = CaptionRoom(themeValue)
@@ -13841,9 +13858,12 @@ Private Sub LayOutStack( _
                     If flowHeight + rowBelow > rowReach Then rowReach = flowHeight + rowBelow
                 Else
                     ' Stretch widens controls; a stack inside keeps its own
-                    ' width, which its content sets across.
+                    ' width, which its content sets across, and a switch
+                    ' its own, where it ran the full width with its caption
+                    ' hanging past the stack.
                     If mStackStretch And innerWidth > 0 And Not mStackAutoWidth _
-                        And memberValue.ComponentKind <> KIND_STACK Then
+                        And memberValue.ComponentKind <> KIND_STACK _
+                        And memberValue.ComponentKind <> KIND_TOGGLE Then
                         flowWidth = innerWidth
                         If fillSlots Then mStackSlotSpans(shownCount) = innerWidth
                     End If
@@ -13879,10 +13899,16 @@ Private Sub ArrangeStack()
     Dim contentHeight As Double
 
     If mStackLaidGen = mStackGen And mStackLaidLeft = mLeft And mStackLaidTop = mTop _
-        And mStackLaidWidth = mWidth Then Exit Sub
+        And mStackLaidWidth = mWidth Then
+        ' A stack placed At a range read the range's height again; the
+        ' layout's stands, where the panel shrank to the range.
+        mHeight = mStackLaidHeight
+        Exit Sub
+    End If
     LayOutStack OwnerApp.Theme, mLeft, mTop, True, contentWidth, contentHeight
     If contentHeight < 1 Then contentHeight = 1
     mHeight = contentHeight
+    mStackLaidHeight = contentHeight
     If mStackAcross Or mStackAutoWidth Then
         If contentWidth < 1 Then contentWidth = 1
         mWidth = contentWidth
@@ -13921,7 +13947,13 @@ Friend Function SlotMoved( _
     ByVal slotSpan As Double _
 ) As Boolean
     SlotMoved = Abs(mLeft - slotLeft) > 0.01 Or Abs(mTop - slotTop) > 0.01
-    If slotSpan > 0 Then SlotMoved = SlotMoved Or Abs(mWidth - slotSpan) > 0.01
+    If slotSpan > 0 Then
+        SlotMoved = SlotMoved Or Abs(mWidth - slotSpan) > 0.01
+    Else
+        ' A member left stretched by a stretch that ended takes its own
+        ' width back, where one whose place held stayed wide.
+        SlotMoved = SlotMoved Or mStretched
+    End If
 End Function
 
 ' After a stack draws: members whose slot changed apply at it, and when
@@ -14774,7 +14806,6 @@ End Function
 Private Sub RefreshTabShut(ByVal hostApp As ReDimUI)
     Dim shutNow As Boolean
 
-    If LenB(mTabOwnerId) = 0 And LenB(mStackId) = 0 And Not mTabShut Then Exit Sub
     If LenB(mTabOwnerId) > 0 Then
         shutNow = TabShutUnder(hostApp.ShownTabOf(mTabOwnerId))
     End If
@@ -16638,16 +16669,22 @@ End Function
 
 ' True when this visible control's rectangle holds the point.
 Friend Function CoversPoint(ByVal pointsX As Double, ByVal pointsY As Double) As Boolean
-    Dim drawnWidth As Double
-
     If Not mVisible Or mKind = KIND_STACK Then Exit Function
-    ' A badge draws as wide as its words, and a switch's caption, which
-    ' flips it, sits past its width.
-    drawnWidth = mWidth
-    If mKind = KIND_BADGE Then drawnWidth = BadgeSpan()
-    If mKind = KIND_TOGGLE Then drawnWidth = mWidth + mToggleCaptionRoom
-    CoversPoint = (pointsX >= mLeft And pointsX <= mLeft + drawnWidth _
+    CoversPoint = (pointsX >= mLeft And pointsX <= mLeft + DrawnSpan() _
         And pointsY >= mTop And pointsY <= mTop + mHeight)
+End Function
+
+' The width the control draws across: a badge as wide as its words, and
+' a switch with its caption, which flips it, past its width.
+Private Function DrawnSpan() As Double
+    Select Case mKind
+        Case KIND_BADGE
+            DrawnSpan = BadgeSpan()
+        Case KIND_TOGGLE
+            DrawnSpan = mWidth + mToggleCaptionRoom
+        Case Else
+            DrawnSpan = mWidth
+    End Select
 End Function
 
 ' The part of this control under a sheet point, as the pointer watches
@@ -17483,7 +17520,7 @@ Friend Function ScreenToSheetPoints(ByVal screenPx As Long, ByVal alongY As Bool
     measuredSlope = (referencePx - originPx) / 1000#
     dpiSlope = ScreenPixelsPerPoint(alongY)
     On Error GoTo 0
-    If measuredSlope <= 0 Or dpiSlope <= 0 Then Exit Function
+    If measuredSlope <= 0 Then Exit Function
     If Abs(measuredSlope - dpiSlope) < 0.02 Then
         pixelsPerPoint = measuredSlope
     ElseIf Abs(measuredSlope - 1#) < 0.02 Then
