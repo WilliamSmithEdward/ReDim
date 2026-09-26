@@ -1420,12 +1420,15 @@ End Sub
 ' front, released while another sheet is.
 Private Sub SyncKeyCapture()
     Dim appValue As ReDimUI
+    Dim componentValue As ReDimUI
 
     If LenB(mFocusComponentId) = 0 Then Exit Sub
     Set appValue = FindKeyed(mApps, mFocusAppId)
     If appValue Is Nothing Then Exit Sub
     If SheetInFront(appValue) Then
         RdxBindKeys
+        Set componentValue = appValue.PeekComponent(mFocusComponentId)
+        If Not componentValue Is Nothing Then componentValue.RebaseFocusSelection appValue.Sheet
     Else
         ReleaseTypingKeys
     End If
@@ -1455,21 +1458,21 @@ Friend Property Get CaretBlinkMs() As Long
     CaretBlinkMs = mCaretBlinkMs
 End Property
 
-' Runs a handler with ReDimUI.Sender set to the component, the way a
-' click does, for handlers fired from keys or the pump; a failure goes
-' to the app's error handler.
-Friend Sub RunHandlerAs( _
+' Runs a handler with ReDimUI.Sender set to the component, as a click,
+' a key, or the pump fires it; a failure goes to the app's error handler
+' and returns False.
+Friend Function RunHandlerAs( _
     ByVal hostApp As ReDimUI, _
     ByVal componentValue As ReDimUI, _
     ByVal handlerProc As String _
-)
+) As Boolean
     Dim priorApp As ReDimUI
     Dim priorComponent As ReDimUI
     Dim failure As String
 
     If Not IsFactory(Me) Then
-        ReDimUI.RunHandlerAs hostApp, componentValue, handlerProc
-        Exit Sub
+        RunHandlerAs = ReDimUI.RunHandlerAs(hostApp, componentValue, handlerProc)
+        Exit Function
     End If
     Set priorApp = mSenderApp
     Set priorComponent = mSenderComponent
@@ -1480,14 +1483,15 @@ Friend Sub RunHandlerAs( _
     On Error GoTo 0
     Set mSenderApp = priorApp
     Set mSenderComponent = priorComponent
-    Exit Sub
+    RunHandlerAs = True
+    Exit Function
 HandlerFailed:
     failure = HandlerFailureText(componentValue, handlerProc, Err.Number, Err.Description)
     On Error GoTo 0
     Set mSenderApp = priorApp
     Set mSenderComponent = priorComponent
     hostApp.ReportAppError failure
-End Sub
+End Function
 
 ' Runs a job's step with the job as ReDimUI.Sender, so a step shared by
 ' several jobs reads its TagValue, and returns what the step returned.
@@ -3480,9 +3484,13 @@ Public Sub OpenCommandPalette()
     cardLeft = viewLeft + (viewWidth - cardWidth) / 2
     cardTop = viewTop + 24
     Set entryTexts = BuildPaletteEntries()
-    mFocusBeforePalette = vbNullString
-    If ReDimUI.IsComponentFocused(mAppId, ReDimUI.FocusedComponentId) Then
-        mFocusBeforePalette = ReDimUI.FocusedComponentId
+    ' Opened again while open, it keeps the control it gives focus back
+    ' to, where it took its own field for that control.
+    If Not PaletteOpen Then
+        mFocusBeforePalette = vbNullString
+        If ReDimUI.IsComponentFocused(mAppId, ReDimUI.FocusedComponentId) Then
+            mFocusBeforePalette = ReDimUI.FocusedComponentId
+        End If
     End If
     BeginUpdate
     mDrawingChrome = True
@@ -5519,13 +5527,15 @@ End Function
 
 ' Alt plus this letter or digit clicks the control while its sheet is
 ' active, and the first matching character of its text is underlined.
-' For buttons and tick boxes; an ampersand in their text stays literal.
+' It goes on a control a click acts on, as Shortcut does; an ampersand
+' in the text stays literal.
 Public Function AccessKey(ByVal keyLetter As String) As ReDimUI
     RequireRole ROLE_COMPONENT, "AccessKey"
     If Len(keyLetter) > 1 Or Not LCase$(keyLetter & "a") Like "[a-z0-9]*" Then
         RaiseError ERROR_INVALID_ARGUMENT, "AccessKey", _
             "AccessKey takes one letter or digit."
     End If
+    If LenB(keyLetter) > 0 Then RequireWholeClick "AccessKey"
     mAccessKey = LCase$(keyLetter)
     Touch
     ReDimUI.RefreshAccessKeys
@@ -5536,6 +5546,20 @@ Friend Property Get AccessKeyLetter() As String
     AccessKeyLetter = mAccessKey
 End Property
 
+' A key that clicks the control stands in for one click on the whole of
+' it; a radio group, a list, a table, or a slider has no such click, and
+' its first row or part would take the key.
+Private Sub RequireWholeClick(ByVal memberName As String)
+    Select Case mKind
+        Case KIND_BUTTON, KIND_TOGGLE, KIND_TICKBOX, KIND_EXPANDER, KIND_SELECT, _
+            KIND_COMBO, KIND_DATE, KIND_INPUT, KIND_IMAGE, KIND_LABEL, KIND_CARD
+        Case Else
+            RaiseError ERROR_INVALID_OPERATION, memberName, memberName & " applies to a " & _
+                "control a click acts on: a Button, Toggle, TickBox, Expander, SelectBox, " & _
+                "MenuButton, ComboBox, DatePicker, TextInput, Image, Label, or Card."
+    End Select
+End Sub
+
 ' A keyboard shortcut that clicks the control while its sheet is in
 ' front, as an Application.OnKey code: "^s" for Ctrl+S, "^+e" for
 ' Ctrl+Shift+E, "{F5}" for F5. It needs Ctrl or Alt, or is a function key,
@@ -5545,14 +5569,7 @@ End Property
 Public Function Shortcut(ByVal keyCode As String) As ReDimUI
     RequireRole ROLE_COMPONENT, "Shortcut"
     If LenB(keyCode) > 0 Then
-        Select Case mKind
-            Case KIND_BUTTON, KIND_TOGGLE, KIND_TICKBOX, KIND_EXPANDER, KIND_SELECT, _
-                KIND_COMBO, KIND_DATE, KIND_INPUT, KIND_IMAGE, KIND_LABEL, KIND_CARD
-            Case Else
-                RaiseError ERROR_INVALID_OPERATION, "Shortcut", "Shortcut applies to a " & _
-                    "control a click acts on: a Button, Toggle, TickBox, Expander, SelectBox, " & _
-                    "MenuButton, ComboBox, DatePicker, TextInput, Image, Label, or Card."
-        End Select
+        RequireWholeClick "Shortcut"
         If Not ShortcutCodeValid(keyCode) Then
             RaiseError ERROR_INVALID_ARGUMENT, "Shortcut", "Shortcut takes an " & _
                 "Application.OnKey code with Ctrl or Alt, such as ""^s"", or a function " & _
@@ -6329,6 +6346,7 @@ Public Function AddCommand( _
 ) As ReDimUI
     Dim commandKey As String
     Dim existing As Variant
+    Dim glyphText As String
 
     If mRole <> ROLE_APP Then
         RequireRole ROLE_COMPONENT, "AddCommand"
@@ -6337,6 +6355,9 @@ Public Function AddCommand( _
                 "AddCommand applies to a MenuButton or an app."
         End If
     End If
+    ' An unknown icon raises before anything is recorded, so the same
+    ' call with the name fixed runs clean.
+    If LenB(iconName) > 0 Then glyphText = ReDimUI.IconGlyph(iconName)
     commandKey = LCase$(commandWords)
     If mCommandProcs Is Nothing Then
         Set mCommandProcs = New Collection
@@ -6348,14 +6369,13 @@ Public Function AddCommand( _
         mCommandIcons.Remove commandKey
     Else
         mCommandOrder.Add commandWords
-        If mRole <> ROLE_APP Then AddItem commandWords
+    End If
+    ' A menu's row comes back with its command after RemoveItem took it.
+    If mRole <> ROLE_APP Then
+        If ExactItemMatch(commandWords) = 0 Then AddItem commandWords
     End If
     mCommandProcs.Add handlerProc, commandKey
-    If LenB(iconName) > 0 Then
-        mCommandIcons.Add ReDimUI.IconGlyph(iconName), commandKey
-    Else
-        mCommandIcons.Add vbNullString, commandKey
-    End If
+    mCommandIcons.Add glyphText, commandKey
     Set AddCommand = Me
 End Function
 
@@ -6653,12 +6673,15 @@ Public Function ItemsFrom( _
     Optional ByVal valueSource As Variant _
 ) As ReDimUI
     Dim keptChecks As Collection
+    Dim keptPick As String
 
     RequireRole ROLE_COMPONENT, "ItemsFrom"
     ' A check list keeps its checks on the items the new list still has,
     ' by text, so a rebuild with the same items keeps what the user
-    ' checked.
+    ' checked; a pick stays on its item the same way, where it stayed on
+    ' the position whatever item came to fill it.
     If Not mCheckedSet Is Nothing Then Set keptChecks = CheckedTexts()
+    If HoldsItemPick() Then keptPick = ItemAt(CLng(mValue))
     Set mItems = ReadItemSource(itemSource, "ItemsFrom")
     ResetItemValues
     ForgetItemMarks
@@ -6666,10 +6689,23 @@ Public Function ItemsFrom( _
         PairItemValues itemSource, valueSource, "ItemsFrom"
     End If
     ItemsChanged
+    If LenB(keptPick) > 0 Then mValue = ExactItemMatch(keptPick)
     ClampItemSelection
     If Not keptChecks Is Nothing Then CheckItemTexts keptChecks
+    ' The available side's selection and an open list's highlight named
+    ' rows of the old list.
+    If Not mPanelSel(0) Is Nothing Then Set mPanelSel(0) = New Collection
+    mListHighlight = 0
     Touch
     Set ItemsFrom = Me
+End Function
+
+' True for a kind whose value is the number of the item picked.
+Private Function HoldsItemPick() As Boolean
+    Select Case mKind
+        Case KIND_SELECT, KIND_COMBO, KIND_RADIO, KIND_TABS
+            HoldsItemPick = Not mIsMenu
+    End Select
 End Function
 
 ' Fills the transfer list's chosen (right-hand) side from a 1D array, a
@@ -6681,6 +6717,7 @@ Public Function ChosenFrom( _
 ) As ReDimUI
     RequireRole ROLE_COMPONENT, "ChosenFrom"
     Set mChosenItems = ReadItemSource(itemSource, "ChosenFrom")
+    ItemsChanged
     If Not IsMissing(valueSource) Then
         PairItemValues itemSource, valueSource, "ChosenFrom"
     End If
@@ -6766,8 +6803,9 @@ Public Function ValuesFrom(ByVal valueSource As Variant) As ReDimUI
 End Function
 
 ' Reads an item source into a fresh Collection of strings. Accepts a 1D
-' array, a Collection, a Range (one item per non-empty cell), or a
-' ROneCOne sequence, as ReadRawSource reads them.
+' array, a Collection, a Range (one item per non-empty cell) or the 2D
+' array its Value gives, or a ROneCOne sequence, as ReadRawSource reads
+' them. Null and Empty entries list nothing.
 Private Function ReadItemSource( _
     ByVal itemSource As Variant, _
     ByVal memberName As String _
@@ -6775,13 +6813,56 @@ Private Function ReadItemSource( _
     Dim gathered As Collection
     Dim entry As Variant
     Dim fromRange As Boolean
+    Dim entryText As String
 
     fromRange = (TypeName(itemSource) = "Range")
+    If IsArrayValue(itemSource) Then fromRange = IsTwoDimensional(itemSource)
     Set gathered = New Collection
     For Each entry In ReadRawSource(itemSource, memberName)
-        If Not fromRange Or LenB(CStr(entry)) > 0 Then gathered.Add CStr(entry)
+        If Not IsNull(entry) And Not IsEmpty(entry) Then
+            entryText = SourceEntryText(entry)
+            If Not fromRange Or LenB(entryText) > 0 Then gathered.Add entryText
+        End If
     Next entry
     Set ReadItemSource = gathered
+End Function
+
+' An entry's words as an item: an error value as its cell shows it,
+' "#N/A" where CStr gave "Error 2042".
+Private Function SourceEntryText(ByVal entry As Variant) As String
+    If IsError(entry) Then
+        SourceEntryText = ErrorCellText(entry)
+    Else
+        SourceEntryText = CStr(entry)
+    End If
+End Function
+
+' Adds an array's entries to a collection: a 2D one, as a range's Value
+' gives, row by row in the order a range reads.
+Private Sub GatherArray(ByVal gathered As Collection, ByVal arrayValue As Variant)
+    Dim rowIdx As Long
+    Dim colIdx As Long
+
+    If IsTwoDimensional(arrayValue) Then
+        For rowIdx = LBound(arrayValue, 1) To UBound(arrayValue, 1)
+            For colIdx = LBound(arrayValue, 2) To UBound(arrayValue, 2)
+                gathered.Add arrayValue(rowIdx, colIdx)
+            Next colIdx
+        Next rowIdx
+    Else
+        For rowIdx = LBound(arrayValue) To UBound(arrayValue)
+            gathered.Add arrayValue(rowIdx)
+        Next rowIdx
+    End If
+End Sub
+
+' Whether an array has a second dimension; asking a 1D array for its
+' second bounds raises.
+Private Function IsTwoDimensional(ByVal arrayValue As Variant) As Boolean
+    On Error GoTo OneDimension
+    IsTwoDimensional = (UBound(arrayValue, 2) >= LBound(arrayValue, 2))
+    Exit Function
+OneDimension:
 End Function
 
 ' The one guarded home for the array test. An object is never an array,
@@ -6881,9 +6962,7 @@ Public Function AddItem( _
     If atPosition >= 1 And atPosition <= mItems.Count Then
         mItems.Add itemText, Before:=atPosition
         If CLng(mValue) >= atPosition Then mValue = mValue + 1
-        ShiftIndexesForInsert mCheckedSet, atPosition
-        ShiftIndexesForInsert mDisabledItems, atPosition
-        ShiftIndexesForInsert mGroupHeaders, atPosition
+        ShiftItemMarks atPosition, 1
     Else
         mItems.Add itemText
     End If
@@ -6892,8 +6971,37 @@ Public Function AddItem( _
     Set AddItem = Me
 End Function
 
-' A set of item numbers (checked rows, disabled items, group headers)
-' follows its items through an insert or a removal.
+' What names items by number follows them through an insert (a step of
+' 1) or a removal (-1) at a position: the checked rows, disabled items,
+' and group headers, the available side's selection, the key cursor on
+' it, and an open list's highlight. A highlight over a list of matches,
+' whose rows an item change reorders, goes, as does one whose item went.
+Private Sub ShiftItemMarks(ByVal atPosition As Long, ByVal stepSize As Long)
+    Dim listMarks As Variant
+
+    For Each listMarks In Array(mCheckedSet, mDisabledItems, mGroupHeaders, mPanelSel(0))
+        If stepSize > 0 Then
+            ShiftIndexesForInsert listMarks, atPosition
+        Else
+            ShiftIndexesForRemove listMarks, atPosition
+        End If
+    Next listMarks
+    If mKeyPanel = 0 Then
+        If mKeyRow > atPosition Or (mKeyRow = atPosition And stepSize > 0) Then
+            mKeyRow = mKeyRow + stepSize
+        End If
+    End If
+    If mListHighlight < 1 Then Exit Sub
+    If mKind = KIND_COMBO Or LenB(mSelectFilter) > 0 Then
+        mListHighlight = 0
+    ElseIf mListHighlight = atPosition And stepSize < 0 Then
+        mListHighlight = 0
+    ElseIf mListHighlight >= atPosition Then
+        mListHighlight = mListHighlight + stepSize
+    End If
+End Sub
+
+' A set of item numbers follows its items through an insert or a removal.
 Private Sub ShiftIndexesForInsert(ByVal indexSet As Collection, ByVal atPosition As Long)
     Dim idx As Long
 
@@ -6922,7 +7030,8 @@ Private Sub ShiftIndexesForRemove(ByVal indexSet As Collection, ByVal removedAt 
     Next idx
 End Sub
 
-' Removes by 1-based position, or by first matching text. Removing an item
+' Removes by 1-based position, or by first matching text; a String is
+' always text, so an item named "1" goes by its name. Removing an item
 ' before the selection shifts the index; removing the selected item clears
 ' the selection to the placeholder rather than guessing a neighbor.
 Public Function RemoveItem(ByVal indexOrText As Variant) As ReDimUI
@@ -6934,7 +7043,7 @@ Public Function RemoveItem(ByVal indexOrText As Variant) As ReDimUI
         Set RemoveItem = Me
         Exit Function
     End If
-    If IsNumeric(indexOrText) Then
+    If VarType(indexOrText) <> vbString And IsNumeric(indexOrText) Then
         idx = CLng(indexOrText)
     Else
         EnsureItemTexts
@@ -6959,9 +7068,7 @@ Public Function RemoveItem(ByVal indexOrText As Variant) As ReDimUI
     ElseIf CLng(mValue) > idx Then
         mValue = mValue - 1
     End If
-    ShiftIndexesForRemove mCheckedSet, idx
-    ShiftIndexesForRemove mDisabledItems, idx
-    ShiftIndexesForRemove mGroupHeaders, idx
+    ShiftItemMarks idx, -1
     Touch
     Set RemoveItem = Me
 End Function
@@ -7299,7 +7406,9 @@ Private Sub PairItemValues( _
     idx = 0
     For Each entry In rawTexts
         idx = idx + 1
-        If Not IsObject(entry) Then StoreItemValue CStr(entry), pairedValues(idx)
+        If Not IsObject(entry) And Not IsNull(entry) Then
+            StoreItemValue SourceEntryText(entry), pairedValues(idx)
+        End If
     Next entry
 End Sub
 
@@ -7316,10 +7425,6 @@ Private Function ReadRawSource( _
     Dim gathered As Collection
     Dim entry As Variant
     Dim area As Range
-    Dim cellValues As Variant
-    Dim rowIdx As Long
-    Dim colIdx As Long
-    Dim idx As Long
 
     Set gathered = New Collection
     If TypeName(anySource) = "Range" Then
@@ -7327,12 +7432,7 @@ Private Function ReadRawSource( _
             If area.CountLarge = 1 Then
                 gathered.Add area.Value
             Else
-                cellValues = area.Value
-                For rowIdx = 1 To UBound(cellValues, 1)
-                    For colIdx = 1 To UBound(cellValues, 2)
-                        gathered.Add cellValues(rowIdx, colIdx)
-                    Next colIdx
-                Next rowIdx
+                GatherArray gathered, area.Value
             End If
         Next area
     ElseIf TypeName(anySource) = "Collection" Or TypeName(anySource) = "ROneCOne" Then
@@ -7340,9 +7440,7 @@ Private Function ReadRawSource( _
             gathered.Add entry
         Next entry
     ElseIf IsArrayValue(anySource) Then
-        For idx = LBound(anySource) To UBound(anySource)
-            gathered.Add anySource(idx)
-        Next idx
+        GatherArray gathered, anySource
     Else
         RaiseError ERROR_INVALID_ARGUMENT, memberName, memberName & _
             " accepts an array, a Collection, a Range, or a ROneCOne sequence."
@@ -8291,8 +8389,13 @@ End Sub
 
 ' Moves every selected row. The ascending pass keeps the rows' relative
 ' order in the target; the descending removal pass keeps yet-unremoved
-' source indices stable.
-Private Sub TransferSelected(ByVal hostApp As ReDimUI, ByVal rightward As Boolean)
+' source indices stable. keptAfter, when given, is the selection the
+' source keeps, in place before OnChange runs. True when rows moved.
+Private Function TransferSelected( _
+    ByVal hostApp As ReDimUI, _
+    ByVal rightward As Boolean, _
+    Optional ByVal keptAfter As Collection _
+) As Boolean
     Dim sourceItems As Collection
     Dim targetItems As Collection
     Dim selectionSet As Collection
@@ -8311,7 +8414,7 @@ Private Sub TransferSelected(ByVal hostApp As ReDimUI, ByVal rightward As Boolea
     Set sourceItems = ItemsOfPanel(fromPanel)
     Set targetItems = ItemsOfPanel(1 - fromPanel)
     Set selectionSet = mPanelSel(fromPanel)
-    If sourceItems.Count = 0 Or selectionSet.Count = 0 Then Exit Sub
+    If sourceItems.Count = 0 Or selectionSet.Count = 0 Then Exit Function
     ReDim selectedFlags(1 To sourceItems.Count)
     ReDim movingFlags(1 To sourceItems.Count)
     For Each entry In selectionSet
@@ -8328,7 +8431,7 @@ Private Sub TransferSelected(ByVal hostApp As ReDimUI, ByVal rightward As Boolea
         End If
     Next idx
     idx = 0
-    If Not anySelected Then Exit Sub
+    If Not anySelected Then Exit Function
     ' One pass moves the selected rows to the target in their list order
     ' and rebuilds the source without them; removing by index would walk
     ' the list once per row. Selected rows the filter hid stay
@@ -8345,11 +8448,16 @@ Private Sub TransferSelected(ByVal hostApp As ReDimUI, ByVal rightward As Boolea
         End If
     Next entry
     SetItemsOfPanel fromPanel, kept
-    Set mPanelSel(fromPanel) = keptSelection
+    If keptAfter Is Nothing Then
+        Set mPanelSel(fromPanel) = keptSelection
+    Else
+        Set mPanelSel(fromPanel) = keptAfter
+    End If
     ItemsChanged
     Touch
+    TransferSelected = True
     CommitTransferChange hostApp
-End Sub
+End Function
 
 Private Sub TransferAll(ByVal hostApp As ReDimUI, ByVal rightward As Boolean)
     Dim entry As Variant
@@ -8624,7 +8732,9 @@ Friend Sub RunClickBehavior()
             BeginToastExit
             Select Case clickedPart
                 Case "ta"
-                    If LenB(mToastActionProc) > 0 Then Application.Run mToastActionProc
+                    If LenB(mToastActionProc) > 0 Then
+                        ReDimUI.RunHandlerAs hostApp, Me, mToastActionProc
+                    End If
                 Case "tx"
                 Case Else
                     RunClickHandlers hostApp
@@ -8647,14 +8757,19 @@ End Sub
 ' component's own work: the async op when OnClickAsync registered one,
 ' otherwise the OnClick or OnChange procedure, then any navigation. A
 ' dialog's button closes the dialog first, so a handler that opens
-' another Confirm keeps it open and focus returns before it looks.
+' another Confirm keeps it open and focus returns before it looks. The
+' handler runs with the control as ReDimUI.Sender, from a key as from a
+' click, and one that fails goes to the app's error sink and navigates
+' nowhere.
 Private Sub RunClickHandlers(ByVal hostApp As ReDimUI)
     If LenB(mAsyncClickProc) > 0 Then
         hostApp.StartAsyncClick Me, mAsyncClickProc
         Exit Sub
     End If
     If mCloseModalOnClick Then hostApp.CloseModal
-    If LenB(mClickProc) > 0 Then Application.Run mClickProc
+    If LenB(mClickProc) > 0 Then
+        If Not ReDimUI.RunHandlerAs(hostApp, Me, mClickProc) Then Exit Sub
+    End If
     If LenB(mNavTargetId) > 0 Then ReDimUI.Navigate mNavTargetId
 End Sub
 
@@ -10489,8 +10604,10 @@ Private Sub HandleControlKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
                     CloseDropList
                 End If
             End If
+            ' With no other stop focus leaves, except from a dialog's one
+            ' button, which keeps it until the dialog closes.
             If Not hostApp.MoveFocusFrom(mComponentId, keyText = "{TAB}") Then
-                LeaveFocus hostApp, True
+                If Not hostApp.ModalUp Then LeaveFocus hostApp, True
             End If
             Exit Sub
         Case "{ESC}"
@@ -10786,12 +10903,12 @@ Private Sub HandleSelectKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
         If Not MoveKeyAim(keyText, anchorItem, 1, itemTotal, mListRows, aimRow, stepDirection) Then
             Select Case keyText
                 Case "{ENTER}", " ", "{ALTUP}"
-                    If mListHighlight >= 1 Then
-                        If PickSelectItem(hostApp, mListHighlight) Then
-                            RunClickHandlers hostApp
-                        End If
-                    Else
+                    ' Alt+Up takes a select's highlight but only closes a
+                    ' menu, whose highlight is a command to run.
+                    If mListHighlight < 1 Or (mIsMenu And keyText = "{ALTUP}") Then
                         CloseDropList
+                    ElseIf PickSelectItem(hostApp, mListHighlight) Then
+                        RunClickHandlers hostApp
                     End If
                     Exit Sub
                 Case "{F4}", "{ALTDOWN}"
@@ -10811,9 +10928,7 @@ Private Sub HandleSelectKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
     If mIsMenu Then
         Select Case keyText
             Case " ", "{ENTER}", "{DOWN}", "{UP}", "{ALTDOWN}", "{F4}"
-                OpenDropList hostApp.Sheet
-                aimRow = PickableNear(1, 1)
-                If aimRow > 0 Then HighlightListItem aimRow
+                OpenListByKey hostApp.Sheet, 1
         End Select
         Exit Sub
     End If
@@ -10822,9 +10937,7 @@ Private Sub HandleSelectKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
     If Not MoveKeyAim(keyText, anchorItem, 1, itemTotal, mListRows, aimRow, stepDirection, True) Then
         Select Case keyText
             Case " ", "{ALTDOWN}", "{F4}"
-                OpenDropList hostApp.Sheet
-                aimRow = PickableNear(IIf(anchorItem >= 1, anchorItem, 1), 1)
-                If aimRow > 0 Then HighlightListItem aimRow
+                OpenListByKey hostApp.Sheet, IIf(anchorItem >= 1, anchorItem, 1)
                 Exit Sub
             Case "{ENTER}"
                 hostApp.ClickDefaultButton
@@ -10836,6 +10949,20 @@ Private Sub HandleSelectKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
     aimRow = PickableNear(aimRow, stepDirection)
     If aimRow = 0 Then Exit Sub
     If PickSelectItem(hostApp, aimRow) Then RunClickHandlers hostApp
+End Sub
+
+' Opens the list from a key, the highlight on the first row from fromRow
+' down that can be picked, and draws it even when no row can be.
+Private Sub OpenListByKey(ByVal hostSheet As Worksheet, ByVal fromRow As Long)
+    Dim aimRow As Long
+
+    OpenDropList hostSheet
+    aimRow = PickableNear(fromRow, 1)
+    If aimRow > 0 Then
+        HighlightListItem aimRow
+    Else
+        Touch
+    End If
 End Sub
 
 ' Where an arrow, Page Up, Page Down, Home, or End aims from anchorRow
@@ -10964,6 +11091,9 @@ End Sub
 ' value changed, which is when the caller runs the handlers; taking the
 ' current item again only closes the list.
 Private Function PickSelectItem(ByVal hostApp As ReDimUI, ByVal itemIndex As Long) As Boolean
+    ' A highlight left on a row that can no longer be picked, its item
+    ' disabled or the list changed under it, takes nothing.
+    If Not ItemPickable(itemIndex) Then Exit Function
     ' A menu keeps no selection: its pick runs the command.
     If mIsMenu Then
         RunMenuCommand hostApp, ItemAt(itemIndex)
@@ -11056,11 +11186,12 @@ End Sub
 
 ' Select-all under a filter: unchecks the rows that show when all of
 ' them are checked, else checks them; hidden rows keep their checks.
-Private Sub ToggleShownChecks()
+' False when no row shows, so nothing changed.
+Private Function ToggleShownChecks() As Boolean
     Dim shownPos As Long
     Dim allChecked As Boolean
 
-    If PanelShownCount(0) = 0 Then Exit Sub
+    If PanelShownCount(0) = 0 Then Exit Function
     allChecked = True
     For shownPos = 1 To PanelShownCount(0)
         If Not IndexSetHas(mCheckedSet, PanelShownItem(0, shownPos)) Then
@@ -11070,7 +11201,8 @@ Private Sub ToggleShownChecks()
     For shownPos = 1 To PanelShownCount(0)
         SetInSet mCheckedSet, PanelShownItem(0, shownPos), Not allChecked
     Next shownPos
-End Sub
+    ToggleShownChecks = True
+End Function
 
 ' Ctrl+A: checks every row that shows, with or without a select-all
 ' header, and never clears, as Ctrl+A selects all in a native list. True
@@ -11104,7 +11236,7 @@ Private Function ToggleCheckRow(ByVal hostApp As ReDimUI, ByVal checkRow As Long
     If checkRow = 0 Then
         If Not mSelectAllRow Then Exit Function
         If LenB(mPanelFilter(0)) > 0 Then
-            ToggleShownChecks
+            If Not ToggleShownChecks() Then Exit Function
         ElseIf mCheckedSet.Count = ItemCount Then
             Set mCheckedSet = New Collection
         Else
@@ -11162,7 +11294,9 @@ Private Sub HandleTransferKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
             Case "{RIGHT}"
                 mKeyPanel = 1
             Case " "
-                If mKeyRow >= 1 And mKeyRow <= TransferPanelCount(mKeyPanel) Then
+                ' A cursor row the filter hides, as after a mouse move
+                ' across, takes nothing.
+                If aimRow >= 1 Then
                     IndexSetToggle mPanelSel(mKeyPanel), mKeyRow
                     Touch
                 End If
@@ -11176,10 +11310,10 @@ Private Sub HandleTransferKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
                 Touch
                 Exit Sub
             Case "{ENTER}"
-                If mKeyRow >= 1 And mKeyRow <= TransferPanelCount(mKeyPanel) Then
-                    If mPanelSel(mKeyPanel).Count = 0 Then mPanelSel(mKeyPanel).Add mKeyRow
-                    TransferSelected hostApp, (mKeyPanel = 0)
+                If mPanelSel(mKeyPanel).Count = 0 And aimRow >= 1 Then
+                    mPanelSel(mKeyPanel).Add mKeyRow
                 End If
+                TransferSelected hostApp, (mKeyPanel = 0)
             Case Else
                 Exit Sub
         End Select
@@ -15683,7 +15817,10 @@ Private Sub ReorderChosen(ByVal hostApp As ReDimUI, ByVal upward As Boolean)
     For idx = 1 To itemTotal
         rebuilt.Add texts(idx)
     Next idx
+    ' A new list of the same length at an address the old one freed would
+    ' pass for it in the filter cache, so the item version moves.
     Set mChosenItems = rebuilt
+    ItemsChanged
     Set mPanelSel(1) = New Collection
     For idx = 1 To itemTotal
         If marked(idx) And Not cursorOnly Then mPanelSel(1).Add idx
@@ -15924,8 +16061,8 @@ Private Sub SyncTransferPartTint(ByVal hostSheet As Worksheet, ByVal themeValue 
 End Sub
 
 ' A move button with nothing to move reads muted, as a pager with
-' nothing beyond it does: > and < while their panel has no selection,
-' >> and << while their panel shows no rows.
+' nothing beyond it does: > and < while their panel shows no selected
+' row, >> and << while their panel shows no rows.
 Private Sub SyncMoveButtonInks(ByVal hostSheet As Worksheet, ByVal themeValue As ReDimUI)
     Dim canMove(1 To 4) As Boolean
     Dim partNames As Variant
@@ -15933,9 +16070,9 @@ Private Sub SyncMoveButtonInks(ByVal hostSheet As Worksheet, ByVal themeValue As
     Dim idx As Long
 
     EnsureTransferCollections
-    canMove(1) = mPanelSel(0).Count > 0
+    canMove(1) = ShowsSelection(0)
     canMove(2) = PanelShownCount(0) > 0
-    canMove(3) = mPanelSel(1).Count > 0
+    canMove(3) = ShowsSelection(1)
     canMove(4) = PanelShownCount(1) > 0
     inkKey = CStr(ObjPtr(themeValue)) & ":" & CStr(mEnabled)
     For idx = 1 To 4
@@ -15952,6 +16089,33 @@ Private Sub SyncMoveButtonInks(ByVal hostSheet As Worksheet, ByVal themeValue As
     Next idx
     On Error GoTo 0
 End Sub
+
+' Whether a panel's filter shows any of its selected rows, the rows > and
+' < move; one pass over the rows shown and one over the selection.
+Private Function ShowsSelection(ByVal panelIndex As Long) As Boolean
+    Dim shownFlags() As Boolean
+    Dim shownPos As Long
+    Dim entry As Variant
+
+    If mPanelSel(panelIndex).Count = 0 Then Exit Function
+    If LenB(PanelFilter(panelIndex)) = 0 Then
+        ShowsSelection = True
+        Exit Function
+    End If
+    If PanelShownCount(panelIndex) = 0 Then Exit Function
+    ReDim shownFlags(0 To TransferPanelCount(panelIndex))
+    For shownPos = 1 To PanelShownCount(panelIndex)
+        shownFlags(PanelShownItem(panelIndex, shownPos)) = True
+    Next shownPos
+    For Each entry In mPanelSel(panelIndex)
+        If CLng(entry) >= 1 And CLng(entry) <= UBound(shownFlags) Then
+            If shownFlags(CLng(entry)) Then
+                ShowsSelection = True
+                Exit Function
+            End If
+        End If
+    Next entry
+End Function
 
 Private Sub ApplyTransferButton( _
     ByVal hostSheet As Worksheet, _
@@ -16287,7 +16451,7 @@ Friend Sub TickPressDrag(ByVal hostApp As ReDimUI, ByVal buttonDown As Boolean)
     End If
     If mKind <> KIND_SLIDEBAR Then Exit Sub
     If mSlideTracking Then
-        If Not mVisible Or Not mEnabled Then
+        If Not mVisible Or Not mEnabled Or mBusy Then
             EndSlideDrag
         ElseIf buttonDown Then
             fraction = CursorTrackFraction()
@@ -16297,8 +16461,9 @@ Friend Sub TickPressDrag(ByVal hostApp As ReDimUI, ByVal buttonDown As Boolean)
         End If
     ElseIf buttonDown And Not mSlidePrevButtonDown Then
         ' Sheet points on a sheet behind the active one are not under
-        ' the pointer, whatever their numbers.
-        If mVisible And mEnabled And SheetInFront(hostApp) Then
+        ' the pointer, whatever their numbers. A busy slider takes no
+        ' press, as a busy control takes no click.
+        If mVisible And mEnabled And Not mBusy And SheetInFront(hostApp) Then
             ' Floating chrome paints above the track: a press that lands
             ' on an open drop list or a modal overlay belongs to the
             ' chrome, and the geometric track test must not reach
@@ -16833,7 +16998,8 @@ Private Function RowDoubleClicked(ByVal partName As String) As Boolean
 End Function
 
 ' Moves one row's item across. The panel's other selected rows stay
-' selected, their numbers closing over the moved row.
+' selected, their numbers closing over the moved row, and are in place
+' before OnChange runs, so a handler that sets the lists keeps its own.
 Private Sub MoveTransferRow( _
     ByVal hostApp As ReDimUI, _
     ByVal rightward As Boolean, _
@@ -16859,9 +17025,9 @@ Private Sub MoveTransferRow( _
     Set soleRow = New Collection
     soleRow.Add itemIndex
     Set mPanelSel(fromPanel) = soleRow
-    TransferSelected hostApp, rightward
-    Set mPanelSel(fromPanel) = keptSelection
-    Touch
+    If Not TransferSelected(hostApp, rightward, keptSelection) Then
+        Set mPanelSel(fromPanel) = priorSelection
+    End If
 End Sub
 
 ' A press on a transfer row, held and moved: along its panel it selects
@@ -16877,13 +17043,12 @@ Private Sub TickTransferDrag(ByVal hostApp As ReDimUI, ByVal buttonDown As Boole
     Dim rowSelected As Boolean
     Dim pointerKnown As Boolean
 
-    If mKind <> KIND_TRANSFER Then Exit Sub
     If buttonDown Or mRowDragOn Then
         pointerKnown = ReDimUI.FramePointer(pointsX, pointsY)
     End If
     If buttonDown And Not mRowDragPrevDown Then
         mRowDragOn = False
-        If mVisible And mEnabled And pointerKnown Then
+        If mVisible And mEnabled And Not mBusy And pointerKnown Then
             If SheetInFront(hostApp) And Not PressClaimedByChrome(hostApp) Then
                 If TransferRowOf(PartAtPoint(pointsX, pointsY), panelAt, rowAt) Then
                     mRowDragOn = True
@@ -16911,7 +17076,8 @@ Private Sub TickTransferDrag(ByVal hostApp As ReDimUI, ByVal buttonDown As Boole
     ElseIf Not buttonDown And mRowDragOn Then
         mRowDragOn = False
         SetDropPanel 0
-        If mRowDragMode = 2 And pointerKnown Then
+        ' A list disabled or busy since the press drops nothing.
+        If mRowDragMode = 2 And pointerKnown And mVisible And mEnabled And Not mBusy Then
             If TransferPanelAt(pointsX, pointsY) = 1 - mRowDragPanel Then
                 rowSelected = IndexSetHas(mPanelSel(mRowDragPanel), mRowDragFrom)
                 If rowSelected Then
@@ -17084,9 +17250,7 @@ Friend Sub FollowListPointer(ByVal partName As String)
     If Left$(partName, 3) <> "opt" Then Exit Sub
     If Not IsNumeric(Mid$(partName, 4)) Then Exit Sub
     rowNumber = CLng(Mid$(partName, 4))
-    If mKind = KIND_SELECT Then
-        If Not ItemPickable(ListItemAtRow(rowNumber)) Then Exit Sub
-    End If
+    If Not ItemPickable(ListItemAtRow(rowNumber)) Then Exit Sub
     If mListOffset + rowNumber = mListHighlight Then Exit Sub
     mListHighlight = mListOffset + rowNumber
     Touch
@@ -18089,6 +18253,15 @@ Friend Sub FocusField(ByVal hostApp As ReDimUI, Optional ByVal openList As Boole
     Touch
 End Sub
 
+' Focus given while another sheet was in front took that sheet's
+' selection as the one to compare; the control's own sheet coming
+' forward takes its selection instead, which a click elsewhere has not
+' moved.
+Friend Sub RebaseFocusSelection(ByVal hostSheet As Worksheet)
+    If Left$(mFieldSelAtFocus, Len(hostSheet.Name) + 1) = hostSheet.Name & "!" Then Exit Sub
+    mFieldSelAtFocus = CurrentSelectionKey()
+End Sub
+
 ' The grid selection as a comparable key. A non-range selection (a shape)
 ' reads as the sentinel, so only real cell selections participate.
 Private Function CurrentSelectionKey() As String
@@ -18115,7 +18288,9 @@ Friend Sub BlurField(ByVal hostApp As ReDimUI, ByVal keepEdits As Boolean)
     If mInputDueMs > 0 Then FireInput hostApp
     If keepEdits Then
         If mKind = KIND_COMBO Then
+            ' A disabled item stays out of reach, as it does in the list.
             exactAt = ExactItemMatch(mText)
+            If Not ItemPickable(exactAt) Then exactAt = 0
             If exactAt = 0 And mRestrictToItems And LenB(mText) > 0 Then
                 ' A restricted combo takes the first item the text
                 ' begins, or goes back to its text at focus.
@@ -18187,6 +18362,15 @@ Friend Sub HandleKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
                 ' A keyboard pick commits exactly like a mouse pick,
                 ' handlers included, and only when the value changes.
                 If PickComboItem(hostApp, mListHighlight) Then
+                    RunClickHandlers hostApp
+                End If
+                Exit Sub
+            ElseIf mComponentId = PALETTE_FIELD_ID Then
+                ' The palette runs its top match, and with none stays
+                ' open; it never commits text or clicks the default
+                ' button.
+                Set mListMatches = BuildListMatches(hostApp.Sheet)
+                If PickComboItem(hostApp, PickableNear(1, 1, mListMatches)) Then
                     RunClickHandlers hostApp
                 End If
                 Exit Sub
@@ -18341,7 +18525,6 @@ End Sub
 Private Sub ComboListNav(ByVal hostApp As ReDimUI, ByVal rowDelta As Long)
     Dim matchCount As Long
     Dim currentItem As Long
-    Dim probe As Long
 
     If Not mSelectOpen Then OpenDropList hostApp.Sheet
     Set mListMatches = BuildListMatches(hostApp.Sheet)
@@ -18365,9 +18548,10 @@ Private Sub ComboListNav(ByVal hostApp As ReDimUI, ByVal rowDelta As Long)
     If mListHighlight < 1 Then mListHighlight = 1
     If mListHighlight > matchCount Then mListHighlight = matchCount
     ' The highlight passes over disabled items: on in the direction of
-    ' the move, else back from the end it reached.
-    probe = PickableNear(mListHighlight, IIf(rowDelta < 0, -1, 1), mListMatches)
-    If probe > 0 Then mListHighlight = probe
+    ' the move, else back from the end it reached; with none to take, it
+    ' goes, and Enter commits the text.
+    mListHighlight = PickableNear(mListHighlight, IIf(rowDelta < 0, -1, 1), mListMatches)
+    If mListHighlight = 0 Then Exit Sub
     If mListHighlight > mListOffset + mListRows Then
         mListOffset = mListHighlight - mListRows
     ElseIf mListHighlight <= mListOffset Then
@@ -18714,8 +18898,9 @@ Friend Sub TickFocusWatch( _
     ByVal buttonDown As Boolean _
 )
     If Not ReDimUI.IsComponentFocused(hostApp.AppId, mComponentId) Then Exit Sub
-    ' A modal's buttons keep focus until the dialog closes.
-    If Left$(mComponentId, 4) = "mdl_" Then Exit Sub
+    ' A modal's buttons keep focus until the dialog closes; the palette
+    ' closes at a press elsewhere, as a field would lose focus.
+    If Left$(mComponentId, 4) = "mdl_" And mComponentId <> PALETTE_FIELD_ID Then Exit Sub
     ' The selection compare costs three COM reads, so it rides the work
     ' cadence; a 50 ms commit latency is imperceptible. The press edge
     ' stays at frame rate.
@@ -18869,7 +19054,8 @@ Private Function FilterItems(ByVal filterText As String) As Collection
     End If
 End Function
 
-' The first item that begins with the text, in any case.
+' The first item that can be picked and begins with the text, in any
+' case.
 Private Function PrefixItemMatch(ByVal candidate As String) As Long
     Dim idx As Long
 
@@ -18880,8 +19066,10 @@ Private Function PrefixItemMatch(ByVal candidate As String) As Long
     For idx = 1 To mItems.Count
         If StrComp(Left$(mItemTexts(idx), Len(candidate)), candidate, _
             vbTextCompare) = 0 Then
-            PrefixItemMatch = idx
-            Exit Function
+            If ItemPickable(idx) Then
+                PrefixItemMatch = idx
+                Exit Function
+            End If
         End If
     Next idx
 End Function
@@ -18982,6 +19170,10 @@ Friend Function PickComboItem( _
             mCaretOn = False
         End If
         mText = picked
+        ' A pick commits as a blur does: an OnInput still waiting reports
+        ' the picked text, and the checks run on it.
+        If mInputDueMs > 0 Then FireInput hostApp
+        RunValidation hostApp
     Else
         priorEvents = Application.EnableEvents
         Application.EnableEvents = False

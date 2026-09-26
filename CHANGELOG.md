@@ -299,6 +299,53 @@
   the suppression 1.0.1 put on that line is gone.
   `requirements-dev.txt` asks for 2.2.1 or later, since 2.2.0 still
   reports the line.
+- A handler a key fires runs with the control as `ReDimUI.Sender`, and
+  an error it raises reaches `OnError`. An arrow on a SelectBox,
+  RadioGroup, Tabs, or Stepper, Space on a CheckList, and Enter on a
+  combo row or a menu command ran `OnChange` or `OnClick` with no
+  sender, so a handler that read `ReDimUI.Sender` stopped at error 91,
+  and any error it raised was lost without a trace.
+- Enter in the command palette runs its top match. With no row
+  highlighted it closed the palette, left the keys nowhere, and clicked
+  the app's `DefaultButton`, so "exp" and Enter could save a form. A
+  press anywhere else closes the palette, and opening it again while it
+  is open keeps the control it gives the keys back to.
+- Alt+Up on an open MenuButton closes it, as documented, where it ran
+  the highlighted command, and a menu whose commands are all disabled
+  draws its list when a key opens it. Tab in a `Confirm` with one button
+  keeps focus there; the keys went back to Excel with the dialog still
+  up. Focus given from code while its sheet is behind another holds
+  when the sheet comes forward, where the next tick ended it.
+- A combo pick fires an `OnInput` still waiting out its `DebounceMs`
+  and clears a `Required` message; both waited for the next focus.
+- Disabled items stay out of reach in a ComboBox: `RestrictToItems`
+  committed one typed in full or begun, and Down could highlight one,
+  after which Enter did nothing. An open list's highlight follows its
+  item through `AddItem` and `RemoveItem`, and Enter on a row disabled
+  under it picks nothing, where it could make a group header the value
+  or run a disabled command.
+- `Items` and `ItemsFrom` keep the pick on its item by text, as they
+  keep a check list's checks; it stayed on the position, so a refreshed
+  list showed another item. `ItemsFrom` reads the 2D array a range's
+  `Value` gives, row by row, where it raised error 9. `Null` entries
+  list nothing, where they raised error 94, and an error value lists as
+  its cell shows it, `#N/A` rather than "Error 2042".
+- `RemoveItem "1"` removes the item named "1"; a String that looked
+  like a number was taken as a position. `AddCommand` brings back a
+  menu row `RemoveItem` took, and an unknown icon name raises before
+  anything is kept, where the same call with the name fixed raised
+  error 5. `AccessKey` goes on the controls `Shortcut` takes and raises
+  on others; on a RadioGroup it picked the first item.
+- A transfer list's selection on the available side follows `AddItem`
+  and `RemoveItem` and clears on `Items`, where it went on naming rows
+  by number and `>` moved the wrong item. `>` and `<` read muted while
+  every selected row is filtered out, Space and Enter no longer act on
+  a cursor row the filter hides, a drag drops nothing while the list is
+  busy or disabled, and a double-click move puts the other selected
+  rows back before `OnChange` runs, so a handler that resets the lists
+  keeps its work. A busy SlideBar takes no press.
+- Select-all on a filtered check list with no rows showing fires
+  nothing, where it fired `OnChange` for no change.
 
 ## 1.0.2 - 2026-09-23
 

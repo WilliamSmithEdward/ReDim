@@ -6455,3 +6455,256 @@ Public Function TestListMoveKeys() As String
     ReDimUI.AutoPump True
     TestListMoveKeys = transcript
 End Function
+
+' Keys run a control's handlers as a click does, with the control as
+' ReDimUI.Sender. Alt+Up only closes an open menu, and a menu whose
+' commands are all disabled still opens by key. Enter in the command
+' palette runs its top match, never the default button, and a press
+' elsewhere closes it. Tab in a one-button dialog keeps focus there.
+' Focus given behind another sheet holds when its sheet comes forward.
+' A combo pick fires a waiting OnInput and checks the pick again.
+Public Function TestKeyRouting() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim transcript As String
+    Dim priorEvents As Boolean
+
+    gSenderCount = 0
+    gLastSender = vbNullString
+    gCommandCount = 0
+    gLastCommand = vbNullString
+    gChangeCount = 0
+    gInputCount = 0
+    gLastInput = vbNullString
+    ReDimUI.AutoPump False
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "wid89")
+    app.SelectBox("pick").AtRect(24, 24, 150, 22).Items("A", "B", "C") _
+        .OnChange "TestReDimWidgets.RecordSender"
+    app.Tabs("tabs").AtRect(24, 60, 240, 26).Items("One", "Two") _
+        .OnChange "TestReDimWidgets.RecordSender"
+    app.Stepper("qty").AtRect(24, 100, 120, 24).SliderRange(0, 9, 1) _
+        .OnChange "TestReDimWidgets.RecordSender"
+    app.MenuButton("more").AtRect(300, 24, 100, 26).Text("More") _
+        .OnClick "TestReDimWidgets.RecordCommand"
+    app.MenuButton("more").AddCommand "Plain"
+    app.MenuButton("dead").AtRect(420, 24, 100, 26).Text("Dead").AddCommand "Gone"
+    app.MenuButton("dead").ItemEnabled 1, False
+    app.Button("save").AtRect(24, 140, 100, 26).Text("Save") _
+        .OnClick "TestReDimWidgets.RecordChange"
+    app.DefaultButton "save"
+    app.AddCommand "Export report", "TestReDimWidgets.RecordAppCommand"
+    app.CommandPalette ""
+    app.ComboBox("fruit").AtRect(24, 190, 150, 22).Items("Apple", "Banana").Required _
+        .OnInput("TestReDimWidgets.RecordInput").DebounceMs 5000
+    app.Render
+
+    app.SelectBox("pick").Focus
+    RdxKeyChar "{DOWN}"
+    transcript = "selectSender=" & gLastSender
+    app.Tabs("tabs").Focus
+    RdxKeyChar "{RIGHT}"
+    transcript = transcript & "|tabsSender=" & gLastSender
+    app.Stepper("qty").Focus
+    RdxKeyChar "{UP}"
+    transcript = transcript & "|stepperSender=" & gLastSender & "/" & gSenderCount
+
+    app.MenuButton("more").Focus
+    RdxKeyChar "{DOWN}"
+    RdxKeyChar "{ALTUP}"
+    transcript = transcript & "|altUpCloses=" & CStr(gCommandCount = 0 And _
+        Not ShapeExists(host, "rdm_wid89_more__opt1"))
+    RdxKeyChar "{DOWN}"
+    RdxKeyChar "{ENTER}"
+    transcript = transcript & "|menuSender=" & gLastCommand & "/" & gCommandCount
+    app.MenuButton("dead").Focus
+    RdxKeyChar "{DOWN}"
+    transcript = transcript & "|deadMenuDraws=" & CStr(ShapeExists(host, "rdm_wid89_dead__opt1"))
+    RdxKeyChar "{ESC}"
+
+    app.OpenCommandPalette
+    TypeText "expo"
+    RdxKeyChar "{ENTER}"
+    transcript = transcript & "|paletteTopMatch=" & gLastCommand & "/" & gChangeCount
+    app.OpenCommandPalette
+    TypeText "zzz"
+    RdxKeyChar "{ENTER}"
+    transcript = transcript & "|paletteNoMatch=" & CStr(gChangeCount = 0 And _
+        host.Shapes("rdm_wid89_mdl_pal_field").Visible = msoTrue)
+    ReDimUI.OverridePointer 40, 500
+    ReDimUI.ForcePressEdge
+    ReDimUI.PumpOnce
+    ReDimUI.ClearPointerOverride
+    transcript = transcript & "|pressCloses=" & CStr( _
+        host.Shapes("rdm_wid89_mdl_pal_field").Visible = msoFalse)
+
+    app.Confirm "Note", "Just so you know.", cancelText:=""
+    RdxKeyChar "{TAB}"
+    transcript = transcript & "|dialogKeepsFocus=" & CStr( _
+        ReDimUI.IsComponentFocused("wid89", "mdl_ok"))
+    RdxKeyChar "{ENTER}"
+    app.CloseModal
+
+    priorEvents = Application.EnableEvents
+    Application.EnableEvents = True
+    ' A new sheet comes to the front, and the control is focused behind it.
+    NewCanvas
+    app.SelectBox("pick").Focus
+    host.Activate
+    ReDimUI.PumpOnce
+    transcript = transcript & "|focusFromBehindHolds=" & CStr( _
+        ReDimUI.IsComponentFocused("wid89", "pick"))
+    Application.EnableEvents = priorEvents
+    ReDimUI.EndKeyboardFocus
+
+    app.ComboBox("fruit").Focus
+    TypeText "ap"
+    RdxKeyChar "{DOWN}"
+    RdxKeyChar "{ENTER}"
+    transcript = transcript & "|pickFiresInput=" & gLastInput & "/" & gInputCount
+    app.ComboBox("fruit").InputValue = vbNullString
+    app.ValidateAll
+    app.ComboBox("fruit").Focus
+    RdxKeyChar "{ALTDOWN}"
+    RdxKeyChar "{DOWN}"
+    RdxKeyChar "{ENTER}"
+    transcript = transcript & "|pickRechecks=" & CStr( _
+        LenB(app.ComboBox("fruit").ValidationError) = 0 _
+        And app.ComboBox("fruit").CurrentText = "Apple")
+    RdxReleaseKeys
+    ReDimUI.AutoPump True
+    TestKeyRouting = transcript
+End Function
+
+' Item edits: a list keeps what its marks and highlight name through
+' inserts, removals, and replacements, refuses rows that cannot be
+' picked, and reads a 2D array, Null, and error values from a source.
+Public Function TestItemEdits() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim transcript As String
+    Dim grid(1 To 2, 1 To 2) As Variant
+
+    gChangeCount = 0
+    ReDimUI.AutoPump False
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "wid90")
+    app.ComboBox("herb").AtRect(24, 24, 150, 22).Items("Banana", "Basil").RestrictToItems
+    app.ComboBox("herb").ItemEnabled 1, False
+    app.ComboBox("only").AtRect(24, 60, 150, 22).Items "Zed"
+    app.ComboBox("only").ItemEnabled 1, False
+    app.SelectBox("sel").AtRect(200, 24, 150, 22).Items("A", "B", "C").Value 1
+    app.CheckList("cl").AtRect(400, 24, 150, 80).Items("A", "B") _
+        .OnChange "TestReDimWidgets.RecordChange"
+    app.TransferList("tl").AtRect(24, 250, 360, 120).Items "A", "B", "C", "D"
+    app.TransferList("tf").AtRect(24, 400, 360, 120) _
+        .Items "Apple", "Banana", "Apricot", "Cherry"
+    app.Render
+
+    app.ComboBox("herb").Focus
+    TypeText "Ba"
+    RdxKeyChar "{ENTER}"
+    transcript = "restrictSkipsDisabled=" & app.ComboBox("herb").CurrentText
+    app.ComboBox("herb").Focus
+    BackspaceAll app.ComboBox("herb")
+    TypeText "Banana"
+    RdxKeyChar "{ENTER}"
+    transcript = transcript & "|exactDisabledRefused=" & app.ComboBox("herb").CurrentText
+    app.ComboBox("only").Focus
+    TypeText "z"
+    RdxKeyChar "{DOWN}"
+    RdxKeyChar "{ENTER}"
+    transcript = transcript & "|noPickableCommits=" & CStr( _
+        Not ReDimUI.IsComponentFocused("wid90", "only") _
+        And app.ComboBox("only").CurrentText = "z")
+
+    app.SelectBox("sel").Focus
+    RdxKeyChar " "
+    RdxKeyChar "{DOWN}"
+    app.SelectBox("sel").ItemEnabled 2, False
+    RdxKeyChar "{ENTER}"
+    transcript = transcript & "|disabledHighlightRefused=" & app.SelectBox("sel").CurrentValue
+    RdxKeyChar "{ESC}"
+    RdxKeyChar " "
+    RdxKeyChar "{DOWN}"
+    app.SelectBox("sel").AddItem "Zero", 1
+    RdxKeyChar "{ENTER}"
+    transcript = transcript & "|highlightFollows=" & app.SelectBox("sel").CurrentText
+    ReDimUI.EndKeyboardFocus
+
+    app.SelectBox("nums").AtRect(200, 60, 150, 22).Items "3", "2", "1"
+    app.SelectBox("nums").RemoveItem "1"
+    transcript = transcript & "|removeByText=" & app.SelectBox("nums").ItemCount & ":" & _
+        app.SelectBox("nums").ItemTextAt(1) & "," & app.SelectBox("nums").ItemTextAt(2)
+
+    app.MenuButton("menu").AtRect(200, 100, 100, 26).Text("Menu") _
+        .AddCommand "Undo", "TestReDimWidgets.RecordCommand"
+    app.MenuButton("menu").RemoveItem "Undo"
+    app.MenuButton("menu").AddCommand "Undo", "TestReDimWidgets.RecordCommand"
+    transcript = transcript & "|commandBack=" & app.MenuButton("menu").ItemCount
+    On Error Resume Next
+    app.MenuButton("menu").AddCommand "Export", "TestReDimWidgets.RecordCommand", "NoSuchIcon"
+    Err.Clear
+    app.MenuButton("menu").AddCommand "Export", "TestReDimWidgets.RecordCommand"
+    transcript = transcript & "|badIconClean=" & CStr(Err.Number = 0) & "/" & _
+        app.MenuButton("menu").ItemCount
+    Err.Clear
+    app.RadioGroup("r").AtRect(400, 120, 120, 40).Items("X", "Y").AccessKey "r"
+    transcript = transcript & "|radioAccessRefused=" & CStr(Err.Number <> 0)
+    Err.Clear
+    On Error GoTo 0
+
+    app.SelectBox("city").AtRect(200, 140, 150, 22).Items("Oslo", "Paris", "Rome").Value 2
+    app.SelectBox("city").ItemsFrom Array("Berlin", "Oslo", "Paris", "Rome")
+    transcript = transcript & "|pickKeptByText=" & app.SelectBox("city").CurrentText & "/" & _
+        app.SelectBox("city").CurrentValue
+    app.SelectBox("early").AtRect(200, 180, 150, 22).Value(2).Items "X", "Y", "Z"
+    transcript = transcript & "|valueBeforeItems=" & app.SelectBox("early").CurrentValue
+    grid(1, 1) = "a"
+    grid(2, 1) = "b"
+    grid(2, 2) = CVErr(xlErrNA)
+    app.SelectBox("grid").AtRect(200, 220, 150, 22).ItemsFrom grid
+    transcript = transcript & "|grid=" & app.SelectBox("grid").ItemCount & ":" & _
+        app.SelectBox("grid").ItemTextAt(3)
+    app.SelectBox("nulls").AtRect(400, 180, 150, 22).ItemsFrom Array("x", Null, "y")
+    transcript = transcript & "|nullSkipped=" & app.SelectBox("nulls").ItemCount
+
+    app.CheckList("cl").Focus
+    TypeText "zz"
+    RdxKeyChar " "
+    transcript = transcript & "|emptySelectAllQuiet=" & gChangeCount
+    ReDimUI.EndKeyboardFocus
+
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid90_tl__al3"
+    app.TransferList("tl").AddItem "Z", 1
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid90_tl__mvr"
+    transcript = transcript & "|selectionFollows=" & app.TransferList("tl").ChosenTextAt(1)
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid90_tl__al2"
+    app.TransferList("tl").Items "P", "Q"
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid90_tl__mvr"
+    transcript = transcript & "|replaceClears=" & app.TransferList("tl").ChosenCount
+
+    app.TransferList("tf").Focus
+    TypeText "ap"
+    RdxKeyChar "{DOWN}"
+    RdxKeyChar " "
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid90_tf__mvr"
+    RdxKeyChar " "
+    RdxKeyChar "{ESC}"
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid90_tf__mvr"
+    transcript = transcript & "|hiddenCursorInert=" & app.TransferList("tf").ChosenCount
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid90_tf__al2"
+    TypeText "ap"
+    transcript = transcript & "|hiddenSelectionMutes=" & CStr( _
+        InkOf(host, "rdm_wid90_tf__mvr") = app.Theme.OnMutedColor)
+    RdxReleaseKeys
+    ReDimUI.AutoPump True
+    TestItemEdits = transcript
+End Function

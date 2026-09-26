@@ -133,13 +133,20 @@ All fluent, all return the component:
   of zero or less.
 - Item lists (`SelectBox`, `ComboBox`, `RadioGroup`, `TransferList`, `CheckList`):
   `Items("A", "B", ...)` replaces; `ItemsFrom(source)` replaces from a 1D array, a
-  Collection, a Range (one item per non-empty cell), or a ROneCOne sequence;
-  `AddItem(text, atPosition)` appends or inserts; `RemoveItem(indexOrText)`; `ClearItems`;
+  Collection, a Range (one item per non-empty cell) or the 2D array its `Value` gives,
+  read row by row, or a ROneCOne sequence. `Null` and `Empty` entries list nothing, and
+  an error value lists as its cell shows it, such as `#N/A`.
+  `AddItem(text, atPosition)` appends or inserts; `RemoveItem(indexOrText)` removes by
+  position, or by text when given a String, so `RemoveItem "1"` removes the item named
+  "1"; `ClearItems`;
   read back with `ItemCount` and `ItemTextAt(position)`, and `ItemPosition(text)` finds
   an item by its text, ignoring case (0 for none). The selected item survives inserts
-  and unrelated removals; removing it clears the selection to the placeholder. `Items`
-  and `ItemsFrom` keep a `CheckList`'s checks on the items the new list still holds, by
-  text, so a rebuild keeps what the user checked. A
+  and unrelated removals; removing it clears the selection to the placeholder. So do a
+  transfer list's selected rows, a check list's checks, and an open list's highlight.
+  `Items` and `ItemsFrom` keep the pick, and a `CheckList`'s checks, on the items the new
+  list still holds, by text, so a rebuild keeps what the user picked or checked; a pick
+  whose item is gone clears to the placeholder, and a transfer list's selection on the
+  available side clears. A
   `RadioGroup` or `CheckList` left with no items shows nothing until items return.
   Programmatic mutations re-render but do not write `WritesTo` state or fire `OnChange`;
   those belong to user interaction and explicit `SetState`. The one exception is the first
@@ -198,7 +205,7 @@ All fluent, all return the component:
   reads it as `ReDimUI.Sender.TagValue`, so one procedure can serve three Start buttons
   instead of three one-line wrappers.
 - Keyboard: `TabIndex(n)` orders Tab, `Focus` gives the control keyboard focus,
-  `AccessKey(letter)` binds Alt+letter for a button or tick box, `Shortcut(keyCode)` binds
+  `AccessKey(letter)` binds Alt+letter that clicks the control, `Shortcut(keyCode)` binds
   a keyboard shortcut such as `"^s"` for Ctrl+S that clicks the control, and `Clearable`
   gives a float TextInput or ComboBox a clear button (see
   [Keyboard focus for every control](#keyboard-focus-for-every-control)).
@@ -224,7 +231,9 @@ All fluent, all return the component:
 
 Handlers are zero-argument public procedures referenced as `"Module.Proc"`. Inside a handler,
 `ReDimUI.Sender` carries who fired and `ReDimUI.SenderPart` names the clicked sub-shape when a
-composite widget fired (toggle knob, checkbox caption, select option).
+composite widget fired (toggle knob, checkbox caption, select option). A handler a key fires,
+an arrow on a SelectBox or Enter on a menu command, sees the same `Sender` a click would,
+and an error it raises reaches the app's `OnError` handler as a click's does.
 
 ## The drawn control family
 
@@ -712,10 +721,13 @@ over a list with the keys in the field. The list holds, in this order:
 
 Typing filters the list and bolds what matched; the arrows walk it. Enter or a click
 closes the palette, gives the keys back to the control that had them, and runs the
-entry. An app entry runs its handler with the app as `ReDimUI.SenderApp`, whose
+entry: the one highlighted, or with none highlighted the top match. Enter with nothing
+matching leaves the palette open; it never commits the typed text or clicks the app's
+`DefaultButton`. An app entry runs its handler with the app as `ReDimUI.SenderApp`, whose
 `LastCommand` names it. A button entry clicks the button, with its debounce, busy state,
 and handlers. A menu entry runs through the menu. Esc closes the list and then the
-palette, and so does a click anywhere else; leaving it never runs what was typed. A
+palette, and so does a click or press anywhere else; leaving it never runs what was
+typed. Opening it again while it is open keeps the control it gives the keys back to. A
 text listed twice keeps its first entry.
 
 ```vba
@@ -826,7 +838,9 @@ keep the keys.
   character of its text and clicks the control on Alt+S while its sheet is in front. The
   chords are bound with `Application.OnKey` only while such a sheet is active, and while
   bound they take that Alt+letter from Excel, so pick letters your users do not need for
-  the ribbon. An ampersand in the text stays literal.
+  the ribbon. An ampersand in the text stays literal. It goes on the controls
+  `Shortcut` takes, below; any other raises an error, where a RadioGroup picked its first
+  item.
 - Shortcuts: `Shortcut "^s"` clicks the control on Ctrl+S while its sheet is in front,
   exactly as a mouse click does: the same handler, the control as `ReDimUI.Sender`, and
   nothing while it is disabled, busy, or hidden, when the next control declaring the key

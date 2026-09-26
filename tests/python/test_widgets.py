@@ -1735,3 +1735,54 @@ def test_list_move_keys(run_widgets):
     assert facts["tableEnd"] == "Row30"
     assert facts["tableDownStops"] == "Row30"
     assert facts["tablePageUp"] == "Row25"
+
+
+def test_key_routing(run_widgets):
+    facts = parse_transcript(run_widgets("TestKeyRouting"))
+    assert facts["selectSender"] == "pick", "a key's OnChange must see the control as Sender"
+    assert facts["tabsSender"] == "tabs"
+    assert facts["stepperSender"] == "qty/3"
+    assert facts["altUpCloses"] == "True", "Alt+Up closes an open menu and runs nothing"
+    assert facts["menuSender"] == "Plain/1", (
+        "Enter on a command without a handler runs the menu's OnClick with the menu as Sender"
+    )
+    assert facts["deadMenuDraws"] == "True", "a menu of disabled commands still opens by key"
+    assert facts["paletteTopMatch"] == "app:Export report/0", (
+        "Enter in the palette runs its top match and never clicks the default button"
+    )
+    assert facts["paletteNoMatch"] == "True", "with no match, Enter leaves the palette open"
+    assert facts["pressCloses"] == "True", "a press elsewhere closes the palette"
+    assert facts["dialogKeepsFocus"] == "True", "Tab in a one-button dialog keeps focus on it"
+    assert facts["focusFromBehindHolds"] == "True", (
+        "focus given while the sheet is behind holds when the sheet comes forward"
+    )
+    assert facts["pickFiresInput"] == "Apple/1", "a combo pick fires the OnInput still waiting"
+    assert facts["pickRechecks"] == "True", "a combo pick clears a Required message"
+
+
+def test_item_edits(run_widgets):
+    facts = parse_transcript(run_widgets("TestItemEdits"))
+    assert facts["restrictSkipsDisabled"] == "Basil", (
+        "RestrictToItems commits the first item that can be picked"
+    )
+    assert facts["exactDisabledRefused"] == "Basil"
+    assert facts["noPickableCommits"] == "True", (
+        "with only disabled matches, Down highlights nothing and Enter commits the text"
+    )
+    assert facts["disabledHighlightRefused"] == "1"
+    assert facts["highlightFollows"] == "C", "an open list's highlight follows its item"
+    assert facts["removeByText"] == "2:3,2", "RemoveItem takes a String as the item's text"
+    assert facts["commandBack"] == "1", "AddCommand brings back a row RemoveItem took"
+    assert facts["badIconClean"] == "True/2", "a bad icon name raises before anything is kept"
+    assert facts["radioAccessRefused"] == "True"
+    assert facts["pickKeptByText"] == "Paris/3", "ItemsFrom keeps the pick on its item"
+    assert facts["valueBeforeItems"] == "2"
+    assert facts["grid"] == "3:#N/A", "a 2D array reads as a range does"
+    assert facts["nullSkipped"] == "2"
+    assert facts["emptySelectAllQuiet"] == "0", "select-all that changes nothing fires nothing"
+    assert facts["selectionFollows"] == "C", "the available side's selection follows AddItem"
+    assert facts["replaceClears"] == "1", "Items clears the available side's selection"
+    assert facts["hiddenCursorInert"] == "1", "Space on a row the filter hides selects nothing"
+    assert facts["hiddenSelectionMutes"] == "True", (
+        "> reads muted while every selected row is filtered out"
+    )
