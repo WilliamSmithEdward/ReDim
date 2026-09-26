@@ -1693,3 +1693,45 @@ def test_face_clears_caret(run_widgets):
     assert facts["pick"] == "True", "a SelectBox's long text must stop short of its caret"
     assert facts["due"] == "True", "a DatePicker's long date must stop short of its caret"
     assert facts["find"] == "True", "a ComboBox's long text must stop short of its caret"
+
+
+def test_list_move_keys(run_widgets):
+    facts = parse_transcript(run_widgets("TestListMoveKeys"))
+    # A closed SelectBox pages by its eight list rows and stops at the ends.
+    assert facts["closedPageDown"] == "13"
+    assert facts["closedPageUp"] == "5"
+    assert facts["closedEnd"] == "20"
+    assert facts["closedDownStops"] == "20"
+    assert facts["closedHome"] == "1"
+    assert facts["closedUpStops"] == "1"
+    assert facts["closedRight"] == "2", "Right steps a closed SelectBox as Down does"
+    assert facts["closedLeft"] == "1"
+    # An open list moves its highlight; Enter takes it.
+    assert facts["openPageDown"] == "9"
+    assert facts["openEnd"] == "20"
+    assert facts["openPageUp"] == "12"
+    assert facts["openHomeDown"] == "2"
+    assert facts["openSideInert"] == "2", "Left and Right do not move an open list"
+    # Filtered, the keys walk the eleven matches: Item01, Item10 to Item19.
+    assert facts["filterPageDown"] == "17"
+    assert facts["filterEnd"] == "19"
+    assert facts["filterPageUp"] == "11"
+    assert facts["filterHomeDown"] == "10"
+    # A CheckList pages by its four-row window.
+    assert facts["checkPageDown"] == "5"
+    assert facts["checkEnd"] == "20"
+    assert facts["checkPageUp"] == "16"
+    assert facts["checkDownUp"] == "17"
+    # A TransferList pages by the five rows a panel shows.
+    assert facts["transferPageDown"] == "Item06"
+    assert facts["transferEnd"] == "Item20"
+    assert facts["transferPageUp"] == "Item14"
+    assert facts["transferHome"] == "Item01/4"
+    assert facts["chosenEnd"] == "3/Item14", "End on the chosen panel reaches its last row"
+    # A Table pages by its five row slots.
+    assert facts["tableHome"] == "Row01"
+    assert facts["tableUpStops"] == "Row01"
+    assert facts["tablePageDown"] == "Row06"
+    assert facts["tableEnd"] == "Row30"
+    assert facts["tableDownStops"] == "Row30"
+    assert facts["tablePageUp"] == "Row25"

@@ -6282,3 +6282,176 @@ Public Function TestFaceClearsCaret() As String
     ReDimUI.AutoPump True
     TestFaceClearsCaret = Mid$(transcript, 2)
 End Function
+
+' The items a CheckList has checked, joined with commas, which it then
+' unchecks, so each key in a test reads on its own.
+Private Function TakeChecked(ByVal listValue As ReDimUI) As String
+    Dim itemNo As Long
+
+    For itemNo = 1 To listValue.ItemCount
+        If listValue.IsItemChecked(itemNo) Then
+            TakeChecked = TakeChecked & "," & itemNo
+            listValue.SetItemChecked itemNo, False
+        End If
+    Next itemNo
+    TakeChecked = Mid$(TakeChecked, 2)
+End Function
+
+' The arrows, Page Up, Page Down, Home, and End on each list that walks
+' rows: a closed and an open SelectBox, a filtered one, a CheckList, a
+' TransferList, and a Table. A page is the list's window of rows.
+Public Function TestListMoveKeys() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim transcript As String
+    Dim names(0 To 19) As String
+    Dim rowNo As Long
+
+    For rowNo = 0 To 19
+        names(rowNo) = "Item" & Format$(rowNo + 1, "00")
+    Next rowNo
+    ReDimUI.AutoPump False
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "wid88")
+    app.SelectBox("sel").AtRect(24, 24, 150, 22).ItemsFrom(names).Value 5
+    app.SelectBox("flt").AtRect(24, 60, 150, 22).ItemsFrom(names).Filterable
+    app.CheckList("chk").AtRect(220, 24, 170, 100).ItemsFrom names
+    app.TransferList("trn").AtRect(24, 300, 360, 140).ItemsFrom names
+    app.Table("tbl").AtRect(400, 150, 300, 160).Columns("Name").WritesTo "tblState"
+    For rowNo = 1 To 30
+        app.Table("tbl").AddRow "Row" & Format$(rowNo, "00")
+    Next rowNo
+    app.Render
+
+    app.SelectBox("sel").Focus
+    RdxKeyChar "{PGDN}"
+    transcript = "closedPageDown=" & app.SelectBox("sel").CurrentValue
+    RdxKeyChar "{PGUP}"
+    transcript = transcript & "|closedPageUp=" & app.SelectBox("sel").CurrentValue
+    RdxKeyChar "{END}"
+    transcript = transcript & "|closedEnd=" & app.SelectBox("sel").CurrentValue
+    RdxKeyChar "{DOWN}"
+    transcript = transcript & "|closedDownStops=" & app.SelectBox("sel").CurrentValue
+    RdxKeyChar "{HOME}"
+    transcript = transcript & "|closedHome=" & app.SelectBox("sel").CurrentValue
+    RdxKeyChar "{UP}"
+    transcript = transcript & "|closedUpStops=" & app.SelectBox("sel").CurrentValue
+    RdxKeyChar "{RIGHT}"
+    transcript = transcript & "|closedRight=" & app.SelectBox("sel").CurrentValue
+    RdxKeyChar "{LEFT}"
+    transcript = transcript & "|closedLeft=" & app.SelectBox("sel").CurrentValue
+
+    RdxKeyChar " "
+    RdxKeyChar "{PGDN}"
+    RdxKeyChar "{ENTER}"
+    transcript = transcript & "|openPageDown=" & app.SelectBox("sel").CurrentValue
+    RdxKeyChar " "
+    RdxKeyChar "{END}"
+    RdxKeyChar "{ENTER}"
+    transcript = transcript & "|openEnd=" & app.SelectBox("sel").CurrentValue
+    RdxKeyChar " "
+    RdxKeyChar "{PGUP}"
+    RdxKeyChar "{ENTER}"
+    transcript = transcript & "|openPageUp=" & app.SelectBox("sel").CurrentValue
+    RdxKeyChar " "
+    RdxKeyChar "{HOME}"
+    RdxKeyChar "{UP}"
+    RdxKeyChar "{DOWN}"
+    RdxKeyChar "{ENTER}"
+    transcript = transcript & "|openHomeDown=" & app.SelectBox("sel").CurrentValue
+    RdxKeyChar " "
+    RdxKeyChar "{LEFT}"
+    RdxKeyChar "{ENTER}"
+    transcript = transcript & "|openSideInert=" & app.SelectBox("sel").CurrentValue
+
+    ' "1" leaves Item01 and Item10 to Item19: eleven matches.
+    app.SelectBox("flt").Focus
+    RdxKeyChar "1"
+    RdxKeyChar "{PGDN}"
+    RdxKeyChar "{ENTER}"
+    transcript = transcript & "|filterPageDown=" & app.SelectBox("flt").CurrentValue
+    RdxKeyChar "1"
+    RdxKeyChar "{END}"
+    RdxKeyChar "{ENTER}"
+    transcript = transcript & "|filterEnd=" & app.SelectBox("flt").CurrentValue
+    RdxKeyChar "1"
+    RdxKeyChar "{END}"
+    RdxKeyChar "{PGUP}"
+    RdxKeyChar "{ENTER}"
+    transcript = transcript & "|filterPageUp=" & app.SelectBox("flt").CurrentValue
+    RdxKeyChar "1"
+    RdxKeyChar "{END}"
+    RdxKeyChar "{HOME}"
+    RdxKeyChar "{DOWN}"
+    RdxKeyChar "{DOWN}"
+    RdxKeyChar "{UP}"
+    RdxKeyChar "{ENTER}"
+    transcript = transcript & "|filterHomeDown=" & app.SelectBox("flt").CurrentValue
+
+    app.CheckList("chk").Focus
+    RdxKeyChar "{HOME}"
+    RdxKeyChar "{DOWN}"
+    RdxKeyChar "{PGDN}"
+    RdxKeyChar " "
+    transcript = transcript & "|checkPageDown=" & TakeChecked(app.CheckList("chk"))
+    RdxKeyChar "{END}"
+    RdxKeyChar " "
+    transcript = transcript & "|checkEnd=" & TakeChecked(app.CheckList("chk"))
+    RdxKeyChar "{PGUP}"
+    RdxKeyChar " "
+    transcript = transcript & "|checkPageUp=" & TakeChecked(app.CheckList("chk"))
+    RdxKeyChar "{DOWN}"
+    RdxKeyChar "{DOWN}"
+    RdxKeyChar "{UP}"
+    RdxKeyChar " "
+    transcript = transcript & "|checkDownUp=" & TakeChecked(app.CheckList("chk"))
+
+    app.TransferList("trn").Focus
+    RdxKeyChar "{HOME}"
+    RdxKeyChar "{PGDN}"
+    RdxKeyChar "{ENTER}"
+    With app.TransferList("trn")
+        transcript = transcript & "|transferPageDown=" & .ChosenTextAt(.ChosenCount)
+    End With
+    RdxKeyChar "{END}"
+    RdxKeyChar "{ENTER}"
+    With app.TransferList("trn")
+        transcript = transcript & "|transferEnd=" & .ChosenTextAt(.ChosenCount)
+    End With
+    RdxKeyChar "{PGUP}"
+    RdxKeyChar "{ENTER}"
+    With app.TransferList("trn")
+        transcript = transcript & "|transferPageUp=" & .ChosenTextAt(.ChosenCount)
+    End With
+    RdxKeyChar "{HOME}"
+    RdxKeyChar "{DOWN}"
+    RdxKeyChar "{UP}"
+    RdxKeyChar "{UP}"
+    RdxKeyChar "{ENTER}"
+    With app.TransferList("trn")
+        transcript = transcript & "|transferHome=" & .ChosenTextAt(.ChosenCount) & "/" & .ChosenCount
+    End With
+    RdxKeyChar "{RIGHT}"
+    RdxKeyChar "{END}"
+    RdxKeyChar "{ENTER}"
+    With app.TransferList("trn")
+        transcript = transcript & "|chosenEnd=" & .ChosenCount & "/" & .ChosenTextAt(.ChosenCount)
+    End With
+
+    app.Table("tbl").Focus
+    RdxKeyChar "{HOME}"
+    transcript = transcript & "|tableHome=" & CStr(app.State("tblState"))
+    RdxKeyChar "{UP}"
+    transcript = transcript & "|tableUpStops=" & CStr(app.State("tblState"))
+    RdxKeyChar "{PGDN}"
+    transcript = transcript & "|tablePageDown=" & CStr(app.State("tblState"))
+    RdxKeyChar "{END}"
+    transcript = transcript & "|tableEnd=" & CStr(app.State("tblState"))
+    RdxKeyChar "{DOWN}"
+    transcript = transcript & "|tableDownStops=" & CStr(app.State("tblState"))
+    RdxKeyChar "{PGUP}"
+    transcript = transcript & "|tablePageUp=" & CStr(app.State("tblState"))
+    RdxReleaseKeys
+    ReDimUI.AutoPump True
+    TestListMoveKeys = transcript
+End Function

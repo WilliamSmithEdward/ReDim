@@ -1142,14 +1142,14 @@ End Sub
 ' forward for its save prompt, and binding keys or arming the pump then
 ' would outlive the code.
 Private Sub mExcelApp_SheetActivate(ByVal Sh As Object)
-    If mCloseHeld Then Exit Sub
-    SyncKeyCapture
-    RefreshAccessKeys
-    If HasPendingWork() Then RequestPump
-    CheckSystemLook
+    SheetCameForward
 End Sub
 
 Private Sub mExcelApp_WorkbookActivate(ByVal Wb As Workbook)
+    SheetCameForward
+End Sub
+
+Private Sub SheetCameForward()
     If mCloseHeld Then Exit Sub
     SyncKeyCapture
     RefreshAccessKeys
@@ -7510,11 +7510,7 @@ Friend Sub SyncInputFromSheet(ByVal hostApp As ReDimUI, ByVal changed As Range)
         ElseIf LenB(cellText) > 0 _
             And FilterItems(cellText).Count > 0 Then
             mValue = 0
-            If Not mSelectOpen Then NoteListOpened
-            mSelectOpen = True
-            mFilterPristine = False
-            mListOffset = 0
-            mListHighlight = 0
+            OpenComboMatches
         Else
             mValue = 0
             mSelectOpen = False
@@ -7796,6 +7792,15 @@ Friend Function ShapeSurelyAbsent(ByVal drawnName As String) As Boolean
 
     If Not mSurfaceFresh Then Exit Function
     ShapeSurelyAbsent = Not TryGetItem(mDrawnShapes, drawnName, drawnMark)
+End Function
+
+' A shape of the app's by name, or Nothing when it is surely absent or the
+' sheet does not hold it.
+Friend Function DrawnShape(ByVal hostSheet As Worksheet, ByVal drawnName As String) As Shape
+    If ShapeSurelyAbsent(drawnName) Then Exit Function
+    On Error Resume Next
+    Set DrawnShape = hostSheet.Shapes(drawnName)
+    On Error GoTo 0
 End Function
 
 Friend Sub NoteShapeDrawn(ByVal drawnName As String)
@@ -8181,35 +8186,14 @@ Private Function JoinedSig(ByVal store As Collection) As String
     If store.Count > 0 Then JoinedSig = "|" & JoinedText(store, "|")
 End Function
 
-' A collection's values joined in order: one For Each into an array and
-' one Join, where indexed reads and repeated concatenation both went
-' quadratic on long lists.
-' A list's item values in order, joined for a WritesTo state; texts for
-' items without a value.
-Private Function JoinedValues( _
-    ByVal store As Collection, _
-    ByVal joinWith As String _
-) As String
-    Dim parts() As String
-    Dim entry As Variant
-    Dim idx As Long
-
-    If mItemValueMap Is Nothing Then
-        JoinedValues = JoinedText(store, joinWith)
-        Exit Function
-    End If
-    If store.Count = 0 Then Exit Function
-    ReDim parts(1 To store.Count)
-    For Each entry In store
-        idx = idx + 1
-        parts(idx) = ItemStateText(CStr(entry))
-    Next entry
-    JoinedValues = Join(parts, joinWith)
-End Function
-
+' A collection's values joined in order, or with asValues its item texts
+' as the values they stand for, for a WritesTo state: one For Each into an
+' array and one Join, where indexed reads and repeated concatenation both
+' went quadratic on long lists.
 Private Function JoinedText( _
     ByVal store As Collection, _
-    ByVal joinWith As String _
+    ByVal joinWith As String, _
+    Optional ByVal asValues As Boolean _
 ) As String
     Dim parts() As String
     Dim entry As Variant
@@ -8219,7 +8203,11 @@ Private Function JoinedText( _
     ReDim parts(1 To store.Count)
     For Each entry In store
         idx = idx + 1
-        parts(idx) = CStr(entry)
+        If asValues Then
+            parts(idx) = ItemStateText(CStr(entry))
+        Else
+            parts(idx) = CStr(entry)
+        End If
     Next entry
     JoinedText = Join(parts, joinWith)
 End Function
@@ -8418,7 +8406,7 @@ End Sub
 ' to state and fires OnChange once. Selection clicks fire nothing.
 Private Sub CommitTransferChange(ByVal hostApp As ReDimUI)
     If LenB(mWritesToKey) > 0 Then
-        WriteOwnKey hostApp, JoinedValues(mChosenItems, ", ")
+        WriteOwnKey hostApp, JoinedText(mChosenItems, ", ", True)
     End If
     RunChangeHandler hostApp
 End Sub
@@ -9126,7 +9114,7 @@ Friend Sub SeedWritesTo(ByVal hostApp As ReDimUI)
             If LenB(seedValue) = 0 Then Exit Sub
         Case KIND_TRANSFER
             If mChosenItems Is Nothing Then Exit Sub
-            seedValue = JoinedValues(mChosenItems, ", ")
+            seedValue = JoinedText(mChosenItems, ", ", True)
             If LenB(seedValue) = 0 Then Exit Sub
         Case KIND_TOGGLE, KIND_TICKBOX, KIND_EXPANDER
             seedValue = mChecked
@@ -9444,11 +9432,7 @@ Private Function EnsureShape(ByVal hostSheet As Worksheet) As Shape
     Dim hostApp As ReDimUI
 
     Set hostApp = OwnerApp
-    If Not hostApp.ShapeSurelyAbsent(ShapeName) Then
-        On Error Resume Next
-        Set mainShape = hostSheet.Shapes(ShapeName)
-        On Error GoTo 0
-    End If
+    Set mainShape = hostApp.DrawnShape(hostSheet, ShapeName)
     If Not mainShape Is Nothing Then
         ' An adopted shape from an earlier framework version can carry the
         ' wrong geometry type; rebuild it rather than styling the wrong form.
@@ -9588,16 +9572,16 @@ Private Sub ShowPart(ByVal partShape As Shape, ByVal visibleState As MsoTriState
     partShape.OnAction = mAppliedOnAction
 End Sub
 
-' A part filled with one color: with no edge, or edged in edgeRgb at
-' edgeWeight points.
+' A part filled with one color, or clear for a fill of -1: with no edge,
+' or edged in edgeRgb at edgeWeight points.
 Private Sub PaintPart( _
     ByVal partShape As Shape, _
     ByVal fillRgb As Long, _
     Optional ByVal edgeRgb As Long = -1, _
     Optional ByVal edgeWeight As Single = 1 _
 )
-    partShape.Fill.Visible = msoTrue
-    partShape.Fill.ForeColor.RGB = fillRgb
+    partShape.Fill.Visible = BoolToMso(fillRgb >= 0)
+    If fillRgb >= 0 Then partShape.Fill.ForeColor.RGB = fillRgb
     If edgeRgb < 0 Then
         partShape.Line.Visible = msoFalse
     Else
@@ -9621,11 +9605,7 @@ Private Function EnsurePartShape( _
 
     partShapeName = ShapeName & PART_SEPARATOR & partName
     Set hostApp = OwnerApp
-    If Not hostApp.ShapeSurelyAbsent(partShapeName) Then
-        On Error Resume Next
-        Set partShape = hostSheet.Shapes(partShapeName)
-        On Error GoTo 0
-    End If
+    Set partShape = hostApp.DrawnShape(hostSheet, partShapeName)
     wasCreated = (partShape Is Nothing)
     If wasCreated Then
         Set partShape = hostSheet.Shapes.AddShape(shapeType, mLeft, mTop, 8, 8)
@@ -9654,12 +9634,7 @@ Private Function CopyPartShape( _
 
     partShapeName = ShapeName & PART_SEPARATOR & partName
     Set hostApp = OwnerApp
-    If Not hostApp.ShapeSurelyAbsent(partShapeName) Then
-        On Error Resume Next
-        Set partShape = hostSheet.Shapes(partShapeName)
-        On Error GoTo 0
-        If Not partShape Is Nothing Then Exit Function
-    End If
+    If Not hostApp.DrawnShape(hostSheet, partShapeName) Is Nothing Then Exit Function
     If hostSheet.ProtectDrawingObjects Then
         protectionLifted = hostApp.LiftSurfaceProtection()
         If Not protectionLifted Then Exit Function
@@ -10808,39 +10783,24 @@ Private Sub HandleSelectKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
     If mSelectOpen Then
         anchorItem = mListHighlight
         If anchorItem < 1 Then anchorItem = CLng(mValue)
-        stepDirection = 1
-        Select Case keyText
-            Case "{UP}"
-                aimRow = anchorItem - 1
-                stepDirection = -1
-            Case "{DOWN}"
-                aimRow = anchorItem + 1
-            Case "{PGUP}"
-                aimRow = anchorItem - mListRows
-                stepDirection = -1
-            Case "{PGDN}"
-                aimRow = anchorItem + mListRows
-            Case "{HOME}"
-                aimRow = 1
-            Case "{END}"
-                aimRow = itemTotal
-                stepDirection = -1
-            Case "{ENTER}", " ", "{ALTUP}"
-                If mListHighlight >= 1 Then
-                    If PickSelectItem(hostApp, mListHighlight) Then
-                        RunClickHandlers hostApp
+        If Not MoveKeyAim(keyText, anchorItem, 1, itemTotal, mListRows, aimRow, stepDirection) Then
+            Select Case keyText
+                Case "{ENTER}", " ", "{ALTUP}"
+                    If mListHighlight >= 1 Then
+                        If PickSelectItem(hostApp, mListHighlight) Then
+                            RunClickHandlers hostApp
+                        End If
+                    Else
+                        CloseDropList
                     End If
-                Else
+                    Exit Sub
+                Case "{F4}", "{ALTDOWN}"
                     CloseDropList
-                End If
-                Exit Sub
-            Case "{F4}", "{ALTDOWN}"
-                CloseDropList
-                Exit Sub
-            Case Else
-                aimRow = TypeAheadItem(keyText, anchorItem)
-                If aimRow = 0 Then Exit Sub
-        End Select
+                    Exit Sub
+            End Select
+            aimRow = TypeAheadItem(keyText, anchorItem)
+            If aimRow = 0 Then Exit Sub
+        End If
         aimRow = PickableNear(aimRow, stepDirection)
         If aimRow = 0 Then Exit Sub
         HighlightListItem aimRow
@@ -10857,40 +10817,66 @@ Private Sub HandleSelectKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
         End Select
         Exit Sub
     End If
+    ' Left and Right step a closed list as Up and Down do.
     anchorItem = CLng(mValue)
-    stepDirection = 1
-    Select Case keyText
-        Case "{UP}", "{LEFT}"
-            aimRow = anchorItem - 1
-            stepDirection = -1
-        Case "{DOWN}", "{RIGHT}"
-            aimRow = anchorItem + 1
-        Case "{PGUP}"
-            aimRow = anchorItem - mListRows
-            stepDirection = -1
-        Case "{PGDN}"
-            aimRow = anchorItem + mListRows
-        Case "{HOME}"
-            aimRow = 1
-        Case "{END}"
-            aimRow = itemTotal
-            stepDirection = -1
-        Case " ", "{ALTDOWN}", "{F4}"
-            OpenDropList hostApp.Sheet
-            aimRow = PickableNear(IIf(anchorItem >= 1, anchorItem, 1), 1)
-            If aimRow > 0 Then HighlightListItem aimRow
-            Exit Sub
-        Case "{ENTER}"
-            hostApp.ClickDefaultButton
-            Exit Sub
-        Case Else
-            aimRow = TypeAheadItem(keyText, anchorItem)
-            If aimRow = 0 Then Exit Sub
-    End Select
+    If Not MoveKeyAim(keyText, anchorItem, 1, itemTotal, mListRows, aimRow, stepDirection, True) Then
+        Select Case keyText
+            Case " ", "{ALTDOWN}", "{F4}"
+                OpenDropList hostApp.Sheet
+                aimRow = PickableNear(IIf(anchorItem >= 1, anchorItem, 1), 1)
+                If aimRow > 0 Then HighlightListItem aimRow
+                Exit Sub
+            Case "{ENTER}"
+                hostApp.ClickDefaultButton
+                Exit Sub
+        End Select
+        aimRow = TypeAheadItem(keyText, anchorItem)
+        If aimRow = 0 Then Exit Sub
+    End If
     aimRow = PickableNear(aimRow, stepDirection)
     If aimRow = 0 Then Exit Sub
     If PickSelectItem(hostApp, aimRow) Then RunClickHandlers hostApp
 End Sub
+
+' Where an arrow, Page Up, Page Down, Home, or End aims from anchorRow
+' among rows firstRow to lastRow, a page being pageRows, and which way to
+' look from there for a row that can take the aim. sideArrows lets Left
+' and Right step as Up and Down do. False for any other key.
+Private Function MoveKeyAim( _
+    ByVal keyText As String, _
+    ByVal anchorRow As Long, _
+    ByVal firstRow As Long, _
+    ByVal lastRow As Long, _
+    ByVal pageRows As Long, _
+    ByRef aimRow As Long, _
+    ByRef stepDirection As Long, _
+    Optional ByVal sideArrows As Boolean _
+) As Boolean
+    stepDirection = 1
+    If Not sideArrows Then
+        If keyText = "{LEFT}" Or keyText = "{RIGHT}" Then Exit Function
+    End If
+    MoveKeyAim = True
+    Select Case keyText
+        Case "{UP}", "{LEFT}"
+            aimRow = anchorRow - 1
+            stepDirection = -1
+        Case "{DOWN}", "{RIGHT}"
+            aimRow = anchorRow + 1
+        Case "{PGUP}"
+            aimRow = anchorRow - pageRows
+            stepDirection = -1
+        Case "{PGDN}"
+            aimRow = anchorRow + pageRows
+        Case "{HOME}"
+            aimRow = firstRow
+        Case "{END}"
+            aimRow = lastRow
+            stepDirection = -1
+        Case Else
+            MoveKeyAim = False
+    End Select
+End Function
 
 ' A Filterable list's keys. Letters and Backspace edit the filter, and a
 ' letter on a closed list opens it; while the filter holds letters the
@@ -10917,24 +10903,8 @@ Private Function SelectFilterKey(ByVal hostApp As ReDimUI, ByVal keyText As Stri
         Exit Function
     End If
     If Not mSelectOpen Or LenB(mSelectFilter) = 0 Or mListMatches Is Nothing Then Exit Function
-    stepDirection = 1
-    Select Case keyText
-        Case "{UP}"
-            aimMatch = mListHighlight - 1
-            stepDirection = -1
-        Case "{DOWN}"
-            aimMatch = mListHighlight + 1
-        Case "{PGUP}"
-            aimMatch = mListHighlight - mListRows
-            stepDirection = -1
-        Case "{PGDN}"
-            aimMatch = mListHighlight + mListRows
-        Case "{HOME}"
-            aimMatch = 1
-        Case "{END}"
-            aimMatch = mListMatches.Count
-            stepDirection = -1
-        Case "{ENTER}", "{ALTUP}"
+    If Not MoveKeyAim(keyText, mListHighlight, 1, mListMatches.Count, mListRows, aimMatch, stepDirection) Then
+        If keyText = "{ENTER}" Or keyText = "{ALTUP}" Then
             pickedItem = HighlightedItem()
             If pickedItem >= 1 Then
                 If PickSelectItem(hostApp, pickedItem) Then RunClickHandlers hostApp
@@ -10942,10 +10912,9 @@ Private Function SelectFilterKey(ByVal hostApp As ReDimUI, ByVal keyText As Stri
                 CloseDropList
             End If
             SelectFilterKey = True
-            Exit Function
-        Case Else
-            Exit Function
-    End Select
+        End If
+        Exit Function
+    End If
     aimMatch = PickableMatchNear(aimMatch, stepDirection)
     If aimMatch > 0 Then HighlightListItem aimMatch
     SelectFilterKey = True
@@ -11056,48 +11025,28 @@ Private Sub HandleCheckListKey(ByVal hostApp As ReDimUI, ByVal keyText As String
     Dim firstRow As Long
     Dim aimRow As Long
     Dim shownTotal As Long
-    Dim pageTotal As Long
     Dim windowRows As Long
+    Dim stepDirection As Long
 
     If ItemCount = 0 Then Exit Sub
     If TypeListFilter(keyText) Then Exit Sub
     firstRow = IIf(mSelectAllRow, 0, 1)
-    shownTotal = PanelShownCount(0)
+    RowListWindow shownTotal, windowRows
     ' The cursor walks shown rows (0 is select-all); aimRow is a shown
-    ' position until the end, where it turns back into an item.
+    ' position until the end, where it turns back into an item. A page
+    ' is the window, and a list that shows every row pages to its ends.
     aimRow = PanelShownPosition(0, mKeyRow)
-    Select Case keyText
-        Case "{UP}"
-            aimRow = aimRow - 1
-        Case "{DOWN}"
-            aimRow = aimRow + 1
-        Case "{HOME}"
-            aimRow = firstRow
-        Case "{END}"
-            aimRow = shownTotal
-        Case "{PGUP}", "{PGDN}"
-            ' A windowed list pages by its window; one that shows every
-            ' row jumps to its ends.
-            RowListWindow pageTotal, windowRows
-            If windowRows < ItemCount Then
-                aimRow = aimRow + IIf(keyText = "{PGDN}", windowRows, -windowRows)
-            ElseIf keyText = "{PGUP}" Then
-                aimRow = firstRow
-            Else
-                aimRow = shownTotal
-            End If
-        Case " "
-            If ToggleCheckRow(hostApp, mKeyRow) Then RunClickHandlers hostApp
-            Exit Sub
-        Case "{SELECTALL}"
-            If CheckAllShown(hostApp) Then RunClickHandlers hostApp
-            Exit Sub
-        Case "{ENTER}"
-            hostApp.ClickDefaultButton
-            Exit Sub
-        Case Else
-            Exit Sub
-    End Select
+    If Not MoveKeyAim(keyText, aimRow, firstRow, shownTotal, windowRows, aimRow, stepDirection) Then
+        Select Case keyText
+            Case " "
+                If ToggleCheckRow(hostApp, mKeyRow) Then RunClickHandlers hostApp
+            Case "{SELECTALL}"
+                If CheckAllShown(hostApp) Then RunClickHandlers hostApp
+            Case "{ENTER}"
+                hostApp.ClickDefaultButton
+        End Select
+        Exit Sub
+    End If
     If aimRow < firstRow Then aimRow = firstRow
     If aimRow > shownTotal Then aimRow = shownTotal
     PlaceKeyCursor 0, IIf(aimRow = 0, 0, PanelShownItem(0, aimRow))
@@ -11192,6 +11141,7 @@ Private Sub HandleTransferKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
     Dim rowsShown As Long
     Dim shownPos As Long
     Dim itemNo As Long
+    Dim stepDirection As Long
 
     EnsureTransferCollections
     If TypeListFilter(keyText) Then Exit Sub
@@ -11199,51 +11149,41 @@ Private Sub HandleTransferKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
     ' The cursor walks the rows the panel shows; aimRow is a shown
     ' position until the end, where it turns back into an item.
     aimRow = PanelShownPosition(mKeyPanel, mKeyRow)
-    Select Case keyText
-        Case "{ALTUP}", "{ALTDOWN}"
-            ' Alt+Up and Alt+Down reorder the chosen side from its rows,
-            ' and the window follows the cursor's row.
-            If Not mReorderable Or mKeyPanel <> 1 Then Exit Sub
-            ReorderChosen hostApp, (keyText = "{ALTUP}")
-            aimRow = PanelShownPosition(mKeyPanel, mKeyRow)
-        Case "{UP}"
-            aimRow = aimRow - 1
-        Case "{DOWN}"
-            aimRow = aimRow + 1
-        Case "{HOME}"
-            aimRow = 1
-        Case "{END}"
-            aimRow = PanelShownCount(mKeyPanel)
-        Case "{PGUP}"
-            aimRow = aimRow - rowsShown
-        Case "{PGDN}"
-            aimRow = aimRow + rowsShown
-        Case "{LEFT}"
-            mKeyPanel = 0
-        Case "{RIGHT}"
-            mKeyPanel = 1
-        Case " "
-            If mKeyRow >= 1 And mKeyRow <= TransferPanelCount(mKeyPanel) Then
-                IndexSetToggle mPanelSel(mKeyPanel), mKeyRow
+    If Not MoveKeyAim(keyText, aimRow, 1, PanelShownCount(mKeyPanel), rowsShown, aimRow, stepDirection) Then
+        Select Case keyText
+            Case "{ALTUP}", "{ALTDOWN}"
+                ' Alt+Up and Alt+Down reorder the chosen side from its rows,
+                ' and the window follows the cursor's row.
+                If Not mReorderable Or mKeyPanel <> 1 Then Exit Sub
+                ReorderChosen hostApp, (keyText = "{ALTUP}")
+                aimRow = PanelShownPosition(mKeyPanel, mKeyRow)
+            Case "{LEFT}"
+                mKeyPanel = 0
+            Case "{RIGHT}"
+                mKeyPanel = 1
+            Case " "
+                If mKeyRow >= 1 And mKeyRow <= TransferPanelCount(mKeyPanel) Then
+                    IndexSetToggle mPanelSel(mKeyPanel), mKeyRow
+                    Touch
+                End If
+                Exit Sub
+            Case "{SELECTALL}"
+                ' Ctrl+A selects every row the cursor's panel shows.
+                For shownPos = 1 To PanelShownCount(mKeyPanel)
+                    itemNo = PanelShownItem(mKeyPanel, shownPos)
+                    SetInSet mPanelSel(mKeyPanel), itemNo, True
+                Next shownPos
                 Touch
-            End If
-            Exit Sub
-        Case "{SELECTALL}"
-            ' Ctrl+A selects every row the cursor's panel shows.
-            For shownPos = 1 To PanelShownCount(mKeyPanel)
-                itemNo = PanelShownItem(mKeyPanel, shownPos)
-                SetInSet mPanelSel(mKeyPanel), itemNo, True
-            Next shownPos
-            Touch
-            Exit Sub
-        Case "{ENTER}"
-            If mKeyRow >= 1 And mKeyRow <= TransferPanelCount(mKeyPanel) Then
-                If mPanelSel(mKeyPanel).Count = 0 Then mPanelSel(mKeyPanel).Add mKeyRow
-                TransferSelected hostApp, (mKeyPanel = 0)
-            End If
-        Case Else
-            Exit Sub
-    End Select
+                Exit Sub
+            Case "{ENTER}"
+                If mKeyRow >= 1 And mKeyRow <= TransferPanelCount(mKeyPanel) Then
+                    If mPanelSel(mKeyPanel).Count = 0 Then mPanelSel(mKeyPanel).Add mKeyRow
+                    TransferSelected hostApp, (mKeyPanel = 0)
+                End If
+            Case Else
+                Exit Sub
+        End Select
+    End If
     rowTotal = PanelShownCount(mKeyPanel)
     If aimRow > rowTotal Then aimRow = rowTotal
     If aimRow < 1 Then aimRow = IIf(rowTotal > 0, 1, 0)
@@ -11408,8 +11348,7 @@ Private Sub SyncFieldCaption( _
     captionTop = mTop - noteSize - 8
     If captionTop < 0 Then captionTop = 0
     PlacePart captionShape, mLeft, captionTop, mWidth, noteSize + 7
-    captionShape.Fill.Visible = msoFalse
-    captionShape.Line.Visible = msoFalse
+    PaintPart captionShape, -1
     StyleTextPart captionShape, captionWords, msoAlignLeft, noteSize, False, _
         ResolveDrawnInk(themeValue), themeValue, leftInset:=1, rightInset:=1, _
         textAnchor:=msoAnchorBottom
@@ -11491,8 +11430,7 @@ Private Sub SyncFieldNote( _
     noteShape.Width = mWidth
     If partName = "fh" And mMaxLength > 0 Then noteShape.Width = mWidth - 44
     noteShape.Height = noteSize + 6
-    noteShape.Fill.Visible = msoFalse
-    noteShape.Line.Visible = msoFalse
+    PaintPart noteShape, -1
     StyleTextPart noteShape, noteWords, textAlign, noteSize, False, inkColor, themeValue, _
         leftInset:=2, rightInset:=2, textAnchor:=msoAnchorTop
     ShowPart noteShape, msoTrue
@@ -11839,14 +11777,20 @@ Private Sub ClearFieldText(ByVal hostApp As ReDimUI)
     mCaretPos = 0
     If mKind = KIND_COMBO Then
         mValue = 0
-        If Not mSelectOpen Then NoteListOpened
-        mSelectOpen = True
-        mFilterPristine = False
-        mListOffset = 0
-        mListHighlight = 0
+        OpenComboMatches
     End If
     NoteFieldEdit hostApp
     Touch
+End Sub
+
+' A combo's list opens, or stays open, on the items its text matches,
+' from the top with no row highlighted, as after an edit to the text.
+Private Sub OpenComboMatches()
+    If Not mSelectOpen Then NoteListOpened
+    mSelectOpen = True
+    mFilterPristine = False
+    mListOffset = 0
+    mListHighlight = 0
 End Sub
 
 ' A focused control that is not a text field wears a ring when its app
@@ -11873,10 +11817,7 @@ Private Sub ApplyFocusRing(ByVal hostSheet As Worksheet, ByVal themeValue As ReD
         ringShape.Adjustments(1) = 0.12
         On Error GoTo 0
         PlacePart ringShape, mLeft - 3, mTop - 3, mWidth + 6, mHeight + 6
-        ringShape.Fill.Visible = msoFalse
-        ringShape.Line.Visible = msoTrue
-        ringShape.Line.ForeColor.RGB = themeValue.PrimaryColor
-        ringShape.Line.Weight = 2
+        PaintPart ringShape, -1, themeValue.PrimaryColor, 2
         ShowPart ringShape, msoTrue
     ElseIf LenB(mAppliedRingSig) > 0 Then
         mAppliedRingSig = vbNullString
@@ -11906,10 +11847,7 @@ Private Sub SyncKeyCursor( _
         Set cursorShape = EnsurePartShape(hostSheet, "kr", msoShapeRoundedRectangle)
         PlacePart cursorShape, cursorLeft, cursorTop, cursorWidth, cursorHeight
         RoundCorners cursorShape, cursorHeight
-        cursorShape.Fill.Visible = msoFalse
-        cursorShape.Line.Visible = msoTrue
-        cursorShape.Line.ForeColor.RGB = themeValue.OnSurfaceColor
-        cursorShape.Line.Weight = 1.25
+        PaintPart cursorShape, -1, themeValue.OnSurfaceColor, 1.25
         cursorShape.Line.DashStyle = msoLineRoundDot
         ShowPart cursorShape, msoTrue
         cursorShape.ZOrder msoBringToFront
@@ -12459,8 +12397,7 @@ Private Sub StyleCaptionPart( _
 
     resolvedSize = mFontSize
     If resolvedSize <= 0 Then resolvedSize = themeValue.BaseFontSize
-    captionShape.Fill.Visible = msoFalse
-    captionShape.Line.Visible = msoFalse
+    PaintPart captionShape, -1
     StyleTextPart captionShape, captionText, msoAlignLeft, resolvedSize, mFontBold, _
         ResolveDrawnInk(themeValue), themeValue, leftInset:=2
 End Sub
@@ -13308,46 +13245,33 @@ Private Sub SyncTableRow( _
         Exit Sub
     End If
     PlacePart rowShape, mLeft + 1, mTop + 1 + slotNo * rowPitch, mWidth - 2, rowPitch
-    rowShape.Fill.Visible = BoolToMso(fillRgb >= 0)
-    If fillRgb >= 0 Then rowShape.Fill.ForeColor.RGB = fillRgb
-    rowShape.Line.Visible = msoTrue
-    rowShape.Line.ForeColor.RGB = themeValue.BorderColor
-    rowShape.Line.Weight = 0.5
-    With rowShape.TextFrame2
-        .MarginLeft = 0
-        .MarginRight = 0
-        .MarginTop = 0
-        .MarginBottom = 0
-        .VerticalAnchor = msoAnchorMiddle
-        .WordWrap = msoFalse
-        .TextRange.Text = rowWords
-        .TextRange.ParagraphFormat.Alignment = msoAlignLeft
-        If Split(priorParts(0) & Chr$(1), Chr$(1))(0) <> layoutKey Then
-            With .TextRange.ParagraphFormat.TabStops
-                Do While .Count > 0
-                    .Item(1).Clear
-                Loop
-                If emptyNote Then
-                    .Add msoTabStopLeft, TABLE_CELL_PAD
-                Else
-                    For colNo = 1 To mTableCols
-                        If mColumnNumeric(colNo) Then
-                            .Add msoTabStopRight, mColumnEdges(colNo) - TABLE_CELL_PAD
-                        Else
-                            .Add msoTabStopLeft, ColumnLeftEdge(colNo) + TABLE_CELL_PAD
-                        End If
-                    Next colNo
-                End If
-            End With
-        End If
-        With .TextRange.Font
-            .Name = themeValue.FontName
-            .Size = textSize
-            .Bold = msoFalse
-            .Fill.ForeColor.RGB = inkRgb
+    PaintPart rowShape, fillRgb, themeValue.BorderColor, 0.5
+    StyleTextPart rowShape, rowWords, msoAlignLeft, textSize, False, inkRgb, themeValue
+    If Split(priorParts(0) & Chr$(1), Chr$(1))(0) <> layoutKey Then
+        ClearTabStops rowShape
+        With rowShape.TextFrame2.TextRange.ParagraphFormat.TabStops
+            If emptyNote Then
+                .Add msoTabStopLeft, TABLE_CELL_PAD
+            Else
+                For colNo = 1 To mTableCols
+                    If mColumnNumeric(colNo) Then
+                        .Add msoTabStopRight, mColumnEdges(colNo) - TABLE_CELL_PAD
+                    Else
+                        .Add msoTabStopLeft, ColumnLeftEdge(colNo) + TABLE_CELL_PAD
+                    End If
+                Next colNo
+            End If
         End With
-    End With
+    End If
     ShowPart rowShape, BoolToMso(mVisible)
+End Sub
+
+Private Sub ClearTabStops(ByVal wordsShape As Shape)
+    With wordsShape.TextFrame2.TextRange.ParagraphFormat.TabStops
+        Do While .Count > 0
+            .Item(1).Clear
+        Loop
+    End With
 End Sub
 
 ' The footer while the rows outgrow the table: which rows show of how
@@ -13383,8 +13307,7 @@ Private Sub SyncTableFooter( _
     footTop = mTop + mHeight - 1 - rowPitch
     Set labelShape = EnsurePartShape(hostSheet, "tf", msoShapeRectangle)
     PlacePart labelShape, mLeft + 1, footTop, mWidth - 2 - 2 * PAGER_TARGET - 8, rowPitch
-    labelShape.Fill.Visible = msoFalse
-    labelShape.Line.Visible = msoFalse
+    PaintPart labelShape, -1
     StyleTextPart labelShape, footWords, msoAlignLeft, textSize - 1, False, _
         themeValue.OnMutedColor, themeValue, leftInset:=TABLE_CELL_PAD
     ShowPart labelShape, BoolToMso(mVisible)
@@ -13429,25 +13352,8 @@ Private Sub SyncTablePager( _
         pagerFill = PointerTint(themeValue.SurfaceColor, themeValue.OnSurfaceColor, partName)
     End If
     PaintPart pagerShape, pagerFill
-    With pagerShape.TextFrame2
-        .MarginLeft = 0
-        .MarginRight = 0
-        .MarginTop = 0
-        .MarginBottom = 0
-        .VerticalAnchor = msoAnchorMiddle
-        .WordWrap = msoFalse
-        .TextRange.Text = glyph
-        .TextRange.ParagraphFormat.Alignment = msoAlignCenter
-        With .TextRange.Font
-            .Name = themeValue.FontName
-            .Size = textSize - 2
-            If pagerOn And mEnabled Then
-                .Fill.ForeColor.RGB = themeValue.OnSurfaceColor
-            Else
-                .Fill.ForeColor.RGB = themeValue.BorderColor
-            End If
-        End With
-    End With
+    StyleTextPart pagerShape, glyph, msoAlignCenter, textSize - 2, False, _
+        IIf(pagerOn And mEnabled, themeValue.OnSurfaceColor, themeValue.BorderColor), themeValue
     ShowPart pagerShape, BoolToMso(mVisible)
 End Sub
 
@@ -13551,6 +13457,7 @@ End Function
 Private Sub HandleTableKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
     Dim shownAt As Long
     Dim aimAt As Long
+    Dim stepDirection As Long
 
     Select Case keyText
         Case "{ENTER}"
@@ -13567,24 +13474,9 @@ Private Sub HandleTableKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
     If TypeTableFilter(keyText) Then Exit Sub
     EnsureTableShown
     If mTableShownCount = 0 Then Exit Sub
+    ' With no row selected, Up lands on the first.
     shownAt = TableShownAt(CLng(mValue))
-    Select Case keyText
-        Case "{UP}"
-            aimAt = shownAt - 1
-            If shownAt = 0 Then aimAt = 1
-        Case "{DOWN}"
-            aimAt = shownAt + 1
-        Case "{PGUP}"
-            aimAt = shownAt - mTableSlots
-        Case "{PGDN}"
-            aimAt = shownAt + mTableSlots
-        Case "{HOME}"
-            aimAt = 1
-        Case "{END}"
-            aimAt = mTableShownCount
-        Case Else
-            Exit Sub
-    End Select
+    If Not MoveKeyAim(keyText, shownAt, 1, mTableShownCount, mTableSlots, aimAt, stepDirection) Then Exit Sub
     If aimAt < 1 Then aimAt = 1
     If aimAt > mTableShownCount Then aimAt = mTableShownCount
     If aimAt <= mTableOffset Then mTableOffset = aimAt - 1
@@ -14423,7 +14315,6 @@ Private Function PlaceCalendarWeek( _
     ByVal frameKey As String _
 ) As Shape
     Dim weekShape As Shape
-    Dim columnNo As Long
 
     If weekNo > 1 And LenB(mAppliedRowStates(CAL_SLOT_WEEK1 + weekNo - 1)) = 0 Then
         If Left$(mAppliedRowStates(CAL_SLOT_WEEK1), Len(frameKey) + 1) = frameKey & Chr$(3) Then
@@ -14448,25 +14339,29 @@ Private Function PlaceCalendarWeek( _
         .MarginBottom = 0
         .VerticalAnchor = msoAnchorMiddle
         .WordWrap = msoFalse
-        With .TextRange.ParagraphFormat
-            .Alignment = msoAlignLeft
-            With .TabStops
-                Do While .Count > 0
-                    .Item(1).Clear
-                Loop
-                For columnNo = 1 To 7
-                    .Add msoTabStopCenter, (columnNo - 0.5) * CAL_CELL_W
-                Next columnNo
-            End With
-        End With
+        .TextRange.ParagraphFormat.Alignment = msoAlignLeft
         With .TextRange.Font
             .Name = themeValue.FontName
             .Size = textSize
         End With
     End With
+    SetDayTabs weekShape
     weekShape.OnAction = mAppliedOnAction
     Set PlaceCalendarWeek = weekShape
 End Function
+
+' A tab stop centered on each of the calendar's seven day columns, for
+' the week rows and the weekday names, whose words are tabbed.
+Private Sub SetDayTabs(ByVal wordsShape As Shape)
+    Dim dayNo As Long
+
+    ClearTabStops wordsShape
+    With wordsShape.TextFrame2.TextRange.ParagraphFormat.TabStops
+        For dayNo = 1 To 7
+            .Add msoTabStopCenter, (dayNo - 0.5) * CAL_CELL_W
+        Next dayNo
+    End With
+End Sub
 
 ' The part a calendar state slot records, for the teardown.
 Private Function CalendarSlotPart(ByVal stateSlot As Long) As String
@@ -14509,32 +14404,10 @@ Private Sub SyncCalendarWeekdays( _
     Set weekShape = EnsurePartShape(hostSheet, "cw", msoShapeRectangle)
     PlacePart weekShape, mLeft + CAL_PAD, cardTop + CAL_PAD + CAL_HEAD_H, 7 * CAL_CELL_W, _
         CAL_WEEK_H
-    weekShape.Fill.Visible = msoFalse
-    weekShape.Line.Visible = msoFalse
-    With weekShape.TextFrame2
-        .MarginLeft = 0
-        .MarginRight = 0
-        .MarginTop = 0
-        .MarginBottom = 0
-        .VerticalAnchor = msoAnchorMiddle
-        .WordWrap = msoFalse
-        .TextRange.Text = weekWords
-        .TextRange.ParagraphFormat.Alignment = msoAlignLeft
-        With .TextRange.ParagraphFormat.TabStops
-            Do While .Count > 0
-                .Item(1).Clear
-            Loop
-            For dayNo = 1 To 7
-                .Add msoTabStopCenter, (dayNo - 0.5) * CAL_CELL_W
-            Next dayNo
-        End With
-        With .TextRange.Font
-            .Name = themeValue.FontName
-            .Size = textSize - 2
-            .Bold = msoFalse
-            .Fill.ForeColor.RGB = themeValue.OnMutedColor
-        End With
-    End With
+    PaintPart weekShape, -1
+    StyleTextPart weekShape, weekWords, msoAlignLeft, textSize - 2, False, _
+        themeValue.OnMutedColor, themeValue
+    SetDayTabs weekShape
     weekShape.OnAction = mAppliedOnAction
 End Sub
 
@@ -16804,22 +16677,10 @@ Friend Function DrawTooltip( _
     Set themeValue = hostApp.Theme
     Set tipShape = EnsurePartShape(hostApp.Sheet, "tt", msoShapeRoundedRectangle)
     PaintPart tipShape, themeValue.OnSurfaceColor
+    StyleTextPart tipShape, tipText, msoAlignLeft, themeValue.BaseFontSize - 1, False, _
+        themeValue.SurfaceColor, themeValue, 7, 7, 3
     With tipShape.TextFrame2
-        .MarginLeft = 7
-        .MarginRight = 7
-        .MarginTop = 3
-        .MarginBottom = 3
-        .VerticalAnchor = msoAnchorMiddle
-        .WordWrap = msoFalse
         .AutoSize = msoAutoSizeShapeToFitText
-        .TextRange.Text = tipText
-        .TextRange.ParagraphFormat.Alignment = msoAlignLeft
-        With .TextRange.Font
-            .Name = themeValue.FontName
-            .Size = themeValue.BaseFontSize - 1
-            .Bold = msoFalse
-            .Fill.ForeColor.RGB = themeValue.SurfaceColor
-        End With
         ' A long tip wraps. Office refits a shape to its text only when the
         ' text or the fit changes, so the fit goes off and on again for the
         ' height to follow the wrap.
@@ -17737,23 +17598,9 @@ Private Sub SyncEmptyRow( _
         Set emptyShape = EnsurePartShape(hostSheet, "optn", msoShapeRectangle)
         PlacePart emptyShape, ListSpanLeft(), rowTop, ListSpanWidth(), rowPitch
         PaintPart emptyShape, themeValue.SurfaceColor, themeValue.BorderColor, 1
-        With emptyShape.TextFrame2
-            .MarginLeft = 6
-            .MarginRight = 6
-            .MarginTop = 2
-            .MarginBottom = 2
-            .VerticalAnchor = msoAnchorMiddle
-            .WordWrap = msoFalse
-            .TextRange.Text = GutterText(False, emptyRowWords)
-            .TextRange.ParagraphFormat.Alignment = msoAlignLeft
-            With .TextRange.Font
-                .Name = themeValue.FontName
-                .Size = resolvedSize
-                .Bold = msoFalse
-                .Italic = msoTrue
-                .Fill.ForeColor.RGB = themeValue.OnMutedColor
-            End With
-        End With
+        StyleTextPart emptyShape, GutterText(False, emptyRowWords), msoAlignLeft, resolvedSize, _
+            False, themeValue.OnMutedColor, themeValue, 6, 6, 2
+        emptyShape.TextFrame2.TextRange.Font.Italic = msoTrue
         EnsureGutterTab emptyShape
         ShowPart emptyShape, msoTrue
         emptyShape.ZOrder msoBringToFront
@@ -18481,11 +18328,7 @@ Friend Sub HandleKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
     ' nothing reopen a closed list as it was.
     If mKind = KIND_COMBO Then
         If mText <> textBeforeKey Then
-            If Not mSelectOpen Then NoteListOpened
-            mSelectOpen = True
-            mFilterPristine = False
-            mListOffset = 0
-            mListHighlight = 0
+            OpenComboMatches
         ElseIf Not mSelectOpen Then
             OpenDropList hostApp.Sheet
         End If
