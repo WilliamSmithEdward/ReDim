@@ -3432,6 +3432,7 @@ Public Function TestAutoGrow() As String
     transcript = "startsAtGiven=" & CStr(Abs(fieldShape.Height - 22) < 0.01)
     transcript = transcript & "|firstRenderGrown=" & _
         CStr(Abs(host.Shapes("rdm_wid41_pre").Height - (2 * lineStep + 6)) < 0.01)
+    transcript = transcript & "|secondLineDrawn=" & CStr(LastLineDrawn(host, "rdm_wid41_pre"))
 
     ReDimUI.DispatchShape "rdm_wid41_notes"
     TypeText "one"
@@ -7182,6 +7183,25 @@ Public Function TestFocusedFaceFits() As String
     TestFocusedFaceFits = transcript
 End Function
 
+' Whether a text shape draws its last line: Office leaves out a line that
+' runs past the bottom margin and the inset a rounded corner takes, 0.29
+' of its radius.
+Private Function LastLineDrawn(ByVal host As Worksheet, ByVal shapeName As String) As Boolean
+    Dim frameBottom As Double
+    Dim laidLines As Long
+
+    With host.Shapes(shapeName)
+        frameBottom = .Top + .Height - .TextFrame2.MarginBottom
+        If .AutoShapeType = msoShapeRoundedRectangle Then
+            frameBottom = frameBottom - 0.29289 * .Adjustments(1) * Application.Min(.Width, .Height)
+        End If
+        laidLines = .TextFrame2.TextRange.Lines.Count
+        With .TextFrame2.TextRange.Lines(laidLines, 1)
+            LastLineDrawn = (.BoundTop + .BoundHeight <= frameBottom + 0.05)
+        End With
+    End With
+End Function
+
 ' Whether a text part's words stay inside it, between its margins.
 ' Office's bound counts the paragraph's end as well, a space wide.
 Private Function TextHeld(ByVal host As Worksheet, ByVal shapeName As String) As Boolean
@@ -7245,6 +7265,7 @@ Public Function TestTextFits() As String
     Set fieldShape = host.Shapes("rdm_wid97_ag")
     transcript = transcript & "|growLines=" & fieldShape.TextFrame2.TextRange.Lines.Count & "/" & _
         CStr(Int((fieldShape.Height - 6) / (app.Theme.BaseFontSize * 1.35) + 0.001))
+    transcript = transcript & "|growLastDrawn=" & CStr(LastLineDrawn(host, "rdm_wid97_ag"))
     transcript = transcript & "|radioRowCut=" & CStr( _
         Right$(host.Shapes("rdm_wid97_rg__t2").TextFrame2.TextRange.Text, 1) = ChrW(8230) _
         And TextHeld(host, "rdm_wid97_rg__t2"))
@@ -7289,9 +7310,7 @@ Public Function TestTallFontLines() As String
     app.TextInput("ag").InputValue = "one" & vbLf & "two" & vbLf & "three"
     app.TextInput("ml").AtRect(260, 100, 220, 60).MultiLine
     app.Render
-    Set fieldShape = host.Shapes("rdm_wid98_ag")
-    transcript = transcript & "|growHolds=" & CStr(fieldShape.TextFrame2.TextRange.BoundHeight <= _
-        fieldShape.Height - 6)
+    transcript = transcript & "|growHolds=" & CStr(LastLineDrawn(host, "rdm_wid98_ag"))
     app.TextInput("ml").Focus
     TypeText "one"
     RdxKeyChar "{ENTER}"
@@ -7299,9 +7318,8 @@ Public Function TestTallFontLines() As String
     RdxKeyChar "{ENTER}"
     TypeText "three"
     Set fieldShape = host.Shapes("rdm_wid98_ml")
-    transcript = transcript & "|typedLineShows=" & CStr(fieldShape.TextFrame2.TextRange _
-        .BoundHeight <= fieldShape.Height - 6 And InStr(fieldShape.TextFrame2.TextRange.Text, _
-        "three") > 0)
+    transcript = transcript & "|typedLineShows=" & CStr(LastLineDrawn(host, "rdm_wid98_ml") _
+        And InStr(fieldShape.TextFrame2.TextRange.Text, "three") > 0)
     ReDimUI.EndKeyboardFocus
     RdxReleaseKeys
     ReDimUI.AutoPump True

@@ -164,6 +164,12 @@ Private Const MISSING_GLYPH As Integer = -1
 ' Points a focused face line leaves free at its right, where the measure
 ' and Office's own layout can part by a little.
 Private Const FACE_FIT_SLACK As Double = 3
+' The corner radius, in points, a multi-line field keeps however tall it
+' grows: a one-line field's. Office insets a rounded shape's words by
+' 0.29 of its radius on every side, so a radius that grew with the field
+' took the room its lines were counted in, and the last line went undrawn.
+Private Const MULTILINE_CORNER As Double = 3.3
+Private Const MULTILINE_TEXT_INSET As Double = MULTILINE_CORNER * 0.29289
 
 Private Const ROLE_APP As Long = 1
 Private Const ROLE_COMPONENT As Long = 2
@@ -9915,6 +9921,23 @@ Private Sub RoundCorners(ByVal partShape As Shape, ByVal partHeight As Double)
     If partHeight > 0 Then partShape.Adjustments(1) = ROW_CORNER / partHeight
 End Sub
 
+' A float field's corner: a share of its shorter side on one line, and
+' MULTILINE_CORNER points on several, whatever the field's height.
+Private Sub HoldFieldCorner(ByVal faceShape As Shape)
+    Dim shortSide As Double
+
+    shortSide = faceShape.Width
+    If faceShape.Height < shortSide Then shortSide = faceShape.Height
+    If shortSide <= 0 Then Exit Sub
+    On Error Resume Next
+    If mMultiLine Then
+        faceShape.Adjustments(1) = MULTILINE_CORNER / shortSide
+    Else
+        faceShape.Adjustments(1) = 0.15
+    End If
+    On Error GoTo 0
+End Sub
+
 ' A part's place: left, top, width, and height, written in that order.
 Private Sub PlacePart( _
     ByVal partShape As Shape, _
@@ -10041,6 +10064,8 @@ End Function
 ' the next render. Composite drawn kinds own their geometry in extras: the
 ' main shape is one piece of several, not the declared rectangle.
 Private Sub ApplyGeometry(ByVal mainShape As Shape)
+    Dim sizeMoved As Boolean
+
     If IsCompositeDrawnKind() Then Exit Sub
     If Abs(mainShape.Left - mLeft) > 0.01 Then mainShape.Left = mLeft
     If Abs(mainShape.Top - mTop) > 0.01 Then mainShape.Top = mTop
@@ -10048,8 +10073,13 @@ Private Sub ApplyGeometry(ByVal mainShape As Shape)
         If Abs(mainShape.Width - BadgeSpan()) > 0.01 Then mainShape.Width = BadgeSpan()
     ElseIf Abs(mainShape.Width - mWidth) > 0.01 Then
         mainShape.Width = mWidth
+        sizeMoved = True
     End If
-    If Abs(mainShape.Height - mHeight) > 0.01 Then mainShape.Height = mHeight
+    If Abs(mainShape.Height - mHeight) > 0.01 Then
+        mainShape.Height = mHeight
+        sizeMoved = True
+    End If
+    If sizeMoved And mMultiLine And IsFloatField() Then HoldFieldCorner mainShape
     If Not mAppliedValid Or mAppliedVisible <> mVisible Then
         mainShape.Visible = BoolToMso(mVisible)
         mAppliedVisible = mVisible
@@ -10875,6 +10905,15 @@ Private Sub ApplyText(ByVal mainShape As Shape, ByVal themeValue As ReDimUI)
         End If
         If mKind = KIND_CARD Or mMultiLine Then
             mainShape.TextFrame2.VerticalAnchor = msoAnchorTop
+        End If
+        ' A multi-line field's margins give back the inset its corner
+        ' takes, so its lines start and end where FaceLineHeight counts.
+        If IsFloatField() Then
+            HoldFieldCorner mainShape
+            If mMultiLine Then
+                mainShape.TextFrame2.MarginTop = 3 - MULTILINE_TEXT_INSET
+                mainShape.TextFrame2.MarginBottom = 3 - MULTILINE_TEXT_INSET
+            End If
         End If
     End If
     ' Measured, not assumed: replacing shape text preserves uniform

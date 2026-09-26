@@ -482,6 +482,11 @@
   an AutoGrow field dropped its last line and a focused multi-line
   field hid the line being typed. Line heights come from Office, once
   a session for each font, size, and weight.
+- A multi-line field draws its last line. Its rounded corner grew with
+  its height, and Office insets a rounded shape's words by 0.29 of the
+  corner's radius, so an AutoGrow field sized for its lines left the
+  last one out, in any font. A multi-line field now keeps a one-line
+  field's corners, and its margins give back the corner's inset.
 
 ## 1.0.2 - 2026-09-23
 

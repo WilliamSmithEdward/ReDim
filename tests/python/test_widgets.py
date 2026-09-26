@@ -998,6 +998,9 @@ def test_auto_grow(run_widgets):
     assert facts["firstRenderGrown"] == "True", (
         "a first render must size an AutoGrow field to its text"
     )
+    assert facts["secondLineDrawn"] == "True", (
+        "a grown field draws its last line, clear of its corner's inset"
+    )
     assert facts["grewTwoLines"] == "True"
     assert facts["belowFollows"] == "True", (
         "a component placed Below a growing field must move with it"
@@ -1884,6 +1887,9 @@ def test_text_fits(run_widgets):
     assert facts["badgeHoldsWide"] == "True", "a badge is as wide as its letters"
     drawn, slots = facts["growLines"].split("/")
     assert drawn == slots, "AutoGrow grows to the lines Office draws, no more"
+    assert facts["growLastDrawn"] == "True", (
+        "an AutoGrow field draws its last line; its corner's inset took the room"
+    )
     assert facts["radioRowCut"] == "True", "a long radio item ends in an ellipsis inside the group"
     assert facts["fallbackRowCut"] == "True", (
         "an item in letters the theme font lacks is cut to fit, measured as Office draws it"

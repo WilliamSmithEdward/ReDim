@@ -530,7 +530,8 @@ Focus mechanics, all automatic:
   `maxLines` lines (six by default), shrinks back as lines go, and moves anything placed
   `Below` it. At rest a line too long for the field wraps, and the height counts the
   lines as Office wraps them, so the field keeps one height with focus or without.
-  `AutoGrow` turns `MultiLine` on.
+  `AutoGrow` turns `MultiLine` on. A multi-line field keeps a one-line field's rounded
+  corners however tall it is.
 - Overflow follows the caret. Shape text cannot scroll, so a focused field renders the
   tail window of its buffer - the last lines that fit (multi-line) or the rightmost
   characters that fit (single-line and combo) - with a leading ellipsis marking trimmed
