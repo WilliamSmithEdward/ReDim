@@ -5162,13 +5162,7 @@ Public Function AtRect( _
     mRelMode = REL_NONE
     mLeft = leftPoints
     mTop = topPoints
-    mWidth = widthPoints
-    mHeight = heightPoints
-    mGrowAdded = 0
-    If mKind = KIND_STACK Then
-        mStackAutoWidth = (widthPoints <= 0)
-        MarkStackStale
-    End If
+    TakeSize widthPoints, heightPoints
     Touch
     Set AtRect = Me
 End Function
@@ -5180,11 +5174,7 @@ Public Function Below( _
     Optional ByVal gapPoints As Double = 8 _
 ) As ReDimUI
     RequireRole ROLE_COMPONENT, "Below"
-    mRelMode = REL_BELOW
-    mRelTargetId = otherComponentId
-    mRelGap = gapPoints
-    mAnchor = vbNullString
-    Touch
+    PlaceRelative REL_BELOW, otherComponentId, gapPoints
     Set Below = Me
 End Function
 
@@ -5195,19 +5185,35 @@ Public Function RightOf( _
     Optional ByVal gapPoints As Double = 8 _
 ) As ReDimUI
     RequireRole ROLE_COMPONENT, "RightOf"
-    mRelMode = REL_RIGHT_OF
+    PlaceRelative REL_RIGHT_OF, otherComponentId, gapPoints
+    Set RightOf = Me
+End Function
+
+Private Sub PlaceRelative( _
+    ByVal relModeWanted As Long, _
+    ByVal otherComponentId As String, _
+    ByVal gapPoints As Double _
+)
+    mRelMode = relModeWanted
     mRelTargetId = otherComponentId
     mRelGap = gapPoints
     mAnchor = vbNullString
     Touch
-    Set RightOf = Me
-End Function
+End Sub
 
 Public Function Sized( _
     ByVal widthPoints As Double, _
     ByVal heightPoints As Double _
 ) As ReDimUI
     RequireRole ROLE_COMPONENT, "Sized"
+    TakeSize widthPoints, heightPoints
+    Touch
+    Set Sized = Me
+End Function
+
+' A size given to the control: a stack given no width sizes itself to
+' its members, and growth from AutoGrow starts over.
+Private Sub TakeSize(ByVal widthPoints As Double, ByVal heightPoints As Double)
     mWidth = widthPoints
     mHeight = heightPoints
     mGrowAdded = 0
@@ -5215,9 +5221,7 @@ Public Function Sized( _
         mStackAutoWidth = (widthPoints <= 0)
         MarkStackStale
     End If
-    Touch
-    Set Sized = Me
-End Function
+End Sub
 
 Public Function Text(ByVal displayText As String) As ReDimUI
     RequireRole ROLE_COMPONENT, "Text"
@@ -10499,41 +10503,62 @@ End Function
 Private Function SelectRadioRow(ByVal hostApp As ReDimUI, ByVal rowNumber As Long) As Boolean
     If Not ItemPickable(rowNumber) Then Exit Function
     If rowNumber = CLng(mValue) Then Exit Function
-    mValue = rowNumber
+    TakeItem hostApp, rowNumber
+    SelectRadioRow = True
+End Function
+
+' An item becomes the selection of a select, radio group, or tab strip:
+' its value, or its text, goes to WritesTo, a Required pick is checked
+' again, and the control redraws.
+Private Sub TakeItem(ByVal hostApp As ReDimUI, ByVal itemNumber As Long)
+    mValue = itemNumber
     If LenB(mWritesToKey) > 0 Then
-        WriteOwnKey hostApp, ItemStateValue(ItemAt(rowNumber))
+        WriteOwnKey hostApp, ItemStateValue(ItemAt(itemNumber))
     End If
     RecheckPick hostApp
     Touch
-    SelectRadioRow = True
-End Function
+End Sub
 
 ' Arrows step, Page Up and Page Down step ten times, Home and End jump
 ' to the range ends; each change fires OnChange.
 Private Sub HandleStepperKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
     Dim aimValue As Double
 
+    If keyText = "{ENTER}" Then
+        hostApp.ClickDefaultButton
+        Exit Sub
+    End If
+    If Not ValueKeyAim(keyText, mSliderStep, 10# * mSliderStep, aimValue) Then Exit Sub
+    If SetStepperValue(hostApp, aimValue) Then RunClickHandlers hostApp
+End Sub
+
+' The value a Stepper's or SlideBar's key aims at: the arrows move a
+' step, Page Up and Page Down a page, Home and End go to the range's
+' ends, and digits set the number typed. False for any other key.
+Private Function ValueKeyAim( _
+    ByVal keyText As String, _
+    ByVal smallStep As Double, _
+    ByVal pageStep As Double, _
+    ByRef aimValue As Double _
+) As Boolean
+    ValueKeyAim = True
     Select Case keyText
         Case "{UP}", "{RIGHT}"
-            aimValue = mValue + mSliderStep
+            aimValue = mValue + smallStep
         Case "{DOWN}", "{LEFT}"
-            aimValue = mValue - mSliderStep
+            aimValue = mValue - smallStep
         Case "{PGUP}"
-            aimValue = mValue + 10 * mSliderStep
+            aimValue = mValue + pageStep
         Case "{PGDN}"
-            aimValue = mValue - 10 * mSliderStep
+            aimValue = mValue - pageStep
         Case "{HOME}"
             aimValue = mSliderMin
         Case "{END}"
             aimValue = mSliderMax
-        Case "{ENTER}"
-            hostApp.ClickDefaultButton
-            Exit Sub
         Case Else
-            If Not TypedNumber(keyText, aimValue) Then Exit Sub
+            ValueKeyAim = TypedNumber(keyText, aimValue)
     End Select
-    If SetStepperValue(hostApp, aimValue) Then RunClickHandlers hostApp
-End Sub
+End Function
 
 ' Digits typed within a second of each other build a number, as in an
 ' up-down control's edit box; a minus leads it when the range goes below
@@ -10576,25 +10601,11 @@ Private Sub HandleSliderKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
     If smallStep <= 0 Then smallStep = (mSliderMax - mSliderMin) / 100
     pageStep = CLng((mSliderMax - mSliderMin) / 10 / smallStep) * smallStep
     If pageStep < smallStep Then pageStep = smallStep
-    Select Case keyText
-        Case "{RIGHT}", "{UP}"
-            aimValue = mValue + smallStep
-        Case "{LEFT}", "{DOWN}"
-            aimValue = mValue - smallStep
-        Case "{PGUP}"
-            aimValue = mValue + pageStep
-        Case "{PGDN}"
-            aimValue = mValue - pageStep
-        Case "{HOME}"
-            aimValue = mSliderMin
-        Case "{END}"
-            aimValue = mSliderMax
-        Case "{ENTER}"
-            hostApp.ClickDefaultButton
-            Exit Sub
-        Case Else
-            If Not TypedNumber(keyText, aimValue) Then Exit Sub
-    End Select
+    If keyText = "{ENTER}" Then
+        hostApp.ClickDefaultButton
+        Exit Sub
+    End If
+    If Not ValueKeyAim(keyText, smallStep, pageStep, aimValue) Then Exit Sub
     If aimValue < mSliderMin Then aimValue = mSliderMin
     If aimValue > mSliderMax Then aimValue = mSliderMax
     If aimValue = mValue Then Exit Sub
@@ -10823,12 +10834,7 @@ Private Function PickSelectItem(ByVal hostApp As ReDimUI, ByVal itemIndex As Lon
         Touch
         Exit Function
     End If
-    mValue = itemIndex
-    If LenB(mWritesToKey) > 0 Then
-        WriteOwnKey hostApp, ItemStateValue(ItemAt(itemIndex))
-    End If
-    RecheckPick hostApp
-    Touch
+    TakeItem hostApp, itemIndex
     PickSelectItem = True
 End Function
 
@@ -11244,6 +11250,7 @@ Private Sub SyncFieldCaption( _
 )
     Dim captionShape As Shape
     Dim captionWords As String
+    Dim captionTop As Double
 
     If captionKey = mAppliedCaptionSig Then Exit Sub
     mAppliedCaptionSig = captionKey
@@ -11254,33 +11261,19 @@ Private Sub SyncFieldCaption( _
     captionWords = mCaptionText
     If mRequired Then captionWords = captionWords & " *"
     Set captionShape = EnsurePartShape(hostSheet, "fc", msoShapeRectangle)
-    captionShape.Left = mLeft
-    captionShape.Top = mTop - noteSize - 8
-    If captionShape.Top < 0 Then captionShape.Top = 0
-    captionShape.Width = mWidth
-    captionShape.Height = noteSize + 7
+    captionTop = mTop - noteSize - 8
+    If captionTop < 0 Then captionTop = 0
+    PlacePart captionShape, mLeft, captionTop, mWidth, noteSize + 7
     captionShape.Fill.Visible = msoFalse
     captionShape.Line.Visible = msoFalse
-    With captionShape.TextFrame2
-        .MarginLeft = 1
-        .MarginRight = 1
-        .MarginTop = 0
-        .MarginBottom = 0
-        .VerticalAnchor = msoAnchorBottom
-        .WordWrap = msoFalse
-        .TextRange.Text = captionWords
-        .TextRange.ParagraphFormat.Alignment = msoAlignLeft
-        With .TextRange.Font
-            .Name = themeValue.FontName
-            .Size = noteSize
-            .Bold = msoFalse
-            .Fill.ForeColor.RGB = ResolveDrawnInk(themeValue)
+    StyleTextPart captionShape, captionWords, msoAlignLeft, noteSize, False, _
+        ResolveDrawnInk(themeValue), themeValue, leftInset:=1, rightInset:=1, _
+        textAnchor:=msoAnchorBottom
+    If mRequired Then
+        With captionShape.TextFrame2.TextRange
+            .Characters(Len(captionWords), 1).Font.Fill.ForeColor.RGB = themeValue.DangerColor
         End With
-        If mRequired Then
-            .TextRange.Characters(Len(captionWords), 1).Font.Fill.ForeColor.RGB = _
-                themeValue.DangerColor
-        End If
-    End With
+    End If
     ShowPart captionShape, msoTrue
 End Sub
 
@@ -11643,6 +11636,15 @@ Friend Sub ShowPanel(ByVal hostApp As ReDimUI, ByVal tabNumber As Long)
     End If
 End Sub
 
+' What Required shows: the message it was given, or the UI text.
+Private Function RequiredWords() As String
+    If LenB(mRequiredMessage) > 0 Then
+        RequiredWords = mRequiredMessage
+    Else
+        RequiredWords = Phrase(UI_REQUIRED)
+    End If
+End Function
+
 ' Runs Validates' check on the text. A check that fails to run counts
 ' as a pass and goes to the app's error handler.
 Private Sub RunValidation(ByVal hostApp As ReDimUI)
@@ -11652,11 +11654,7 @@ Private Sub RunValidation(ByVal hostApp As ReDimUI)
     ' check.
     If ChecksPick() Then
         If mValue = 0 Then
-            If LenB(mRequiredMessage) > 0 Then
-                mValidationError = mRequiredMessage
-            Else
-                mValidationError = Phrase(UI_REQUIRED)
-            End If
+            mValidationError = RequiredWords()
             mValidationLive = True
         Else
             mValidationError = vbNullString
@@ -11666,11 +11664,7 @@ Private Sub RunValidation(ByVal hostApp As ReDimUI)
     End If
     ' Required speaks first: an empty text never reaches the check.
     If mRequired And LenB(Trim$(mText)) = 0 Then
-        If LenB(mRequiredMessage) > 0 Then
-            mValidationError = mRequiredMessage
-        Else
-            mValidationError = Phrase(UI_REQUIRED)
-        End If
+        mValidationError = RequiredWords()
         mValidationLive = True
         Exit Sub
     End If
@@ -12422,6 +12416,7 @@ Private Sub ApplyTabs( _
     Dim tabShape As Shape
     Dim accentBar As Shape
     Dim tabFill As Long
+    Dim tabInk As Long
     Dim tabWords As String
     Dim fitChars As Long
     Dim barMade As Boolean
@@ -12471,26 +12466,13 @@ Private Sub ApplyTabs( _
         If Len(tabWords) > fitChars And fitChars >= 2 Then
             tabWords = Left$(tabWords, fitChars - 1) & ChrW(8230)
         End If
-        With tabShape.TextFrame2
-            .MarginLeft = 4
-            .MarginRight = 4
-            .MarginTop = 0
-            .MarginBottom = 0
-            .VerticalAnchor = msoAnchorMiddle
-            .WordWrap = msoFalse
-            .TextRange.Text = tabWords
-            .TextRange.ParagraphFormat.Alignment = msoAlignCenter
-            With .TextRange.Font
-                .Name = themeValue.FontName
-                .Size = textSize
-                .Bold = BoolToMso(idx = tabNow)
-                If idx = tabNow And mEnabled Then
-                    .Fill.ForeColor.RGB = themeValue.OnSurfaceColor
-                Else
-                    .Fill.ForeColor.RGB = themeValue.OnMutedColor
-                End If
-            End With
-        End With
+        If idx = tabNow And mEnabled Then
+            tabInk = themeValue.OnSurfaceColor
+        Else
+            tabInk = themeValue.OnMutedColor
+        End If
+        StyleTextPart tabShape, tabWords, msoAlignCenter, textSize, (idx = tabNow), tabInk, _
+            themeValue, leftInset:=4, rightInset:=4
         ShowPart tabShape, BoolToMso(mVisible)
         tabLeft = tabLeft + tabWidths(idx)
         mTabRights(idx) = tabLeft - mLeft
@@ -13094,26 +13076,9 @@ Private Sub SyncTableCell( _
     Set partShape = EnsurePartShape(hostSheet, partName, msoShapeRectangle)
     PlacePart partShape, partLeft, partTop, partWidth, partHeight
     PaintPart partShape, fillRgb
-    With partShape.TextFrame2
-        .MarginLeft = TABLE_CELL_PAD
-        .MarginRight = TABLE_CELL_PAD
-        .MarginTop = 0
-        .MarginBottom = 0
-        .VerticalAnchor = msoAnchorMiddle
-        .WordWrap = msoFalse
-        .TextRange.Text = partWords
-        If alignRight Then
-            .TextRange.ParagraphFormat.Alignment = msoAlignRight
-        Else
-            .TextRange.ParagraphFormat.Alignment = msoAlignLeft
-        End If
-        With .TextRange.Font
-            .Name = themeValue.FontName
-            .Size = textSize
-            .Bold = BoolToMso(wordsBold)
-            .Fill.ForeColor.RGB = inkRgb
-        End With
-    End With
+    StyleTextPart partShape, partWords, IIf(alignRight, msoAlignRight, msoAlignLeft), _
+        textSize, wordsBold, inkRgb, themeValue, leftInset:=TABLE_CELL_PAD, _
+        rightInset:=TABLE_CELL_PAD
     ShowPart partShape, BoolToMso(mVisible)
 End Sub
 
@@ -14603,11 +14568,7 @@ End Sub
 Private Function SelectTab(ByVal hostApp As ReDimUI, ByVal tabNumber As Long) As Boolean
     If tabNumber < 1 Or tabNumber > ItemCount Then Exit Function
     If tabNumber = ShownTab() Then Exit Function
-    mValue = tabNumber
-    If LenB(mWritesToKey) > 0 Then
-        WriteOwnKey hostApp, ItemStateValue(ItemAt(tabNumber))
-    End If
-    Touch
+    TakeItem hostApp, tabNumber
     SelectTab = True
 End Function
 
@@ -17585,25 +17546,12 @@ Private Sub SyncDropList( _
             Else
                 PlacePart optionShape, ListSpanLeft(), rowTop, ListSpanWidth(), rowPitch
                 PaintPart optionShape, rowFill, themeValue.BorderColor, 1
-                With optionShape.TextFrame2
-                    .MarginLeft = 6
-                    .MarginRight = 6
-                    .MarginTop = 2
-                    .MarginBottom = 2
-                    .VerticalAnchor = msoAnchorMiddle
-                    .WordWrap = msoFalse
-                    .TextRange.Text = rowText
-                    .TextRange.ParagraphFormat.Alignment = msoAlignLeft
-                    With .TextRange.Font
-                        .Name = themeValue.FontName
-                        .Size = resolvedSize
-                        .Bold = msoFalse
-                        .Fill.ForeColor.RGB = rowInk
-                    End With
-                    If boldAt > 0 Then
-                        .TextRange.Characters(boldAt, boldLength).Font.Bold = msoTrue
-                    End If
-                End With
+                StyleTextPart optionShape, rowText, msoAlignLeft, resolvedSize, False, rowInk, _
+                    themeValue, leftInset:=6, rightInset:=6, yInset:=2
+                If boldAt > 0 Then
+                    optionShape.TextFrame2.TextRange.Characters(boldAt, boldLength).Font.Bold = _
+                        msoTrue
+                End If
                 If mIsMenu Then StyleMenuRow optionShape.TextFrame2.TextRange, _
                     themeValue, rowText
                 If LenB(priorKey) = 0 Or partCreated Then
