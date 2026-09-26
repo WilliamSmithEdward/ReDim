@@ -3300,29 +3300,40 @@ End Sub
 
 Public Sub CloseModal()
     Dim heldByDialog As Boolean
-    Dim returnTo As ReDimUI
+    Dim modalId As Variant
 
     RequireRole ROLE_APP, "CloseModal"
     heldByDialog = Left$(ReDimUI.FocusedComponentId, 4) = "mdl_" _
         And ReDimUI.IsComponentFocused(mAppId, ReDimUI.FocusedComponentId)
     BeginUpdate
-    HideIfExists "mdl_ov"
-    HideIfExists "mdl_card"
-    HideIfExists "mdl_ok"
-    HideIfExists "mdl_cancel"
+    For Each modalId In ModalPartIds()
+        HideIfExists CStr(modalId)
+    Next modalId
     EndUpdate
     ' Focus goes back to the control that held it before the dialog.
     If heldByDialog Then
         If ReDimUI.IsComponentFocused(mAppId, ReDimUI.FocusedComponentId) Then
             ReDimUI.ClearKeyboardFocus
         End If
-        If LenB(mFocusBeforeModal) > 0 Then
-            If TryGetComponent(mFocusBeforeModal, returnTo) Then
-                If returnTo.IsFocusable Then returnTo.TakeFocus Me, False
-            End If
-        End If
+        ReturnFocusTo mFocusBeforeModal
     End If
     mFocusBeforeModal = vbNullString
+End Sub
+
+' The parts Confirm draws, bottom to top.
+Private Function ModalPartIds() As Variant
+    ModalPartIds = Array("mdl_ov", "mdl_card", "mdl_ok", "mdl_cancel")
+End Function
+
+' A dialog or the palette closing gives focus back to the control that
+' held it, when that control can still take it.
+Private Sub ReturnFocusTo(ByVal targetComponentId As String)
+    Dim returnTo As ReDimUI
+
+    If LenB(targetComponentId) = 0 Then Exit Sub
+    If TryGetComponent(targetComponentId, returnTo) Then
+        If returnTo.IsFocusable Then returnTo.TakeFocus Me, False
+    End If
 End Sub
 
 Private Sub HideIfExists(ByVal targetComponentId As String)
@@ -3337,7 +3348,7 @@ Friend Sub RaiseModalZOrder()
     Dim modalId As Variant
     Dim componentValue As ReDimUI
 
-    For Each modalId In Array("mdl_ov", "mdl_card", "mdl_ok", "mdl_cancel")
+    For Each modalId In ModalPartIds()
         If TryGetComponent(CStr(modalId), componentValue) Then
             On Error Resume Next
             mSheet.Shapes(componentValue.ShapeName).ZOrder msoBringToFront
@@ -3569,8 +3580,6 @@ End Sub
 ' Hides the palette; with restoreFocus the control that had the keys
 ' when it opened takes them back.
 Friend Sub ClosePalette(ByVal restoreFocus As Boolean)
-    Dim returnTo As ReDimUI
-
     If ReDimUI.FocusedComponentId = PALETTE_FIELD_ID Then
         If ReDimUI.IsComponentFocused(mAppId, PALETTE_FIELD_ID) Then
             ReDimUI.ClearKeyboardFocus
@@ -3580,21 +3589,7 @@ Friend Sub ClosePalette(ByVal restoreFocus As Boolean)
     HideIfExists PALETTE_FIELD_ID
     HideIfExists PALETTE_CARD_ID
     EndUpdate
-    If restoreFocus And LenB(mFocusBeforePalette) > 0 Then
-        If TryGetComponent(mFocusBeforePalette, returnTo) Then
-            If returnTo.IsFocusable Then returnTo.TakeFocus Me, False
-        End If
-    End If
-    mFocusBeforePalette = vbNullString
-End Sub
-
-' The palette field is blurring: its own blur finishes first, so the
-' palette hides after it.
-Friend Sub HidePaletteSoon()
-    BeginUpdate
-    HideIfExists PALETTE_FIELD_ID
-    HideIfExists PALETTE_CARD_ID
-    EndUpdate
+    If restoreFocus Then ReturnFocusTo mFocusBeforePalette
     mFocusBeforePalette = vbNullString
 End Sub
 
@@ -6818,15 +6813,7 @@ Public Function SetItemChecked( _
     RequireRole ROLE_COMPONENT, "SetItemChecked"
     EnsureCheckedSet
     If itemNumber >= 1 And itemNumber <= ItemCount Then
-        If checkedFlag Then
-            If Not TransferSelectionHas(mCheckedSet, itemNumber) Then
-                mCheckedSet.Add itemNumber
-            End If
-        Else
-            If TransferSelectionHas(mCheckedSet, itemNumber) Then
-                TransferSelectionToggle mCheckedSet, itemNumber
-            End If
-        End If
+        SetInSet mCheckedSet, itemNumber, checkedFlag
         Touch
     End If
     Set SetItemChecked = Me
@@ -6835,7 +6822,7 @@ End Function
 Public Property Get IsItemChecked(ByVal itemNumber As Long) As Boolean
     RequireRole ROLE_COMPONENT, "IsItemChecked"
     If mCheckedSet Is Nothing Then Exit Property
-    IsItemChecked = TransferSelectionHas(mCheckedSet, itemNumber)
+    IsItemChecked = IndexSetHas(mCheckedSet, itemNumber)
 End Property
 
 Public Property Get CheckedCount() As Long
@@ -7011,9 +6998,7 @@ Public Function ItemEnabled(ByVal itemNumber As Long, ByVal enabledFlag As Boole
     End If
     If itemNumber >= 1 And itemNumber <= ItemCount Then
         If mDisabledItems Is Nothing Then Set mDisabledItems = New Collection
-        If TransferSelectionHas(mDisabledItems, itemNumber) = enabledFlag Then
-            TransferSelectionToggle mDisabledItems, itemNumber
-        End If
+        SetInSet mDisabledItems, itemNumber, Not enabledFlag
         Touch
     End If
     Set ItemEnabled = Me
@@ -7091,10 +7076,10 @@ End Sub
 Private Function ItemPickable(ByVal itemNumber As Long) As Boolean
     If itemNumber < 1 Or itemNumber > ItemCount Then Exit Function
     If Not mDisabledItems Is Nothing Then
-        If TransferSelectionHas(mDisabledItems, itemNumber) Then Exit Function
+        If IndexSetHas(mDisabledItems, itemNumber) Then Exit Function
     End If
     If Not mGroupHeaders Is Nothing Then
-        If TransferSelectionHas(mGroupHeaders, itemNumber) Then Exit Function
+        If IndexSetHas(mGroupHeaders, itemNumber) Then Exit Function
     End If
     ItemPickable = True
 End Function
@@ -7111,7 +7096,7 @@ End Function
 
 Private Function IsGroupHeader(ByVal itemNumber As Long) As Boolean
     If mGroupHeaders Is Nothing Then Exit Function
-    IsGroupHeader = TransferSelectionHas(mGroupHeaders, itemNumber)
+    IsGroupHeader = IndexSetHas(mGroupHeaders, itemNumber)
 End Function
 
 ' The pickable row nearest a target in one direction, else in the
@@ -8269,7 +8254,7 @@ Private Function CheckedJoined() As String
     CheckedJoined = Join(parts, ", ")
 End Function
 
-Private Function TransferSelectionHas( _
+Private Function IndexSetHas( _
     ByVal selectionSet As Collection, _
     ByVal rowNumber As Long _
 ) As Boolean
@@ -8277,13 +8262,18 @@ Private Function TransferSelectionHas( _
 
     For Each entry In selectionSet
         If CLng(entry) = rowNumber Then
-            TransferSelectionHas = True
+            IndexSetHas = True
             Exit Function
         End If
     Next entry
 End Function
 
-Private Sub TransferSelectionToggle( _
+' Puts a number in a set of item numbers, or takes it out.
+Private Sub SetInSet(ByVal indexSet As Collection, ByVal itemNumber As Long, ByVal wanted As Boolean)
+    If IndexSetHas(indexSet, itemNumber) <> wanted Then IndexSetToggle indexSet, itemNumber
+End Sub
+
+Private Sub IndexSetToggle( _
     ByVal selectionSet As Collection, _
     ByVal rowNumber As Long _
 )
@@ -8298,7 +8288,7 @@ Private Sub TransferSelectionToggle( _
     selectionSet.Add rowNumber
 End Sub
 
-Private Sub PruneTransferSelection( _
+Private Sub PruneIndexSet( _
     ByVal selectionSet As Collection, _
     ByVal maxIndex As Long _
 )
@@ -8574,7 +8564,7 @@ Friend Sub RunClickBehavior()
                 If RowDoubleClicked(transferPart) Then
                     MoveTransferRow hostApp, (clickedPanel = 0), transferRow
                 Else
-                    TransferSelectionToggle mPanelSel(clickedPanel), transferRow
+                    IndexSetToggle mPanelSel(clickedPanel), transferRow
                     PlaceKeyCursor clickedPanel, transferRow
                     Touch
                 End If
@@ -11124,14 +11114,12 @@ Private Sub ToggleShownChecks()
     If PanelShownCount(0) = 0 Then Exit Sub
     allChecked = True
     For shownPos = 1 To PanelShownCount(0)
-        If Not TransferSelectionHas(mCheckedSet, PanelShownItem(0, shownPos)) Then
+        If Not IndexSetHas(mCheckedSet, PanelShownItem(0, shownPos)) Then
             allChecked = False
         End If
     Next shownPos
     For shownPos = 1 To PanelShownCount(0)
-        If TransferSelectionHas(mCheckedSet, PanelShownItem(0, shownPos)) = allChecked Then
-            TransferSelectionToggle mCheckedSet, PanelShownItem(0, shownPos)
-        End If
+        SetInSet mCheckedSet, PanelShownItem(0, shownPos), Not allChecked
     Next shownPos
 End Sub
 
@@ -11143,8 +11131,8 @@ Private Function CheckAllShown(ByVal hostApp As ReDimUI) As Boolean
 
     EnsureCheckedSet
     For shownPos = 1 To PanelShownCount(0)
-        If Not TransferSelectionHas(mCheckedSet, PanelShownItem(0, shownPos)) Then
-            TransferSelectionToggle mCheckedSet, PanelShownItem(0, shownPos)
+        If Not IndexSetHas(mCheckedSet, PanelShownItem(0, shownPos)) Then
+            IndexSetToggle mCheckedSet, PanelShownItem(0, shownPos)
             CheckAllShown = True
         End If
     Next shownPos
@@ -11178,7 +11166,7 @@ Private Function ToggleCheckRow(ByVal hostApp As ReDimUI, ByVal checkRow As Long
         End If
     Else
         If checkRow < 1 Or checkRow > ItemCount Then Exit Function
-        TransferSelectionToggle mCheckedSet, checkRow
+        IndexSetToggle mCheckedSet, checkRow
     End If
     PlaceKeyCursor 0, checkRow
     If LenB(mWritesToKey) > 0 Then
@@ -11236,7 +11224,7 @@ Private Sub HandleTransferKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
             mKeyPanel = 1
         Case " "
             If mKeyRow >= 1 And mKeyRow <= TransferPanelCount(mKeyPanel) Then
-                TransferSelectionToggle mPanelSel(mKeyPanel), mKeyRow
+                IndexSetToggle mPanelSel(mKeyPanel), mKeyRow
                 Touch
             End If
             Exit Sub
@@ -11244,9 +11232,7 @@ Private Sub HandleTransferKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
             ' Ctrl+A selects every row the cursor's panel shows.
             For shownPos = 1 To PanelShownCount(mKeyPanel)
                 itemNo = PanelShownItem(mKeyPanel, shownPos)
-                If Not TransferSelectionHas(mPanelSel(mKeyPanel), itemNo) Then
-                    TransferSelectionToggle mPanelSel(mKeyPanel), itemNo
-                End If
+                SetInSet mPanelSel(mKeyPanel), itemNo, True
             Next shownPos
             Touch
             Exit Sub
@@ -12240,15 +12226,8 @@ Private Sub ApplyToastParts( _
             hostSheet, "ta", msoShapeRoundedRectangle)
         PlacePart actionButton, mLeft + mWidth - PAGER_TARGET - 7 - actionWidth, _
             visualTop + (mHeight - 22) / 2, actionWidth, 22
-        actionButton.Fill.Visible = msoTrue
-        actionButton.Fill.ForeColor.RGB = ResolveSurfaceFill(themeValue)
-        actionButton.Line.Visible = msoTrue
-        If mToastActionBorder >= 0 Then
-            actionButton.Line.ForeColor.RGB = mToastActionBorder
-        Else
-            actionButton.Line.ForeColor.RGB = themeValue.PrimaryColor
-        End If
-        actionButton.Line.Weight = 1
+        PaintPart actionButton, ResolveSurfaceFill(themeValue), _
+            IIf(mToastActionBorder >= 0, mToastActionBorder, themeValue.PrimaryColor), 1
         StyleGlyphText actionButton, mToastActionLabel, _
             themeValue.OnSurfaceColor, resolvedSize - 1, themeValue
         ShowPart actionButton, BoolToMso(mVisible)
@@ -15053,7 +15032,7 @@ Private Sub ApplyCheckListParts( _
         End If
         Exit Sub
     End If
-    PruneTransferSelection mCheckedSet, rowTotal
+    PruneIndexSet mCheckedSet, rowTotal
     ' A filter lays the rows out anew: it is part of the layout.
     layoutKey = PartsState(themeValue) & ":" & CStr(mSelectAllRow) & _
         ":" & CStr(rowTotal) & Chr$(1) & mPanelFilter(0)
@@ -15554,7 +15533,7 @@ Private Sub ApplyTransferParts( _
 
     EnsureTransferCollections
     For panelNo = 0 To 1
-        PruneTransferSelection mPanelSel(panelNo), ItemsOfPanel(panelNo).Count
+        PruneIndexSet mPanelSel(panelNo), ItemsOfPanel(panelNo).Count
         If mPanelOffset(panelNo) > PanelShownCount(panelNo) - TransferRowCapacity() Then
             mPanelOffset(panelNo) = PanelShownCount(panelNo) - TransferRowCapacity()
         End If
@@ -16180,7 +16159,7 @@ Private Sub SyncTransferRows( _
     EnsureRowStates rowStates, wanted
     For idx = 1 To wanted
         itemIndex = PanelShownItem(panelIndex, scrollOffset + idx)
-        rowSelected = TransferSelectionHas(selectionSet, itemIndex)
+        rowSelected = IndexSetHas(selectionSet, itemIndex)
         If rowSelected Then
             rowFill = themeValue.PrimaryColor
             rowInk = themeValue.OnPrimaryColor
@@ -17073,7 +17052,7 @@ Private Sub TickTransferDrag(ByVal hostApp As ReDimUI, ByVal buttonDown As Boole
         SetDropPanel 0
         If mRowDragMode = 2 And pointerKnown Then
             If TransferPanelAt(pointsX, pointsY) = 1 - mRowDragPanel Then
-                rowSelected = TransferSelectionHas(mPanelSel(mRowDragPanel), mRowDragFrom)
+                rowSelected = IndexSetHas(mPanelSel(mRowDragPanel), mRowDragFrom)
                 If rowSelected Then
                     TransferSelected hostApp, (mRowDragPanel = 0)
                 Else
@@ -17217,15 +17196,7 @@ Friend Sub SetPointerLook( _
 )
     If hoveredOn Then
         If Not OwnerApp.PointerEffectsOn Then Exit Sub
-        Select Case mKind
-            Case KIND_BUTTON, KIND_TOGGLE, KIND_TICKBOX, KIND_RADIO, _
-                KIND_STEPPER, KIND_SLIDEBAR, KIND_SELECT, KIND_CHECKLIST, _
-                KIND_TRANSFER, KIND_TABS, KIND_DATE, KIND_TABLE, KIND_EXPANDER
-            Case KIND_INPUT, KIND_COMBO
-                If Not IsFloatField() Then Exit Sub
-            Case Else
-                Exit Sub
-        End Select
+        If Not IsInteractiveKind() Then Exit Sub
     ElseIf Not mHovered Then
         Exit Sub
     End If
@@ -18149,15 +18120,24 @@ End Function
 ' an image only when it has a click handler.
 Friend Function IsFocusable() As Boolean
     If Not mVisible Or Not mEnabled Or mBusy Then Exit Function
+    ' An image takes focus when a click on it does something.
+    If mKind = KIND_IMAGE Then
+        IsFocusable = (LenB(mClickProc) > 0)
+    Else
+        IsFocusable = IsInteractiveKind()
+    End If
+End Function
+
+' A kind the user works: every control that answers the pointer and the
+' keys, and a float field, as against a label, card, or other display.
+Private Function IsInteractiveKind() As Boolean
     Select Case mKind
         Case KIND_BUTTON, KIND_TOGGLE, KIND_TICKBOX, KIND_RADIO, _
             KIND_STEPPER, KIND_SLIDEBAR, KIND_SELECT, KIND_CHECKLIST, _
             KIND_TRANSFER, KIND_TABS, KIND_DATE, KIND_TABLE, KIND_EXPANDER
-            IsFocusable = True
+            IsInteractiveKind = True
         Case KIND_INPUT, KIND_COMBO
-            IsFocusable = IsFloatField()
-        Case KIND_IMAGE
-            IsFocusable = (LenB(mClickProc) > 0)
+            IsInteractiveKind = IsFloatField()
     End Select
 End Function
 
@@ -18321,7 +18301,9 @@ Friend Sub BlurField(ByVal hostApp As ReDimUI, ByVal keepEdits As Boolean)
     End If
     mSelectOpen = False
     Touch
-    If mComponentId = PALETTE_FIELD_ID Then hostApp.HidePaletteSoon
+    ' The palette's own field has let focus go by now, so closing the
+    ' palette only hides it.
+    If mComponentId = PALETTE_FIELD_ID Then hostApp.ClosePalette False
 End Sub
 
 Friend Sub HandleKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
