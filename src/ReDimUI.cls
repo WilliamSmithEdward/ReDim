@@ -9452,6 +9452,45 @@ Private Sub RoundCorners(ByVal partShape As Shape, ByVal partHeight As Double)
     If partHeight > 0 Then partShape.Adjustments(1) = ROW_CORNER / partHeight
 End Sub
 
+' A part's place: left, top, width, and height, written in that order.
+Private Sub PlacePart( _
+    ByVal partShape As Shape, _
+    ByVal partLeft As Double, _
+    ByVal partTop As Double, _
+    ByVal partWidth As Double, _
+    ByVal partHeight As Double _
+)
+    partShape.Left = partLeft
+    partShape.Top = partTop
+    partShape.Width = partWidth
+    partShape.Height = partHeight
+End Sub
+
+' A part shown or hidden, taking the clicks its control takes.
+Private Sub ShowPart(ByVal partShape As Shape, ByVal visibleState As MsoTriState)
+    partShape.Visible = visibleState
+    partShape.OnAction = mAppliedOnAction
+End Sub
+
+' A part filled with one color: with no edge, or edged in edgeRgb at
+' edgeWeight points.
+Private Sub PaintPart( _
+    ByVal partShape As Shape, _
+    ByVal fillRgb As Long, _
+    Optional ByVal edgeRgb As Long = -1, _
+    Optional ByVal edgeWeight As Single = 1 _
+)
+    partShape.Fill.Visible = msoTrue
+    partShape.Fill.ForeColor.RGB = fillRgb
+    If edgeRgb < 0 Then
+        partShape.Line.Visible = msoFalse
+    Else
+        partShape.Line.Visible = msoTrue
+        partShape.Line.ForeColor.RGB = edgeRgb
+        partShape.Line.Weight = edgeWeight
+    End If
+End Sub
+
 ' The named part, created when missing; wasCreated says which, so a row
 ' updater that writes only what changed knows to style a fresh shape.
 Private Function EnsurePartShape( _
@@ -9576,9 +9615,7 @@ Private Sub ApplyStyle(ByVal mainShape As Shape, ByVal themeValue As ReDimUI)
             End If
         Case KIND_SPINNER
             If Not mAppliedValid Or mAppliedFill <> resolvedFill Then
-                mainShape.Fill.Visible = msoTrue
-                mainShape.Fill.ForeColor.RGB = ResolveSpinnerColor(themeValue)
-                mainShape.Line.Visible = msoFalse
+                PaintPart mainShape, ResolveSpinnerColor(themeValue)
                 mAppliedFill = resolvedFill
             End If
         Case KIND_STACK
@@ -9602,34 +9639,24 @@ Private Sub ApplyStyle(ByVal mainShape As Shape, ByVal themeValue As ReDimUI)
             End If
         Case KIND_BADGE
             If Not mAppliedValid Or mAppliedFill <> resolvedFill Then
-                mainShape.Fill.Visible = msoTrue
-                mainShape.Fill.ForeColor.RGB = resolvedFill
-                mainShape.Line.Visible = msoFalse
+                PaintPart mainShape, resolvedFill
                 mAppliedFill = resolvedFill
             End If
         Case KIND_CARD, KIND_TOAST, KIND_TABLE
             If Not mAppliedValid Or mAppliedFill <> ResolveSurfaceFill(themeValue) Then
-                mainShape.Fill.Visible = msoTrue
-                mainShape.Fill.ForeColor.RGB = ResolveSurfaceFill(themeValue)
-                mainShape.Line.Visible = msoTrue
-                mainShape.Line.ForeColor.RGB = themeValue.BorderColor
-                mainShape.Line.Weight = 1
+                PaintPart mainShape, ResolveSurfaceFill(themeValue), themeValue.BorderColor, 1
                 mAppliedFill = ResolveSurfaceFill(themeValue)
             End If
         Case KIND_PROGRESS
             If Not mAppliedValid Or mAppliedFill <> themeValue.MutedColor Then
-                mainShape.Fill.Visible = msoTrue
-                mainShape.Fill.ForeColor.RGB = themeValue.MutedColor
-                mainShape.Line.Visible = msoFalse
+                PaintPart mainShape, themeValue.MutedColor
                 mAppliedFill = themeValue.MutedColor
             End If
         Case KIND_TOGGLE
             resolvedFill = PointerTint(ResolveToggleFill(themeValue), _
                 IIf(mChecked, themeValue.OnPrimaryColor, themeValue.OnSurfaceColor))
             If Not mAppliedValid Or mAppliedFill <> resolvedFill Then
-                mainShape.Fill.Visible = msoTrue
-                mainShape.Fill.ForeColor.RGB = resolvedFill
-                mainShape.Line.Visible = msoFalse
+                PaintPart mainShape, resolvedFill
                 mAppliedFill = resolvedFill
             End If
         Case KIND_IMAGE
@@ -9703,11 +9730,7 @@ Private Sub ApplyStyle(ByVal mainShape As Shape, ByVal themeValue As ReDimUI)
                     themeValue.OnSurfaceColor)
             End If
             If Not mAppliedValid Or mAppliedFill <> resolvedFill Then
-                mainShape.Fill.Visible = msoTrue
-                mainShape.Fill.ForeColor.RGB = resolvedFill
-                mainShape.Line.Visible = msoTrue
-                mainShape.Line.ForeColor.RGB = themeValue.BorderColor
-                mainShape.Line.Weight = 1
+                PaintPart mainShape, resolvedFill, themeValue.BorderColor, 1
                 mAppliedFill = resolvedFill
             End If
         Case KIND_OVERLAY
@@ -11161,13 +11184,10 @@ Private Sub ApplyClearButton( _
         clearShape.Left = mLeft + mWidth - ClearReserve() - _
             IIf(mKind = KIND_COMBO, 16, 0) + 2
         clearShape.Top = mTop + (mHeight - ClearButtonSize()) / 2
-        clearShape.Fill.Visible = msoTrue
-        clearShape.Fill.ForeColor.RGB = themeValue.MutedColor
-        clearShape.Line.Visible = msoFalse
+        PaintPart clearShape, themeValue.MutedColor
         StyleGlyphText clearShape, ChrW(&H2715), themeValue.OnSurfaceColor, _
             ClearButtonSize() * 0.5, themeValue
-        clearShape.Visible = msoTrue
-        clearShape.OnAction = mAppliedOnAction
+        ShowPart clearShape, msoTrue
         mainShape.TextFrame2.MarginRight = FaceMarginRight()
     ElseIf LenB(mAppliedClearSig) > 0 Then
         mAppliedClearSig = vbNullString
@@ -11235,33 +11255,11 @@ Private Sub ApplyBadgePart(ByVal hostSheet As Worksheet, ByVal themeValue As ReD
     On Error Resume Next
     badgeShape.Adjustments(1) = 0.5
     On Error GoTo 0
-    badgeShape.Left = mLeft + mWidth - badgeSpanNow + 6
-    badgeShape.Top = mTop - 7
-    badgeShape.Width = badgeSpanNow
-    badgeShape.Height = 16
-    badgeShape.Fill.Visible = msoTrue
-    badgeShape.Fill.ForeColor.RGB = themeValue.DangerColor
-    badgeShape.Line.Visible = msoTrue
-    badgeShape.Line.ForeColor.RGB = themeValue.CanvasColor
-    badgeShape.Line.Weight = 1.5
-    With badgeShape.TextFrame2
-        .MarginLeft = 0
-        .MarginRight = 0
-        .MarginTop = 0
-        .MarginBottom = 0
-        .VerticalAnchor = msoAnchorMiddle
-        .WordWrap = msoFalse
-        .TextRange.Text = mBadgeText
-        .TextRange.ParagraphFormat.Alignment = msoAlignCenter
-        With .TextRange.Font
-            .Name = themeValue.FontName
-            .Size = 9
-            .Bold = msoTrue
-            .Fill.ForeColor.RGB = themeValue.OnPrimaryColor
-        End With
-    End With
-    badgeShape.Visible = msoTrue
-    badgeShape.OnAction = mAppliedOnAction
+    PlacePart badgeShape, mLeft + mWidth - badgeSpanNow + 6, mTop - 7, badgeSpanNow, 16
+    PaintPart badgeShape, themeValue.DangerColor, themeValue.CanvasColor, 1.5
+    StyleTextPart badgeShape, mBadgeText, msoAlignCenter, 9, True, themeValue.OnPrimaryColor, _
+        themeValue
+    ShowPart badgeShape, msoTrue
 End Sub
 
 ' The caption above the control and the hint below it, small text; the
@@ -11334,8 +11332,7 @@ Private Sub SyncFieldCaption( _
                 themeValue.DangerColor
         End If
     End With
-    captionShape.Visible = msoTrue
-    captionShape.OnAction = mAppliedOnAction
+    ShowPart captionShape, msoTrue
 End Sub
 
 ' The Skeleton's muted fill at its pulse step: toward the surface and
@@ -11371,11 +11368,8 @@ Private Sub ApplySkeletonBars(ByVal hostSheet As Worksheet, ByVal themeValue As 
         skeletonBar.Top = mTop + (barNo - 1) * barPitch + barPitch * 0.2
         skeletonBar.Height = barPitch * 0.6
         skeletonBar.Width = mWidth * IIf(barNo = mSkeletonLines And barNo > 1, 0.6, 1)
-        skeletonBar.Fill.Visible = msoTrue
-        skeletonBar.Fill.ForeColor.RGB = barFill
-        skeletonBar.Line.Visible = msoFalse
-        skeletonBar.Visible = BoolToMso(mVisible)
-        skeletonBar.OnAction = mAppliedOnAction
+        PaintPart skeletonBar, barFill
+        ShowPart skeletonBar, BoolToMso(mVisible)
     Next barNo
     ' Bars past the count are leftovers of a longer skeleton.
     For barNo = mSkeletonLines + 1 To mAppliedOptionCount
@@ -11413,24 +11407,9 @@ Private Sub SyncFieldNote( _
     noteShape.Height = noteSize + 6
     noteShape.Fill.Visible = msoFalse
     noteShape.Line.Visible = msoFalse
-    With noteShape.TextFrame2
-        .MarginLeft = 2
-        .MarginRight = 2
-        .MarginTop = 0
-        .MarginBottom = 0
-        .VerticalAnchor = msoAnchorTop
-        .WordWrap = msoFalse
-        .TextRange.Text = noteWords
-        .TextRange.ParagraphFormat.Alignment = textAlign
-        With .TextRange.Font
-            .Name = themeValue.FontName
-            .Size = noteSize
-            .Bold = msoFalse
-            .Fill.ForeColor.RGB = inkColor
-        End With
-    End With
-    noteShape.Visible = msoTrue
-    noteShape.OnAction = mAppliedOnAction
+    StyleTextPart noteShape, noteWords, textAlign, noteSize, False, inkColor, themeValue, _
+        leftInset:=2, rightInset:=2, textAnchor:=msoAnchorTop
+    ShowPart noteShape, msoTrue
 End Sub
 
 ' Points the clear button takes from the text, 0 while it is not shown.
@@ -11806,16 +11785,12 @@ Private Sub ApplyFocusRing(ByVal hostSheet As Worksheet, ByVal themeValue As ReD
         On Error Resume Next
         ringShape.Adjustments(1) = 0.12
         On Error GoTo 0
-        ringShape.Left = mLeft - 3
-        ringShape.Top = mTop - 3
-        ringShape.Width = mWidth + 6
-        ringShape.Height = mHeight + 6
+        PlacePart ringShape, mLeft - 3, mTop - 3, mWidth + 6, mHeight + 6
         ringShape.Fill.Visible = msoFalse
         ringShape.Line.Visible = msoTrue
         ringShape.Line.ForeColor.RGB = themeValue.PrimaryColor
         ringShape.Line.Weight = 2
-        ringShape.Visible = msoTrue
-        ringShape.OnAction = mAppliedOnAction
+        ShowPart ringShape, msoTrue
     ElseIf LenB(mAppliedRingSig) > 0 Then
         mAppliedRingSig = vbNullString
         DropPart hostSheet, "fr"
@@ -11842,18 +11817,14 @@ Private Sub SyncKeyCursor( _
         If cursorKey = mAppliedKeyCursorSig Then Exit Sub
         mAppliedKeyCursorSig = cursorKey
         Set cursorShape = EnsurePartShape(hostSheet, "kr", msoShapeRoundedRectangle)
-        cursorShape.Left = cursorLeft
-        cursorShape.Top = cursorTop
-        cursorShape.Width = cursorWidth
-        cursorShape.Height = cursorHeight
+        PlacePart cursorShape, cursorLeft, cursorTop, cursorWidth, cursorHeight
         RoundCorners cursorShape, cursorHeight
         cursorShape.Fill.Visible = msoFalse
         cursorShape.Line.Visible = msoTrue
         cursorShape.Line.ForeColor.RGB = themeValue.OnSurfaceColor
         cursorShape.Line.Weight = 1.25
         cursorShape.Line.DashStyle = msoLineRoundDot
-        cursorShape.Visible = msoTrue
-        cursorShape.OnAction = mAppliedOnAction
+        ShowPart cursorShape, msoTrue
         cursorShape.ZOrder msoBringToFront
     ElseIf LenB(mAppliedKeyCursorSig) > 0 Then
         mAppliedKeyCursorSig = vbNullString
@@ -12017,10 +11988,8 @@ Private Sub ApplySparkline(ByVal hostSheet As Worksheet, ByVal themeValue As ReD
         lineShape.Visible = BoolToMso(mVisible)
     End If
     Set dotShape = EnsurePartShape(hostSheet, "sd", msoShapeOval)
-    dotShape.Left = coords(mSparkCount, 1) - SPARK_DOT / 2
-    dotShape.Top = coords(mSparkCount, 2) - SPARK_DOT / 2
-    dotShape.Width = SPARK_DOT
-    dotShape.Height = SPARK_DOT
+    PlacePart dotShape, coords(mSparkCount, 1) - SPARK_DOT / 2, _
+        coords(mSparkCount, 2) - SPARK_DOT / 2, SPARK_DOT, SPARK_DOT
     dotShape.Fill.Visible = msoTrue
     dotShape.Fill.ForeColor.RGB = inkRgb
     dotShape.OnAction = mAppliedOnAction
@@ -12107,25 +12076,18 @@ Private Sub ApplyToastParts( _
     End If
 
     Set closeButton = EnsurePartShape(hostSheet, "tx", msoShapeRectangle)
-    closeButton.Left = mLeft + mWidth - PAGER_TARGET - 3
-    closeButton.Top = visualTop + 3
-    closeButton.Width = PAGER_TARGET
-    closeButton.Height = PAGER_TARGET
-    closeButton.Fill.Visible = msoTrue
-    closeButton.Fill.ForeColor.RGB = ResolveSurfaceFill(themeValue)
-    closeButton.Line.Visible = msoFalse
+    PlacePart closeButton, mLeft + mWidth - PAGER_TARGET - 3, visualTop + 3, PAGER_TARGET, _
+        PAGER_TARGET
+    PaintPart closeButton, ResolveSurfaceFill(themeValue)
     StyleGlyphText closeButton, ChrW(&H2715), themeValue.OnMutedColor, 8, _
         themeValue
-    closeButton.Visible = BoolToMso(mVisible)
-    closeButton.OnAction = mAppliedOnAction
+    ShowPart closeButton, BoolToMso(mVisible)
 
     If LenB(mToastActionLabel) > 0 Then
         Set actionButton = EnsurePartShape( _
             hostSheet, "ta", msoShapeRoundedRectangle)
-        actionButton.Left = mLeft + mWidth - PAGER_TARGET - 7 - actionWidth
-        actionButton.Top = visualTop + (mHeight - 22) / 2
-        actionButton.Width = actionWidth
-        actionButton.Height = 22
+        PlacePart actionButton, mLeft + mWidth - PAGER_TARGET - 7 - actionWidth, _
+            visualTop + (mHeight - 22) / 2, actionWidth, 22
         actionButton.Fill.Visible = msoTrue
         actionButton.Fill.ForeColor.RGB = ResolveSurfaceFill(themeValue)
         actionButton.Line.Visible = msoTrue
@@ -12137,8 +12099,7 @@ Private Sub ApplyToastParts( _
         actionButton.Line.Weight = 1
         StyleGlyphText actionButton, mToastActionLabel, _
             themeValue.OnSurfaceColor, resolvedSize - 1, themeValue
-        actionButton.Visible = BoolToMso(mVisible)
-        actionButton.OnAction = mAppliedOnAction
+        ShowPart actionButton, BoolToMso(mVisible)
     End If
     ' The fit may have resized the card: record the state the parts now
     ' match, so the next apply skips them.
@@ -12314,6 +12275,40 @@ Private Sub FadeToastPart(ByVal hostSheet As Worksheet, ByVal partName As String
     On Error GoTo 0
 End Sub
 
+' A text part's words and their look: insets (none above and below by
+' default), an anchor, no wrapping, the words and their alignment, and
+' the theme's font at a size, weight, and ink.
+Private Sub StyleTextPart( _
+    ByVal wordsShape As Shape, _
+    ByVal partWords As String, _
+    ByVal textAlign As MsoParagraphAlignment, _
+    ByVal textSize As Double, _
+    ByVal wordsBold As Boolean, _
+    ByVal inkColor As Long, _
+    ByVal themeValue As ReDimUI, _
+    Optional ByVal leftInset As Single = 0, _
+    Optional ByVal rightInset As Single = 0, _
+    Optional ByVal yInset As Single = 0, _
+    Optional ByVal textAnchor As MsoVerticalAnchor = msoAnchorMiddle _
+)
+    With wordsShape.TextFrame2
+        .MarginLeft = leftInset
+        .MarginRight = rightInset
+        .MarginTop = yInset
+        .MarginBottom = yInset
+        .VerticalAnchor = textAnchor
+        .WordWrap = msoFalse
+        .TextRange.Text = partWords
+        .TextRange.ParagraphFormat.Alignment = textAlign
+        With .TextRange.Font
+            .Name = themeValue.FontName
+            .Size = textSize
+            .Bold = BoolToMso(wordsBold)
+            .Fill.ForeColor.RGB = inkColor
+        End With
+    End With
+End Sub
+
 Private Sub StyleGlyphText( _
     ByVal glyphShape As Shape, _
     ByVal glyph As String, _
@@ -12321,22 +12316,7 @@ Private Sub StyleGlyphText( _
     ByVal glyphSize As Double, _
     ByVal themeValue As ReDimUI _
 )
-    With glyphShape.TextFrame2
-        .MarginLeft = 0
-        .MarginRight = 0
-        .MarginTop = 0
-        .MarginBottom = 0
-        .VerticalAnchor = msoAnchorMiddle
-        .WordWrap = msoFalse
-        .TextRange.Text = glyph
-        .TextRange.ParagraphFormat.Alignment = msoAlignCenter
-        With .TextRange.Font
-            .Name = themeValue.FontName
-            .Size = glyphSize
-            .Bold = msoTrue
-            .Fill.ForeColor.RGB = inkColor
-        End With
-    End With
+    StyleTextPart glyphShape, glyph, msoAlignCenter, glyphSize, True, inkColor, themeValue
 End Sub
 
 Private Sub StyleCaptionPart( _
@@ -12350,22 +12330,8 @@ Private Sub StyleCaptionPart( _
     If resolvedSize <= 0 Then resolvedSize = themeValue.BaseFontSize
     captionShape.Fill.Visible = msoFalse
     captionShape.Line.Visible = msoFalse
-    With captionShape.TextFrame2
-        .MarginLeft = 2
-        .MarginRight = 0
-        .MarginTop = 0
-        .MarginBottom = 0
-        .VerticalAnchor = msoAnchorMiddle
-        .WordWrap = msoFalse
-        .TextRange.Text = captionText
-        .TextRange.ParagraphFormat.Alignment = msoAlignLeft
-        With .TextRange.Font
-            .Name = themeValue.FontName
-            .Size = resolvedSize
-            .Bold = BoolToMso(mFontBold)
-            .Fill.ForeColor.RGB = ResolveDrawnInk(themeValue)
-        End With
-    End With
+    StyleTextPart captionShape, captionText, msoAlignLeft, resolvedSize, mFontBold, _
+        ResolveDrawnInk(themeValue), themeValue, leftInset:=2
 End Sub
 
 Private Function ResolveDrawnInk(ByVal themeValue As ReDimUI) As Long
@@ -12454,10 +12420,7 @@ Private Sub ApplyTickBox( _
     boxSize = mHeight - 2
     If boxSize > 16 Then boxSize = 16
     If boxSize < 10 Then boxSize = 10
-    mainShape.Left = mLeft
-    mainShape.Top = mTop + (mHeight - boxSize) / 2
-    mainShape.Width = boxSize
-    mainShape.Height = boxSize
+    PlacePart mainShape, mLeft, mTop + (mHeight - boxSize) / 2, boxSize, boxSize
     mainShape.Visible = BoolToMso(mVisible)
     mainShape.Fill.Visible = msoTrue
     If mChecked And mEnabled Then
@@ -12480,16 +12443,12 @@ Private Sub ApplyTickBox( _
             boxSize * 0.62, themeValue
     End If
     Set captionShape = EnsurePartShape(hostSheet, "lbl", msoShapeRectangle)
-    captionShape.Left = mLeft + boxSize + 6
-    captionShape.Top = mTop - 1
-    captionShape.Width = mWidth - boxSize - 6
-    captionShape.Height = mHeight + 2
+    PlacePart captionShape, mLeft + boxSize + 6, mTop - 1, mWidth - boxSize - 6, mHeight + 2
     StyleCaptionPart captionShape, mText, themeValue
     If LenB(mAccessKey) > 0 Or LenB(mAppliedAccessKey) > 0 Then
         MarkAccessKey captionShape, mText
     End If
-    captionShape.Visible = BoolToMso(mVisible)
-    captionShape.OnAction = mAppliedOnAction
+    ShowPart captionShape, BoolToMso(mVisible)
     mAppliedChecked = mChecked
 End Sub
 
@@ -12525,13 +12484,8 @@ Private Sub ApplyTabs( _
     tabNow = ShownTab()
     If ExtrasCurrent(PartsState(themeValue) & ":" & CStr(tabNow) & ":" & _
         PointerKey() & ":" & CStr(mItemsVersion)) Then Exit Sub
-    mainShape.Left = mLeft
-    mainShape.Top = mTop + mHeight - 1
-    mainShape.Width = mWidth
-    mainShape.Height = 1
-    mainShape.Fill.Visible = msoTrue
-    mainShape.Fill.ForeColor.RGB = themeValue.BorderColor
-    mainShape.Line.Visible = msoFalse
+    PlacePart mainShape, mLeft, mTop + mHeight - 1, mWidth, 1
+    PaintPart mainShape, themeValue.BorderColor
     mainShape.Visible = BoolToMso(mVisible)
     textSize = mFontSize
     If textSize <= 0 Then textSize = themeValue.BaseFontSize
@@ -12588,8 +12542,7 @@ Private Sub ApplyTabs( _
                 End If
             End With
         End With
-        tabShape.Visible = BoolToMso(mVisible)
-        tabShape.OnAction = mAppliedOnAction
+        ShowPart tabShape, BoolToMso(mVisible)
         tabLeft = tabLeft + tabWidths(idx)
         mTabRights(idx) = tabLeft - mLeft
     Next idx
@@ -12615,8 +12568,7 @@ Private Sub ApplyTabs( _
             accentBar.Fill.ForeColor.RGB = themeValue.OnMutedColor
         End If
         accentBar.Line.Visible = msoFalse
-        accentBar.Visible = BoolToMso(mVisible)
-        accentBar.OnAction = mAppliedOnAction
+        ShowPart accentBar, BoolToMso(mVisible)
     Else
         DropPart hostSheet, "ti"
         If mGlidePart = "ti" Then mGlidePart = vbNullString
@@ -13185,13 +13137,8 @@ Private Sub SyncTableCell( _
     If appliedKey = partKey Then Exit Sub
     appliedKey = partKey
     Set partShape = EnsurePartShape(hostSheet, partName, msoShapeRectangle)
-    partShape.Left = partLeft
-    partShape.Top = partTop
-    partShape.Width = partWidth
-    partShape.Height = partHeight
-    partShape.Fill.Visible = msoTrue
-    partShape.Fill.ForeColor.RGB = fillRgb
-    partShape.Line.Visible = msoFalse
+    PlacePart partShape, partLeft, partTop, partWidth, partHeight
+    PaintPart partShape, fillRgb
     With partShape.TextFrame2
         .MarginLeft = TABLE_CELL_PAD
         .MarginRight = TABLE_CELL_PAD
@@ -13212,8 +13159,7 @@ Private Sub SyncTableCell( _
             .Fill.ForeColor.RGB = inkRgb
         End With
     End With
-    partShape.Visible = BoolToMso(mVisible)
-    partShape.OnAction = mAppliedOnAction
+    ShowPart partShape, BoolToMso(mVisible)
 End Sub
 
 ' A row slot: one shape across the table with a thin rule; its tab stops
@@ -13267,10 +13213,7 @@ Private Sub SyncTableRow( _
         End With
         Exit Sub
     End If
-    rowShape.Left = mLeft + 1
-    rowShape.Top = mTop + 1 + slotNo * rowPitch
-    rowShape.Width = mWidth - 2
-    rowShape.Height = rowPitch
+    PlacePart rowShape, mLeft + 1, mTop + 1 + slotNo * rowPitch, mWidth - 2, rowPitch
     rowShape.Fill.Visible = BoolToMso(fillRgb >= 0)
     If fillRgb >= 0 Then rowShape.Fill.ForeColor.RGB = fillRgb
     rowShape.Line.Visible = msoTrue
@@ -13310,8 +13253,7 @@ Private Sub SyncTableRow( _
             .Fill.ForeColor.RGB = inkRgb
         End With
     End With
-    rowShape.Visible = BoolToMso(mVisible)
-    rowShape.OnAction = mAppliedOnAction
+    ShowPart rowShape, BoolToMso(mVisible)
 End Sub
 
 ' The footer while the rows outgrow the table: which rows show of how
@@ -13346,30 +13288,12 @@ Private Sub SyncTableFooter( _
     End If
     footTop = mTop + mHeight - 1 - rowPitch
     Set labelShape = EnsurePartShape(hostSheet, "tf", msoShapeRectangle)
-    labelShape.Left = mLeft + 1
-    labelShape.Top = footTop
-    labelShape.Width = mWidth - 2 - 2 * PAGER_TARGET - 8
-    labelShape.Height = rowPitch
+    PlacePart labelShape, mLeft + 1, footTop, mWidth - 2 - 2 * PAGER_TARGET - 8, rowPitch
     labelShape.Fill.Visible = msoFalse
     labelShape.Line.Visible = msoFalse
-    With labelShape.TextFrame2
-        .MarginLeft = TABLE_CELL_PAD
-        .MarginRight = 0
-        .MarginTop = 0
-        .MarginBottom = 0
-        .VerticalAnchor = msoAnchorMiddle
-        .WordWrap = msoFalse
-        .TextRange.Text = footWords
-        .TextRange.ParagraphFormat.Alignment = msoAlignLeft
-        With .TextRange.Font
-            .Name = themeValue.FontName
-            .Size = textSize - 1
-            .Bold = msoFalse
-            .Fill.ForeColor.RGB = themeValue.OnMutedColor
-        End With
-    End With
-    labelShape.Visible = BoolToMso(mVisible)
-    labelShape.OnAction = mAppliedOnAction
+    StyleTextPart labelShape, footWords, msoAlignLeft, textSize - 1, False, _
+        themeValue.OnMutedColor, themeValue, leftInset:=TABLE_CELL_PAD
+    ShowPart labelShape, BoolToMso(mVisible)
     SyncTablePager hostSheet, themeValue, "tp", ChrW(9664), _
         mLeft + mWidth - 2 * PAGER_TARGET - 6, footTop + (rowPitch - PAGER_TARGET) / 2, _
         mTableOffset > 0, textSize
@@ -13405,17 +13329,12 @@ Private Sub SyncTablePager( _
     Dim pagerFill As Long
 
     Set pagerShape = EnsurePartShape(hostSheet, partName, msoShapeRoundedRectangle)
-    pagerShape.Left = partLeft
-    pagerShape.Top = partTop
-    pagerShape.Width = PAGER_TARGET
-    pagerShape.Height = PAGER_TARGET
+    PlacePart pagerShape, partLeft, partTop, PAGER_TARGET, PAGER_TARGET
     pagerFill = themeValue.SurfaceColor
     If pagerOn Then
         pagerFill = PointerTint(themeValue.SurfaceColor, themeValue.OnSurfaceColor, partName)
     End If
-    pagerShape.Fill.Visible = msoTrue
-    pagerShape.Fill.ForeColor.RGB = pagerFill
-    pagerShape.Line.Visible = msoFalse
+    PaintPart pagerShape, pagerFill
     With pagerShape.TextFrame2
         .MarginLeft = 0
         .MarginRight = 0
@@ -13435,8 +13354,7 @@ Private Sub SyncTablePager( _
             End If
         End With
     End With
-    pagerShape.Visible = BoolToMso(mVisible)
-    pagerShape.OnAction = mAppliedOnAction
+    ShowPart pagerShape, BoolToMso(mVisible)
 End Sub
 
 ' The table part under a point, from the last layout: a header cell, a
@@ -14164,15 +14082,8 @@ Private Sub SyncCalendar(ByVal hostSheet As Worksheet, ByVal themeValue As ReDim
         On Error Resume Next
         partShape.Adjustments(1) = 0.04
         On Error GoTo 0
-        partShape.Left = mLeft
-        partShape.Top = cardTop
-        partShape.Width = CAL_WIDTH
-        partShape.Height = CAL_DEPTH
-        partShape.Fill.Visible = msoTrue
-        partShape.Fill.ForeColor.RGB = themeValue.SurfaceColor
-        partShape.Line.Visible = msoTrue
-        partShape.Line.ForeColor.RGB = themeValue.BorderColor
-        partShape.Line.Weight = 1
+        PlacePart partShape, mLeft, cardTop, CAL_WIDTH, CAL_DEPTH
+        PaintPart partShape, themeValue.SurfaceColor, themeValue.BorderColor, 1
         partShape.OnAction = mAppliedOnAction
     End If
     SyncCalendarPart hostSheet, themeValue, 2, "ch", mLeft + CAL_PAD + CAL_CELL_W, _
@@ -14433,10 +14344,8 @@ Private Function PlaceCalendarWeek( _
         End If
     End If
     Set weekShape = EnsurePartShape(hostSheet, "cr" & weekNo, msoShapeRectangle)
-    weekShape.Left = mLeft + CAL_PAD
-    weekShape.Top = gridTop + (weekNo - 1) * CAL_CELL_H + 1
-    weekShape.Width = 7 * CAL_CELL_W
-    weekShape.Height = CAL_CELL_H - 2
+    PlacePart weekShape, mLeft + CAL_PAD, gridTop + (weekNo - 1) * CAL_CELL_H + 1, _
+        7 * CAL_CELL_W, CAL_CELL_H - 2
     weekShape.Fill.Visible = msoFalse
     With weekShape.TextFrame2
         .MarginLeft = 0
@@ -14504,10 +14413,8 @@ Private Sub SyncCalendarWeekdays( _
     If mAppliedRowStates(5) = weekKey Then Exit Sub
     mAppliedRowStates(5) = weekKey
     Set weekShape = EnsurePartShape(hostSheet, "cw", msoShapeRectangle)
-    weekShape.Left = mLeft + CAL_PAD
-    weekShape.Top = cardTop + CAL_PAD + CAL_HEAD_H
-    weekShape.Width = 7 * CAL_CELL_W
-    weekShape.Height = CAL_WEEK_H
+    PlacePart weekShape, mLeft + CAL_PAD, cardTop + CAL_PAD + CAL_HEAD_H, 7 * CAL_CELL_W, _
+        CAL_WEEK_H
     weekShape.Fill.Visible = msoFalse
     weekShape.Line.Visible = msoFalse
     With weekShape.TextFrame2
@@ -14603,29 +14510,11 @@ Private Sub SyncCalendarPart( _
     On Error Resume Next
     partShape.Adjustments(1) = 0.3
     On Error GoTo 0
-    partShape.Left = partLeft
-    partShape.Top = partTop
-    partShape.Width = partWidth
-    partShape.Height = partHeight
+    PlacePart partShape, partLeft, partTop, partWidth, partHeight
     partShape.Fill.Visible = BoolToMso(fillRgb >= 0)
     If fillRgb >= 0 Then partShape.Fill.ForeColor.RGB = fillRgb
     ApplyCalendarRing partShape, ringRgb, ringDashed
-    With partShape.TextFrame2
-        .MarginLeft = 0
-        .MarginRight = 0
-        .MarginTop = 0
-        .MarginBottom = 0
-        .VerticalAnchor = msoAnchorMiddle
-        .WordWrap = msoFalse
-        .TextRange.Text = partWords
-        .TextRange.ParagraphFormat.Alignment = msoAlignCenter
-        With .TextRange.Font
-            .Name = themeValue.FontName
-            .Size = textSize
-            .Bold = BoolToMso(wordsBold)
-            .Fill.ForeColor.RGB = inkRgb
-        End With
-    End With
+    StyleTextPart partShape, partWords, msoAlignCenter, textSize, wordsBold, inkRgb, themeValue
     partShape.OnAction = mAppliedOnAction
 End Sub
 
@@ -14921,10 +14810,7 @@ Private Sub ApplyRadioGroup( _
         Else
             Set ring = EnsurePartShape(hostSheet, "c" & idx, msoShapeOval)
         End If
-        ring.Left = mLeft
-        ring.Top = rowTop + (rowPitch - circleSize) / 2
-        ring.Width = circleSize
-        ring.Height = circleSize
+        PlacePart ring, mLeft, rowTop + (rowPitch - circleSize) / 2, circleSize, circleSize
         ring.Fill.Visible = msoTrue
         ring.Fill.ForeColor.RGB = themeValue.SurfaceColor
         ring.Line.Visible = msoTrue
@@ -14938,13 +14824,10 @@ Private Sub ApplyRadioGroup( _
             ring.Line.ForeColor.RGB = themeValue.BorderColor
             ring.Line.Weight = 1.25
         End If
-        ring.Visible = BoolToMso(mVisible)
-        ring.OnAction = mAppliedOnAction
+        ShowPart ring, BoolToMso(mVisible)
         Set dot = EnsurePartShape(hostSheet, "d" & idx, msoShapeOval)
-        dot.Left = ring.Left + circleSize * 0.3
-        dot.Top = ring.Top + circleSize * 0.3
-        dot.Width = circleSize * 0.4
-        dot.Height = circleSize * 0.4
+        PlacePart dot, ring.Left + circleSize * 0.3, ring.Top + circleSize * 0.3, _
+            circleSize * 0.4, circleSize * 0.4
         dot.Fill.Visible = msoTrue
         If mEnabled Then
             dot.Fill.ForeColor.RGB = ResolveFill(themeValue)
@@ -14952,21 +14835,16 @@ Private Sub ApplyRadioGroup( _
             dot.Fill.ForeColor.RGB = themeValue.OnMutedColor
         End If
         dot.Line.Visible = msoFalse
-        dot.Visible = BoolToMso(mVisible And isPicked)
-        dot.OnAction = mAppliedOnAction
+        ShowPart dot, BoolToMso(mVisible And isPicked)
         Set captionShape = EnsurePartShape(hostSheet, "t" & idx, msoShapeRectangle)
-        captionShape.Left = mLeft + circleSize + 8
-        captionShape.Top = rowTop
-        captionShape.Width = rowTextRoom
-        captionShape.Height = rowPitch
+        PlacePart captionShape, mLeft + circleSize + 8, rowTop, rowTextRoom, rowPitch
         StyleCaptionPart captionShape, ItemAt(idx), themeValue
         ' A disabled item reads muted and takes no clicks.
         If Not ItemPickable(idx) Then
             captionShape.TextFrame2.TextRange.Font.Fill.ForeColor.RGB = themeValue.OnMutedColor
             ring.Line.ForeColor.RGB = themeValue.BorderColor
         End If
-        captionShape.Visible = BoolToMso(mVisible)
-        captionShape.OnAction = mAppliedOnAction
+        ShowPart captionShape, BoolToMso(mVisible)
 RowDrawn:
     Next idx
     ' Rows beyond the current item count are leftovers from a longer list.
@@ -15140,13 +15018,10 @@ Private Sub ApplyCheckListParts( _
                 StyleCheckBoxFace box, boxSize, mTop, rowPitch, themeValue, _
                     (checkedTotal = shownTotal And shownTotal > 0), (checkedTotal > 0), _
                     PointerOn("row0")
-                captionShape.Left = mLeft + boxSize + 8
-                captionShape.Top = mTop
-                captionShape.Width = mWidth - boxSize - 8
-                captionShape.Height = rowPitch
+                PlacePart captionShape, mLeft + boxSize + 8, mTop, mWidth - boxSize - 8, _
+                    rowPitch
                 StyleCaptionPart captionShape, headerText, themeValue
-                captionShape.Visible = BoolToMso(mVisible)
-                captionShape.OnAction = mAppliedOnAction
+                ShowPart captionShape, BoolToMso(mVisible)
             End If
         End If
     ElseIf fullPass Then
@@ -15219,13 +15094,10 @@ Private Sub ApplyCheckListParts( _
                 End If
                 StyleCheckBoxFace box, boxSize, rowTop, rowPitch, themeValue, _
                     checkedFlags(idx), checkedFlags(idx), PointerOn("row" & idx)
-                captionShape.Left = mLeft + boxSize + 8
-                captionShape.Top = rowTop
-                captionShape.Width = rowTextRoom - boxSize
-                captionShape.Height = rowPitch
+                PlacePart captionShape, mLeft + boxSize + 8, rowTop, rowTextRoom - boxSize, _
+                    rowPitch
                 StyleCaptionPart captionShape, ItemAt(idx), themeValue
-                captionShape.Visible = BoolToMso(mVisible)
-                captionShape.OnAction = mAppliedOnAction
+                ShowPart captionShape, BoolToMso(mVisible)
             End If
         End If
     Next idx
@@ -15299,10 +15171,7 @@ Private Sub StyleCheckBoxFace( _
     ByVal partialState As Boolean, _
     Optional ByVal pointerHere As Boolean = False _
 )
-    box.Left = mLeft
-    box.Top = rowTop + (rowPitch - boxSize) / 2
-    box.Width = boxSize
-    box.Height = boxSize
+    PlacePart box, mLeft, rowTop + (rowPitch - boxSize) / 2, boxSize, boxSize
     box.Fill.Visible = msoTrue
     StyleCheckBoxEdge box, themeValue, partialState, pointerHere
     If fullState Then
@@ -15317,8 +15186,7 @@ Private Sub StyleCheckBoxFace( _
         StyleGlyphText box, vbNullString, themeValue.OnSurfaceColor, _
             boxSize * 0.62, themeValue
     End If
-    box.Visible = BoolToMso(mVisible)
-    box.OnAction = mAppliedOnAction
+    ShowPart box, BoolToMso(mVisible)
 End Sub
 
 ' A check box's fill and edge: the accent when checked or mixed, else
@@ -15367,46 +15235,31 @@ Private Sub ApplyStepper( _
     If mValue <= mSliderMin Then minusInk = themeValue.OnMutedColor
     If mValue >= mSliderMax Then plusInk = themeValue.OnMutedColor
     buttonSize = mHeight
-    mainShape.Left = mLeft + buttonSize + 4
-    mainShape.Top = mTop
-    mainShape.Width = mWidth - 2 * (buttonSize + 4)
-    mainShape.Height = mHeight
+    PlacePart mainShape, mLeft + buttonSize + 4, mTop, mWidth - 2 * (buttonSize + 4), mHeight
     mainShape.Visible = BoolToMso(mVisible)
-    mainShape.Fill.Visible = msoTrue
-    mainShape.Fill.ForeColor.RGB = themeValue.SurfaceColor
-    mainShape.Line.Visible = msoTrue
-    mainShape.Line.ForeColor.RGB = themeValue.BorderColor
-    mainShape.Line.Weight = 1
+    PaintPart mainShape, themeValue.SurfaceColor, themeValue.BorderColor, 1
     StyleGlyphText mainShape, CStr(CLng(mValue)), ResolveDrawnInk(themeValue), _
         IIf(mFontSize > 0, mFontSize, themeValue.BaseFontSize), themeValue
 
     Set minusButton = EnsurePartShape(hostSheet, "minus", msoShapeRoundedRectangle)
-    minusButton.Left = mLeft
-    minusButton.Top = mTop
-    minusButton.Width = buttonSize
-    minusButton.Height = buttonSize
+    PlacePart minusButton, mLeft, mTop, buttonSize, buttonSize
     minusButton.Fill.Visible = msoTrue
     minusButton.Fill.ForeColor.RGB = PointerTint(themeValue.MutedColor, _
         ResolveDrawnInk(themeValue), "minus")
     minusButton.Line.Visible = msoFalse
     StyleGlyphText minusButton, "-", minusInk, _
         themeValue.BaseFontSize + 2, themeValue
-    minusButton.Visible = BoolToMso(mVisible)
-    minusButton.OnAction = mAppliedOnAction
+    ShowPart minusButton, BoolToMso(mVisible)
 
     Set plusButton = EnsurePartShape(hostSheet, "plus", msoShapeRoundedRectangle)
-    plusButton.Left = mLeft + mWidth - buttonSize
-    plusButton.Top = mTop
-    plusButton.Width = buttonSize
-    plusButton.Height = buttonSize
+    PlacePart plusButton, mLeft + mWidth - buttonSize, mTop, buttonSize, buttonSize
     plusButton.Fill.Visible = msoTrue
     plusButton.Fill.ForeColor.RGB = PointerTint(themeValue.MutedColor, _
         ResolveDrawnInk(themeValue), "plus")
     plusButton.Line.Visible = msoFalse
     StyleGlyphText plusButton, "+", plusInk, _
         themeValue.BaseFontSize + 2, themeValue
-    plusButton.Visible = BoolToMso(mVisible)
-    plusButton.OnAction = mAppliedOnAction
+    ShowPart plusButton, BoolToMso(mVisible)
 End Sub
 
 Private Sub ApplyToggleKnob( _
@@ -15445,8 +15298,7 @@ Private Sub ApplyToggleKnob( _
     Else
         knob.Fill.ForeColor.RGB = RGB(255, 255, 255)
     End If
-    knob.Visible = BoolToMso(mVisible)
-    knob.OnAction = mAppliedOnAction
+    ShowPart knob, BoolToMso(mVisible)
 End Sub
 
 ' A Toggle's Text: a caption right of the switch, sized to its words,
@@ -15479,8 +15331,7 @@ Private Sub ApplyToggleCaption(ByVal hostSheet As Worksheet, ByVal themeValue As
     End If
     captionShape.Width = captionShape.TextFrame2.TextRange.BoundWidth + 8
     mToggleCaptionRoom = 8 + captionShape.Width
-    captionShape.Visible = msoTrue
-    captionShape.OnAction = mAppliedOnAction
+    ShowPart captionShape, msoTrue
 End Sub
 
 ' Puts a part at its target left and width, or, when it may glide and
@@ -15609,32 +15460,17 @@ Private Sub ApplyTransferParts( _
     layoutKey = PartsState(themeValue)
     If Not (mAppliedValid And layoutKey = mAppliedTransferSig) Then
         mAppliedTransferSig = layoutKey
-        mainShape.Left = mLeft
-        mainShape.Top = panelTop
-        mainShape.Width = panelW
-        mainShape.Height = panelH
-        mainShape.Fill.Visible = msoTrue
-        mainShape.Fill.ForeColor.RGB = ResolveSurfaceFill(themeValue)
-        mainShape.Line.Visible = msoTrue
-        mainShape.Line.ForeColor.RGB = themeValue.BorderColor
-        mainShape.Line.Weight = 1
+        PlacePart mainShape, mLeft, panelTop, panelW, panelH
+        PaintPart mainShape, ResolveSurfaceFill(themeValue), themeValue.BorderColor, 1
         mainShape.Visible = BoolToMso(mVisible)
 
         Set rightPanel = EnsurePartShape(hostSheet, "rp", msoShapeRoundedRectangle)
         On Error Resume Next
         rightPanel.Adjustments(1) = 0.08
         On Error GoTo 0
-        rightPanel.Left = rightX
-        rightPanel.Top = panelTop
-        rightPanel.Width = panelW
-        rightPanel.Height = panelH
-        rightPanel.Fill.Visible = msoTrue
-        rightPanel.Fill.ForeColor.RGB = ResolveSurfaceFill(themeValue)
-        rightPanel.Line.Visible = msoTrue
-        rightPanel.Line.ForeColor.RGB = themeValue.BorderColor
-        rightPanel.Line.Weight = 1
-        rightPanel.Visible = BoolToMso(mVisible)
-        rightPanel.OnAction = mAppliedOnAction
+        PlacePart rightPanel, rightX, panelTop, panelW, panelH
+        PaintPart rightPanel, ResolveSurfaceFill(themeValue), themeValue.BorderColor, 1
+        ShowPart rightPanel, BoolToMso(mVisible)
 
         ApplyTransferButton hostSheet, themeValue, "mvr", ">", _
             btnX, btnTop, TRANSFER_BUTTON_W, TRANSFER_BUTTON_H
@@ -15712,10 +15548,7 @@ Private Sub ApplyTransferHeader( _
     If headerKey = appliedKey Then Exit Sub
     appliedKey = headerKey
     Set headerShape = EnsurePartShape(hostSheet, partName, msoShapeRectangle)
-    headerShape.Left = headerLeft
-    headerShape.Top = mTop - 1
-    headerShape.Width = headerWidth
-    headerShape.Height = headerHeight
+    PlacePart headerShape, headerLeft, mTop - 1, headerWidth, headerHeight
     StyleCaptionPart headerShape, headerText, themeValue
     headerShape.Visible = BoolToMso(mVisible)
 End Sub
@@ -15762,27 +15595,21 @@ Private Sub ApplyTransferScroller( _
         appliedKey = scrollKey
         Set scrollButton = EnsurePartShape( _
             hostSheet, upPart, msoShapeRoundedRectangle)
-        scrollButton.Left = panelX + panelW - PAGER_TARGET - 3
-        scrollButton.Top = panelTop + 3
-        scrollButton.Width = PAGER_TARGET
-        scrollButton.Height = PAGER_TARGET
+        PlacePart scrollButton, panelX + panelW - PAGER_TARGET - 3, panelTop + 3, _
+            PAGER_TARGET, PAGER_TARGET
         scrollButton.Fill.Visible = msoTrue
         scrollButton.Fill.ForeColor.RGB = themeValue.MutedColor
         StyleGlyphText scrollButton, ChrW(9650), upInk, 9, themeValue
-        scrollButton.Visible = msoTrue
-        scrollButton.OnAction = mAppliedOnAction
+        ShowPart scrollButton, msoTrue
         If firstDraw Then scrollButton.ZOrder msoBringToFront
         Set scrollButton = EnsurePartShape( _
             hostSheet, downPart, msoShapeRoundedRectangle)
-        scrollButton.Left = panelX + panelW - PAGER_TARGET - 3
-        scrollButton.Top = panelTop + panelH - PAGER_TARGET - 3
-        scrollButton.Width = PAGER_TARGET
-        scrollButton.Height = PAGER_TARGET
+        PlacePart scrollButton, panelX + panelW - PAGER_TARGET - 3, _
+            panelTop + panelH - PAGER_TARGET - 3, PAGER_TARGET, PAGER_TARGET
         scrollButton.Fill.Visible = msoTrue
         scrollButton.Fill.ForeColor.RGB = themeValue.MutedColor
         StyleGlyphText scrollButton, ChrW(9660), downInk, 9, themeValue
-        scrollButton.Visible = msoTrue
-        scrollButton.OnAction = mAppliedOnAction
+        ShowPart scrollButton, msoTrue
         If firstDraw Then scrollButton.ZOrder msoBringToFront
     ElseIf LenB(appliedKey) > 0 Then
         appliedKey = vbNullString
@@ -15820,13 +15647,10 @@ Private Sub SyncReorderButtons( _
         arrowShape.Height = PAGER_TARGET
         arrowShape.Left = ReorderArrowLeft(rightX, panelW, partNo)
         arrowShape.Top = mTop - 1
-        arrowShape.Fill.Visible = msoTrue
-        arrowShape.Fill.ForeColor.RGB = themeValue.MutedColor
-        arrowShape.Line.Visible = msoFalse
+        PaintPart arrowShape, themeValue.MutedColor
         StyleGlyphText arrowShape, IIf(partNo = 0, ChrW(9650), ChrW(9660)), _
             ResolveDrawnInk(themeValue), 9, themeValue
-        arrowShape.Visible = msoTrue
-        arrowShape.OnAction = mAppliedOnAction
+        ShowPart arrowShape, msoTrue
         arrowShape.ZOrder msoBringToFront
     Next partNo
     mAppliedPartTint = vbNullString
@@ -16276,16 +16100,12 @@ Private Sub ApplyTransferButton( _
     On Error Resume Next
     moveButton.Adjustments(1) = 0.25
     On Error GoTo 0
-    moveButton.Left = buttonLeft
-    moveButton.Top = buttonTop
-    moveButton.Width = buttonWidth
-    moveButton.Height = buttonHeight
+    PlacePart moveButton, buttonLeft, buttonTop, buttonWidth, buttonHeight
     moveButton.Fill.Visible = msoTrue
     moveButton.Fill.ForeColor.RGB = themeValue.MutedColor
     StyleGlyphText moveButton, glyph, ResolveDrawnInk(themeValue), _
         themeValue.BaseFontSize, themeValue
-    moveButton.Visible = BoolToMso(mVisible)
-    moveButton.OnAction = mAppliedOnAction
+    ShowPart moveButton, BoolToMso(mVisible)
 End Sub
 
 ' One panel's window of rows. Each row keeps the state it was last drawn
@@ -16370,33 +16190,16 @@ Private Sub SyncTransferRows( _
                 ' The hover and selection fills round their corners inside
                 ' the rounded panel.
                 RoundCorners rowShape, TRANSFER_ROW_H
-                rowShape.Left = panelX + 3
-                rowShape.Top = panelTop + 3 + (idx - 1) * TRANSFER_ROW_H
-                rowShape.Width = rowWidth
-                rowShape.Height = TRANSFER_ROW_H
+                PlacePart rowShape, panelX + 3, panelTop + 3 + (idx - 1) * TRANSFER_ROW_H, _
+                    rowWidth, TRANSFER_ROW_H
                 rowShape.Fill.Visible = msoTrue
                 rowShape.Fill.ForeColor.RGB = rowFill
-                With rowShape.TextFrame2
-                    .MarginLeft = 6
-                    .MarginRight = 4
-                    .MarginTop = 1
-                    .MarginBottom = 1
-                    .VerticalAnchor = msoAnchorMiddle
-                    .WordWrap = msoFalse
-                    .TextRange.Text = rowText
-                    .TextRange.ParagraphFormat.Alignment = msoAlignLeft
-                    With .TextRange.Font
-                        .Name = themeValue.FontName
-                        .Size = resolvedSize
-                        .Bold = msoFalse
-                        .Fill.ForeColor.RGB = rowInk
-                    End With
-                End With
+                StyleTextPart rowShape, rowText, msoAlignLeft, resolvedSize, False, rowInk, _
+                    themeValue, leftInset:=6, rightInset:=4, yInset:=1
                 If LenB(priorKey) = 0 Or partCreated Then
                     EnsureGutterTab rowShape
                 End If
-                rowShape.Visible = msoTrue
-                rowShape.OnAction = mAppliedOnAction
+                ShowPart rowShape, msoTrue
                 If LenB(priorKey) = 0 Then rowShape.ZOrder msoBringToFront
             End If
         End If
@@ -16439,8 +16242,7 @@ Private Sub ApplyListCaret( _
     Else
         caret.Fill.ForeColor.RGB = themeValue.OnMutedColor
     End If
-    caret.Visible = BoolToMso(mVisible)
-    caret.OnAction = mAppliedOnAction
+    ShowPart caret, BoolToMso(mVisible)
 End Sub
 
 ' Slim centered track, accent fill up to the value, and a round thumb.
@@ -16463,14 +16265,9 @@ Private Sub ApplySlideBar( _
         ":" & CStr(mSlideTracking) & ":" & CStr(bubbleOn) & ":" & _
         PointerKey()) Then Exit Sub
     trackTop = mTop + (mHeight - 6) / 2
-    mainShape.Left = mLeft
-    mainShape.Top = trackTop
-    mainShape.Width = mWidth
-    mainShape.Height = 6
+    PlacePart mainShape, mLeft, trackTop, mWidth, 6
     mainShape.Visible = BoolToMso(mVisible)
-    mainShape.Fill.Visible = msoTrue
-    mainShape.Fill.ForeColor.RGB = themeValue.MutedColor
-    mainShape.Line.Visible = msoFalse
+    PaintPart mainShape, themeValue.MutedColor
 
     Set fillPart = EnsurePartShape(hostSheet, "fill", msoShapeRoundedRectangle)
     fillPart.Left = mLeft
@@ -16509,8 +16306,7 @@ Private Sub ApplySlideBar( _
     thumb.Line.Visible = msoTrue
     thumb.Line.ForeColor.RGB = themeValue.BorderColor
     thumb.Line.Weight = 1.25
-    thumb.Visible = BoolToMso(mVisible)
-    thumb.OnAction = mAppliedOnAction
+    ShowPart thumb, BoolToMso(mVisible)
     SyncSlideBubble hostSheet, themeValue, bubbleOn, _
         thumb.Left + thumbSize / 2
 End Sub
@@ -16550,27 +16346,10 @@ Private Sub SyncSlideBubble( _
     Else
         bubble.Top = mTop + mHeight + 4
     End If
-    bubble.Fill.Visible = msoTrue
-    bubble.Fill.ForeColor.RGB = themeValue.PrimaryColor
-    bubble.Line.Visible = msoFalse
-    With bubble.TextFrame2
-        .MarginLeft = 2
-        .MarginRight = 2
-        .MarginTop = 0
-        .MarginBottom = 0
-        .VerticalAnchor = msoAnchorMiddle
-        .WordWrap = msoFalse
-        .TextRange.Text = bubbleText
-        .TextRange.ParagraphFormat.Alignment = msoAlignCenter
-        With .TextRange.Font
-            .Name = themeValue.FontName
-            .Size = bubbleSize
-            .Bold = msoTrue
-            .Fill.ForeColor.RGB = themeValue.OnPrimaryColor
-        End With
-    End With
-    bubble.Visible = msoTrue
-    bubble.OnAction = mAppliedOnAction
+    PaintPart bubble, themeValue.PrimaryColor
+    StyleTextPart bubble, bubbleText, msoAlignCenter, bubbleSize, True, _
+        themeValue.OnPrimaryColor, themeValue, leftInset:=2, rightInset:=2
+    ShowPart bubble, msoTrue
     mAppliedBubble = True
 End Sub
 
@@ -17025,9 +16804,7 @@ Friend Function DrawTooltip( _
     Set hostApp = OwnerApp
     Set themeValue = hostApp.Theme
     Set tipShape = EnsurePartShape(hostApp.Sheet, "tt", msoShapeRoundedRectangle)
-    tipShape.Fill.Visible = msoTrue
-    tipShape.Fill.ForeColor.RGB = themeValue.OnSurfaceColor
-    tipShape.Line.Visible = msoFalse
+    PaintPart tipShape, themeValue.OnSurfaceColor
     With tipShape.TextFrame2
         .MarginLeft = 7
         .MarginRight = 7
@@ -17079,8 +16856,7 @@ Friend Function DrawTooltip( _
     If tipTop < 0 Then tipTop = 0
     tipShape.Left = tipLeft
     tipShape.Top = tipTop
-    tipShape.Visible = msoTrue
-    tipShape.OnAction = mAppliedOnAction
+    ShowPart tipShape, msoTrue
     tipShape.ZOrder msoBringToFront
     tipRight = tipLeft + tipWidth
     tipBottom = tipTop + tipHeight
@@ -17865,15 +17641,8 @@ Private Sub SyncDropList( _
                     End If
                 End With
             Else
-                optionShape.Left = ListSpanLeft()
-                optionShape.Top = rowTop
-                optionShape.Width = ListSpanWidth()
-                optionShape.Height = rowPitch
-                optionShape.Fill.Visible = msoTrue
-                optionShape.Fill.ForeColor.RGB = rowFill
-                optionShape.Line.Visible = msoTrue
-                optionShape.Line.ForeColor.RGB = themeValue.BorderColor
-                optionShape.Line.Weight = 1
+                PlacePart optionShape, ListSpanLeft(), rowTop, ListSpanWidth(), rowPitch
+                PaintPart optionShape, rowFill, themeValue.BorderColor, 1
                 With optionShape.TextFrame2
                     .MarginLeft = 6
                     .MarginRight = 6
@@ -17898,8 +17667,7 @@ Private Sub SyncDropList( _
                 If LenB(priorKey) = 0 Or partCreated Then
                     EnsureGutterTab optionShape
                 End If
-                optionShape.Visible = msoTrue
-                optionShape.OnAction = mAppliedOnAction
+                ShowPart optionShape, msoTrue
                 If LenB(priorKey) = 0 Then optionShape.ZOrder msoBringToFront
             End If
             Set styledRow = optionShape
@@ -18002,15 +17770,8 @@ Private Sub SyncEmptyRow( _
         If emptyKey = mAppliedEmptyRowSig Then Exit Sub
         mAppliedEmptyRowSig = emptyKey
         Set emptyShape = EnsurePartShape(hostSheet, "optn", msoShapeRectangle)
-        emptyShape.Left = ListSpanLeft()
-        emptyShape.Top = rowTop
-        emptyShape.Width = ListSpanWidth()
-        emptyShape.Height = rowPitch
-        emptyShape.Fill.Visible = msoTrue
-        emptyShape.Fill.ForeColor.RGB = themeValue.SurfaceColor
-        emptyShape.Line.Visible = msoTrue
-        emptyShape.Line.ForeColor.RGB = themeValue.BorderColor
-        emptyShape.Line.Weight = 1
+        PlacePart emptyShape, ListSpanLeft(), rowTop, ListSpanWidth(), rowPitch
+        PaintPart emptyShape, themeValue.SurfaceColor, themeValue.BorderColor, 1
         With emptyShape.TextFrame2
             .MarginLeft = 6
             .MarginRight = 6
@@ -18029,8 +17790,7 @@ Private Sub SyncEmptyRow( _
             End With
         End With
         EnsureGutterTab emptyShape
-        emptyShape.Visible = msoTrue
-        emptyShape.OnAction = mAppliedOnAction
+        ShowPart emptyShape, msoTrue
         emptyShape.ZOrder msoBringToFront
     ElseIf LenB(mAppliedEmptyRowSig) > 0 Then
         mAppliedEmptyRowSig = vbNullString
@@ -18340,19 +18100,11 @@ Private Sub SyncListPager( _
         appliedKey = pagerKey
         Set pagerShape = EnsurePartShape( _
             hostSheet, partName, msoShapeRectangle)
-        pagerShape.Left = ListSpanLeft()
-        pagerShape.Top = rowTop
-        pagerShape.Width = ListSpanWidth()
-        pagerShape.Height = mHeight
-        pagerShape.Fill.Visible = msoTrue
-        pagerShape.Fill.ForeColor.RGB = themeValue.MutedColor
-        pagerShape.Line.Visible = msoTrue
-        pagerShape.Line.ForeColor.RGB = themeValue.BorderColor
-        pagerShape.Line.Weight = 1
+        PlacePart pagerShape, ListSpanLeft(), rowTop, ListSpanWidth(), mHeight
+        PaintPart pagerShape, themeValue.MutedColor, themeValue.BorderColor, 1
         StyleGlyphText pagerShape, pagerWords, pagerInk, _
             resolvedSize - 1, themeValue
-        pagerShape.Visible = msoTrue
-        pagerShape.OnAction = mAppliedOnAction
+        ShowPart pagerShape, msoTrue
         If firstDraw Then pagerShape.ZOrder msoBringToFront
     ElseIf LenB(appliedKey) > 0 Then
         appliedKey = vbNullString
