@@ -59,6 +59,30 @@ Private Declare PtrSafe Function ReleaseDC Lib "user32" ( _
     ByVal windowHandle As LongPtr, ByVal deviceContext As LongPtr) As Long
 Private Declare PtrSafe Function GetDeviceCaps Lib "gdi32" ( _
     ByVal deviceContext As LongPtr, ByVal capabilityIndex As Long) As Long
+' Text measuring for a focused field's face, which Office cannot measure
+' before the text is written.
+Private Type RdxTextExtent
+    extentX As Long
+    extentY As Long
+End Type
+Private Declare PtrSafe Function CreateCompatibleDC Lib "gdi32" ( _
+    ByVal deviceContext As LongPtr) As LongPtr
+Private Declare PtrSafe Function CreateFontW Lib "gdi32" ( _
+    ByVal emHeight As Long, ByVal averageWidth As Long, ByVal escapementTenths As Long, _
+    ByVal slantTenths As Long, ByVal weightValue As Long, ByVal italicFlag As Long, _
+    ByVal underlineFlag As Long, ByVal strikeFlag As Long, ByVal charSetCode As Long, _
+    ByVal outPrecisionCode As Long, ByVal clipPrecisionCode As Long, _
+    ByVal qualityCode As Long, ByVal pitchFamilyCode As Long, _
+    ByVal facePointer As LongPtr) As LongPtr
+Private Declare PtrSafe Function SelectObject Lib "gdi32" ( _
+    ByVal deviceContext As LongPtr, ByVal gdiObject As LongPtr) As LongPtr
+Private Declare PtrSafe Function DeleteObject Lib "gdi32" ( _
+    ByVal gdiObject As LongPtr) As Long
+Private Declare PtrSafe Function DeleteDC Lib "gdi32" ( _
+    ByVal deviceContext As LongPtr) As Long
+Private Declare PtrSafe Function GetTextExtentPoint32W Lib "gdi32" ( _
+    ByVal deviceContext As LongPtr, ByVal textPointer As LongPtr, ByVal charCount As Long, _
+    ByRef textExtent As RdxTextExtent) As Long
 Private Declare PtrSafe Function GetAsyncKeyState Lib "user32" ( _
     ByVal virtualKey As Long) As Integer
 Private Declare PtrSafe Function GetCaretBlinkTime Lib "user32" () As Long
@@ -128,6 +152,11 @@ Private Const ERROR_INVALID_OPERATION As Long = ERROR_BASE + 2
 Private Const ERROR_NOT_FOUND As Long = ERROR_BASE + 3
 Private Const CLICK_DEBOUNCE_MS As Long = 150
 Private Const UNMAPPABLE_POINTS As Double = -1E+18
+' The em, in device units, the text measure builds its font at.
+Private Const TEXT_MEASURE_EM As Long = 1000
+' Points a focused face line leaves free at its right, where the measure
+' and Office's own layout can part by a little.
+Private Const FACE_FIT_SLACK As Double = 3
 
 Private Const ROLE_APP As Long = 1
 Private Const ROLE_COMPONENT As Long = 2
@@ -391,6 +420,11 @@ Private mPointerButtonHeld As Boolean
 Private mFramePointerState As Long
 Private mFramePointerX As Double
 Private mFramePointerY As Double
+' The factory's text measure: a memory device context with the font last
+' asked for selected into it, made at a large em so no advance rounds.
+Private mMeasureDc As LongPtr
+Private mMeasureFont As LongPtr
+Private mMeasureFontKey As String
 ' The caret blink interval Windows reported when a field last took
 ' focus; 0 when the user turned blinking off.
 Private mCaretBlinkMs As Long
@@ -1140,9 +1174,10 @@ Friend Sub HoldForClose()
     Next appValue
     On Error GoTo 0
     ' With the close held, no app wants a key: every access key and
-    ' shortcut goes back.
+    ' shortcut goes back, and the text measure lets its handles go.
     RefreshAccessKeys
     ReleaseRecordedKeys
+    ReleaseTextMeasure
 End Sub
 
 ' The workbook is still open after a close began: the user cancelled at
@@ -2385,6 +2420,7 @@ Public Sub Shutdown()
     RefreshAccessKeys
     Set mSenderApp = Nothing
     Set mSenderComponent = Nothing
+    ReleaseTextMeasure
 End Sub
 
 Public Property Get Version() As String
@@ -10307,9 +10343,11 @@ End Function
 ' The viewport of the buffer that fits the field, always containing the
 ' caret: the caret's hard line renders with a horizontal window around
 ' the caret, neighboring lines fill the remaining rows (truncated with
-' an ellipsis when long, so line estimates stay exact), and ellipses at
-' the edges mark trimmed content above and below. Character columns are
-' estimated at 0.58 of the font size, lines at 1.35, conservatively.
+' an ellipsis when long, so no line wraps), and ellipses at the edges
+' mark trimmed content above and below. Each line is measured in the
+' field's font to fit the width, where a width per character stops
+' ordinary text short of the edge and lets wide letters wrap; lines are
+' estimated at 1.35 of the font size.
 ' The focused field's face: the text with the insertion bar at the
 ' caret (a space while the blink is off, so nothing shifts), windowed
 ' to what fits, with ellipses marking what is cut: the lines around the
@@ -10323,7 +10361,6 @@ Private Function BuildFace( _
     Dim renderMap() As Long
     Dim caretRender As Long
     Dim idx As Long
-    Dim charsPerLine As Long
     Dim maxLines As Long
     Dim lineStarts() As Long
     Dim lineEnds() As Long
@@ -10335,6 +10372,10 @@ Private Function BuildFace( _
     Dim lineNumber As Long
     Dim lineLength As Long
     Dim windowStart As Long
+    Dim windowEnd As Long
+    Dim caretAt As Long
+    Dim faceRoom As Double
+    Dim fontFace As String
     Dim faceText As String
 
     If mCaretPos > Len(mText) Then mCaretPos = Len(mText)
@@ -10360,7 +10401,10 @@ Private Function BuildFace( _
             renderMap(idx) = idx - 1
         End If
     Next idx
-    charsPerLine = FaceCharsPerLine(resolvedSize)
+    ' The room a face line has: the field between its margins, less a
+    ' sliver where the measure and Office's layout may part.
+    faceRoom = mWidth - 6 - FaceMarginRight() - FACE_FIT_SLACK
+    fontFace = OwnerApp.Theme.FontName
     ' Line spans of the rendered text, line breaks excluded.
     segmentStart = 1
     For idx = 1 To Len(rendered) + 1
@@ -10397,30 +10441,15 @@ Private Function BuildFace( _
             AppendFace faceText, vbLf, renderMap(lineStarts(lineNumber) - 1)
         End If
         lineLength = lineEnds(lineNumber) - lineStarts(lineNumber) + 1
-        If lineLength <= charsPerLine Then
-            For idx = lineStarts(lineNumber) To lineEnds(lineNumber)
-                AppendFace faceText, Mid$(rendered, idx, 1), renderMap(idx)
-            Next idx
-        ElseIf lineNumber = caretLine Then
-            windowStart = caretRender - lineStarts(lineNumber) + 1 - charsPerLine + 2
-            If windowStart < 1 Then windowStart = 1
-            If windowStart + charsPerLine - 1 > lineLength Then
-                windowStart = lineLength - charsPerLine + 1
-            End If
-            If windowStart > 1 Then AppendFace faceText, ChrW(8230), 0
-            For idx = lineStarts(lineNumber) + windowStart - 1 To _
-                lineStarts(lineNumber) + windowStart + charsPerLine - 2
-                AppendFace faceText, Mid$(rendered, idx, 1), renderMap(idx)
-            Next idx
-            If windowStart + charsPerLine - 1 < lineLength Then
-                AppendFace faceText, ChrW(8230), 0
-            End If
-        Else
-            For idx = lineStarts(lineNumber) To lineStarts(lineNumber) + charsPerLine - 2
-                AppendFace faceText, Mid$(rendered, idx, 1), renderMap(idx)
-            Next idx
-            AppendFace faceText, ChrW(8230), 0
-        End If
+        caretAt = 0
+        If lineNumber = caretLine Then caretAt = caretRender - lineStarts(lineNumber) + 1
+        FitFaceWindow Mid$(rendered, lineStarts(lineNumber), lineLength), caretAt, faceRoom, _
+            fontFace, resolvedSize, windowStart, windowEnd
+        If windowStart > 1 Then AppendFace faceText, ChrW(8230), 0
+        For idx = lineStarts(lineNumber) + windowStart - 1 To lineStarts(lineNumber) + windowEnd - 1
+            AppendFace faceText, Mid$(rendered, idx, 1), renderMap(idx)
+        Next idx
+        If windowEnd < lineLength Then AppendFace faceText, ChrW(8230), 0
     Next lineNumber
     If lastLine < lineTotal Then AppendFace faceText, ChrW(8230), 0
     ' An empty field keeps its placeholder, after the bar.
@@ -10447,6 +10476,92 @@ Private Sub AppendFace(ByRef faceText As String, ByVal faceChar As String, ByVal
     End If
     mFaceMap(mFaceLength) = textIndex
 End Sub
+
+' The stretch of a focused face's line the face shows, as its first and
+' last characters: all of it when it fits; otherwise, on the caret's
+' line (caretAt its place there), a stretch that ends a character past
+' the caret and reaches as far left as fits, then, when it reaches the
+' line's start, as far right; on another line, as much of its start as
+' fits before an ellipsis.
+Private Sub FitFaceWindow( _
+    ByVal lineText As String, _
+    ByVal caretAt As Long, _
+    ByVal faceRoom As Double, _
+    ByVal fontFace As String, _
+    ByVal resolvedSize As Double, _
+    ByRef windowStart As Long, _
+    ByRef windowEnd As Long _
+)
+    Dim lowMark As Long
+    Dim highMark As Long
+    Dim midMark As Long
+
+    windowStart = 1
+    windowEnd = Len(lineText)
+    If windowEnd = 0 Then Exit Sub
+    If FaceTextWidth(lineText, fontFace, resolvedSize) <= faceRoom Then Exit Sub
+    windowEnd = 0
+    If caretAt > 0 Then
+        windowEnd = caretAt + 1
+        If windowEnd > Len(lineText) Then windowEnd = Len(lineText)
+        ' A start further right leaves a narrower stretch, so the leftmost
+        ' start that fits is found by halving.
+        lowMark = 1
+        highMark = windowEnd
+        Do While lowMark < highMark
+            midMark = (lowMark + highMark) \ 2
+            If FaceWindowFits(lineText, midMark, windowEnd, faceRoom, fontFace, resolvedSize) Then
+                highMark = midMark
+            Else
+                lowMark = midMark + 1
+            End If
+        Loop
+        windowStart = lowMark
+        If windowStart > 1 Then Exit Sub
+    End If
+    ' From the line's start, as far right as fits; the whole line did not.
+    lowMark = windowEnd
+    highMark = Len(lineText) - 1
+    Do While lowMark < highMark
+        midMark = (lowMark + highMark + 1) \ 2
+        If FaceWindowFits(lineText, 1, midMark, faceRoom, fontFace, resolvedSize) Then
+            lowMark = midMark
+        Else
+            highMark = midMark - 1
+        End If
+    Loop
+    windowEnd = lowMark
+End Sub
+
+' Whether a stretch of a face line fits the face with the ellipses that
+' mark what it cuts off either side.
+Private Function FaceWindowFits( _
+    ByVal lineText As String, _
+    ByVal windowStart As Long, _
+    ByVal windowEnd As Long, _
+    ByVal faceRoom As Double, _
+    ByVal fontFace As String, _
+    ByVal resolvedSize As Double _
+) As Boolean
+    Dim windowWords As String
+
+    windowWords = Mid$(lineText, windowStart, windowEnd - windowStart + 1)
+    If windowStart > 1 Then windowWords = ChrW(8230) & windowWords
+    If windowEnd < Len(lineText) Then windowWords = windowWords & ChrW(8230)
+    FaceWindowFits = (FaceTextWidth(windowWords, fontFace, resolvedSize) <= faceRoom)
+End Function
+
+' The width a face's words take in the field's font, or when they cannot
+' be measured, the estimate of 0.58 of the font size a character.
+Private Function FaceTextWidth( _
+    ByVal faceWords As String, _
+    ByVal fontFace As String, _
+    ByVal resolvedSize As Double _
+) As Double
+    If LenB(faceWords) = 0 Then Exit Function
+    FaceTextWidth = ReDimUI.TextWidthPoints(faceWords, fontFace, resolvedSize, mFontBold)
+    If FaceTextWidth = 0 Then FaceTextWidth = Len(faceWords) * resolvedSize * 0.58
+End Function
 
 ' Cuts a one-line face's text to the longest start that fits on one line
 ' with an ellipsis, measured from the drawn text: a face that holds its
@@ -17646,6 +17761,56 @@ Private Function ScreenPixelsPerPoint(ByVal alongY As Boolean) As Double
     On Error GoTo 0
     If ScreenPixelsPerPoint = 0 Then ScreenPixelsPerPoint = dotsPerInch / 72#
 End Function
+
+' The width in points a line of text takes in a font at a size, or 0 when
+' it cannot be measured. GDI measures at a large em and the result
+' scales, since at a field's size each character's advance would round
+' to a pixel. A focused field fits its face lines with it, before Office
+' has the text to lay out.
+Friend Function TextWidthPoints( _
+    ByVal lineText As String, _
+    ByVal fontFace As String, _
+    ByVal textSize As Double, _
+    ByVal boldOn As Boolean _
+) As Double
+    Dim fontKey As String
+    Dim textExtent As RdxTextExtent
+    Dim newFont As LongPtr
+
+    If Not IsFactory(Me) Then
+        TextWidthPoints = ReDimUI.TextWidthPoints(lineText, fontFace, textSize, boldOn)
+        Exit Function
+    End If
+    If LenB(lineText) = 0 Then Exit Function
+    If mMeasureDc = 0 Then mMeasureDc = CreateCompatibleDC(0)
+    If mMeasureDc = 0 Then Exit Function
+    fontKey = fontFace & "|" & CStr(boldOn)
+    If fontKey <> mMeasureFontKey Then
+        ' The new font goes in before the old one is let go, since a font
+        ' still selected into a device context must not be deleted.
+        newFont = CreateFontW(-TEXT_MEASURE_EM, 0, 0, 0, IIf(boldOn, 700, 400), 0, 0, 0, _
+            1, 0, 0, 0, 0, StrPtr(fontFace))
+        If newFont = 0 Then Exit Function
+        SelectObject mMeasureDc, newFont
+        If mMeasureFont <> 0 Then DeleteObject mMeasureFont
+        mMeasureFont = newFont
+        mMeasureFontKey = fontKey
+    End If
+    If GetTextExtentPoint32W(mMeasureDc, StrPtr(lineText), Len(lineText), textExtent) = 0 Then
+        Exit Function
+    End If
+    TextWidthPoints = textExtent.extentX * textSize / TEXT_MEASURE_EM
+End Function
+
+' Lets the text measure's device context go, then its font, which the
+' context held until then.
+Private Sub ReleaseTextMeasure()
+    If mMeasureDc <> 0 Then DeleteDC mMeasureDc
+    If mMeasureFont <> 0 Then DeleteObject mMeasureFont
+    mMeasureFont = 0
+    mMeasureDc = 0
+    mMeasureFontKey = vbNullString
+End Sub
 
 Private Sub ApplyComboParts( _
     ByVal hostSheet As Worksheet, _

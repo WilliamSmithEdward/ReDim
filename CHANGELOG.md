@@ -448,6 +448,11 @@
   pressed unless set, and 0 leaves the fill as it is. The theme answers
   them as `HoverTintPercent` and `PressTintPercent`. `PointerEffects`
   stays off by default.
+- A focused `TextInput` or `ComboBox` uses its whole width. Each line of
+  its face was cut to a character count guessed from the font size, so
+  ordinary text ended in an ellipsis a fifth or more short of the right
+  edge, and a line of wide letters such as W ran over and wrapped. The
+  face now measures its text in the theme's font, bold included.
 
 ## 1.0.2 - 2026-09-23
 

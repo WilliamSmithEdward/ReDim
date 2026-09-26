@@ -527,7 +527,11 @@ Focus mechanics, all automatic:
 - Overflow follows the caret. Shape text cannot scroll, so a focused field renders the
   tail window of its buffer - the last lines that fit (multi-line) or the rightmost
   characters that fit (single-line and combo) - with a leading ellipsis marking trimmed
-  content. The buffer keeps the complete text and commits intact; unfocused fields show
+  content. A focused multi-line field cuts a line too long for its width instead of
+  wrapping it: the caret's line shows the stretch that ends at the caret, and each other
+  line its beginning, ending in an ellipsis. Each line is measured in the theme's font,
+  so it runs to the field's right edge. The buffer keeps the complete text and commits
+  intact; unfocused fields show
   their beginning, ending in an ellipsis where the text is cut, as a `SelectBox` or
   `DatePicker` face does with a long item or date.
 - Esc reverts the field to the text it had when focus arrived, fires nothing, and leaves.

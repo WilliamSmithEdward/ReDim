@@ -1864,3 +1864,11 @@ def test_focus_and_windows(run_widgets):
     assert facts["rowRedrawn"] == "True", "a hand-deleted table row draws in full again"
     assert facts["navigateActivates"] == "True", "Navigate to the shown window brings it forward"
     assert facts["imageFocus"] == "True", "an Image that navigates takes focus"
+
+
+def test_focused_face_fits(run_widgets):
+    facts = parse_transcript(run_widgets("TestFocusedFaceFits"))
+    for name in ("single", "multi", "wide", "bold"):
+        drawn, held, used = facts[name].split("/")
+        assert drawn == held, f"{name}: a focused field's line must not wrap"
+        assert int(used) >= 85, f"{name}: a focused field's line must reach its right edge"

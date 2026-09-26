@@ -1700,9 +1700,15 @@ Public Function TestMultiLineInput() As String
     For keyNo = 1 To 30
         RdxKeyChar "x"
     Next keyNo
+    ' The window fits what the field's width holds, measured: more than
+    ' the 20 characters an estimate of the font's widths allowed, on one
+    ' line, after an ellipsis and before the caret.
     faceRaw = host.Shapes("rdm_wid25_one").TextFrame2.TextRange.Text
-    transcript = transcript & "|lineWindow=" & _
-        CStr(faceRaw = ChrW(8230) & String$(20, "x") & "|")
+    transcript = transcript & "|lineWindow=" & CStr( _
+        Left$(faceRaw, 1) = ChrW(8230) And Right$(faceRaw, 1) = "|" _
+        And Mid$(faceRaw, 2, Len(faceRaw) - 2) = String$(Len(faceRaw) - 2, "x") _
+        And Len(faceRaw) - 2 > 20 _
+        And host.Shapes("rdm_wid25_one").TextFrame2.TextRange.BoundHeight < 22)
     RdxKeyChar "{ENTER}"
     transcript = transcript & "|lineFullCommit=" & _
         CStr(Len(CStr(app.State("oneLine"))) = 30)
@@ -7108,4 +7114,70 @@ Public Function TestFocusAndWindows() As String
     RdxReleaseKeys
     ReDimUI.AutoPump True
     TestFocusAndWindows = transcript
+End Function
+
+' A focused face as laid out: the lines Office drew against the lines
+' the face holds, and the widest line as a percent of the room between
+' the margins, as "drawn/held/percent". Office hands a written line break
+' back as a carriage return or a vertical tab.
+Private Function FaceFill(ByVal host As Worksheet, ByVal shapeName As String) As String
+    Dim room As Double
+    Dim widest As Double
+    Dim lineNo As Long
+    Dim heldText As String
+
+    With host.Shapes(shapeName)
+        room = .Width - .TextFrame2.MarginLeft - .TextFrame2.MarginRight
+        With .TextFrame2.TextRange
+            For lineNo = 1 To .Lines.Count
+                If .Lines(lineNo, 1).BoundWidth > widest Then widest = .Lines(lineNo, 1).BoundWidth
+            Next lineNo
+            heldText = Replace(Replace(Replace(.Text, vbCrLf, vbLf), vbCr, vbLf), Chr$(11), vbLf)
+            FaceFill = .Lines.Count & "/" & (UBound(Split(heldText, vbLf)) + 1) & "/" & _
+                CStr(Int(100 * widest / room))
+        End With
+    End With
+End Function
+
+' A focused field fits its face to its width, measured in its font: a long
+' line fills most of the room without wrapping, on a single line, on each
+' line of a multi-line field, in wide letters, and in bold.
+Public Function TestFocusedFaceFits() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim transcript As String
+
+    ReDimUI.AutoPump False
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "wid96")
+    app.TextInput("one").AtRect 24, 24, 220, 22
+    app.TextInput("notes").AtRect(24, 70, 300, 60).MultiLine
+    app.TextInput("wide").AtRect 24, 150, 220, 22
+    app.TextInput("heavy").AtRect(24, 190, 220, 22).Bold
+    app.Render
+
+    app.TextInput("one").Focus
+    TypeText "the quick brown fox jumps over the lazy dog and keeps on running"
+    transcript = "single=" & FaceFill(host, "rdm_wid96_one")
+    ReDimUI.EndKeyboardFocus
+
+    app.TextInput("notes").Focus
+    TypeText "this is a multiline text line that runs on past the edge"
+    RdxKeyChar "{ENTER}"
+    TypeText "this is also a text line that runs past the edge too"
+    transcript = transcript & "|multi=" & FaceFill(host, "rdm_wid96_notes")
+    ReDimUI.EndKeyboardFocus
+
+    app.TextInput("wide").Focus
+    TypeText String$(40, "W")
+    transcript = transcript & "|wide=" & FaceFill(host, "rdm_wid96_wide")
+    ReDimUI.EndKeyboardFocus
+
+    app.TextInput("heavy").Focus
+    TypeText "the quick brown fox jumps over the lazy dog and keeps on running"
+    transcript = transcript & "|bold=" & FaceFill(host, "rdm_wid96_heavy")
+    ReDimUI.EndKeyboardFocus
+    RdxReleaseKeys
+    ReDimUI.AutoPump True
+    TestFocusedFaceFits = transcript
 End Function
