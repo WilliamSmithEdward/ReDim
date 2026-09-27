@@ -22,6 +22,11 @@
   rebuild spent 75 of its 120 milliseconds there and now takes about 37.
   A theme's revision now follows its look, shared by every theme whose
   tokens all match.
+- An arrow key in a radio group redrew every row: 8.4 milliseconds a key
+  for six items, 39 for a windowed group of forty. A row now redraws
+  only when its pick, the pointer, or its place in the window changes,
+  and a row that keeps its place restyles only its circle: 0.2 and 4.4
+  milliseconds. A row whose shapes something deleted draws in full again.
 
 ## 1.0.3 - 2026-09-26
 

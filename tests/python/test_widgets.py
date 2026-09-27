@@ -173,6 +173,7 @@ def test_radio_group(run_widgets):
     assert facts["changeRan"] == "1"
     assert facts["sameRowNoOp"] == "True"
     assert facts["rowOnePicked"] == "Low"
+    assert facts["redrawnDot"] == "True"
 
 
 def test_stepper(run_widgets):

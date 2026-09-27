@@ -15297,15 +15297,20 @@ Private Sub RevealListRow(ByVal shownPosition As Long)
 End Sub
 
 ' Hides a part a windowed list drew for a row now outside its window,
-' when the part exists.
+' when the part exists; one the app knows it never drew costs no lookup.
 Private Sub HideRowPart(ByVal hostSheet As Worksheet, ByVal partName As String)
-    On Error Resume Next
-    hostSheet.Shapes(ShapeName & PART_SEPARATOR & partName).Visible = msoFalse
-    On Error GoTo 0
+    Dim partShape As Shape
+
+    Set partShape = OwnerApp.DrawnShape(hostSheet, ShapeName & PART_SEPARATOR & partName)
+    If Not partShape Is Nothing Then partShape.Visible = msoFalse
 End Sub
 
 ' One circle-and-caption row per item. The selected row's circle fills with
-' the accent and carries an inner dot part.
+' the accent and carries an inner dot part. The group's frame (its place,
+' look, and items) draws every row afresh when it changes; otherwise each
+' row keeps a key of its place in the window, its pick, and the pointer,
+' so an arrow key or a hover rewrites only the rows it touches, and a row
+' that stays in place changes only its circle's edge and dot.
 Private Sub ApplyRadioGroup( _
     ByVal mainShape As Shape, _
     ByVal hostSheet As Worksheet, _
@@ -15319,11 +15324,22 @@ Private Sub ApplyRadioGroup( _
     Dim captionShape As Shape
     Dim dot As Shape
     Dim circleSize As Double
+    Dim ringTop As Double
     Dim isPicked As Boolean
     Dim windowRows As Long
     Dim windowed As Boolean
     Dim rowPos As Long
     Dim rowTextRoom As Double
+    Dim fullPass As Boolean
+    Dim rowKey As String
+    Dim priorKey As String
+    Dim priorStates() As String
+    Dim priorTop As Long
+    Dim wasDrawn As Boolean
+    Dim rowKept As Boolean
+    Dim ringCreated As Boolean
+    Dim dotCreated As Boolean
+    Dim captionCreated As Boolean
 
     If Not mItems Is Nothing Then rowTotal = mItems.Count
     If rowTotal = 0 Then
@@ -15342,15 +15358,26 @@ Private Sub ApplyRadioGroup( _
         End If
         DropRowScroller hostSheet
         mAppliedExtrasSig = vbNullString
+        Erase mAppliedRowStates
         Exit Sub
     End If
     RowListLayout rowTotal, 0, rowPitch, windowRows
     windowed = (windowRows < rowTotal)
     If mListOffset > rowTotal - windowRows Then mListOffset = rowTotal - windowRows
     If mListOffset < 0 Or Not windowed Then mListOffset = 0
-    If ExtrasCurrent(PartsState(themeValue) & ":" & CStr(mValue) & ":" & _
-        CStr(mListOffset) & ":" & PointerKey() & DisabledItemsSig() & _
-        JoinedSig(mItems)) Then Exit Sub
+    fullPass = Not ExtrasCurrent(PartsState(themeValue) & ":" & DisabledItemsSig() & _
+        JoinedSig(mItems))
+    If fullPass Then
+        ' The row states drawn under the old frame say which rows exist to
+        ' hide; none are known after the main shape was made anew.
+        On Error Resume Next
+        priorTop = UBound(mAppliedRowStates)
+        On Error GoTo 0
+        If priorTop > 0 Then priorStates = mAppliedRowStates
+        ReDim mAppliedRowStates(1 To rowTotal)
+    Else
+        EnsureRowStates mAppliedRowStates, rowTotal
+    End If
     circleSize = rowPitch - 6
     If circleSize > 14 Then circleSize = 14
     If circleSize < 10 Then circleSize = 10
@@ -15360,39 +15387,75 @@ Private Sub ApplyRadioGroup( _
         ' A windowed group draws the rows in its window and hides the rest.
         rowPos = idx - mListOffset
         If rowPos < 1 Or rowPos > windowRows Then
-            If idx = 1 Then
-                mainShape.Visible = msoFalse
-            Else
-                HideRowPart hostSheet, "c" & idx
+            rowKey = "~"
+        Else
+            isPicked = (idx = CLng(mValue))
+            rowKey = CStr(isPicked) & CStr(PointerOn("row" & idx)) & Chr$(3) & CStr(rowPos)
+        End If
+        priorKey = mAppliedRowStates(idx)
+        If rowKey = priorKey Then GoTo RowDrawn
+        mAppliedRowStates(idx) = rowKey
+        If rowKey = "~" Then
+            ' Only a row drawn before has parts to hide: under this frame,
+            ' under the one before it, or, with no states known, possibly any.
+            wasDrawn = LenB(priorKey) > 0
+            If fullPass Then
+                If priorTop = 0 Then
+                    wasDrawn = True
+                ElseIf idx <= priorTop Then
+                    If LenB(priorStates(idx)) > 0 And priorStates(idx) <> "~" Then wasDrawn = True
+                End If
             End If
-            HideRowPart hostSheet, "d" & idx
-            HideRowPart hostSheet, "t" & idx
+            If wasDrawn Then
+                If idx = 1 Then
+                    mainShape.Visible = msoFalse
+                Else
+                    HideRowPart hostSheet, "c" & idx
+                End If
+                HideRowPart hostSheet, "d" & idx
+                HideRowPart hostSheet, "t" & idx
+            End If
             GoTo RowDrawn
         End If
-        rowTop = mTop + (rowPos - 1) * rowPitch
-        isPicked = (idx = CLng(mValue))
+        ringCreated = False
         If idx = 1 Then
             Set ring = mainShape
         Else
-            Set ring = EnsurePartShape(hostSheet, "c" & idx, msoShapeOval)
+            Set ring = EnsurePartShape(hostSheet, "c" & idx, msoShapeOval, ringCreated)
         End If
-        PlacePart ring, mLeft, rowTop + (rowPitch - circleSize) / 2, circleSize, circleSize
+        Set dot = EnsurePartShape(hostSheet, "d" & idx, msoShapeOval, dotCreated)
+        rowTop = mTop + (rowPos - 1) * rowPitch
+        ringTop = rowTop + (rowPitch - circleSize) / 2
+        ' A row drawn under this frame and still shown keeps its look: a
+        ' scroll moves its parts, and the pick or the pointer restyles its
+        ' circle. A part made anew, after something deleted it, draws the
+        ' whole row.
+        rowKept = (Not fullPass And LenB(priorKey) > 0 And priorKey <> "~")
+        If rowKept Then rowKept = Not (ringCreated Or dotCreated)
+        If rowKept And RowKeyPlace(priorKey) <> RowKeyPlace(rowKey) Then
+            Set captionShape = EnsurePartShape(hostSheet, "t" & idx, msoShapeRectangle, _
+                captionCreated)
+            If captionCreated Then
+                rowKept = False
+            Else
+                PlacePart ring, mLeft, ringTop, circleSize, circleSize
+                PlacePart dot, mLeft + circleSize * 0.3, ringTop + circleSize * 0.3, _
+                    circleSize * 0.4, circleSize * 0.4
+                PlacePart captionShape, mLeft + circleSize + 8, rowTop, rowTextRoom, rowPitch
+            End If
+        End If
+        If rowKept Then
+            StyleRadioRing ring, themeValue, idx, isPicked
+            dot.Visible = BoolToMso(mVisible And isPicked)
+            GoTo RowDrawn
+        End If
+        PlacePart ring, mLeft, ringTop, circleSize, circleSize
         ring.Fill.Visible = msoTrue
         ring.Fill.ForeColor.RGB = themeValue.SurfaceColor
         ring.Line.Visible = msoTrue
-        If isPicked And mEnabled Then
-            ring.Line.ForeColor.RGB = ResolveFill(themeValue)
-            ring.Line.Weight = 1.5
-        ElseIf PointerOn("row" & idx) Then
-            ring.Line.ForeColor.RGB = themeValue.PrimaryColor
-            ring.Line.Weight = 1.25
-        Else
-            ring.Line.ForeColor.RGB = themeValue.BorderColor
-            ring.Line.Weight = 1.25
-        End If
+        StyleRadioRing ring, themeValue, idx, isPicked
         ShowPart ring, BoolToMso(mVisible)
-        Set dot = EnsurePartShape(hostSheet, "d" & idx, msoShapeOval)
-        PlacePart dot, ring.Left + circleSize * 0.3, ring.Top + circleSize * 0.3, _
+        PlacePart dot, mLeft + circleSize * 0.3, ringTop + circleSize * 0.3, _
             circleSize * 0.4, circleSize * 0.4
         dot.Fill.Visible = msoTrue
         If mEnabled Then
@@ -15409,7 +15472,6 @@ Private Sub ApplyRadioGroup( _
         ' A disabled item reads muted and takes no clicks.
         If Not ItemPickable(idx) Then
             captionShape.TextFrame2.TextRange.Font.Fill.ForeColor.RGB = themeValue.OnMutedColor
-            ring.Line.ForeColor.RGB = themeValue.BorderColor
         End If
         ShowPart captionShape, BoolToMso(mVisible)
 RowDrawn:
@@ -15427,7 +15489,30 @@ RowDrawn:
     End If
 End Sub
 
-' A check list row key's place in the window, "" for a key with none.
+' A radio row's circle edge: in the accent when picked, the primary color
+' under the pointer, the border otherwise, and the border on an item out
+' of reach, picked or not.
+Private Sub StyleRadioRing( _
+    ByVal ring As Shape, _
+    ByVal themeValue As ReDimUI, _
+    ByVal itemNo As Long, _
+    ByVal isPicked As Boolean _
+)
+    If isPicked And mEnabled Then
+        ring.Line.ForeColor.RGB = ResolveFill(themeValue)
+        ring.Line.Weight = 1.5
+    ElseIf PointerOn("row" & itemNo) Then
+        ring.Line.ForeColor.RGB = themeValue.PrimaryColor
+        ring.Line.Weight = 1.25
+    Else
+        ring.Line.ForeColor.RGB = themeValue.BorderColor
+        ring.Line.Weight = 1.25
+    End If
+    If Not ItemPickable(itemNo) Then ring.Line.ForeColor.RGB = themeValue.BorderColor
+End Sub
+
+' A list row key's place in the window, the text after its last Chr$(3);
+' "" for a key with none.
 Private Function RowKeyPlace(ByVal rowKey As String) As String
     Dim splitAt As Long
 

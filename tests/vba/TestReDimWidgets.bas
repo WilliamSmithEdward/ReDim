@@ -639,6 +639,8 @@ End Function
 Public Function TestRadioGroup() As String
     Dim app As ReDimUI
     Dim host As Worksheet
+    Dim ring As Shape
+    Dim dot As Shape
     Dim transcript As String
 
     Set host = NewCanvas()
@@ -679,6 +681,19 @@ Public Function TestRadioGroup() As String
     Sleep 200
     ReDimUI.DispatchShape "rdm_wid13_prio"
     transcript = transcript & "|rowOnePicked=" & app.State("prio")
+
+    ' A row whose parts something deleted draws them in full again, the
+    ' dot centered in its circle and filled like the circle's edge.
+    host.Shapes("rdm_wid13_prio__c2").Delete
+    host.Shapes("rdm_wid13_prio__d2").Delete
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid13_prio__t2"
+    Set ring = host.Shapes("rdm_wid13_prio__c2")
+    Set dot = host.Shapes("rdm_wid13_prio__d2")
+    transcript = transcript & "|redrawnDot=" & CStr(dot.Visible = msoTrue And _
+        dot.Fill.ForeColor.RGB = ring.Line.ForeColor.RGB And _
+        Abs(dot.Top + dot.Height / 2 - ring.Top - ring.Height / 2) < 0.5 And _
+        dot.Width < ring.Width)
     TestRadioGroup = transcript
 End Function
 
