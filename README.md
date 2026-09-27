@@ -62,7 +62,8 @@ user keeps working in the workbook.
   form before a save, and `SetUIText` translates every word ReDim draws or announces.
 - **Stateful.** Each app owns a key-value store. `BindText`, `BindValue`, `BindVisible`, and
   `BindEnabled` re-render only what changed. `OnStateChanged` registers workbook procedures as
-  state listeners. `WritesTo` flows control values back into state. The store is deliberately
+  state listeners, run when a key changes. `WritesTo` ties a control to a key both ways: the
+  control writes it, and follows it when code writes it. The store is deliberately
   in-memory and session-scoped: persistence belongs to the host application, which can walk
   the store with `StateKeys`, save it wherever fits (ROneCOne's JSON serializer is on
   board), and reseed on build with `SetStateDefault`, which never clobbers a value already
