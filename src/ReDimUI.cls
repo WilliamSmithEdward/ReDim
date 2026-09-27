@@ -992,8 +992,9 @@ Private mListLeft As Double
 Private mListWidth As Double
 Private mListFitOffset As Long
 Private mListFitFace As String
-' The filter the list was fitted under; typing that brings longer rows
-' into view fits it again.
+' The filter and the items the list was fitted under; typing that brings
+' longer rows into view fits it again, and so do items that change while
+' it is open, as a load can bring them.
 Private mListFitFilter As String
 ' Items as a String array (1-based), rebuilt by one For Each after any
 ' change: a VBA Collection read by index walks the list, so loops that
@@ -3930,18 +3931,27 @@ End Sub
 
 ' Stores the value, redraws the controls bound to the key, then runs the
 ' key's listeners, so a listener reading a control sees the value it now
-' shows. A draw that raises still lets the listeners run, then raises.
+' shows. A draw that raises still lets the listeners run, then raises. A
+' write that leaves the value as it was still redraws, so it overrules a
+' setter, but runs no listener: a listener that writes back the value it
+' read, as one that normalizes the key does, ran itself until VBA ran
+' out of stack.
 Private Sub StoreState( _
     ByVal stateKey As String, _
     ByVal stateValue As Variant, _
     ByVal writer As ReDimUI _
 )
     Dim known As Variant
+    Dim unchanged As Boolean
     Dim drawError As Long
     Dim drawSource As String
     Dim drawDescription As String
 
-    If Not TryGetItem(mStateValues, stateKey, known) Then mStateKeys.Add stateKey
+    If TryGetItem(mStateValues, stateKey, known) Then
+        unchanged = SameStateValue(known, stateValue)
+    Else
+        mStateKeys.Add stateKey
+    End If
     ReplaceItem mStateValues, stateKey, stateValue
     MarkBoundComponentsDirty stateKey, writer
     If mBatchDepth = 0 And mRendered Then
@@ -3952,9 +3962,25 @@ Private Sub StoreState( _
         drawDescription = Err.Description
         On Error GoTo 0
     End If
-    InvokeStateHandlers stateKey
+    If Not unchanged Then InvokeStateHandlers stateKey
     If drawError <> 0 Then Err.Raise drawError, drawSource, drawDescription
 End Sub
+
+' Whether a write leaves a key's value as it was: the same type and the
+' same value, Empty and Null alike. An object, an array, or an error
+' value always counts as new.
+Private Function SameStateValue(ByRef priorValue As Variant, ByRef writtenValue As Variant) As Boolean
+    If IsObject(priorValue) Or IsObject(writtenValue) Then Exit Function
+    If IsArrayValue(priorValue) Or IsArrayValue(writtenValue) Then Exit Function
+    If VarType(priorValue) <> VarType(writtenValue) Then Exit Function
+    Select Case VarType(writtenValue)
+        Case vbEmpty, vbNull
+            SameStateValue = True
+        Case vbError
+        Case Else
+            SameStateValue = (priorValue = writtenValue)
+    End Select
+End Function
 
 ' A control seeding the key it writes: stored when the key has none,
 ' running no listener, since it happens while the app draws. Controls
@@ -6885,8 +6911,7 @@ Public Function ItemsFrom( _
     If Not mCheckedSet Is Nothing Then Set keptChecks = CheckedTexts()
     If HoldsItemPick() Then keptPick = ItemAt(CLng(mValue))
     Set mItems = ReadItemSource(itemSource, "ItemsFrom")
-    ResetItemValues
-    ForgetItemMarks
+    ForgetOldItems
     If Not IsMissing(valueSource) Then
         PairItemValues itemSource, valueSource, "ItemsFrom"
     End If
@@ -6894,13 +6919,20 @@ Public Function ItemsFrom( _
     If LenB(keptPick) > 0 Then mValue = ExactItemMatch(keptPick)
     ClampItemSelection
     If Not keptChecks Is Nothing Then CheckItemTexts keptChecks
-    ' The available side's selection and an open list's highlight named
-    ' rows of the old list.
-    If Not mPanelSel(0) Is Nothing Then Set mPanelSel(0) = New Collection
-    mListHighlight = 0
     Touch
     Set ItemsFrom = Me
 End Function
+
+' What an item list replaced whole lets go of: the values (a transfer
+' list's chosen items keep theirs), the disabled items and group headers,
+' and the available side's selection and an open list's highlight, which
+' named rows of the old list.
+Private Sub ForgetOldItems()
+    ResetItemValues
+    ForgetItemMarks
+    If Not mPanelSel(0) Is Nothing Then Set mPanelSel(0) = New Collection
+    mListHighlight = 0
+End Sub
 
 ' True for a kind whose value is the number of the item picked.
 Private Function HoldsItemPick() As Boolean
@@ -7281,8 +7313,7 @@ Public Function ClearItems() As ReDimUI
     Set mCommandProcs = Nothing
     Set mCommandIcons = Nothing
     Set mCommandOrder = Nothing
-    ResetItemValues
-    ForgetItemMarks
+    ForgetOldItems
     ItemsChanged
     mValue = 0
     If Not mCheckedSet Is Nothing Then Set mCheckedSet = New Collection
@@ -7543,10 +7574,13 @@ Private Function ItemStateText(ByVal itemText As String) As String
     On Error GoTo 0
 End Function
 
+' An item's value; Empty, as a blank cell in a paired value range gives,
+' is no value, so the item writes its text as one given none does.
 Private Sub StoreItemValue(ByVal itemText As String, ByVal itemValue As Variant)
     If LenB(itemText) = 0 Then Exit Sub
-    If mItemValueMap Is Nothing Then Set mItemValueMap = New Collection
     ForgetItemValue itemText
+    If IsEmpty(itemValue) Then Exit Sub
+    If mItemValueMap Is Nothing Then Set mItemValueMap = New Collection
     mItemValueMap.Add itemValue, itemText
 End Sub
 
@@ -7727,7 +7761,9 @@ Public Property Let InputValue(ByVal assignedText As String)
 
     RequireRole ROLE_COMPONENT, "InputValue"
     If IsFloatField() Then
-        mText = LfBreaks(assignedText)
+        ' The key takes the text as the field holds it.
+        mText = HeldFieldText(assignedText)
+        assignedText = mText
         ' A combo's item follows its text, which its open list marks.
         If mKind = KIND_COMBO Then mValue = ExactItemMatch(mText)
         Touch
@@ -9057,13 +9093,7 @@ Friend Sub Apply( _
 
     RequireRole ROLE_COMPONENT, "Apply"
     ResolveBindings hostApp
-    ' A stepper's or slider's value stays inside SliderRange however it
-    ' was set: a range narrowed under it, or a Value past its ends, which
-    ' overflowed the face's whole number.
-    If mKind = KIND_STEPPER Or mKind = KIND_SLIDEBAR Then
-        If mValue < mSliderMin Then mValue = mSliderMin
-        If mValue > mSliderMax Then mValue = mSliderMax
-    End If
+    If mKind = KIND_STEPPER Or mKind = KIND_SLIDEBAR Then HoldValueInRange
     ' A control hidden with its list or calendar open closes it, which
     ' otherwise sprang open again when the control showed.
     If mSelectOpen And Not mVisible Then
@@ -9353,14 +9383,20 @@ Private Function TakeStateValue(ByVal hostApp As ReDimUI, ByRef stateValue As Va
         Case KIND_INPUT, KIND_COMBO
             If ReDimUI.IsComponentFocused(mOwnerAppId, mComponentId) Then Exit Function
             ' A combo writes a named item's value; it shows the item, and
-            ' takes it as its item, which its open list marks.
-            If mKind = KIND_COMBO Then namedItem = ItemPositionOf(stateValue)
+            ' takes it as its item, which its open list marks. Its item
+            ' stays when it names the value, as a select's pick does.
+            If mKind = KIND_COMBO Then
+                namedItem = CLng(mValue)
+                If Not ItemNamesState(namedItem, stateValue) Then
+                    namedItem = ItemPositionOf(stateValue)
+                End If
+            End If
             If namedItem > 0 Then
                 mText = ItemAt(namedItem)
             ElseIf IsNull(stateValue) Then
                 mText = vbNullString
             Else
-                mText = LfBreaks(ValueWords(stateValue))
+                mText = HeldFieldText(ValueWords(stateValue))
             End If
             If mKind = KIND_COMBO Then mValue = namedItem
             mCaretPos = Len(mText)
@@ -9407,8 +9443,9 @@ Private Function ItemPositionOf(ByRef stateValue As Variant) As Long
 End Function
 
 ' Whether an item is the one a state value names: a number matches an
-' item's numeric value, anything else its value or text as text. A group
-' header, an item with no nameable value, Empty, and Null match nothing.
+' item's numeric value, anything else its value or text as text, in any
+' case, as ItemPosition and typing find an item. A group header, an item
+' with no nameable value, Empty, and Null match nothing.
 Private Function ItemNamesState(ByVal itemNumber As Long, ByRef stateValue As Variant) As Boolean
     Dim itemValue As Variant
 
@@ -9421,7 +9458,7 @@ Private Function ItemNamesState(ByVal itemNumber As Long, ByRef stateValue As Va
     If IsNumeric(itemValue) And IsNumeric(stateValue) And VarType(stateValue) <> vbString Then
         ItemNamesState = (CDbl(itemValue) = CDbl(stateValue))
     Else
-        ItemNamesState = (CStr(itemValue) = CStr(stateValue))
+        ItemNamesState = (StrComp(CStr(itemValue), CStr(stateValue), vbTextCompare) = 0)
     End If
 End Function
 
@@ -9435,6 +9472,14 @@ Private Function SeedsWritesTo() As Boolean
         SeedsWritesTo = (mKind = KIND_CHECKLIST Or mKind = KIND_TRANSFER)
     End If
 End Function
+
+' A stepper's or slider's value stays inside SliderRange however it was
+' set: a range narrowed under it, or a Value past its ends, which
+' overflowed the face's whole number.
+Private Sub HoldValueInRange()
+    If mValue < mSliderMin Then mValue = mSliderMin
+    If mValue > mSliderMax Then mValue = mSliderMax
+End Sub
 
 ' A key with no value takes what the control shows, silently, as if the
 ' build had set it with SetStateDefault before any listener could care:
@@ -9460,6 +9505,9 @@ Friend Sub SeedWritesTo(ByVal hostApp As ReDimUI)
         Case KIND_TOGGLE, KIND_TICKBOX, KIND_EXPANDER
             seedValue = mChecked
         Case KIND_STEPPER, KIND_SLIDEBAR
+            ' The value the control shows, which a seed before the first
+            ' draw would otherwise take from past the range.
+            HoldValueInRange
             seedValue = mValue
         Case KIND_DATE
             If mValue = 0 Then Exit Sub
@@ -9490,6 +9538,7 @@ End Sub
 Private Sub ResolveBindings(ByVal hostApp As ReDimUI)
     Dim bound As Variant
     Dim boundDay As Double
+    Dim boundItem As Long
     Dim followed As Variant
 
     ' A control follows the key it writes: the key's value, when it has
@@ -9531,12 +9580,20 @@ Private Sub ResolveBindings(ByVal hostApp As ReDimUI)
                 If VarType(bound) = vbBoolean Or IsNumeric(bound) Then
                     mChecked = CBool(bound)
                 End If
-            ElseIf IsNumeric(bound) Then
-                mValue = CDbl(bound)
             ElseIf mKind = KIND_SELECT Or mKind = KIND_RADIO Or mKind = KIND_TABS Then
                 ' A number is a position; a text names an item by its text
-                ' or its value, as the control writes it.
-                If ItemPositionOf(bound) > 0 Then mValue = ItemPositionOf(bound)
+                ' or its value, as the control writes it, so an item's
+                ' value read back as text finds it. Numeric text that names
+                ' no item is a position.
+                boundItem = 0
+                If VarType(bound) = vbString Then boundItem = ItemPositionOf(bound)
+                If boundItem > 0 Then
+                    mValue = boundItem
+                ElseIf IsNumeric(bound) Then
+                    mValue = CDbl(bound)
+                End If
+            ElseIf IsNumeric(bound) Then
+                mValue = CDbl(bound)
             End If
         End If
     End If
@@ -10505,6 +10562,8 @@ Private Function BuildFace( _
     Dim windowEnd As Long
     Dim caretAt As Long
     Dim faceRoom As Double
+    Dim lineRoom As Double
+    Dim markRoom As Double
     Dim fontFace As String
     Dim faceText As String
 
@@ -10513,13 +10572,14 @@ Private Function BuildFace( _
     caretRender = mCaretPos + 1
     ' Completion letters follow the text and map to -1.
     ' A masked field renders a dot for each character, one for one, so
-    ' the caret and the face map line up with the text beneath.
+    ' the caret and the face map line up with the text beneath. The face
+    ' is fitted with the bar in place whether the blink shows it or not: a
+    ' space is wider, and fitting with it moved the window each blink.
     If mMasked Then
-        rendered = String$(mCaretPos, ChrW(8226)) & IIf(mCaretOn, "|", " ") & _
+        rendered = String$(mCaretPos, ChrW(8226)) & "|" & _
             String$(Len(mText) - mCaretPos, ChrW(8226)) & ghostText
     Else
-        rendered = Left$(mText, mCaretPos) & IIf(mCaretOn, "|", " ") & _
-            Mid$(mText, mCaretPos + 1) & ghostText
+        rendered = Left$(mText, mCaretPos) & "|" & Mid$(mText, mCaretPos + 1) & ghostText
     End If
     ReDim renderMap(1 To Len(rendered))
     For idx = 1 To Len(rendered)
@@ -10565,6 +10625,12 @@ Private Function BuildFace( _
     mGhostFaceStart = 0
     mGhostFaceLength = 0
     ReDim mFaceMap(1 To Len(rendered) + 2 * lineTotal + 2)
+    ' The marks for lines cut above and below sit on the first and last
+    ' lines shown, which leave room for them: a line fitted to the whole
+    ' room wrapped with its mark, and Office left out the caret's line.
+    If firstLine > 1 Or lastLine < lineTotal Then
+        markRoom = WordsWidth(ChrW(8230), fontFace, resolvedSize, mFontBold)
+    End If
     If firstLine > 1 Then AppendFace faceText, ChrW(8230), 0
     For lineNumber = firstLine To lastLine
         If lineNumber > firstLine Then
@@ -10573,11 +10639,18 @@ Private Function BuildFace( _
         lineLength = lineEnds(lineNumber) - lineStarts(lineNumber) + 1
         caretAt = 0
         If lineNumber = caretLine Then caretAt = caretRender - lineStarts(lineNumber) + 1
-        FitFaceWindow Mid$(rendered, lineStarts(lineNumber), lineLength), caretAt, faceRoom, _
+        lineRoom = faceRoom
+        If lineNumber = firstLine And firstLine > 1 Then lineRoom = lineRoom - markRoom
+        If lineNumber = lastLine And lastLine < lineTotal Then lineRoom = lineRoom - markRoom
+        FitFaceWindow Mid$(rendered, lineStarts(lineNumber), lineLength), caretAt, lineRoom, _
             fontFace, resolvedSize, windowStart, windowEnd
         If windowStart > 1 Then AppendFace faceText, ChrW(8230), 0
         For idx = lineStarts(lineNumber) + windowStart - 1 To lineStarts(lineNumber) + windowEnd - 1
-            AppendFace faceText, Mid$(rendered, idx, 1), renderMap(idx)
+            If idx = caretRender And Not mCaretOn Then
+                AppendFace faceText, " ", renderMap(idx)
+            Else
+                AppendFace faceText, Mid$(rendered, idx, 1), renderMap(idx)
+            End If
         Next idx
         If windowEnd < lineLength Then AppendFace faceText, ChrW(8230), 0
     Next lineNumber
@@ -18542,7 +18615,7 @@ Private Sub SyncDropList( _
         mListWidth = 0
     ElseIf mListWidth = 0 Or mListFitOffset <> mListOffset _
         Or mListFitFace <> CStr(mLeft) & ":" & CStr(mWidth) _
-        Or mListFitFilter <> mListMatchesFilter Then
+        Or mListFitFilter <> mListMatchesFilter & Chr$(1) & CStr(mItemsVersion) Then
         FitListWidth hostSheet, wanted, themeValue.FontName, resolvedSize
         ' The up pager drew before the rows; it follows the fitted width.
         SyncListPager hostSheet, themeValue, "optu", ChrW(9650), _
@@ -18675,9 +18748,9 @@ End Function
 ' shortcuts, are read as drawn; an item row is its gutter and its item,
 ' measured, in bold where a filter's match or a group header draws it,
 ' which costs a combo's keystroke far less than reading each row from
-' Office. Rows paged or filtered into view can widen an open list but
-' never narrow it, so it holds still while paging; a face that moved or
-' resized fits it afresh.
+' Office. Rows paged or filtered into view, or items that change, can
+' widen an open list but never narrow it, so it holds still while paging;
+' a face that moved or resized fits it afresh.
 Private Sub FitListWidth( _
     ByVal hostSheet As Worksheet, _
     ByVal rowTotal As Long, _
@@ -18725,7 +18798,7 @@ Private Sub FitListWidth( _
     mListWidth = fitWidth
     mListFitOffset = mListOffset
     mListFitFace = faceKey
-    mListFitFilter = mListMatchesFilter
+    mListFitFilter = mListMatchesFilter & Chr$(1) & CStr(mItemsVersion)
     If Abs(fitLeft - drawnLeft) < 0.01 And Abs(fitWidth - drawnWidth) < 0.01 Then Exit Sub
     For idx = 1 To rowTotal
         With hostSheet.Shapes(ShapeName & PART_SEPARATOR & "opt" & idx)
@@ -19509,6 +19582,16 @@ Private Function LfBreaks(ByVal givenText As String) As String
     LfBreaks = Replace(Replace(givenText, vbCrLf, vbLf), vbCr, vbLf)
 End Function
 
+' Text as a float field holds it, however it arrives: CR and CRLF as line
+' breaks, and on a single-line field, which cannot show one, breaks and
+' tabs as spaces.
+Private Function HeldFieldText(ByVal givenText As String) As String
+    HeldFieldText = LfBreaks(givenText)
+    If Not mMultiLine Then
+        HeldFieldText = Replace(Replace(HeldFieldText, vbLf, " "), vbTab, " ")
+    End If
+End Function
+
 ' What a field takes of typed or pasted text, given the text around
 ' the insertion: CR and CRLF become line breaks, a single-line field
 ' turns breaks and tabs into spaces, Numeric keeps what a number can
@@ -19519,11 +19602,7 @@ Private Function FieldAdmits( _
     ByVal keptAfter As String _
 ) As String
     Dim room As Long
-    givenText = LfBreaks(givenText)
-    If Not mMultiLine Then
-        givenText = Replace(givenText, vbLf, " ")
-        givenText = Replace(givenText, vbTab, " ")
-    End If
+    givenText = HeldFieldText(givenText)
     If mNumeric Then givenText = NumericAdmits(givenText, keptBefore, keptAfter)
     If mMaxLength > 0 Then
         room = mMaxLength - Len(keptBefore) - Len(keptAfter)

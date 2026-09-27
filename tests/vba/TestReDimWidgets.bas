@@ -1345,6 +1345,21 @@ Public Function TestTransferList() As String
              app.TransferList("teams").ItemTextAt(2) = "Delta" And _
              app.TransferList("teams").ChosenTextAt(1) = "Alpha")
     transcript = transcript & "|changeFinal=" & gChangeCount
+
+    ' ClearItems takes the available side's selection with the items, so
+    ' items added after it come in unselected and a move takes none, with
+    ' no draw between them to drop the old rows' selection either.
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid22_teams__al1"
+    app.BeginUpdate
+    app.TransferList("teams").ClearItems
+    app.TransferList("teams").AddItem "Foxtrot"
+    app.TransferList("teams").AddItem "Golf"
+    app.EndUpdate
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid22_teams__mvr"
+    transcript = transcript & "|clearTakesSelection=" & app.TransferList("teams").ItemCount & _
+        "/" & CStr(Not RowChecked(host, "rdm_wid22_teams__al1"))
     ReDimUI.AutoPump True
     TestTransferList = transcript
 End Function
@@ -6938,6 +6953,7 @@ Public Function TestFieldEdits() As String
     app.ComboBox("fruit").AtRect(24, 132, 160, 22).Items("Apple", "Banana").WritesTo "fruit"
     app.TextInput("cellField").At("F10").WritesTo "cellState"
     app.TextInput("lines").AtRect(220, 24, 160, 60).MultiLine
+    app.TextInput("single").AtRect(220, 100, 160, 22).WritesTo "singleKey"
     app.Render
 
     app.TextInput("num").Focus
@@ -6982,6 +6998,14 @@ Public Function TestFieldEdits() As String
     app.TextInput("lines").InputValue = "a" & vbCr & "b" & vbCrLf & "c"
     transcript = transcript & "|breaksAsLf=" & CStr( _
         app.TextInput("lines").InputValue = "a" & vbLf & "b" & vbLf & "c")
+    ' A single-line field takes breaks and tabs from code or state as
+    ' spaces, as typing and paste give them, and its key holds that text.
+    app.TextInput("single").InputValue = "one" & vbCrLf & "two" & vbTab & "three"
+    transcript = transcript & "|singleSpaces=" & app.TextInput("single").InputValue & "/" & _
+        CStr(app.State("singleKey")) & "/" & _
+        NormalizedFace(host.Shapes("rdm_wid92_single"))
+    app.SetState "singleKey", "four" & vbLf & "five"
+    transcript = transcript & "|singleFollows=" & app.TextInput("single").InputValue
     On Error Resume Next
     app.ComboBox("fruit").Masked
     transcript = transcript & "|maskedRefusesCombo=" & CStr(Err.Number <> 0)
@@ -7014,12 +7038,18 @@ Public Function TestRangesAndValues() As String
     app.SlideBar("fours").AtRect(220, 340, 160, 18).SliderRange(0, 10, 4).Value 0
     app.ProgressBar("prog").AtRect(24, 340, 160, 10).Value 150
     app.Skeleton("sk").AtRect 24, 380, 160, 30
+    app.Stepper("over").AtRect(420, 300, 120, 24).SliderRange(0, 10, 1).Value(50) _
+        .WritesTo "overKey"
     app.Render
+    ' A key seeded from a value past the range takes the value shown.
+    transcript = "seedClamped=" & CStr(app.State("overKey")) & "/" & _
+        app.Stepper("over").CurrentValue & "|"
 
     app.DatePicker("due").Focus
     RdxKeyChar "{ALTDOWN}"
     RdxKeyChar "{ENTER}"
-    transcript = "opensInRange=" & Format$(app.DatePicker("due").PickedDate, "yyyy-mm-dd")
+    transcript = transcript & "opensInRange=" & _
+        Format$(app.DatePicker("due").PickedDate, "yyyy-mm-dd")
     On Error Resume Next
     app.DatePicker("due").DateRange DateSerial(2026, 3, 20), DateSerial(2026, 3, 10)
     transcript = transcript & "|reversedRefused=" & CStr(Err.Number <> 0)
@@ -7235,6 +7265,12 @@ End Function
 Public Function TestFocusedFaceFits() As String
     Dim app As ReDimUI
     Dim host As Worksheet
+    Dim lineNo As Long
+    Dim caretNo As Long
+    Dim tickNo As Long
+    Dim prefixLen As Long
+    Dim blinkShifts As Long
+    Dim barFace As String
     Dim transcript As String
 
     ReDimUI.AutoPump False
@@ -7244,6 +7280,7 @@ Public Function TestFocusedFaceFits() As String
     app.TextInput("notes").AtRect(24, 70, 300, 60).MultiLine
     app.TextInput("wide").AtRect 24, 150, 220, 22
     app.TextInput("heavy").AtRect(24, 190, 220, 22).Bold
+    app.TextInput("scroll").AtRect(24, 230, 300, 60).MultiLine
     app.Render
 
     app.TextInput("one").Focus
@@ -7267,9 +7304,75 @@ Public Function TestFocusedFaceFits() As String
     TypeText "the quick brown fox jumps over the lazy dog and keeps on running"
     transcript = transcript & "|bold=" & FaceFill(host, "rdm_wid96_heavy")
     ReDimUI.EndKeyboardFocus
+
+    ' Scrolled past its first lines, a field marks the lines above and
+    ' below with an ellipsis inside the room, so no line wraps and the
+    ' caret's line stays drawn at the bottom.
+    app.TextInput("scroll").Focus
+    For lineNo = 1 To 5
+        If lineNo > 1 Then RdxKeyChar "{ENTER}"
+        TypeText "line " & lineNo & " is a text line that runs on and on well past the " & _
+            "right edge of the field"
+    Next lineNo
+    transcript = transcript & "|scrolledDown=" & FaceFill(host, "rdm_wid96_scroll") & "/" & _
+        CStr(CaretLineDrawn(host, "rdm_wid96_scroll"))
+    RdxKeyChar "{UP}"
+    RdxKeyChar "{UP}"
+    RdxKeyChar "{UP}"
+    transcript = transcript & "|scrolledUp=" & FaceFill(host, "rdm_wid96_scroll") & "/" & _
+        CStr(CaretLineDrawn(host, "rdm_wid96_scroll"))
+    ReDimUI.EndKeyboardFocus
+
+    ' The blink swaps the bar for a space and nothing else: the window
+    ' around the caret holds still wherever the caret sits on a long line.
+    ' A space is wider than the bar, so windows fitted to it moved; two
+    ' letters ahead of this line and the caret 31 places from its end was
+    ' one such place in the theme's font.
+    For prefixLen = 0 To 3
+        app.TextInput("one").InputValue = String$(prefixLen, "i") & _
+            "the quick brown fox jumps over the lazy dog and keeps on running on"
+        app.TextInput("one").Focus
+        RdxKeyChar "{TEXTEND}"
+        For caretNo = 1 To 36
+            RdxKeyChar "{LEFT}"
+            If caretNo >= 26 Then
+                barFace = NormalizedFace(host.Shapes("rdm_wid96_one"))
+                For tickNo = 1 To 60
+                    ReDimUI.PumpOnce
+                    If InStr(NormalizedFace(host.Shapes("rdm_wid96_one")), "|") = 0 Then Exit For
+                Next tickNo
+                If Replace(barFace, "|", " ") <> NormalizedFace(host.Shapes("rdm_wid96_one")) Then
+                    blinkShifts = blinkShifts + 1
+                End If
+            End If
+        Next caretNo
+        ReDimUI.EndKeyboardFocus
+    Next prefixLen
+    transcript = transcript & "|blinkShifts=" & blinkShifts
     RdxReleaseKeys
     ReDimUI.AutoPump True
     TestFocusedFaceFits = transcript
+End Function
+
+' Whether a focused face draws the line holding its insertion bar.
+Private Function CaretLineDrawn(ByVal host As Worksheet, ByVal shapeName As String) As Boolean
+    Dim frameBottom As Double
+    Dim lineNo As Long
+
+    With host.Shapes(shapeName)
+        frameBottom = .Top + .Height - .TextFrame2.MarginBottom
+        If .AutoShapeType = msoShapeRoundedRectangle Then
+            frameBottom = frameBottom - 0.29289 * .Adjustments(1) * Application.Min(.Width, .Height)
+        End If
+        With .TextFrame2.TextRange
+            For lineNo = 1 To .Lines.Count
+                If InStr(.Lines(lineNo, 1).Text, "|") > 0 Then
+                    CaretLineDrawn = (.Lines(lineNo, 1).BoundTop + _
+                        .Lines(lineNo, 1).BoundHeight <= frameBottom + 0.05)
+                End If
+            Next lineNo
+        End With
+    End With
 End Function
 
 ' Whether a text shape draws its last line: Office leaves out a line that
@@ -7368,6 +7471,10 @@ Public Function TestTextFits() As String
     transcript = transcript & "|listFitsItem=" & CStr(TextHeld(host, "rdm_wid97_sb__opt2") _
         And host.Shapes("rdm_wid97_sb__opt1").Width = host.Shapes("rdm_wid97_sb__opt2").Width _
         And host.Shapes("rdm_wid97_sb__opt2").Width > 120)
+    ' An item added while the list is open, as a load can, widens it.
+    app.SelectBox("sb").AddItem "An item added while the list is open, longer still"
+    transcript = transcript & "|listFitsAdded=" & CStr(TextHeld(host, "rdm_wid97_sb__opt3") _
+        And host.Shapes("rdm_wid97_sb__opt1").Width = host.Shapes("rdm_wid97_sb__opt3").Width)
     ReDimUI.DispatchShape "rdm_wid97_sb"
     ReDimUI.AutoPump True
     TestTextFits = transcript

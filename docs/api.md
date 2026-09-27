@@ -75,7 +75,7 @@ framework. Also:
 | `SetStateDefault key, value` | Sets only when the key has no value; the right form for initial values. |
 | (persistence) | The state store is deliberately in-memory and session-scoped; ReDim ships no persistence. Durability belongs to the host application: walk the store with `StateKeys` and `State`, save wherever fits (a hidden sheet, workbook names, a file), and reseed on build with `SetStateDefault`, which never clobbers a value already in play. `ROneCOne.Json.Serialize`/`Deserialize` are available if JSON is the format of choice. |
 | `HotKey keyCode, "Module.Proc"` / `ClearHotKeys` | Application.OnKey with cleanup on Unmount and Shutdown. |
-| `OnStateChanged key, "Module.Proc"` | Zero-argument listener runs after the key changes and the controls bound to it redraw, so a listener reading one sees the new value (inside `BeginUpdate`, the redraw waits for `EndUpdate`). `Array("a", "b")` in place of the key listens on each; a listener already on a key is not added again, so a build that runs twice still fires it once. A listener ReDim cannot run goes to the `OnError` sink, named with the key, and the key's other listeners still run. |
+| `OnStateChanged key, "Module.Proc"` | Zero-argument listener runs after the key changes and the controls bound to it redraw, so a listener reading one sees the new value (inside `BeginUpdate`, the redraw waits for `EndUpdate`). A write that leaves the value as it was (the same type and value) still redraws but runs no listener, so a listener that writes back the value it read, rounded or clamped, settles. `Array("a", "b")` in place of the key listens on each; a listener already on a key is not added again, so a build that runs twice still fires it once. A listener ReDim cannot run goes to the `OnError` sink, named with the key, and the key's other listeners still run. |
 | `BeginUpdate` / `EndUpdate` | Batch several changes into one flush. |
 | `Render` | Mark everything dirty and paint. Call once after building the UI. |
 | `FlushDirty` | Paint the components changed since the last paint, now. A change outside `BeginUpdate` paints on its own, so code rarely needs it. |
@@ -159,7 +159,8 @@ All fluent, all return the component:
   render, when a `WritesTo` key with no value yet takes the control's value.
 - Item values: an item can carry a value apart from its text, `AddItem("Medium", , 20)` or
   `ItemsFrom(texts, values)` with the values in a source of the same shape (a range of
-  items with gaps pairs with its range of values cell by cell). A pick then writes the
+  items with gaps pairs with its range of values cell by cell; a blank value, `Empty`, is
+  no value, so that item writes its text). A pick then writes the
   value to `WritesTo` instead of the text, with the value's own type, and a check list or
   transfer list joins the values of its checked or chosen items. `ItemValueAt(position)`
   and `ChosenValueAt(position)` read a value, or the text for an item without one. Values
@@ -198,13 +199,15 @@ All fluent, all return the component:
   key is next written or the app renders; to change a following control for good, set its
   key. A `Toggle`, `TickBox`, or `Expander` follows `True` and `False`, a `Stepper` or
   `SlideBar` a number (clamped), a `DatePicker` a `Date` or a date serial number, a
-  `SelectBox`, `RadioGroup`, or `Tabs` the first item whose value or text the key holds
-  (`Empty` or `Null` picks none), and a float `TextInput` or `ComboBox` its text, except
-  while it has the keys. A value the control cannot show leaves it as it is. A `CheckList`
+  `SelectBox`, `RadioGroup`, or `Tabs` the first item whose value or text the key holds, in
+  any case (`Empty` or `Null` picks none), and a float `TextInput` or `ComboBox` its text,
+  except while it has the keys; a single-line field shows a line break as a space. A value
+  the control cannot show leaves it as it is. A `CheckList`
   or `TransferList` writes a joined list and does not follow, though it seeds an unset key
   with its checks or picks on the first render; nor does a cell-backed field, whose value
   is its cell. `BindValue(key)` follows a different key one way; on a
-  `SelectBox`, `RadioGroup`, or `Tabs` a number is a position and a text names an item.
+  `SelectBox`, `RadioGroup`, or `Tabs` a number is a position and a text names an item,
+  so an item's value read back as text finds it; numeric text that names none is a position.
   State keys ignore case in bindings as in the store.
 - Behavior: `OnClick "Module.Proc"`, `OnClickAsync "Module.Proc"`, `OnChange "Module.Proc"`.
   `Tag(value)` attaches any value to a control, and to an async op or job too; a handler
@@ -561,7 +564,9 @@ Focus mechanics, all automatic:
   default `ProtectSurface` sheet the canvas is unselectable, so grid clicks move no
   selection at all - there, commit by Enter, Tab, or clicking any control, which is the
   natural flow on an app surface anyway.
-- `InputValue` reads and writes the buffer in float mode, the cell in cell mode.
+- `InputValue` reads and writes the buffer in float mode, the cell in cell mode. In float
+  mode a written line break becomes LF, and a single-line field takes breaks and tabs as
+  spaces, as a paste does; so does the text a field shows from the key it writes.
 
 Capture uses `Application.OnKey`, bound only while a control holds focus and released when
 it leaves, so sheet typing is untouched the rest of the time. The bound set is the

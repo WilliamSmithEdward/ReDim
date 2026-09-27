@@ -391,6 +391,9 @@ def test_transfer_list(run_widgets):
     assert facts["noSelNoOp"] == "True"
     assert facts["multiBack"] == "True"
     assert facts["changeFinal"] == "5"
+    assert facts["clearTakesSelection"] == "2/True", (
+        "items added after ClearItems must come in unselected"
+    )
 
 
 def test_check_list(run_widgets):
@@ -1844,11 +1847,16 @@ def test_field_edits(run_widgets):
     assert facts["comboItemFollows"] == "2/Banana", "a combo's item follows its WritesTo key"
     assert facts["errorCellReads"] == "#N/A/#N/A", "an error cell reads as the cell shows it"
     assert facts["breaksAsLf"] == "True", "line breaks from code become LF"
+    assert facts["singleSpaces"] == "one two three/one two three/one two three", (
+        "a single-line field takes breaks and tabs from code as spaces, its key too"
+    )
+    assert facts["singleFollows"] == "four five", "a single-line field shows a followed break as a space"
     assert facts["maskedRefusesCombo"] == "True", "Masked takes a TextInput alone"
 
 
 def test_ranges_and_values(run_widgets):
     facts = parse_transcript(run_widgets("TestRangesAndValues"))
+    assert facts["seedClamped"] == "10/10", "a key seeded past the range takes the value shown"
     assert facts["opensInRange"] == "2026-03-10", (
         "a calendar holding a date outside DateRange opens on the nearest day it allows"
     )
@@ -1894,6 +1902,12 @@ def test_focused_face_fits(run_widgets):
         drawn, held, used = facts[name].split("/")
         assert drawn == held, f"{name}: a focused field's line must not wrap"
         assert int(used) >= 85, f"{name}: a focused field's line must reach its right edge"
+    for name in ("scrolledDown", "scrolledUp"):
+        drawn, held, used, caret_drawn = facts[name].split("/")
+        assert drawn == held, f"{name}: a line marked with an ellipsis above or below must not wrap"
+        assert int(used) <= 100, f"{name}: every line stays inside the room"
+        assert caret_drawn == "True", f"{name}: the caret's line must stay drawn"
+    assert facts["blinkShifts"] == "0", "the blink must swap the bar for a space and move nothing"
 
 
 def test_text_fits(run_widgets):
@@ -1915,6 +1929,7 @@ def test_text_fits(run_widgets):
     )
     assert facts["transferRowCut"] == "True", "a long transfer row ends in an ellipsis in its panel"
     assert facts["listFitsItem"] == "True", "a drop list is as wide as its longest item"
+    assert facts["listFitsAdded"] == "True", "an item added to an open list widens it"
 
 
 def test_theme_look_revision(run_widgets):

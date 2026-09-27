@@ -51,6 +51,47 @@
   and a control's write stopped before its `OnChange` and the key's
   later listeners. It now goes to the app's `OnError` sink, named with
   the key, and the rest still run.
+- A listener that wrote its key back, rounded or clamped, ran itself
+  again on every write until VBA ran out of stack, since a write ran the
+  listeners whether or not the value changed. A write that leaves the
+  value as it was (the same type and value) still redraws, so it still
+  overrules a setter, but runs no listener.
+- A multi-line field scrolled past its first lines marked the lines
+  above and below with an ellipsis the lines were not fitted for, so a
+  long first line wrapped and Office left out the last line, the one
+  being typed. The first and last lines shown now leave room for their
+  marks.
+- A focused field's text moved on some blinks of the insertion bar: the
+  window around the caret was fitted to the bar or to the space that
+  stands for it while the blink is off, and a space is wider. It is now
+  fitted to the bar either way.
+- A single-line field took a line break or a tab from `InputValue` or
+  from the key it follows as it came, which it cannot show, where typing
+  and paste give spaces. It now takes them as spaces too, and
+  `InputValue` writes the key the text the field holds.
+- An open drop list whose items changed, as a load can change them, kept
+  the width it had, so a longer new item ran past its edge. It fits
+  again when the items change.
+- A key named an item by its text only in the same case, so
+  `SetState "size", "small"` left a select of "Small" where it was. Item
+  text now matches in any case, as `ItemPosition` and typing match it.
+- `BindValue` on a select, radio group, or tab strip took numeric text,
+  such as an item's value 20 read back as "20", as a position. Text now
+  names an item first; numeric text that names none is still a position.
+- A stepper or slider seeded the key it writes with a `Value` past its
+  range before the first draw clamped it, so the key held 50 while the
+  control showed 10. The seed takes the clamped value.
+- A combo moved off the second of two items that share a value whenever
+  the app rendered, as a select, radio group, or tab strip already did
+  not. Its item stays when it names the value.
+- An item paired with a blank value in `ItemsFrom(texts, values)` took
+  `Empty` as its value: a pick wrote `Empty`, which reads as nothing
+  picked, and a key of 0 named the item. A blank value is now no value,
+  and the item writes its text.
+- `ClearItems` kept a transfer list's selection and an open list's
+  highlight, which name rows by number, so items added in the same
+  `BeginUpdate` came in selected. They go with the items now, as
+  `ItemsFrom` already let them go.
 
 ## 1.0.3 - 2026-09-26
 

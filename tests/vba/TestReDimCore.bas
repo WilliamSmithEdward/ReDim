@@ -12,6 +12,7 @@ Private gLastSenderId As String
 Private gLastSenderApp As String
 Private gNavLog As String
 Private gListenerSaw As String
+Private gListenerRuns As Long
 
 Private Function NewCanvas() As Worksheet
     Set NewCanvas = ActiveWorkbook.Worksheets.Add
@@ -678,6 +679,10 @@ Public Function TestWritesToFollows() As String
     transcript = transcript & "|valueMaps=" & app.SelectBox("size").CurrentValue
     app.SetState "size", "Small"
     transcript = transcript & "|textMaps=" & app.SelectBox("size").CurrentValue
+    ' An item's text names it in any case, as ItemPosition and typing find it.
+    app.SetState "size", 20
+    app.SetState "size", "SMALL"
+    transcript = transcript & "|textAnyCase=" & app.SelectBox("size").CurrentValue
     app.SetState "qty", 999
     transcript = transcript & "|clamps=" & app.Stepper("qty").CurrentValue
     app.SetState "name", "Ada"
@@ -725,9 +730,17 @@ Public Function TestWritesToEdges() As String
         .CheckedFrom(Array("Alpha", "Charlie")).WritesTo "opts"
     app.TransferList("crew").AtRect(200, 240, 360, 140).Items("Ann", "Ben", "Cy") _
         .ChosenFrom(Array("Dee")).WritesTo "crew"
+    app.RadioGroup("tier").AtRect(360, 120, 140, 50).BindValue "tierKey"
+    app.RadioGroup("tier").AddItem "Small", , 10
+    app.RadioGroup("tier").AddItem "Large", , 20
+    app.SelectBox("paired").AtRect(24, 400, 140, 22) _
+        .ItemsFrom(Array("Alpha", "Beta"), Array(1, Empty)).Value(2).WritesTo "pairedKey"
     app.OnStateChanged "dark", "TestReDimCore.CoreReadToggle"
     app.Render
-    transcript = "seedShown=" & app.Label("volText").CurrentText
+    ' A blank paired value is no value: the item writes its text.
+    transcript = "blankValue=" & TypeName(app.State("pairedKey")) & ":" & _
+        CStr(app.State("pairedKey")) & "|"
+    transcript = transcript & "seedShown=" & app.Label("volText").CurrentText
     transcript = transcript & "|listsSeed=" & app.State("opts") & "/" & app.State("crew")
     transcript = transcript & "|positions=" & app.TransferList("crew").ItemPosition("ben") & _
         "/" & app.TransferList("crew").ChosenPosition("DEE") & "/" & _
@@ -747,6 +760,14 @@ Public Function TestWritesToEdges() As String
         app.Label("volText").CurrentText
     app.SetState "vol", 150
     transcript = transcript & "|clampKept=" & app.Stepper("vol").CurrentValue
+    ' BindValue on a list: a text names an item, a number is a position,
+    ' and numeric text that names no item is a position too.
+    app.SetState "tierKey", "20"
+    transcript = transcript & "|bindText=" & app.RadioGroup("tier").CurrentValue
+    app.SetState "tierKey", 1
+    transcript = transcript & "/" & app.RadioGroup("tier").CurrentValue
+    app.SetState "tierKey", "2"
+    transcript = transcript & "/" & app.RadioGroup("tier").CurrentValue
     app.SetState "due", "46287"
     transcript = transcript & "|dateFromText=" & CStr(app.DatePicker("due").PickedDate = _
         CDate(46287#))
@@ -898,9 +919,13 @@ Public Function TestFollowCatchesUp() As String
     app.RadioGroup("size").AtRect(200, 24, 140, 70).WritesTo "size"
     app.RadioGroup("size").AddItem "Small", , 1
     app.RadioGroup("size").AddItem "Tiny", , 1
+    app.ComboBox("cup").AtRect(360, 24, 140, 22).WritesTo "cup"
+    app.ComboBox("cup").AddItem "Short", , 8
+    app.ComboBox("cup").AddItem "Tall", , 8
     app.SlideBar("sl").AtRect(24, 180, 160, 18).SliderRange(0, 100, 5).Value(5) _
         .OnChange "TestReDimCore.CoreClickHandler"
     app.OnStateChanged "q", "TestReDimCore.CoreClampQ"
+    app.OnStateChanged "whole", "TestReDimCore.CoreWholeNumber"
     app.Render
 
     app.TextInput("nm").Focus
@@ -924,9 +949,17 @@ Public Function TestFollowCatchesUp() As String
     app.SetState "qty", 150
     transcript = transcript & "|keyCase=" & app.Stepper("qty").CurrentValue
 
+    ' Listeners run when the key changes: a listener writing back the
+    ' value the key holds runs nothing again.
+    gListenerRuns = 0
+    app.SetState "whole", 2.5
+    transcript = transcript & "|rewriteSettles=" & gListenerRuns & "/" & app.State("whole")
+
     ReDimUI.DispatchShape "rdm_core13_size__t2"
+    app.ComboBox("cup").InputValue = "Tall"
     app.Render
-    transcript = transcript & "|sharedAfterRender=" & app.RadioGroup("size").CurrentValue
+    transcript = transcript & "|sharedAfterRender=" & app.RadioGroup("size").CurrentValue & _
+        "/" & app.ComboBox("cup").CurrentValue & "/" & app.ComboBox("cup").InputValue
 
     gClickCount = 0
     app.SlideBar("sl").Focus
@@ -984,6 +1017,16 @@ End Function
 Public Sub CoreClampQ()
     With ReDimUI.App("core13")
         If .State("q") > 3 Then .SetState "q", 3
+    End With
+End Sub
+
+' Writes its key back as a whole number every time it runs, as a
+' normalizing listener might; the count stops it where ReDim did not.
+Public Sub CoreWholeNumber()
+    gListenerRuns = gListenerRuns + 1
+    If gListenerRuns > 50 Then Exit Sub
+    With ReDimUI.App("core13")
+        .SetState "whole", Int(.State("whole"))
     End With
 End Sub
 

@@ -195,6 +195,7 @@ def test_writes_to_follows(run_core):
     )
     assert facts["valueMaps"] == "2", "an item's value must map back to its item"
     assert facts["textMaps"] == "1", "an item's text must map back to its item"
+    assert facts["textAnyCase"] == "1", "an item's text must name it in any case"
     assert facts["clamps"] == "50"
     assert facts["fieldFollows"] == "Ada"
     assert facts["typingKept"] == "Adax", "a focused field must keep what is being typed"
@@ -218,6 +219,11 @@ def test_writes_to_edges(run_core):
     assert facts["nullClears"] == "0"
     assert facts["drawsAfterNull"] == "30/Volume 30", "a Null key must not stop later draws"
     assert facts["clampKept"] == "100", "a same-key BindValue must not undo the clamp"
+    assert facts["blankValue"] == "String:Beta", "an item paired with a blank value writes its text"
+    assert facts["bindText"] == "2/1/2", (
+        "BindValue on a list: text names an item, a number is a position, "
+        "numeric text naming none is a position"
+    )
     assert facts["dateFromText"] == "True", "a numeric string must name a date"
     assert facts["hugeIgnored"] == "True", "a number past the date range must be ignored"
     assert facts["listenerSees"] == "True", "a listener must read the value the control shows"
@@ -258,8 +264,11 @@ def test_follow_catches_up(run_core):
         "a listener's rewrite of the key must move the control that wrote it"
     )
     assert facts["keyCase"] == "100", "WritesTo and BindValue keys match in any case"
-    assert facts["sharedAfterRender"] == "2", (
-        "a pick among items sharing a value must survive Render"
+    assert facts["rewriteSettles"] == "2/2", (
+        "a listener writing back the value its key holds must not run again"
+    )
+    assert facts["sharedAfterRender"] == "2/2/Tall", (
+        "a pick among items sharing a value must survive Render, a combo's too"
     )
     assert facts["snapBackQuiet"] == "5/0", "a digit that snaps back must fire nothing"
 
