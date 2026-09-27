@@ -778,6 +778,8 @@ Private mPlaceholder As String
 Private mInputProc As String
 Private mDebounceMs As Long
 Private mInputDueMs As LongLong
+' The text OnInput last told of, or the text at focus before it has.
+Private mInputReported As String
 Private mNumeric As Boolean
 Private mNumericDecimal As Boolean
 Private mNumericNegative As Boolean
@@ -1784,19 +1786,27 @@ Private Sub RefreshShortcuts()
             Next idx
         End If
     Next appValue
+    ' A chord the focus capture holds stays with it either way: a shortcut
+    ' bound over it took a focused field's Ctrl+Z, and one let go reset it
+    ' to Excel's. The shortcut is still listed, so a captured key reaches
+    ' it, and RebindShortcuts binds it when the capture lets go.
     listedCodes = Split(mBoundShortcuts, Chr$(1))
     For idx = 0 To UBound(listedCodes)
         If LenB(listedCodes(idx)) > 0 Then
             If Not CodeListHas(wantedCodes, listedCodes(idx)) Then
                 ' An access key bound a moment ago may use the same chord.
-                If Not AccessChordBound(listedCodes(idx)) Then Application.OnKey listedCodes(idx)
+                If Not AccessChordBound(listedCodes(idx)) _
+                    And Not RdxCaptureHolds(listedCodes(idx)) Then
+                    Application.OnKey listedCodes(idx)
+                End If
             End If
         End If
     Next idx
     listedCodes = Split(wantedCodes, Chr$(1))
     For idx = 0 To UBound(listedCodes)
         If LenB(listedCodes(idx)) > 0 Then
-            If Not CodeListHas(mBoundShortcuts, listedCodes(idx)) Then
+            If Not CodeListHas(mBoundShortcuts, listedCodes(idx)) _
+                And Not RdxCaptureHolds(listedCodes(idx)) Then
                 BindShortcut listedCodes(idx)
             End If
         End If
@@ -5799,7 +5809,7 @@ Public Function Shortcut(ByVal keyCode As String) As ReDimUI
                 "such as ""^%{DEL}"", since many keyboards type characters with it."
         End If
     End If
-    mShortcut = keyCode
+    mShortcut = CanonicalShortcut(keyCode)
     If LenB(keyCode) > 0 Then OwnerApp.NoteTooltips
     Touch
     ReDimUI.RefreshAccessKeys LenB(keyCode) > 0
@@ -5860,6 +5870,44 @@ Private Function ShortcutCodeValid(ByVal keyCode As String) As Boolean
     Else
         ShortcutCodeValid = (InStr(modifiers, "^") > 0 Or InStr(modifiers, "%") > 0)
     End If
+End Function
+
+' A shortcut's OnKey code in the one spelling the key capture uses:
+' modifiers in the order Ctrl, Alt, Shift, and a key with several names
+' by the capture's, so "+^{DELETE}" is "^+{DEL}". Spelled another way, a
+' shortcut never matched the key a focused control captured.
+Private Function CanonicalShortcut(ByVal keyCode As String) As String
+    Dim pos As Long
+    Dim modifiers As String
+    Dim keyPart As String
+
+    pos = 1
+    Do While pos <= Len(keyCode)
+        If InStr("^%+", Mid$(keyCode, pos, 1)) = 0 Then Exit Do
+        modifiers = modifiers & Mid$(keyCode, pos, 1)
+        pos = pos + 1
+    Loop
+    keyPart = Mid$(keyCode, pos)
+    If Len(keyPart) > 2 And Left$(keyPart, 1) = "{" And Right$(keyPart, 1) = "}" Then
+        Select Case UCase$(Mid$(keyPart, 2, Len(keyPart) - 2))
+            Case "BACKSPACE", "BKSP", "BS"
+                keyPart = "{BS}"
+            Case "DELETE", "DEL"
+                keyPart = "{DEL}"
+            Case "ESCAPE", "ESC"
+                keyPart = "{ESC}"
+            Case "INSERT", "INS"
+                keyPart = "{INSERT}"
+            Case "RETURN"
+                keyPart = "~"
+            Case Else
+                keyPart = "{" & UCase$(Mid$(keyPart, 2, Len(keyPart) - 2)) & "}"
+        End Select
+    End If
+    If InStr(modifiers, "^") > 0 Then CanonicalShortcut = "^"
+    If InStr(modifiers, "%") > 0 Then CanonicalShortcut = CanonicalShortcut & "%"
+    If InStr(modifiers, "+") > 0 Then CanonicalShortcut = CanonicalShortcut & "+"
+    CanonicalShortcut = CanonicalShortcut & keyPart
 End Function
 
 ' A shortcut's OnKey code as people read it: "^+s" is Ctrl+Shift+S, "{F5}"
@@ -8463,13 +8511,16 @@ Friend Function ActivateDeclared(ByVal keyText As String, ByVal byShortcut As Bo
     trapped = ModalUp()
     For Each orderedId In mComponentOrder
         If TryGetComponent(CStr(orderedId), componentValue) Then
+            ' An access key goes on the controls a shortcut does, a label
+            ' or card with a click handler among them, so both ask the same
+            ' of the control; asking an access key's control to be
+            ' focusable left those deaf to it.
             If byShortcut Then
                 declared = (StrComp(componentValue.ShortcutCode, keyText, vbTextCompare) = 0)
-                If declared Then declared = componentValue.TakesShortcut
             Else
                 declared = (componentValue.AccessKeyLetter = keyText)
-                If declared Then declared = componentValue.IsFocusable
             End If
+            If declared Then declared = componentValue.TakesShortcut
             If declared Then
                 If Not trapped Or Left$(componentValue.ComponentId, 4) = "mdl_" Then
                     ReDimUI.DispatchShape componentValue.ShapeName
@@ -12306,6 +12357,7 @@ End Sub
 Private Sub FireInput(ByVal hostApp As ReDimUI)
     mInputDueMs = 0
     If LenB(mInputProc) = 0 Then Exit Sub
+    mInputReported = mText
     ReDimUI.RunHandlerAs hostApp, Me, mInputProc
 End Sub
 
@@ -19288,7 +19340,6 @@ Friend Sub TakeFocus(ByVal hostApp As ReDimUI, ByVal openList As Boolean)
         FocusField hostApp, openList
         Exit Sub
     End If
-    mFieldSelAtFocus = CurrentSelectionKey()
     mOffPressPending = False
     mTypeAhead = vbNullString
     If Not mKeyCursorSet Then
@@ -19296,7 +19347,10 @@ Friend Sub TakeFocus(ByVal hostApp As ReDimUI, ByVal openList As Boolean)
         mKeyPanel = 0
         mKeyCursorSet = True
     End If
+    ' The grid selection to watch is read once the control that had focus
+    ' has committed, since its handlers may select a cell.
     ReDimUI.SetKeyboardFocus hostApp, Me
+    mFieldSelAtFocus = CurrentSelectionKey()
     Touch
 End Sub
 
@@ -19358,7 +19412,13 @@ End Sub
 Friend Sub FocusField(ByVal hostApp As ReDimUI, Optional ByVal openList As Boolean = True)
     If Not IsFloatField() Then Exit Sub
     mOffPressPending = False
+    ' The control that had focus commits first, and its handlers may give
+    ' this field new text or select a cell; what the field keeps as its
+    ' text and selection at focus is read after that, where a stale read
+    ' made Esc blank what the commit filled and a Tab on fire OnChange.
+    ReDimUI.SetKeyboardFocus hostApp, Me
     mFieldTextAtFocus = mText
+    mInputReported = mText
     mErrorAtFocus = mValidationError
     mErrorLiveAtFocus = mValidationLive
     mFieldSelAtFocus = CurrentSelectionKey()
@@ -19369,7 +19429,6 @@ Friend Sub FocusField(ByVal hostApp As ReDimUI, Optional ByVal openList As Boole
     mLastEditKind = vbNullString
     mCaretOn = True
     mCaretAccumMs = 0
-    ReDimUI.SetKeyboardFocus hostApp, Me
     If mKind = KIND_COMBO And openList Then OpenDropList hostApp.Sheet
     Touch
 End Sub
@@ -19405,9 +19464,9 @@ Friend Sub BlurField(ByVal hostApp As ReDimUI, ByVal keepEdits As Boolean)
     ReDimUI.ClearKeyboardFocus
     mCaretOn = False
     mSelAnchor = mCaretPos
-    ' A pending OnInput reports the final text before the commit.
-    If mInputDueMs > 0 Then FireInput hostApp
     If keepEdits Then
+        ' A pending OnInput reports the final text before the commit.
+        If mInputDueMs > 0 Then FireInput hostApp
         If mKind = KIND_COMBO Then
             ' A disabled item stays out of reach, as it does in the list.
             exactAt = ExactItemMatch(mText)
@@ -19435,11 +19494,15 @@ Friend Sub BlurField(ByVal hostApp As ReDimUI, ByVal keepEdits As Boolean)
         End If
     Else
         ' The text, its check's verdict, and a combo's item go back to
-        ' what they were when focus arrived.
+        ' what they were when focus arrived. A waiting OnInput would tell
+        ' of typing thrown away, so it does not run; one that told of the
+        ' typing already hears of the text the field went back to.
+        mInputDueMs = 0
         mText = mFieldTextAtFocus
         mValidationError = mErrorAtFocus
         mValidationLive = mErrorLiveAtFocus
         If mKind = KIND_COMBO Then mValue = ExactItemMatch(mText)
+        If mText <> mInputReported Then FireInput hostApp
     End If
     mSelectOpen = False
     Touch
@@ -19494,9 +19557,11 @@ Friend Sub HandleKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
                 End If
                 Exit Sub
             Else
-                ' Enter commits, then clicks the app's default button.
+                ' Enter commits, then clicks the app's default button,
+                ' unless the commit's own handlers put up a dialog: the key
+                ' is spent, where it went on to click the dialog's OK.
                 BlurField hostApp, True
-                hostApp.ClickDefaultButton
+                If Not hostApp.ModalUp Then hostApp.ClickDefaultButton
                 Exit Sub
             End If
         Case "{TAB}", "{BACKTAB}"

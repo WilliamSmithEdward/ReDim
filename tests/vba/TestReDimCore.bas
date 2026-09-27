@@ -1093,3 +1093,65 @@ Public Function TestErrorWords() As String
     app.Unmount True
     TestErrorWords = transcript
 End Function
+
+' Asks from a field's commit, as a form confirming a rename does.
+Public Sub CoreAskOnCommit()
+    ReDimUI.SenderApp.Confirm "Rename", "Rename the record?", "TestReDimCore.CoreClickHandler"
+End Sub
+
+' Fills the city a zip code names, as a lookup listener does.
+Public Sub CoreFillCity()
+    ReDimUI.App("core15").SetState "city", "Springfield"
+End Sub
+
+Public Sub CoreCountCity()
+    gListenerRuns = gListenerRuns + 1
+End Sub
+
+' Focus handing on: the Enter that commits a field whose handler asks a
+' question leaves the dialog waiting, and a field reached while the one
+' left commits keeps, as its text at focus, what that commit gave it.
+Public Function TestFocusHandoff() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim transcript As String
+
+    gClickCount = 0
+    gListenerRuns = 0
+    ReDimUI.AutoPump False
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "core15")
+    app.TextInput("name").AtRect(24, 24, 160, 22).OnChange "TestReDimCore.CoreAskOnCommit"
+    app.TextInput("zip").AtRect(24, 60, 160, 22).WritesTo "zip"
+    app.TextInput("city").AtRect(24, 96, 160, 22).WritesTo("city") _
+        .OnChange "TestReDimCore.CoreCountCity"
+    app.OnStateChanged "zip", "TestReDimCore.CoreFillCity"
+    app.Render
+
+    app.TextInput("name").Focus
+    RdxKeyChar "x"
+    RdxKeyChar "{ENTER}"
+    transcript = "dialogWaits=" & CStr(host.Shapes("rdm_core15_mdl_card").Visible = msoTrue) & _
+        "/" & gClickCount
+    RdxKeyChar "{ESC}"
+    ReDimUI.EndKeyboardFocus
+
+    app.TextInput("zip").Focus
+    RdxKeyChar "1"
+    RdxKeyChar "{TAB}"
+    transcript = transcript & "|handedTo=" & ReDimUI.FocusedComponentId & "/" & _
+        app.TextInput("city").InputValue
+    RdxKeyChar "{ESC}"
+    transcript = transcript & "|escKeepsFilled=" & app.TextInput("city").InputValue & "/" & _
+        CStr(app.State("city"))
+    app.TextInput("zip").Focus
+    RdxKeyChar "2"
+    RdxKeyChar "{TAB}"
+    RdxKeyChar "{TAB}"
+    transcript = transcript & "|tabOnSilent=" & gListenerRuns
+    RdxReleaseKeys
+    ReDimUI.EndKeyboardFocus
+    app.Unmount True
+    ReDimUI.AutoPump True
+    TestFocusHandoff = transcript
+End Function

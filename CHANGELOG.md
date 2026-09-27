@@ -139,6 +139,32 @@
   long filter or `EmptyText` did not fit; they end in an ellipsis now.
 - `SortedDescending` stayed `True` after the sorted column went, while
   `SortColumn` read 0; both now read as no sort.
+- Enter in a field whose `OnChange`, or a listener on its key, put up a
+  `Confirm` went on to click that dialog's OK, running its handler before
+  the user could answer. The Enter that commits now clicks the default
+  button only when no dialog came up.
+- A field reached by Tab while the field left committed read its text
+  at focus before that commit ran. When the commit filled it, as a zip
+  code filling a city does, Esc blanked the field while its key kept the
+  text, and a Tab on with no edit fired its `OnChange`. The field now
+  reads its text at focus after the hand-off, as it does the grid
+  selection it watches.
+- An `AccessKey` on a Label or Card with a click handler never fired,
+  though it goes on the controls `Shortcut` takes; it does now.
+- A `Shortcut` spelled with another of its key's names, such as
+  `"^{DELETE}"` for Ctrl+Del, never fired while a control had focus,
+  since the key arrived under the capture's name. Shortcuts are kept in
+  the capture's spelling.
+- A shortcut on one of a focused field's editing chords, such as Ctrl+Z,
+  took the chord from the field when the field's sheet came back to the
+  front, and dropping such a shortcut reset the chord to Excel's. While
+  a field has the keys its chords now stay with it; the shortcut takes
+  its key back when the field lets go, as the docs say.
+- Esc in a field ran a waiting `OnInput` call with the typing it was
+  about to throw away, and never reported the text it went back to, so
+  a list filtered as the user typed stayed filtered by the lost text. A
+  waiting call no longer runs, and a field that had reported typing runs
+  `OnInput` once more with the text it went back to.
 
 ## 1.0.3 - 2026-09-26
 

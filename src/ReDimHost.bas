@@ -263,6 +263,21 @@ Public Function RdxCapturedCodes(ByVal keyText As String) As String
     Next binding
 End Function
 
+' Whether the focus capture holds an OnKey code now: a shortcut on the
+' same chord leaves it be until the capture lets go, since binding over
+' it took a focused field's editing chord, such as Ctrl+Z, from it.
+Public Function RdxCaptureHolds(ByVal keyCode As String) As Boolean
+    Dim binding As Variant
+
+    If Not gKeysBound Then Exit Function
+    For Each binding In CapturedKeys()
+        If StrComp(binding(0), keyCode, vbTextCompare) = 0 Then
+            RdxCaptureHolds = True
+            Exit Function
+        End If
+    Next binding
+End Function
+
 ' Panic release: restores every key ReDim may have bound, whether or not
 ' any focus state survives. Safe to call at any time.
 Public Sub RdxReleaseKeys()

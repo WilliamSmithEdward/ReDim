@@ -773,6 +773,12 @@ def test_shortcuts(run_widgets):
     assert facts["capturedChordClicks"] == "undo", (
         "a shortcut on a key that focus captured must still click its control"
     )
+    assert facts["aliasChordClicks"] == "wipe", (
+        "a shortcut spelled with another name for its key must reach it too"
+    )
+    assert facts["captureHolds"] == "True/False/abc/False", (
+        "a focused field's capture holds its editing chords, Ctrl+Z still undoing in it"
+    )
     assert facts["refusesSlider"] == "True", "a control with no one click must refuse a shortcut"
     assert facts["labelClicks"] == "help", "a label with OnClick must take a shortcut"
     assert facts["codeRules"] == "00000111", (
@@ -882,6 +888,7 @@ def test_keyboard_focus(run_widgets):
     )
     assert facts["keyUnderlined"] == "True"
     assert facts["accessKeyClicks"] == "True"
+    assert facts["labelAccessKey"] == "1", "Alt plus a label's access key clicks it"
     assert facts["selectionEndsFocus"] == "True"
     assert facts["clickEndsFocus"] == "True"
     assert facts["scrolledIntoView"] == "True", (
@@ -1855,6 +1862,10 @@ def test_field_edits(run_widgets):
         "a single-line field takes breaks and tabs from code as spaces, its key too"
     )
     assert facts["singleFollows"] == "four five", "a single-line field shows a followed break as a space"
+    assert facts["escDropsPending"] == "0", "Esc must not run a waiting OnInput with typing it drops"
+    assert facts["escReportsRevert"] == "3/", (
+        "a field OnInput told of its typing reports the text Esc went back to"
+    )
     assert facts["maskedRefusesCombo"] == "True", "Masked takes a TextInput alone"
 
 

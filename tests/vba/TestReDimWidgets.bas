@@ -2749,6 +2749,27 @@ Public Function TestShortcuts() As String
     RdxKeyChar "{UNDO}"
     transcript = transcript & "|capturedChordClicks=" & gLastSender
     ReDimUI.ClearKeyboardFocus
+    ' So does a shortcut spelled with another of its key's names: Ctrl+Del
+    ' arrives captured as ^{DEL} whatever the shortcut calls the key.
+    app.Button("wipe").AtRect(140, 150, 100, 30).Text("Wipe").Shortcut("^{DELETE}") _
+        .OnClick "TestReDimWidgets.RecordSender"
+    Sleep 200
+    app.Component("new").Focus
+    RdxKeyChar "{WORDDEL}"
+    transcript = transcript & "|aliasChordClicks=" & gLastSender
+    ReDimUI.ClearKeyboardFocus
+    ' While a field has the keys, the capture holds its editing chords,
+    ' so declaring or dropping a shortcut on one leaves it with the field.
+    app.TextInput("typed").AtRect(140, 190, 100, 22).Text "abc"
+    app.TextInput("typed").Focus
+    transcript = transcript & "|captureHolds=" & CStr(RdxCaptureHolds("^z")) & "/" & _
+        CStr(RdxCaptureHolds("^k"))
+    app.Button("undo").Shortcut ""
+    app.Button("undo").Shortcut "^z"
+    RdxKeyChar "{UNDO}"
+    transcript = transcript & "/" & app.TextInput("typed").InputValue
+    ReDimUI.ClearKeyboardFocus
+    transcript = transcript & "/" & CStr(RdxCaptureHolds("^z"))
 
     ' A shortcut goes on a control a click acts on: a slider has no one
     ' click to give, and a label with OnClick takes one.
@@ -2951,6 +2972,7 @@ Public Function TestKeyboardFocus() As String
     Dim host As Worksheet
     Dim transcript As String
     Dim visibleArea As Range
+    Dim changesBefore As Long
 
     gChangeCount = 0
     ReDimUI.AutoPump False
@@ -3026,6 +3048,14 @@ Public Function TestKeyboardFocus() As String
     ReDimUI.DispatchAccessKey "a"
     transcript = transcript & "|accessKeyClicks=" & _
         CStr(Not app.TickBox("agree").IsChecked)
+    ' So does it on a label with a click handler, which Shortcut takes too.
+    changesBefore = gChangeCount
+    app.Label("help").AtRect(24, 196, 80, 18).Text("Help") _
+        .OnClick("TestReDimWidgets.RecordChange").AccessKey "h"
+    ReDimUI.RefreshAccessKeys
+    Sleep 200
+    ReDimUI.DispatchAccessKey "h"
+    transcript = transcript & "|labelAccessKey=" & (gChangeCount - changesBefore)
 
     ' A moved selection and a click elsewhere both end focus.
     app.Button("save").Focus
@@ -6992,6 +7022,9 @@ Public Function TestFieldEdits() As String
     app.TextInput("cellField").At("F10").WritesTo "cellState"
     app.TextInput("lines").AtRect(220, 24, 160, 60).MultiLine
     app.TextInput("single").AtRect(220, 100, 160, 22).WritesTo "singleKey"
+    app.TextInput("debounced").AtRect(220, 136, 160, 22).OnInput("TestReDimWidgets.RecordInput") _
+        .DebounceMs 300
+    app.TextInput("live").AtRect(220, 172, 160, 22).OnInput "TestReDimWidgets.RecordInput"
     app.Render
 
     app.TextInput("num").Focus
@@ -7044,6 +7077,20 @@ Public Function TestFieldEdits() As String
         NormalizedFace(host.Shapes("rdm_wid92_single"))
     app.SetState "singleKey", "four" & vbLf & "five"
     transcript = transcript & "|singleFollows=" & app.TextInput("single").InputValue
+
+    ' Esc takes typing back without reporting it: a waiting OnInput call
+    ' does not run, and a field OnInput had told of its typing reports the
+    ' text it went back to.
+    gInputCount = 0
+    app.TextInput("debounced").Focus
+    TypeText "abc"
+    RdxKeyChar "{ESC}"
+    transcript = transcript & "|escDropsPending=" & gInputCount
+    gInputCount = 0
+    app.TextInput("live").Focus
+    TypeText "ab"
+    RdxKeyChar "{ESC}"
+    transcript = transcript & "|escReportsRevert=" & gInputCount & "/" & gLastInput
     On Error Resume Next
     app.ComboBox("fruit").Masked
     transcript = transcript & "|maskedRefusesCombo=" & CStr(Err.Number <> 0)

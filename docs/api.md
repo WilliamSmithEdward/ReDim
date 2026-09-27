@@ -531,7 +531,8 @@ Focus mechanics, all automatic:
 - One control holds keyboard focus at a time; focus moving on commits a field it leaves.
 - Enter commits: the buffer becomes the value, `WritesTo` state is written and `OnChange`
   fires if the text changed, and then Enter clicks the app's `DefaultButton` if it has
-  one. Tab and Shift+Tab commit the same way and move focus to the next or previous
+  one, unless the commit's handlers put up a `Confirm`, which then waits for its answer.
+  Tab and Shift+Tab commit the same way and move focus to the next or previous
   control in Tab order (see [Keyboard focus for every control](#keyboard-focus-for-every-control));
   with no other control to move to, they commit and leave. Tab first takes a combo's
   shown suggestion. A combo commit whose text names an item, in any case, takes that
@@ -558,7 +559,8 @@ Focus mechanics, all automatic:
   intact; unfocused fields show
   their beginning, ending in an ellipsis where the text is cut, as a `SelectBox` or
   `DatePicker` face does with a long item or date.
-- Esc reverts the field to the text it had when focus arrived, fires nothing, and leaves.
+- Esc reverts the field to the text it had when focus arrived, fires no `OnChange`, and
+  leaves (see `OnInput` below for what it tells of the revert).
   A combo with its list open closes the list on the first Esc, keeping focus and text,
   and reverts on the second. `Clearable` gives either field a clear button for emptying
   it.
@@ -644,8 +646,9 @@ Builders for float `TextInput` and `ComboBox` fields:
 - `OnInput "Module.Proc"` runs after every edit that changes the text, typing, deletes,
   paste, cut, and undo alike. `ReDimUI.Sender` is the field, so
   `ReDimUI.Sender.InputValue` is the text so far. `DebounceMs 300` waits until typing
-  pauses that long; a pending call runs before focus leaves the field. `OnChange` still
-  fires once per commit.
+  pauses that long; a pending call runs before a commit, and Esc drops it. When Esc takes
+  back typing `OnInput` already told of, it runs once more with the text the field went
+  back to. `OnChange` still fires once per commit.
 - `Numeric` keeps digits, one decimal separator, and a leading minus. The separator is the
   locale's, and both the period and the comma type it. `Numeric allowDecimal:=False` refuses
   the separator and `Numeric allowNegative:=False` the minus.
@@ -892,7 +895,8 @@ keep the keys.
   The code is an `Application.OnKey` code with Ctrl (`^`) or Alt (`%`), Shift (`+`)
   optional, such as `"^+e"` for Ctrl+Shift+E, or a function key from `"{F1}"` to
   `"{F15}"`. The key is a character, `~` for Enter, or a key name OnKey knows, in braces,
-  such as `"^{DEL}"`. A key a focused field types is refused, and so is Ctrl+Alt with a
+  such as `"^{DEL}"`; a key's other names (`{DELETE}`, `{BACKSPACE}`, `{ESCAPE}`) name the
+  same key. A key a focused field types is refused, and so is Ctrl+Alt with a
   character: Windows sends AltGr as Ctrl+Alt, and many keyboards type characters with it.
   `""` removes the shortcut. A focused field keeps its own editing chords (Ctrl+A,
   Ctrl+C, and the rest) while it has the keys, and the shortcut takes its key back when

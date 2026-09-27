@@ -288,6 +288,18 @@ def test_theme_builders(run_core):
     assert facts["stockUntouched"] == "True", "building on ThemeLight must not change it"
 
 
+def test_focus_handoff(run_core):
+    facts = parse_transcript(run_core("TestFocusHandoff"))
+    assert facts["dialogWaits"] == "True/0", (
+        "the Enter that commits must not click OK on a dialog the commit opened"
+    )
+    assert facts["handedTo"] == "city/Springfield"
+    assert facts["escKeepsFilled"] == "Springfield/Springfield", (
+        "Esc must go back to what the field held once the field left had committed"
+    )
+    assert facts["tabOnSilent"] == "0", "tabbing on without an edit must fire nothing"
+
+
 def test_error_words(run_core):
     facts = parse_transcript(run_core("TestErrorWords"))
     assert facts["componentNamed"] == (
