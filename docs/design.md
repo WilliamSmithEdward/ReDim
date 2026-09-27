@@ -59,15 +59,18 @@ Each app owns a store mapping `String` keys to `Variant` values.
 - `ui.State(key)` reads
 - Bindings: `.BindText key`, optional format applied through ROneCOne composite formatting,
   `.BindValue`, `.BindVisible`, `.BindEnabled`
-- `ui.OnStateChanged key, "Module.Proc"` registers a handler (Action taking the key name)
+- `ui.OnStateChanged key, "Module.Proc"` registers a zero-argument listener, run after a
+  write changes the key and its bound controls redraw; a write that leaves the value as it
+  was runs none
 
 ## Event dispatch
 
 Every interactive shape's `OnAction` targets one dispatcher in `ReDimHost`. The dispatcher reads
 `Application.Caller`, parses app and component ids, applies click guards (disabled, busy, debounce),
-sets `ReDimUI.Sender` context, and invokes the component's handler delegate (a ROneCOne Action,
-typically wrapping a workbook procedure name). Tests can inject clicks through the same path by
-calling the dispatcher with an explicit shape name.
+sets `ReDimUI.Sender` context, and runs the component's handler, the workbook procedure its
+`OnClick` or `OnChange` names, through `Application.Run`; one it cannot run goes to the app's
+`OnError` sink. An `OnClickAsync` body runs as a ROneCOne task through the pump. Tests can inject
+clicks through the same path by calling the dispatcher with an explicit shape name.
 
 ## Async engine
 
@@ -117,7 +120,9 @@ Pump safety rails, in order of importance:
 with `WithPrimary` and `WithFont`. A theme carries the primary, surface, and muted colors with
 their inks, the success, warning, danger, border, and canvas colors, and the font name and size;
 `theme.ContrastReport` checks every pairing the controls draw against WCAG. `ui.SetTheme`
-restyles every component through the normal diff path.
+restyles every component through the normal diff path. A theme's revision follows its look,
+shared by every theme whose tokens all match, so `SetTheme` with a fresh copy of the look
+already drawn, as a rebuild does, restyles nothing.
 
 ## Build and verification
 
