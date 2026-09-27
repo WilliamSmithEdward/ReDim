@@ -27,6 +27,20 @@
   only when its pick, the pointer, or its place in the window changes,
   and a row that keeps its place restyles only its circle: 0.2 and 4.4
   milliseconds. A row whose shapes something deleted draws in full again.
+- Moving the pointer across a tab strip redrew every tab, 7.2
+  milliseconds a frame, and across a table redrew its footer and both
+  paging arrows, 8.5. Each tab and each arrow now keeps a key of its
+  own, so a hover repaints only what the pointer entered and left: 0.5
+  and 0.7 milliseconds. Showing another tab by key went from 3.7 to 0.4.
+- An arrow key on a stepper redrew its face and both buttons, 3.0
+  milliseconds, and on a slider its track, fill, thumb, and value
+  bubble, 1.9. The stepper now rewrites its number, and the ink of a
+  button that reached an end; the slider moves its fill, thumb, and
+  bubble: 0.1 and 0.3 milliseconds.
+- A field with `MaxLength` redrew its count under the field on every key
+  typed, 1.2 milliseconds a key against 0.2 without one. The count now
+  rewrites only its words, as do a field's message and hint when they
+  change.
 
 ## 1.0.3 - 2026-09-26
 

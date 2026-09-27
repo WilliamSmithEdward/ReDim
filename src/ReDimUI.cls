@@ -721,8 +721,9 @@ Private mAppliedTransferSig As String
 Private mAppliedCheckSig As String
 Private mAppliedProgressSig As String
 ' Composite part signatures: the kind's extra parts (tick box, knob,
-' radio rows, stepper, slider, drop-list caret), drop-list rows, pagers,
-' and empty row, check-list rows, transfer headers, rows, and scrollers.
+' radio rows, stepper, slider, drop-list caret), drop-list rows, pagers
+' (a table's paging arrows too), and empty row, check-list rows, tabs,
+' transfer headers, rows, and scrollers.
 ' A part is rewritten only when its signature changes. Render forgets
 ' the extras signature; a recreated main shape forgets them all.
 Private mAppliedExtrasSig As String
@@ -11807,15 +11808,11 @@ Private Sub ApplyFieldNotes(ByVal hostSheet As Worksheet, ByVal themeValue As Re
     noteSize = mFontSize
     If noteSize <= 0 Then noteSize = themeValue.BaseFontSize
     noteSize = noteSize - 2
-    If LenB(ShownError()) > 0 And mVisible Then
-        noteKey = PartsState(themeValue) & ":" & ShownError()
-    End If
+    If LenB(ShownError()) > 0 And mVisible Then noteKey = PartsState(themeValue)
     SyncFieldNote hostSheet, themeValue, "me", noteKey, ShownError(), _
         themeValue.DangerColor, msoAlignLeft, noteSize, mAppliedMessageSig
     noteKey = vbNullString
-    If mMaxLength > 0 And mVisible Then
-        noteKey = PartsState(themeValue) & ":" & Len(mText) & "/" & mMaxLength
-    End If
+    If mMaxLength > 0 And mVisible Then noteKey = PartsState(themeValue)
     SyncFieldNote hostSheet, themeValue, "mc", noteKey, _
         Len(mText) & "/" & mMaxLength, themeValue.OnMutedColor, msoAlignRight, _
         noteSize, mAppliedCountSig
@@ -11882,7 +11879,7 @@ Private Sub ApplyAdornments(ByVal hostSheet As Worksheet, ByVal themeValue As Re
     SyncFieldCaption hostSheet, themeValue, captionKey, noteSize
     If LenB(mHintText) > 0 And mVisible _
         And Not ((IsFloatField() Or IsPickKind()) And LenB(ShownError()) > 0) Then
-        hintKey = PartsState(themeValue) & ":" & mHintText & ":" & CStr(mMaxLength)
+        hintKey = PartsState(themeValue) & ":" & CStr(mMaxLength)
     End If
     SyncFieldNote hostSheet, themeValue, "fh", hintKey, mHintText, _
         themeValue.OnMutedColor, msoAlignLeft, noteSize - 1, mAppliedHintSig
@@ -11965,7 +11962,9 @@ Private Sub ApplySkeletonBars(ByVal hostSheet As Worksheet, ByVal themeValue As 
     mAppliedOptionCount = mSkeletonLines
 End Sub
 
-' One note under the field; an empty key removes it.
+' One note under the field, drawn for the state in noteKey; an empty key
+' removes it. A note still there under the same key rewrites only words
+' that changed, as a length count does on every key typed.
 Private Sub SyncFieldNote( _
     ByVal hostSheet As Worksheet, _
     ByVal themeValue As ReDimUI, _
@@ -11978,15 +11977,24 @@ Private Sub SyncFieldNote( _
     ByRef appliedKey As String _
 )
     Dim noteShape As Shape
+    Dim fullKey As String
+    Dim priorKey As String
+    Dim partMade As Boolean
 
-    If noteKey = appliedKey Then Exit Sub
-    If LenB(noteKey) = 0 Then
+    If LenB(noteKey) > 0 Then fullKey = noteKey & Chr$(1) & noteWords
+    If fullKey = appliedKey Then Exit Sub
+    If LenB(fullKey) = 0 Then
         appliedKey = vbNullString
         DropPart hostSheet, partName
         Exit Sub
     End If
-    appliedKey = noteKey
-    Set noteShape = EnsurePartShape(hostSheet, partName, msoShapeRectangle)
+    priorKey = appliedKey
+    appliedKey = fullKey
+    Set noteShape = EnsurePartShape(hostSheet, partName, msoShapeRectangle, partMade)
+    If Not partMade And Left$(priorKey, Len(noteKey) + 1) = noteKey & Chr$(1) Then
+        noteShape.TextFrame2.TextRange.Text = noteWords
+        Exit Sub
+    End If
     noteShape.Left = mLeft
     noteShape.Top = mTop + mHeight + 1
     noteShape.Width = mWidth
@@ -13075,7 +13083,10 @@ End Sub
 ' text as measured in bold, as the tab shown draws it, so no tab changes
 ' width with the one shown (equal shares when the texts need more than
 ' the width, cut short with an ellipsis where they do not fit), and an
-' accent bar under the tab shown.
+' accent bar under the tab shown. The strip's frame (its place, look, and
+' tab texts) draws every tab afresh when it changes; otherwise each tab
+' keeps a key of whether it shows and its fill under the pointer, so a
+' hover or another tab shown rewrites only the tabs it touches.
 Private Sub ApplyTabs( _
     ByVal mainShape As Shape, _
     ByVal hostSheet As Worksheet, _
@@ -13097,70 +13108,103 @@ Private Sub ApplyTabs( _
     Dim barWidth As Double
     Dim glideBase As String
     Dim tabMade As Boolean
+    Dim fullPass As Boolean
+    Dim tabKey As String
+    Dim priorKey As String
 
     tabTotal = ItemCount
     tabNow = ShownTab()
-    If ExtrasCurrent(PartsState(themeValue) & ":" & CStr(tabNow) & ":" & _
-        PointerKey() & ":" & CStr(mItemsVersion)) Then Exit Sub
-    PlacePart mainShape, mLeft, mTop + mHeight - 1, mWidth, 1
-    PaintPart mainShape, themeValue.BorderColor
-    mainShape.Visible = BoolToMso(mVisible)
+    glideBase = PartsState(themeValue) & ":" & CStr(mItemsVersion)
+    fullPass = Not ExtrasCurrent(glideBase)
     textSize = mFontSize
     If textSize <= 0 Then textSize = themeValue.BaseFontSize
-    If tabTotal > 0 Then
-        EnsureItemTexts
-        ReDim tabWidths(1 To tabTotal)
-        ReDim mTabRights(1 To tabTotal)
-        For idx = 1 To tabTotal
-            tabWidths(idx) = WordsWidth(mItemTexts(idx), themeValue.FontName, textSize, True) + 24
-            widthSum = widthSum + tabWidths(idx)
-        Next idx
-        If widthSum > mWidth Then
+    If tabTotal > 0 Then ReDim tabWidths(1 To tabTotal)
+    If fullPass Then
+        PlacePart mainShape, mLeft, mTop + mHeight - 1, mWidth, 1
+        PaintPart mainShape, themeValue.BorderColor
+        mainShape.Visible = BoolToMso(mVisible)
+        Erase mAppliedRowStates
+        If tabTotal > 0 Then
+            EnsureItemTexts
+            ReDim mTabRights(1 To tabTotal)
+            ReDim mAppliedRowStates(1 To tabTotal)
             For idx = 1 To tabTotal
-                tabWidths(idx) = mWidth / tabTotal
+                tabWidths(idx) = WordsWidth(mItemTexts(idx), themeValue.FontName, textSize, _
+                    True) + 24
+                widthSum = widthSum + tabWidths(idx)
+            Next idx
+            If widthSum > mWidth Then
+                For idx = 1 To tabTotal
+                    tabWidths(idx) = mWidth / tabTotal
+                Next idx
+            End If
+            For idx = 1 To tabTotal
+                tabLeft = tabLeft + tabWidths(idx)
+                mTabRights(idx) = tabLeft
             Next idx
         End If
+    Else
+        ' The widths the frame was drawn with.
+        For idx = 1 To tabTotal
+            tabWidths(idx) = mTabRights(idx)
+            If idx > 1 Then tabWidths(idx) = tabWidths(idx) - mTabRights(idx - 1)
+        Next idx
     End If
-    tabLeft = mLeft
     For idx = 1 To tabTotal
-        Set tabShape = EnsurePartShape(hostSheet, "tb" & idx, msoShapeRoundedRectangle, tabMade)
-        tabShape.Left = tabLeft
-        tabShape.Top = mTop
-        tabShape.Width = tabWidths(idx)
-        ' The foot stays clear for the rule and the accent bar.
-        tabShape.Height = mHeight - 3
-        If tabMade Or Not mAppliedValid Then RoundCorners tabShape, mHeight - 3
+        ' Clear on the surface, tinted while the pointer is over it.
         tabFill = PointerTint(themeValue.SurfaceColor, themeValue.OnSurfaceColor, _
             "tab" & idx)
-        tabShape.Fill.Visible = BoolToMso(tabFill <> themeValue.SurfaceColor)
-        If tabFill <> themeValue.SurfaceColor Then tabShape.Fill.ForeColor.RGB = tabFill
-        tabShape.Line.Visible = msoFalse
-        tabWords = FitWordsToWidth(mItemTexts(idx), tabWidths(idx) - 8, themeValue.FontName, _
-            textSize, True)
+        If tabFill = themeValue.SurfaceColor Then tabFill = -1
+        tabKey = CStr(idx = tabNow) & ":" & CStr(tabFill)
+        priorKey = mAppliedRowStates(idx)
+        If tabKey = priorKey Then GoTo TabDrawn
+        mAppliedRowStates(idx) = tabKey
+        Set tabShape = EnsurePartShape(hostSheet, "tb" & idx, msoShapeRoundedRectangle, tabMade)
         If idx = tabNow And mEnabled Then
             tabInk = themeValue.OnSurfaceColor
         Else
             tabInk = themeValue.OnMutedColor
         End If
+        If LenB(priorKey) > 0 And Not tabMade Then
+            ' Drawn under this frame: its fill when the pointer came or went,
+            ' and its words' weight and ink when the tab shown moved.
+            If Mid$(priorKey, InStr(priorKey, ":")) <> Mid$(tabKey, InStr(tabKey, ":")) Then
+                PaintPart tabShape, tabFill
+            End If
+            If Left$(priorKey, InStr(priorKey, ":")) <> Left$(tabKey, InStr(tabKey, ":")) Then
+                With tabShape.TextFrame2.TextRange.Font
+                    .Bold = BoolToMso(idx = tabNow)
+                    .Fill.ForeColor.RGB = tabInk
+                End With
+            End If
+            GoTo TabDrawn
+        End If
+        ' The foot stays clear for the rule and the accent bar.
+        PlacePart tabShape, mLeft + mTabRights(idx) - tabWidths(idx), mTop, tabWidths(idx), _
+            mHeight - 3
+        RoundCorners tabShape, mHeight - 3
+        PaintPart tabShape, tabFill
+        tabWords = FitWordsToWidth(ItemAt(idx), tabWidths(idx) - 8, themeValue.FontName, _
+            textSize, True)
         StyleTextPart tabShape, tabWords, msoAlignCenter, textSize, (idx = tabNow), tabInk, _
             themeValue, leftInset:=4, rightInset:=4
         ShowPart tabShape, BoolToMso(mVisible)
-        tabLeft = tabLeft + tabWidths(idx)
-        mTabRights(idx) = tabLeft - mLeft
+TabDrawn:
     Next idx
     If tabNow >= 1 Then
+        If Not fullPass And tabNow = mAppliedIndicatorTab Then GoTo BarDrawn
         Set accentBar = EnsurePartShape(hostSheet, "ti", msoShapeRoundedRectangle, barMade)
         barWidth = tabWidths(tabNow) - 16
         If barWidth < 8 Then barWidth = 8
         ' Another tab shown on a strip drawn in place already glides the
         ' bar over to it.
-        glideBase = PartsState(themeValue) & ":" & CStr(mItemsVersion)
         PlaceGliding accentBar, "ti", _
             mLeft + mTabRights(tabNow) - tabWidths(tabNow) + (tabWidths(tabNow) - barWidth) / 2, _
             barWidth, Not barMade And mAppliedValid And mAppliedIndicatorTab >= 1 _
             And mAppliedIndicatorTab <> tabNow And glideBase = mAppliedGlideBase
         mAppliedGlideBase = glideBase
         mAppliedIndicatorTab = tabNow
+        If Not (fullPass Or barMade) Then GoTo BarDrawn
         accentBar.Top = mTop + mHeight - 3
         accentBar.Height = 3
         accentBar.Fill.Visible = msoTrue
@@ -13171,6 +13215,7 @@ Private Sub ApplyTabs( _
         End If
         accentBar.Line.Visible = msoFalse
         ShowPart accentBar, BoolToMso(mVisible)
+BarDrawn:
     Else
         DropPart hostSheet, "ti"
         If mGlidePart = "ti" Then mGlidePart = vbNullString
@@ -13862,7 +13907,9 @@ Private Sub ClearTabStops(ByVal wordsShape As Shape)
 End Sub
 
 ' The footer while the rows outgrow the table: which rows show of how
-' many, and arrows that page, muted at the ends.
+' many, and arrows that page, muted at the ends. The words and each arrow
+' keep their own key, so the pointer moving over an arrow repaints that
+' arrow's fill and nothing else.
 Private Sub SyncTableFooter( _
     ByVal hostSheet As Worksheet, _
     ByVal themeValue As ReDimUI, _
@@ -13875,35 +13922,36 @@ Private Sub SyncTableFooter( _
     Dim labelShape As Shape
     Dim footWords As String
 
-    If mTableFooterOn Then
-        lastShown = mTableOffset + mTableSlots
-        If lastShown > mTableShownCount Then lastShown = mTableShownCount
-        footWords = FooterWords(lastShown)
-        footKey = PartsState(themeValue) & ":" & CStr(mTableOffset) & ":" & _
-            CStr(lastShown) & ":" & CStr(mTableShownCount) & ":" & PointerKey() & _
-            Chr$(1) & footWords
-    End If
-    If footKey = mAppliedTableFootSig Then Exit Sub
-    mAppliedTableFootSig = footKey
-    If LenB(footKey) = 0 Then
+    If Not mTableFooterOn Then
+        If LenB(mAppliedTableFootSig) = 0 Then Exit Sub
+        mAppliedTableFootSig = vbNullString
+        mAppliedPagerUpSig = vbNullString
+        mAppliedPagerDownSig = vbNullString
         DropPart hostSheet, "tf"
         DropPart hostSheet, "tp"
         DropPart hostSheet, "tn"
         Exit Sub
     End If
+    lastShown = mTableOffset + mTableSlots
+    If lastShown > mTableShownCount Then lastShown = mTableShownCount
+    footWords = FooterWords(lastShown)
     footTop = mTop + mHeight - 1 - rowPitch
-    Set labelShape = EnsurePartShape(hostSheet, "tf", msoShapeRectangle)
-    PlacePart labelShape, mLeft + 1, footTop, mWidth - 2 - 2 * PAGER_TARGET - 8, rowPitch
-    PaintPart labelShape, -1
-    StyleTextPart labelShape, footWords, msoAlignLeft, textSize - 1, False, _
-        themeValue.OnMutedColor, themeValue, leftInset:=TABLE_CELL_PAD
-    ShowPart labelShape, BoolToMso(mVisible)
+    footKey = PartsState(themeValue) & Chr$(1) & footWords
+    If footKey <> mAppliedTableFootSig Then
+        mAppliedTableFootSig = footKey
+        Set labelShape = EnsurePartShape(hostSheet, "tf", msoShapeRectangle)
+        PlacePart labelShape, mLeft + 1, footTop, mWidth - 2 - 2 * PAGER_TARGET - 8, rowPitch
+        PaintPart labelShape, -1
+        StyleTextPart labelShape, footWords, msoAlignLeft, textSize - 1, False, _
+            themeValue.OnMutedColor, themeValue, leftInset:=TABLE_CELL_PAD
+        ShowPart labelShape, BoolToMso(mVisible)
+    End If
     SyncTablePager hostSheet, themeValue, "tp", ChrW(9664), _
         mLeft + mWidth - 2 * PAGER_TARGET - 6, footTop + (rowPitch - PAGER_TARGET) / 2, _
-        mTableOffset > 0, textSize
+        mTableOffset > 0, textSize, mAppliedPagerUpSig
     SyncTablePager hostSheet, themeValue, "tn", ChrW(9654), _
         mLeft + mWidth - PAGER_TARGET - 4, footTop + (rowPitch - PAGER_TARGET) / 2, _
-        lastShown < mTableShownCount, textSize
+        lastShown < mTableShownCount, textSize, mAppliedPagerDownSig
 End Sub
 
 ' "1-6 of 14", and with a filter "Filter "ap": 1-3 of 3"; no rows
@@ -13919,6 +13967,8 @@ Private Function FooterWords(ByVal lastShown As Long) As String
     End If
 End Function
 
+' A table's paging arrow; one drawn in this place and state before, and
+' still there, takes only the pointer's tint.
 Private Sub SyncTablePager( _
     ByVal hostSheet As Worksheet, _
     ByVal themeValue As ReDimUI, _
@@ -13927,17 +13977,32 @@ Private Sub SyncTablePager( _
     ByVal partLeft As Double, _
     ByVal partTop As Double, _
     ByVal pagerOn As Boolean, _
-    ByVal textSize As Double _
+    ByVal textSize As Double, _
+    ByRef appliedKey As String _
 )
     Dim pagerShape As Shape
     Dim pagerFill As Long
+    Dim frameKey As String
+    Dim pagerKey As String
+    Dim priorFrame As String
+    Dim partMade As Boolean
 
-    Set pagerShape = EnsurePartShape(hostSheet, partName, msoShapeRoundedRectangle)
-    PlacePart pagerShape, partLeft, partTop, PAGER_TARGET, PAGER_TARGET
     pagerFill = themeValue.SurfaceColor
     If pagerOn Then
         pagerFill = PointerTint(themeValue.SurfaceColor, themeValue.OnSurfaceColor, partName)
     End If
+    frameKey = PartsState(themeValue) & ":" & CStr(partLeft) & ":" & CStr(partTop) & ":" & _
+        CStr(pagerOn)
+    pagerKey = frameKey & Chr$(3) & CStr(pagerFill)
+    If pagerKey = appliedKey Then Exit Sub
+    priorFrame = Split(appliedKey & Chr$(3), Chr$(3))(0)
+    appliedKey = pagerKey
+    Set pagerShape = EnsurePartShape(hostSheet, partName, msoShapeRoundedRectangle, partMade)
+    If priorFrame = frameKey And Not partMade Then
+        PaintPart pagerShape, pagerFill
+        Exit Sub
+    End If
+    PlacePart pagerShape, partLeft, partTop, PAGER_TARGET, PAGER_TARGET
     PaintPart pagerShape, pagerFill
     StyleTextPart pagerShape, glyph, msoAlignCenter, textSize - 2, False, _
         IIf(pagerOn And mEnabled, themeValue.OnSurfaceColor, themeValue.BorderColor), themeValue
@@ -15863,7 +15928,10 @@ Private Sub StyleCheckBoxEdge( _
     End If
 End Sub
 
-' Minus and plus squares around a bordered value face.
+' Minus and plus squares around a bordered value face. The stepper's
+' frame (its place and look) draws all three afresh when it changes;
+' otherwise the face rewrites only its number, and each square only its
+' fill under the pointer and its glyph's ink.
 Private Sub ApplyStepper( _
     ByVal mainShape As Shape, _
     ByVal hostSheet As Worksheet, _
@@ -15871,43 +15939,69 @@ Private Sub ApplyStepper( _
 )
     Dim minusInk As Long
     Dim plusInk As Long
+    Dim faceWords As String
 
-    ' The range is in the key: one narrowed to the value's side mutes a
-    ' button though the value held.
-    If ExtrasCurrent(PartsState(themeValue) & ":" & CStr(mValue) & ":" & CStr(mSliderMin) & _
-        ":" & CStr(mSliderMax) & ":" & PointerKey()) Then Exit Sub
+    If Not ExtrasCurrent(PartsState(themeValue)) Then
+        ReDim mAppliedRowStates(1 To 3)
+        PlacePart mainShape, mLeft + mHeight + 4, mTop, mWidth - 2 * (mHeight + 4), mHeight
+        mainShape.Visible = BoolToMso(mVisible)
+        PaintPart mainShape, themeValue.SurfaceColor, themeValue.BorderColor, 1
+    End If
+    faceWords = CStr(CLng(mValue))
+    If LenB(mAppliedRowStates(1)) = 0 Then
+        StyleGlyphText mainShape, faceWords, ResolveDrawnInk(themeValue), _
+            IIf(mFontSize > 0, mFontSize, themeValue.BaseFontSize), themeValue
+    ElseIf faceWords <> mAppliedRowStates(1) Then
+        mainShape.TextFrame2.TextRange.Text = faceWords
+    End If
+    mAppliedRowStates(1) = faceWords
     ' A button with no step left in its direction reads muted, as a list
-    ' pager with nothing beyond it does.
+    ' pager with nothing beyond it does, the range narrowed to the value's
+    ' side included.
     minusInk = ResolveDrawnInk(themeValue)
     plusInk = minusInk
     If mValue <= mSliderMin Then minusInk = themeValue.OnMutedColor
     If mValue >= mSliderMax Then plusInk = themeValue.OnMutedColor
-    PlacePart mainShape, mLeft + mHeight + 4, mTop, mWidth - 2 * (mHeight + 4), mHeight
-    mainShape.Visible = BoolToMso(mVisible)
-    PaintPart mainShape, themeValue.SurfaceColor, themeValue.BorderColor, 1
-    StyleGlyphText mainShape, CStr(CLng(mValue)), ResolveDrawnInk(themeValue), _
-        IIf(mFontSize > 0, mFontSize, themeValue.BaseFontSize), themeValue
-    DrawStepButton hostSheet, themeValue, "minus", mLeft, "-", minusInk
-    DrawStepButton hostSheet, themeValue, "plus", mLeft + mWidth - mHeight, "+", plusInk
+    DrawStepButton hostSheet, themeValue, "minus", mLeft, "-", minusInk, mAppliedRowStates(2)
+    DrawStepButton hostSheet, themeValue, "plus", mLeft + mWidth - mHeight, "+", plusInk, _
+        mAppliedRowStates(3)
 End Sub
 
 ' A stepper's minus or plus square: a muted fill, tinted under the
-' pointer, and its glyph in the ink given.
+' pointer, and its glyph in the ink given. One drawn under this frame, and
+' still there, rewrites only the fill or the ink that changed.
 Private Sub DrawStepButton( _
     ByVal hostSheet As Worksheet, _
     ByVal themeValue As ReDimUI, _
     ByVal partName As String, _
     ByVal partLeft As Double, _
     ByVal glyph As String, _
-    ByVal glyphInk As Long _
+    ByVal glyphInk As Long, _
+    ByRef appliedKey As String _
 )
     Dim buttonShape As Shape
+    Dim buttonFill As Long
+    Dim buttonKey As String
+    Dim priorLook() As String
+    Dim partMade As Boolean
 
-    Set buttonShape = EnsurePartShape(hostSheet, partName, msoShapeRoundedRectangle)
-    PlacePart buttonShape, partLeft, mTop, mHeight, mHeight
-    PaintPart buttonShape, PointerTint(themeValue.MutedColor, ResolveDrawnInk(themeValue), partName)
-    StyleGlyphText buttonShape, glyph, glyphInk, themeValue.BaseFontSize + 2, themeValue
-    ShowPart buttonShape, BoolToMso(mVisible)
+    buttonFill = PointerTint(themeValue.MutedColor, ResolveDrawnInk(themeValue), partName)
+    buttonKey = CStr(buttonFill) & ":" & CStr(glyphInk)
+    If buttonKey = appliedKey Then Exit Sub
+    Set buttonShape = EnsurePartShape(hostSheet, partName, msoShapeRoundedRectangle, partMade)
+    If LenB(appliedKey) > 0 And Not partMade Then
+        priorLook = Split(appliedKey, ":")
+        If priorLook(0) <> CStr(buttonFill) Then PaintPart buttonShape, buttonFill
+        If priorLook(1) <> CStr(glyphInk) Then
+            buttonShape.TextFrame2.TextRange.Font.Fill.ForeColor.RGB = glyphInk
+        End If
+    Else
+        PlacePart buttonShape, partLeft, mTop, mHeight, mHeight
+        PaintPart buttonShape, buttonFill
+        StyleGlyphText buttonShape, glyph, glyphInk, themeValue.BaseFontSize + 2, themeValue
+        ShowPart buttonShape, BoolToMso(mVisible)
+    End If
+    appliedKey = buttonKey
 End Sub
 
 Private Sub ApplyToggleKnob( _
@@ -16847,7 +16941,11 @@ Private Sub ApplyListCaret( _
     ShowPart caret, BoolToMso(mVisible)
 End Sub
 
-' Slim centered track, accent fill up to the value, and a round thumb.
+' Slim centered track, accent fill up to the value, and a round thumb. The
+' slider's frame (its place and look) draws its parts afresh when it
+' changes; otherwise a new value moves the fill's end, the thumb, and the
+' bubble, and the pointer or a drag restyles only the thumb's fill. The
+' fill, thumb, and bubble keep their keys in the row states, 1 to 3.
 Private Sub ApplySlideBar( _
     ByVal mainShape As Shape, _
     ByVal hostSheet As Worksheet, _
@@ -16858,63 +16956,74 @@ Private Sub ApplySlideBar( _
     Dim trackTop As Double
     Dim fraction As Double
     Dim thumbSize As Double
-    Dim bubbleOn As Boolean
+    Dim thumbLeft As Double
+    Dim thumbFill As Long
+    Dim partKey As String
+    Dim partMade As Boolean
+    Dim priorLook() As String
 
-    fraction = SlideFraction()
-    bubbleOn = mVisible And (mSlideTracking Or _
-        ReDimUI.IsComponentFocused(mOwnerAppId, mComponentId))
-    If ExtrasCurrent(PartsState(themeValue) & ":" & CStr(fraction) & _
-        ":" & CStr(mSlideTracking) & ":" & CStr(bubbleOn) & ":" & _
-        PointerKey()) Then Exit Sub
     trackTop = mTop + (mHeight - 6) / 2
-    PlacePart mainShape, mLeft, trackTop, mWidth, 6
-    mainShape.Visible = BoolToMso(mVisible)
-    PaintPart mainShape, themeValue.MutedColor
+    If Not ExtrasCurrent(PartsState(themeValue)) Then
+        ReDim mAppliedRowStates(1 To 3)
+        PlacePart mainShape, mLeft, trackTop, mWidth, 6
+        mainShape.Visible = BoolToMso(mVisible)
+        PaintPart mainShape, themeValue.MutedColor
+    End If
+    fraction = SlideFraction()
 
-    Set fillPart = EnsurePartShape(hostSheet, "fill", msoShapeRoundedRectangle)
-    fillPart.Left = mLeft
-    fillPart.Top = trackTop
-    fillPart.Height = 6
-    If fraction <= 0 Then
-        fillPart.Visible = msoFalse
-    Else
-        fillPart.Width = mWidth * fraction
-        fillPart.Visible = BoolToMso(mVisible)
+    partKey = CStr(fraction)
+    If partKey <> mAppliedRowStates(1) Then
+        Set fillPart = EnsurePartShape(hostSheet, "fill", msoShapeRoundedRectangle, partMade)
+        If LenB(mAppliedRowStates(1)) = 0 Or partMade Then
+            fillPart.Left = mLeft
+            fillPart.Top = trackTop
+            fillPart.Height = 6
+            If mEnabled Then
+                PaintPart fillPart, ResolveFill(themeValue)
+            Else
+                PaintPart fillPart, themeValue.OnMutedColor
+            End If
+            fillPart.OnAction = mAppliedOnAction
+        End If
+        If fraction <= 0 Then
+            fillPart.Visible = msoFalse
+        Else
+            fillPart.Width = mWidth * fraction
+            fillPart.Visible = BoolToMso(mVisible)
+        End If
+        mAppliedRowStates(1) = partKey
     End If
-    fillPart.Fill.Visible = msoTrue
-    If mEnabled Then
-        fillPart.Fill.ForeColor.RGB = ResolveFill(themeValue)
-    Else
-        fillPart.Fill.ForeColor.RGB = themeValue.OnMutedColor
-    End If
-    fillPart.Line.Visible = msoFalse
-    fillPart.OnAction = mAppliedOnAction
 
     thumbSize = mHeight
-    Set thumb = EnsurePartShape(hostSheet, "thumb", msoShapeOval)
-    thumb.Width = thumbSize
-    thumb.Height = thumbSize
-    thumb.Left = mLeft + mWidth * fraction - thumbSize / 2
-    If thumb.Left < mLeft - thumbSize / 2 Then thumb.Left = mLeft - thumbSize / 2
-    thumb.Top = mTop
-    thumb.Fill.Visible = msoTrue
+    thumbLeft = mLeft + mWidth * fraction - thumbSize / 2
     ' The engaged thumb carries the accent so tracking mode is visible.
     If mSlideTracking Then
-        thumb.Fill.ForeColor.RGB = ResolveFill(themeValue)
+        thumbFill = ResolveFill(themeValue)
     Else
-        thumb.Fill.ForeColor.RGB = PointerTint(RGB(255, 255, 255), _
-            themeValue.OnSurfaceColor)
+        thumbFill = PointerTint(RGB(255, 255, 255), themeValue.OnSurfaceColor)
     End If
-    thumb.Line.Visible = msoTrue
-    thumb.Line.ForeColor.RGB = themeValue.BorderColor
-    thumb.Line.Weight = 1.25
-    ShowPart thumb, BoolToMso(mVisible)
-    SyncSlideBubble hostSheet, themeValue, bubbleOn, _
-        thumb.Left + thumbSize / 2
+    partKey = CStr(thumbLeft) & ":" & CStr(thumbFill)
+    If partKey <> mAppliedRowStates(2) Then
+        Set thumb = EnsurePartShape(hostSheet, "thumb", msoShapeOval, partMade)
+        If LenB(mAppliedRowStates(2)) = 0 Or partMade Then
+            PlacePart thumb, thumbLeft, mTop, thumbSize, thumbSize
+            PaintPart thumb, thumbFill, themeValue.BorderColor, 1.25
+            ShowPart thumb, BoolToMso(mVisible)
+        Else
+            priorLook = Split(mAppliedRowStates(2), ":")
+            If priorLook(0) <> CStr(thumbLeft) Then thumb.Left = thumbLeft
+            If priorLook(1) <> CStr(thumbFill) Then thumb.Fill.ForeColor.RGB = thumbFill
+        End If
+        mAppliedRowStates(2) = partKey
+    End If
+    SyncSlideBubble hostSheet, themeValue, mVisible And (mSlideTracking Or _
+        ReDimUI.IsComponentFocused(mOwnerAppId, mComponentId)), thumbLeft + thumbSize / 2
 End Sub
 
 ' The value in a bubble over the thumb while a drag or keyboard focus
-' moves it; below the track when there is no room above.
+' moves it; below the track when there is no room above. One drawn under
+' this frame rewrites its words and width when the value changes, and its
+' place when the thumb moves.
 Private Sub SyncSlideBubble( _
     ByVal hostSheet As Worksheet, _
     ByVal themeValue As ReDimUI, _
@@ -16925,26 +17034,43 @@ Private Sub SyncSlideBubble( _
     Dim bubbleText As String
     Dim bubbleSize As Double
     Dim bubbleWidth As Double
+    Dim bubbleKey As String
+    Dim priorKey As String
+    Dim partMade As Boolean
 
     If Not bubbleOn Then
         If mAppliedBubble Then
             mAppliedBubble = False
+            mAppliedRowStates(3) = vbNullString
             DropPart hostSheet, "vb"
         End If
         Exit Sub
     End If
     bubbleText = CStr(mValue)
+    bubbleKey = bubbleText & ":" & CStr(centerX)
+    priorKey = mAppliedRowStates(3)
+    If bubbleKey = priorKey Then Exit Sub
+    mAppliedRowStates(3) = bubbleKey
     bubbleSize = mFontSize
     If bubbleSize <= 0 Then bubbleSize = themeValue.BaseFontSize
     bubbleSize = bubbleSize - 1
     bubbleWidth = WordsWidth(bubbleText, themeValue.FontName, bubbleSize, True) + 12
     If bubbleWidth < 24 Then bubbleWidth = 24
-    Set bubble = EnsurePartShape(hostSheet, "vb", msoShapeRoundedRectangle)
+    Set bubble = EnsurePartShape(hostSheet, "vb", msoShapeRoundedRectangle, partMade)
+    mAppliedBubble = True
+    If LenB(priorKey) > 0 And Not partMade Then
+        If Left$(priorKey, InStrRev(priorKey, ":") - 1) <> bubbleText Then
+            bubble.TextFrame2.TextRange.Text = bubbleText
+            bubble.Width = bubbleWidth
+        End If
+        bubble.Left = centerX - bubbleWidth / 2
+        Exit Sub
+    End If
     bubble.Width = bubbleWidth
     bubble.Height = bubbleSize + 8
     bubble.Left = centerX - bubbleWidth / 2
-    If mTop - bubble.Height - 4 >= 0 Then
-        bubble.Top = mTop - bubble.Height - 4
+    If mTop - bubbleSize - 12 >= 0 Then
+        bubble.Top = mTop - bubbleSize - 12
     Else
         bubble.Top = mTop + mHeight + 4
     End If
@@ -16952,7 +17078,6 @@ Private Sub SyncSlideBubble( _
     StyleTextPart bubble, bubbleText, msoAlignCenter, bubbleSize, True, _
         themeValue.OnPrimaryColor, themeValue, leftInset:=2, rightInset:=2
     ShowPart bubble, msoTrue
-    mAppliedBubble = True
 End Sub
 
 Private Function SlideFraction() As Double

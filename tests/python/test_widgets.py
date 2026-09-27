@@ -202,6 +202,8 @@ def test_slide_bar(run_widgets):
     assert facts["minValue"] == "0"
     assert facts["fillHiddenAtMin"] == "True"
     assert facts["maxValue"] == "100"
+    assert facts["fillBack"] == "True", "the fill must show again past the minimum"
+    assert facts["thumbAtEnd"] == "True"
 
 
 def test_slide_drag(run_widgets):
@@ -982,6 +984,7 @@ def test_field_rules(run_widgets):
     assert facts["keypadDecimal"] == "True", "the keypad's decimal key types the separator"
     assert facts["maxLength"] == "abcde"
     assert facts["counter"] == "5/5"
+    assert facts["counterLook"] == "True", "a count rewritten per key keeps its look"
     assert facts["invalid"] == "Needs an @"
     assert facts["messageShown"] == "True"
     assert facts["dangerBorder"] == "True"
@@ -1047,6 +1050,7 @@ def test_pointer_basics(run_widgets):
     assert facts["bubbleShown"] == "50"
     assert facts["bubbleAbove"] == "True"
     assert facts["bubbleFollows"] == "80"
+    assert facts["bubbleOverThumb"] == "True", "the bubble must stay centered on the thumb"
     assert facts["releaseCommits"] == "1:80"
     assert facts["bubbleGone"] == "True"
     assert facts["focusBubble"] == "90"
@@ -1251,12 +1255,18 @@ def test_tabs(run_widgets):
     assert facts["altText"] == "True"
     assert facts["visibleOnTab"] == "True"
     assert facts["keyRight"] == "True"
+    assert facts["shownInk"] == "True"
+    assert facts["leftInk"] == "True"
     assert facts["visibleWaited"] == "True", (
         "Visible set while the tab hid the control must apply when the tab shows"
     )
     assert facts["keyWraps"] == "1"
     assert facts["keyEnd"] == "3"
     assert facts["hoverTints"] == "True"
+    assert facts["hoverMoves"] == "True"
+    assert facts["tabRedrawn"] == "True", (
+        "a tab part deleted from under the app must come back drawn in full"
+    )
     assert facts["hidingCommits"] == "True", (
         "a focused field on a panel that hides must commit and let focus go"
     )
@@ -1330,8 +1340,16 @@ def test_table(run_widgets):
     assert facts["footer"] == "1-5 of 14"
     assert facts["paged"] == "6-10 of 14"
     assert facts["keyHome"] == "1-5 of 14/Apple"
+    assert facts["footerGoes"] == "True"
+    assert facts["footerBack"] == "True", (
+        "a footer that goes and comes back on the same page must draw its arrows"
+    )
     assert facts["keyEnd"] == "10-14 of 14/Item 1"
     assert facts["keyUp"] == "Item 2/4"
+    assert facts["pagerTint"] == "True"
+    assert facts["pagerTintMoves"] == "True", (
+        "the back arrow gives its tint back and the muted next arrow takes none"
+    )
     assert facts["fromRange"] == "Name/3/85"
     assert facts["blanksLast"] == "Bob 85,Cy"
 

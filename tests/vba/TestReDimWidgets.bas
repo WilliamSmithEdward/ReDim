@@ -353,6 +353,13 @@ Private Function InkOf(ByVal host As Worksheet, ByVal shapeName As String) As Lo
     InkOf = host.Shapes(shapeName).TextFrame2.TextRange.Font.Fill.ForeColor.RGB
 End Function
 
+' The horizontal middle of a drawn shape.
+Private Function ShapeCenterX(ByVal host As Worksheet, ByVal shapeName As String) As Double
+    With host.Shapes(shapeName)
+        ShapeCenterX = .Left + .Width / 2
+    End With
+End Function
+
 ' Empties a focused float field through the keys, one Backspace per
 ' character, as a user would.
 Private Sub BackspaceAll(ByVal fieldValue As ReDimUI)
@@ -781,6 +788,10 @@ Public Function TestSlideBar() As String
         CStr(fillShape.Visible = msoFalse)
     app.Component("vol").SlideToFraction app, 1#, False
     transcript = transcript & "|maxValue=" & app.State("volume")
+    transcript = transcript & "|fillBack=" & CStr(fillShape.Visible = msoTrue _
+        And Abs(fillShape.Width - 200) < 0.5)
+    transcript = transcript & "|thumbAtEnd=" & _
+        CStr(Abs(thumbShape.Left + thumbShape.Width / 2 - 224) < 0.5)
     ' Render armed the pump for the slider's press watch; never leave a
     ' timer armed across harness call boundaries.
     RdxStopPump
@@ -3392,6 +3403,12 @@ Public Function TestFieldRules() As String
     transcript = transcript & "|maxLength=" & app.TextInput("code").InputValue
     transcript = transcript & "|counter=" & _
         host.Shapes("rdm_wid40_code__mc").TextFrame2.TextRange.Text
+    ' A count rewritten key by key keeps its muted ink and right edge.
+    With host.Shapes("rdm_wid40_code__mc").TextFrame2.TextRange
+        transcript = transcript & "|counterLook=" & CStr( _
+            .Font.Fill.ForeColor.RGB = app.Theme.OnMutedColor _
+            And .ParagraphFormat.Alignment = msoAlignRight)
+    End With
 
     ReDimUI.DispatchShape "rdm_wid40_mail"
     TypeText "bob"
@@ -3616,6 +3633,8 @@ Public Function TestPointerBasics() As String
     ReDimUI.PumpOnce
     transcript = transcript & "|bubbleFollows=" & _
         host.Shapes("rdm_wid43_vol__vb").TextFrame2.TextRange.Text
+    transcript = transcript & "|bubbleOverThumb=" & CStr(Abs(ShapeCenterX(host, _
+        "rdm_wid43_vol__vb") - ShapeCenterX(host, "rdm_wid43_vol__thumb")) < 0.5)
     ReDimUI.OverridePointer 184, 69, False
     ReDimUI.PumpOnce
     transcript = transcript & "|releaseCommits=" & CStr(gChangeCount) & ":" & _
@@ -4414,6 +4433,8 @@ End Function
 Public Function TestTabs() As String
     Dim app As ReDimUI
     Dim host As Worksheet
+    Dim tabLeft As Double
+    Dim tabWidth As Double
     Dim transcript As String
 
     gChangeCount = 0
@@ -4465,6 +4486,14 @@ Public Function TestTabs() As String
     transcript = transcript & "|keyRight=" & CStr(app.Tabs("tabs").CurrentValue = 3 _
         And host.Shapes("rdm_wid53_beta").Visible = msoFalse _
         And host.Shapes("rdm_wid53_ver").Visible = msoFalse)
+    With host.Shapes("rdm_wid53_tabs__tb3").TextFrame2.TextRange.Font
+        transcript = transcript & "|shownInk=" & CStr(.Bold = msoTrue _
+            And .Fill.ForeColor.RGB = app.Theme.OnSurfaceColor)
+    End With
+    With host.Shapes("rdm_wid53_tabs__tb2").TextFrame2.TextRange.Font
+        transcript = transcript & "|leftInk=" & CStr(.Bold = msoFalse _
+            And .Fill.ForeColor.RGB = app.Theme.OnMutedColor)
+    End With
     app.Label("ver").Visible True
     transcript = transcript & "|visibleWaited=" & _
         CStr(host.Shapes("rdm_wid53_ver").Visible = msoTrue)
@@ -4481,6 +4510,23 @@ Public Function TestTabs() As String
     transcript = transcript & "|hoverTints=" & CStr( _
         host.Shapes("rdm_wid53_tabs__tb3").Fill.Visible = msoTrue _
         And host.Shapes("rdm_wid53_tabs__tb2").Fill.Visible = msoFalse)
+    ReDimUI.OverridePointer host.Shapes("rdm_wid53_tabs__tb2").Left + 10, 38
+    ReDimUI.PumpOnce
+    transcript = transcript & "|hoverMoves=" & CStr( _
+        host.Shapes("rdm_wid53_tabs__tb2").Fill.Visible = msoTrue _
+        And host.Shapes("rdm_wid53_tabs__tb3").Fill.Visible = msoFalse)
+    ' A tab something deleted comes back whole when the pointer reaches it.
+    tabLeft = host.Shapes("rdm_wid53_tabs__tb1").Left
+    tabWidth = host.Shapes("rdm_wid53_tabs__tb1").Width
+    host.Shapes("rdm_wid53_tabs__tb1").Delete
+    ReDimUI.OverridePointer tabLeft + 10, 38
+    ReDimUI.PumpOnce
+    With host.Shapes("rdm_wid53_tabs__tb1")
+        transcript = transcript & "|tabRedrawn=" & CStr(.Fill.Visible = msoTrue _
+            And Abs(.Left - tabLeft) < 0.1 And Abs(.Width - tabWidth) < 0.1 _
+            And .TextFrame2.TextRange.Text = "General" _
+            And .TextFrame2.TextRange.Font.Bold = msoTrue)
+    End With
     ReDimUI.ClearPointerOverride
     app.PointerEffects False
 
@@ -4779,6 +4825,14 @@ Public Function TestTable() As String
     transcript = transcript & "|keyHome=" & _
         host.Shapes("rdm_wid55_orders__tf").TextFrame2.TextRange.Text & "/" & _
         CStr(app.State("orderState"))
+    ' A footer that goes and comes back on the same page draws its arrows.
+    app.Table("orders").AtRect 24, 24, 360, 400
+    transcript = transcript & "|footerGoes=" & CStr(Not ShapeExists(host, "rdm_wid55_orders__tp"))
+    app.Table("orders").AtRect 24, 24, 360, 160
+    transcript = transcript & "|footerBack=" & CStr( _
+        ShapeExists(host, "rdm_wid55_orders__tf") _
+        And ShapeExists(host, "rdm_wid55_orders__tp") _
+        And ShapeExists(host, "rdm_wid55_orders__tn"))
     RdxKeyChar "{END}"
     transcript = transcript & "|keyEnd=" & _
         host.Shapes("rdm_wid55_orders__tf").TextFrame2.TextRange.Text & "/" & _
@@ -4786,6 +4840,25 @@ Public Function TestTable() As String
     RdxKeyChar "{UP}"
     transcript = transcript & "|keyUp=" & CStr(app.State("orderState")) & "/" & gChangeCount
     RdxReleaseKeys
+
+    ' On the last page the back arrow takes the pointer's tint and gives
+    ' it back; the muted next arrow takes none.
+    app.PointerEffects
+    With host.Shapes("rdm_wid55_orders__tp")
+        ReDimUI.OverridePointer .Left + .Width / 2, .Top + .Height / 2
+    End With
+    ReDimUI.PumpOnce
+    transcript = transcript & "|pagerTint=" & CStr( _
+        host.Shapes("rdm_wid55_orders__tp").Fill.ForeColor.RGB <> app.Theme.SurfaceColor)
+    With host.Shapes("rdm_wid55_orders__tn")
+        ReDimUI.OverridePointer .Left + .Width / 2, .Top + .Height / 2
+    End With
+    ReDimUI.PumpOnce
+    transcript = transcript & "|pagerTintMoves=" & CStr( _
+        host.Shapes("rdm_wid55_orders__tp").Fill.ForeColor.RGB = app.Theme.SurfaceColor _
+        And host.Shapes("rdm_wid55_orders__tn").Fill.ForeColor.RGB = app.Theme.SurfaceColor)
+    ReDimUI.ClearPointerOverride
+    app.PointerEffects False
 
     host.Range("H1:I4").Value = Array("Name", "Score")
     host.Range("H2").Value = "Ann"
