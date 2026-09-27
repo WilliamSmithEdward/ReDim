@@ -47,8 +47,10 @@ now, so a second click can wait for the first run; `ui.Job(id).IsRunning` does t
 job. Cancelling an op or job that was never created does nothing, as it does for one at rest.
 
 An outcome handler runs with the op as `ReDimUI.Sender`, so it reads the result without a
-module variable holding the task, and an error inside it goes to the app's `OnError` sink
-instead of vanishing:
+module variable holding the task. Like every handler it traps its own errors: Excel does not
+hand an error raised inside a procedure `Application.Run` started back to ReDim, so an
+untrapped one stops the pump's tick with VBA's dialog. A handler ReDim cannot run goes to the
+app's `OnError` sink.
 
 ```vba
 Public Sub ApplyData()
@@ -84,8 +86,9 @@ interval, the right shape for game loops and animations, and the pace can change
 ui.Job("loop").Steps("Game.Frame").PacedMs 150
 ```
 
-`CancelJob` requests a stop; the job's `JobOnCancel` handler runs on the next tick. Step errors finish
-the job through its fail handler and the app error sink instead of surfacing a dialog.
+`CancelJob` requests a stop; the job's `JobOnCancel` handler runs on the next tick. A step
+ReDim cannot run finishes the job through its fail handler and the app's error sink. A step
+traps its own errors, as a handler does.
 
 ## Rails
 
@@ -109,8 +112,9 @@ the job through its fail handler and the app error sink instead of surfacing a d
 - `WorkbookBeforeClose` and `ReDimUI.Shutdown` stop the pump deterministically, so no TIMERPROC
   outlives its project. A close keeps the apps mounted in case it is cancelled at the save
   prompt; nothing arms the pump again until the user clicks or selects in the workbook.
-- An op whose tick faults does not hold up the ops after it, and a `TracksState` listener that
-  raises does not cost the op its outcome handler; the error goes to the app's error sink.
+- An op whose tick faults does not hold up the ops after it, and a `TracksState` listener
+  ReDim cannot run does not cost the op its outcome handler; the failure goes to the app's
+  error sink.
 - `ReDimUI.AutoPump False` plus `ReDimUI.PumpOnce` gives tests a fully deterministic clock.
 
 ## Honest limits

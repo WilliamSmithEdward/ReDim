@@ -40,8 +40,9 @@ Option Explicit
 ' - Look: themes from the With builders, text measured in any font,
 '   Meiryo and Microsoft YaHei included, the pointer tint, focus rings.
 ' - Async and errors: a done handler that reads its task's result, two
-'   jobs sharing one step, the named error sink, and a Confirm opened
-'   from another.
+'   jobs sharing one step, the error sink naming a handler ReDim cannot
+'   run, a handler that traps its own error, and a Confirm opened from
+'   another.
 '
 ' The command palette (Ctrl+Shift+P) turns to any tab.
 
@@ -289,11 +290,13 @@ Private Sub BuildLookTab(ByVal ui As ReDimUI)
         .OnTab SECTIONS_ID, 4
     ui.Badge("sampleBadge").AtRect(526, 283, 0, 18).Text("WIDE NEWS").Warning _
         .OnTab SECTIONS_ID, 4
+    ' The sample strip sits on the Look tab's panel, and its own panels hold
+    ' a table, alert settings, and a few advanced ones.
     ui.Tabs("sampleTabs").AtRect(24, 318, 380, 30) _
         .Items("Overview", "Notifications", "Advanced settings").OnTab SECTIONS_ID, 4
     With ui.Table("sampleTable")
         .AtRect(24, 356, 380, 128).Columns("Item", "Quantity on hand", "Price") _
-            .OnTab SECTIONS_ID, 4
+            .OnTab "sampleTabs", 1
         .ColumnWidths 0, 80, 0
         .ColumnFormat 3, "0.00"
         .AddRow "Widget", 120, 2.5
@@ -302,6 +305,18 @@ Private Sub BuildLookTab(ByVal ui As ReDimUI)
         .AddRow "Flange", 31, 3.2
         .SortBy 2
     End With
+    ui.CheckList("sampleAlerts").AtRect(24, 360, 380, 76) _
+        .Items("Email me when an order ships", "A weekly summary every Monday", _
+        "Mentions and replies").CheckedFrom(Array("Mentions and replies")) _
+        .OnTab "sampleTabs", 2
+    ui.Toggle("sampleQuiet").AtRect(24, 450, 44, 22).Text("Quiet hours at night") _
+        .OnTab "sampleTabs", 2
+    ui.Stepper("sampleRows").AtRect(24, 378, 130, 26).Caption("Rows per page") _
+        .SliderRange(5, 100, 5).Value(25).OnTab "sampleTabs", 3
+    ui.TextInput("sampleServer").AtRect(180, 378, 224, 22).Caption("Server address") _
+        .Placeholder("https://example.com/api").OnTab "sampleTabs", 3
+    ui.TickBox("sampleVerbose").AtRect(24, 428, 220, 18).Text("Keep a verbose log") _
+        .OnTab "sampleTabs", 3
     ui.TextInput("sampleNotes").AtRect(430, 334, 200, 22).Caption("AutoGrow in the font") _
         .AutoGrow(4).OnTab SECTIONS_ID, 4
     ui.TextInput("sampleNotes").InputValue = "One" & vbLf & "Two" & vbLf & "Three"
@@ -311,8 +326,8 @@ End Sub
 Private Sub BuildAsyncTab(ByVal ui As ReDimUI)
     ui.Label("asyncIntro").AtRect(24, 104, 620, 48).FontSize(10).OnTab(SECTIONS_ID, 5) _
         .Text "An op's done handler reads its task's result through ReDimUI.Sender.Task. " & _
-        "Two jobs share one step, told apart by their Tag. A failing handler reaches the " & _
-        "error sink, which names it."
+        "Two jobs share one step, told apart by their Tag. A handler ReDim cannot run " & _
+        "reaches the error sink, which names it; a handler traps its own errors."
     ui.Button("roll").AtRect(24, 168, 170, 30).Text("Roll a die in 1 s").Primary _
         .BusyText("Rolling").OnClick("WhatsNew.HandleRoll").OnTab SECTIONS_ID, 5
     ui.Spinner("rollSpin").AtRect(204, 172, 22, 22).Visible(False).OnTab SECTIONS_ID, 5
@@ -333,14 +348,20 @@ Private Sub BuildAsyncTab(ByVal ui As ReDimUI)
     ui.Job("jobB").Steps("WhatsNew.FillStep").PacedMs(90).Tag("jobB") _
         .JobOnDone("WhatsNew.HandleFilled").JobOnCancel "WhatsNew.HandleFillCancelled"
 
-    ui.Button("oops").AtRect(24, 302, 200, 30).Text("Run a failing handler").Danger _
+    ' The button's handler is missing on purpose, the failure ReDim sees.
+    ui.Button("missing").AtRect(24, 302, 200, 30).Text("Run a missing handler").Danger _
+        .OnClick("WhatsNew.NoSuchHandler").OnTab SECTIONS_ID, 5
+    ui.Label("missingNote").AtRect(236, 300, 400, 42).FontSize(9) _
+        .Text("ReDim cannot run it, so the app's OnError sink gets the failure, naming " & _
+        "the procedure and the control.").OnTab SECTIONS_ID, 5
+    ui.Button("oops").AtRect(24, 346, 200, 30).Text("Run a handler that fails").Warning _
         .OnClick("WhatsNew.HandleOops").OnTab SECTIONS_ID, 5
-    ui.Label("oopsNote").AtRect(236, 300, 400, 42).FontSize(9) _
-        .Text("The error goes to the app's OnError sink, which gets the procedure and " & _
-        "the control that ran it.").OnTab SECTIONS_ID, 5
-    ui.Button("reset").AtRect(24, 346, 200, 30).Text("Reset the demo").Secondary _
+    ui.Label("oopsNote").AtRect(236, 344, 400, 42).FontSize(9) _
+        .Text("Excel does not hand an error raised inside a handler back to ReDim, so " & _
+        "the handler traps its own.").OnTab SECTIONS_ID, 5
+    ui.Button("reset").AtRect(24, 390, 200, 30).Text("Reset the demo").Secondary _
         .OnClick("WhatsNew.HandleReset").OnTab SECTIONS_ID, 5
-    ui.Label("resetNote").AtRect(236, 346, 400, 42).FontSize(9) _
+    ui.Label("resetNote").AtRect(236, 390, 400, 42).FontSize(9) _
         .Text("Asks twice: a Confirm opened from another Confirm's OK stays open.") _
         .OnTab SECTIONS_ID, 5
 End Sub
@@ -564,12 +585,21 @@ Public Sub HandleStopJobs()
     LogEvent "CancelJob on both; a job at rest takes it as nothing"
 End Sub
 
+' A handler traps its own errors. Excel does not hand an error raised
+' inside a procedure Application.Run started back to its caller, so an
+' untrapped one would stop here with VBA's dialog, and End there resets
+' the project, every app with it.
 Public Sub HandleOops()
-    LogEvent "HandleOops raises an error"
-    Err.Raise 5, "WhatsNew.HandleOops", "The report has no rows to print."
+    On Error GoTo Failed
+    ThisWorkbook.Worksheets("Monthly report").Activate
+    Exit Sub
+
+Failed:
+    LogEvent "HandleOops trapped its own error " & Err.Number & ": " & Err.Description
+    WhatsNewApp().Toast("There is no Monthly report sheet to show.").Warning
 End Sub
 
-' The app's OnError sink: a failed handler's message, naming the
+' The app's OnError sink: a handler ReDim could not run, naming the
 ' procedure and the control that ran it.
 Public Sub ShowHandlerError(ByVal failureWords As String)
     LogEvent failureWords

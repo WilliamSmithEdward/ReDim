@@ -96,7 +96,7 @@ framework. Also:
 | `CloseModal` | Hide the modal set. |
 | `Async(opId)` / `CancelAsync opId` / `AsyncError(opId)` | Async ops (see [async.md](async.md)); `Async(opId).IsRunning` reads whether one runs now. |
 | `Job(jobId)` / `CancelJob jobId` | Chunked or paced background work; `Job(jobId).IsRunning` reads whether it runs now. |
-| `OnError "Module.Proc"` | One-argument sink for swallowed handler failures. |
+| `OnError "Module.Proc"` | One-argument sink for the handler failures ReDim sees, such as a handler it cannot run, named with the control, op, or job that ran it: "ReDim handler error 1004 in Orders.Save for component 'save': Cannot run the macro". An error raised inside a handler never reaches it: Excel does not return an error from a procedure `Application.Run` started, so VBA stops in the handler with its own dialog, and End there resets the project and every app with it until the build runs again. A handler traps its own errors. |
 | `TickFaultCount` / `ResetTickFaults` (on `ReDimUI`) | The pump and key dispatch trap errors silently by design; every trapped fault increments this factory counter. Read it in tests or diagnostics to prove a run was clean, reset it to scope a measurement. |
 | `ProtectSurface protectOn, allowCellSelection` | Opt-in app-sheet protection (UserInterfaceOnly): users cannot enter cell edit mode or drag shapes there, framework writes keep working, cell-anchored TextInput cells stay editable, and float fields type normally since they never enter cell edit. By default locked canvas cells are also unselectable - no selection rectangle on the app surface, no protected-cell warnings for stray keys - while unlocked TextInput cells stay selectable; pass `allowCellSelection:=True` to keep the whole grid selectable. OnKey capture (fields, HotKey) is unaffected. Protection state does not persist across reopen, so builds should call `ProtectSurface False` first and `ProtectSurface` after Render, as every demo does. Unmount unprotects. |
 | `Unmount deleteShapes` | Remove components (and shapes) and forget the app. Its running ops and jobs stop without running their outcome handlers. |
@@ -239,7 +239,9 @@ Handlers are zero-argument public procedures referenced as `"Module.Proc"`. Insi
 `ReDimUI.Sender` carries who fired and `ReDimUI.SenderPart` names the clicked sub-shape when a
 composite widget fired (toggle knob, checkbox caption, select option). A handler a key fires,
 an arrow on a SelectBox or Enter on a menu command, sees the same `Sender` a click would,
-and an error it raises reaches the app's `OnError` handler as a click's does.
+and one ReDim cannot run reaches the app's `OnError` handler as a click's does. A handler
+traps its own errors: Excel does not hand an error raised inside it back to ReDim, so an
+untrapped one stops with VBA's dialog, and End there resets the project, every app with it.
 
 ## The drawn control family
 

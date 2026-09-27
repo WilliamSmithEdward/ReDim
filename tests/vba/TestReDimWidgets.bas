@@ -10,6 +10,7 @@ Private Declare PtrSafe Function GetDoubleClickTime Lib "user32" () As Long
 Private Declare PtrSafe Function GetKeyState Lib "user32" (ByVal nVirtKey As Long) As Integer
 
 Private gChangeCount As Long
+Private gSinkWords As String
 Private gConfirmRan As Long
 Private gInputCount As Long
 Private gLastInput As String
@@ -7324,4 +7325,29 @@ Public Function TestTallFontLines() As String
     RdxReleaseKeys
     ReDimUI.AutoPump True
     TestTallFontLines = transcript
+End Function
+
+Public Sub RecordSinkError(ByVal failureWords As String)
+    gSinkWords = failureWords
+End Sub
+
+' The app's OnError sink gets a handler ReDim cannot run, named with the
+' control that ran it. (An error raised inside a handler never comes back
+' to ReDim: Excel does not return one from a procedure Application.Run
+' started, so it stops in the handler.)
+Public Function TestErrorSink() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+
+    gSinkWords = vbNullString
+    ReDimUI.AutoPump False
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "wid99")
+    app.OnError "TestReDimWidgets.RecordSinkError"
+    app.Button("missing").AtRect(24, 24, 120, 28).Text("Missing") _
+        .OnClick "TestReDimWidgets.NoSuchHandler"
+    app.Render
+    ReDimUI.DispatchShape "rdm_wid99_missing"
+    ReDimUI.AutoPump True
+    TestErrorSink = "sink=" & gSinkWords
 End Function

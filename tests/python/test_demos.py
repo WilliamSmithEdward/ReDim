@@ -421,8 +421,17 @@ Public Function SmokeWhatsNew() As String
     app.SetState "section", "Async and errors"
     transcript = transcript & "|section=" & app.Tabs("sections").CurrentValue
 
-    ' The failing handler is left out: an error raised inside a handler
-    ' escapes a harness call whatever traps it, as TestReDimAsync notes.
+    ' A handler ReDim cannot run reaches the sink, named; the handler that
+    ' fails traps its own error.
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_whatsnew_missing"
+    transcript = transcript & "|sinkNamed=" & _
+        CStr(InStr(CStr(app.State("log")), "WhatsNew.NoSuchHandler") > 0)
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_whatsnew_oops"
+    transcript = transcript & "|trapped=" & _
+        CStr(InStr(CStr(app.State("log")), "HandleOops trapped its own error 9") > 0)
+
     Sleep 200
     ReDimUI.DispatchShape "rdm_whatsnew_roll"
     For ticks = 1 To 50
@@ -612,6 +621,8 @@ def test_whats_new_smoke(demo_paths):
         assert facts["found"] == "Mangosteen", "ItemPosition finds an item in any case"
         assert facts["ocean"] == "True", "a theme built with the With builders"
         assert facts["section"] == "5", "the tab strip follows its key"
+        assert facts["sinkNamed"] == "True", "the error sink names a handler ReDim cannot run"
+        assert facts["trapped"] == "True", "the failing handler traps its own error"
         assert facts["rolled"] == "True", "the done handler reads the task's result"
         assert facts["filled"] == "100/100", "two jobs share one step by their Tag"
         assert facts["protected"] == "True"

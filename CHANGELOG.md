@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.0.4 - 2026-09-27
+
+- The docs said an error raised inside a handler reaches the app's
+  `OnError` sink. It cannot: Excel does not return an error from a
+  procedure `Application.Run` started, so VBA stops in the handler with
+  its own dialog, and End there resets the project and every app with
+  it until the build runs again. The sink gets the failures ReDim sees,
+  such as a handler it cannot run, named with the control that ran it,
+  and the docs now say a handler, an outcome handler, and a job's step
+  trap their own errors. `TestErrorSink` checks the sink.
+- The What's New demo's red button raised an untrapped error, which
+  stopped in VBA's dialog. It now runs a missing handler, which the sink
+  reports, and a second button shows a handler trapping its own error.
+- The What's New demo's sample tab strip changed nothing under it. Its
+  tabs now switch between a table, alert settings, and a few advanced
+  settings.
+
 ## 1.0.3 - 2026-09-26
 
 - `WritesTo` goes both ways: a control follows the key it writes.

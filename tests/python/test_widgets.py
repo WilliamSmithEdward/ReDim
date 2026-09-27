@@ -1898,6 +1898,13 @@ def test_text_fits(run_widgets):
     assert facts["listFitsItem"] == "True", "a drop list is as wide as its longest item"
 
 
+def test_error_sink(run_widgets):
+    facts = parse_transcript(run_widgets("TestErrorSink"))
+    assert facts["sink"].startswith(
+        "ReDim handler error 1004 in TestReDimWidgets.NoSuchHandler for component 'missing': "
+    ), "the sink gets a handler ReDim cannot run, named with its control"
+
+
 def test_tall_font_lines(run_widgets):
     facts = parse_transcript(run_widgets("TestTallFontLines"))
     assert facts["faces"] == "North/Ada", "a tall font's faces show their values"
