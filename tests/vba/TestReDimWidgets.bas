@@ -7327,6 +7327,43 @@ Public Function TestTallFontLines() As String
     TestTallFontLines = transcript
 End Function
 
+' A theme's revision follows its look: two fresh ThemeLight share one, and
+' SetTheme with the look already drawn restyles nothing, so a fill changed
+' by hand stays; a new look, or the app's theme edited and set again,
+' restyles.
+Public Function TestThemeLookRevision() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim transcript As String
+    Dim editedTheme As ReDimUI
+    Dim buttonShape As Shape
+
+    ReDimUI.AutoPump False
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "wid100")
+    app.Button("go").AtRect(24, 24, 100, 28).Text("Go").Primary
+    app.Render
+    Set buttonShape = host.Shapes("rdm_wid100_go")
+    transcript = "sameLook=" & CStr(ReDimUI.ThemeLight.ThemeRevision = _
+        ReDimUI.ThemeLight.ThemeRevision)
+    transcript = transcript & "|otherLook=" & CStr(ReDimUI.ThemeLight.ThemeRevision <> _
+        ReDimUI.ThemeDark.ThemeRevision)
+    buttonShape.Fill.ForeColor.RGB = RGB(255, 0, 0)
+    app.SetTheme ReDimUI.ThemeLight
+    transcript = transcript & "|sameLookKeeps=" & CStr(buttonShape.Fill.ForeColor.RGB = RGB(255, 0, 0))
+    Set editedTheme = ReDimUI.ThemeLight.WithPrimary(RGB(10, 20, 30), RGB(255, 255, 255))
+    app.SetTheme editedTheme
+    transcript = transcript & "|newLookRestyles=" & _
+        CStr(buttonShape.Fill.ForeColor.RGB = RGB(10, 20, 30))
+    editedTheme.WithPrimary ReDimUI.ThemeLight.PrimaryColor, ReDimUI.ThemeLight.OnPrimaryColor
+    app.SetTheme editedTheme
+    transcript = transcript & "|editedBack=" & _
+        CStr(buttonShape.Fill.ForeColor.RGB = ReDimUI.ThemeLight.PrimaryColor) & "/" & _
+        CStr(editedTheme.ThemeRevision = ReDimUI.ThemeLight.ThemeRevision)
+    ReDimUI.AutoPump True
+    TestThemeLookRevision = transcript
+End Function
+
 Public Sub RecordSinkError(ByVal failureWords As String)
     gSinkWords = failureWords
 End Sub

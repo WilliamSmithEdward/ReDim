@@ -494,6 +494,8 @@ Private mDirtyIds As Collection
 Private mBatchDepth As Long
 Private mRendered As Boolean
 Private mTheme As ReDimUI
+' The theme revision the last Render drew every control in.
+Private mDrawnThemeRevision As Long
 Private mAsyncOps As Collection
 Private mJobs As Collection
 Private mErrorHandlerProc As String
@@ -1114,11 +1116,13 @@ Private mThemeFontSize As Double
 ' the pointer is on it, and while it is pressed.
 Private mThemeHoverTint As Double
 Private mThemePressTint As Double
-' The look's number, new with the theme and with each With builder, which
-' draw keys compare where they compared the theme's address; the factory
-' counts them out, so no two looks share one.
+' The look's number, which draw keys compare where they compared the
+' theme's address: one per look, so every theme whose tokens all match
+' shares it, and a new one when a With builder makes a look the factory
+' has not seen. The factory counts them out and keeps each look's number.
 Private mThemeRevision As Long
 Private mThemeRevisionsIssued As Long
+Private mLookRevisions As Collection
 
 ' =====================================================================
 ' Factory surface
@@ -4128,6 +4132,7 @@ Public Sub Render()
         componentValue.SeedWritesTo Me
     Next componentValue
     mRendered = True
+    mDrawnThemeRevision = mTheme.ThemeRevision
     FlushDirty
     PruneOrphanShapes
     ' Anything rendered that needs frames (a slider's press watch, a
@@ -4273,6 +4278,12 @@ Public Function SetTheme(ByVal themeValue As ReDimUI) As ReDimUI
         RaiseError ERROR_INVALID_ARGUMENT, "SetTheme", "SetTheme requires a theme."
     End If
     Set mTheme = themeValue
+    ' A theme in the look already drawn changes nothing on the sheet: a
+    ' rebuild that set a fresh ReDimUI.ThemeLight restyled every control.
+    If mRendered And themeValue.ThemeRevision = mDrawnThemeRevision Then
+        Set SetTheme = Me
+        Exit Function
+    End If
     ' A painted canvas belongs to the theme too: without this, a theme
     ' swap left dark controls floating on the old light background.
     If mCanvasPainted Then
@@ -20488,23 +20499,44 @@ Friend Sub ConfigureTheme( _
     mThemeFontSize = fontPoints
     mThemeHoverTint = 8
     mThemePressTint = 16
-    mThemeRevision = ReDimUI.NextThemeRevision
+    ReviseTheme
 End Sub
 
-Friend Function NextThemeRevision() As Long
+' The number of a look, given as its tokens joined: the one issued the
+' first time the factory saw the look, so a fresh ThemeLight drawn over
+' another leaves every control as it is.
+Friend Function LookRevision(ByVal lookKey As String) As Long
+    If Not IsFactory(Me) Then
+        LookRevision = ReDimUI.LookRevision(lookKey)
+        Exit Function
+    End If
+    If mLookRevisions Is Nothing Then Set mLookRevisions = New Collection
+    On Error Resume Next
+    LookRevision = mLookRevisions.Item(lookKey)
+    On Error GoTo 0
+    If LookRevision > 0 Then Exit Function
     mThemeRevisionsIssued = mThemeRevisionsIssued + 1
-    NextThemeRevision = mThemeRevisionsIssued
+    LookRevision = mThemeRevisionsIssued
+    mLookRevisions.Add LookRevision, lookKey
 End Function
 
 Friend Property Get ThemeRevision() As Long
     ThemeRevision = mThemeRevision
 End Property
 
-' A With builder's check and mark: the theme role, and a new revision, so
-' controls drawn in the old look repaint.
+' A With builder's check, before it changes anything: the theme role.
 Private Sub EditTheme(ByVal memberName As String)
     RequireRole ROLE_THEME, memberName
-    mThemeRevision = ReDimUI.NextThemeRevision
+End Sub
+
+' The theme's revision after its tokens changed: its look's number, so
+' controls drawn in another look repaint and those in this one stay.
+Private Sub ReviseTheme()
+    mThemeRevision = ReDimUI.LookRevision(mThemePrimary & "|" & mThemeOnPrimary & "|" & _
+        mThemeSurface & "|" & mThemeOnSurface & "|" & mThemeMuted & "|" & mThemeOnMuted & _
+        "|" & mThemeSuccess & "|" & mThemeDanger & "|" & mThemeBorder & "|" & mThemeCanvas & _
+        "|" & mThemeFontName & "|" & CStr(mThemeFontSize) & "|" & CStr(mThemeHoverTint) & _
+        "|" & CStr(mThemePressTint))
 End Sub
 
 Public Property Get PrimaryColor() As Long
@@ -20580,6 +20612,7 @@ Public Function WithPrimary( _
     EditTheme "WithPrimary"
     mThemePrimary = primaryRgb
     mThemeOnPrimary = onPrimaryRgb
+    ReviseTheme
     Set WithPrimary = Me
 End Function
 
@@ -20590,6 +20623,7 @@ Public Function WithFont( _
     EditTheme "WithFont"
     mThemeFontName = fontFace
     mThemeFontSize = fontPoints
+    ReviseTheme
     Set WithFont = Me
 End Function
 
@@ -20600,6 +20634,7 @@ Public Function WithSurface(ByVal surfaceRgb As Long, ByVal onSurfaceRgb As Long
     EditTheme "WithSurface"
     mThemeSurface = surfaceRgb
     mThemeOnSurface = onSurfaceRgb
+    ReviseTheme
     Set WithSurface = Me
 End Function
 
@@ -20607,6 +20642,7 @@ Public Function WithMuted(ByVal mutedRgb As Long, ByVal onMutedRgb As Long) As R
     EditTheme "WithMuted"
     mThemeMuted = mutedRgb
     mThemeOnMuted = onMutedRgb
+    ReviseTheme
     Set WithMuted = Me
 End Function
 
@@ -20614,18 +20650,21 @@ Public Function WithStatus(ByVal successRgb As Long, ByVal dangerRgb As Long) As
     EditTheme "WithStatus"
     mThemeSuccess = successRgb
     mThemeDanger = dangerRgb
+    ReviseTheme
     Set WithStatus = Me
 End Function
 
 Public Function WithBorder(ByVal borderRgb As Long) As ReDimUI
     EditTheme "WithBorder"
     mThemeBorder = borderRgb
+    ReviseTheme
     Set WithBorder = Me
 End Function
 
 Public Function WithCanvas(ByVal canvasRgb As Long) As ReDimUI
     EditTheme "WithCanvas"
     mThemeCanvas = canvasRgb
+    ReviseTheme
     Set WithCanvas = Me
 End Function
 
@@ -20644,6 +20683,7 @@ Public Function WithPointerTint( _
     End If
     mThemeHoverTint = hoverPercent
     mThemePressTint = pressPercent
+    ReviseTheme
     Set WithPointerTint = Me
 End Function
 

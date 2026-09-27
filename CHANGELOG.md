@@ -16,6 +16,12 @@
 - The What's New demo's sample tab strip changed nothing under it. Its
   tabs now switch between a table, alert settings, and a few advanced
   settings.
+- A theme in the look already drawn restyles nothing. Every theme took a
+  revision of its own, so `SetTheme` with a fresh `ReDimUI.ThemeLight`,
+  as a rebuild does, restyled every control: the Expense Tracker's
+  rebuild spent 75 of its 120 milliseconds there and now takes about 37.
+  A theme's revision now follows its look, shared by every theme whose
+  tokens all match.
 
 ## 1.0.3 - 2026-09-26
 

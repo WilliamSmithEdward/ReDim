@@ -1898,6 +1898,15 @@ def test_text_fits(run_widgets):
     assert facts["listFitsItem"] == "True", "a drop list is as wide as its longest item"
 
 
+def test_theme_look_revision(run_widgets):
+    facts = parse_transcript(run_widgets("TestThemeLookRevision"))
+    assert facts["sameLook"] == "True", "two themes with one look share a revision"
+    assert facts["otherLook"] == "True"
+    assert facts["sameLookKeeps"] == "True", "SetTheme with the look drawn restyles nothing"
+    assert facts["newLookRestyles"] == "True"
+    assert facts["editedBack"] == "True/True", "a theme edited back takes the look's revision"
+
+
 def test_error_sink(run_widgets):
     facts = parse_transcript(run_widgets("TestErrorSink"))
     assert facts["sink"].startswith(
