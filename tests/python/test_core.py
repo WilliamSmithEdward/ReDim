@@ -187,6 +187,9 @@ def test_writes_to_follows(run_core):
     assert facts["seeded"] == "True/0", (
         "a key with no value takes the control's on render, firing no listener"
     )
+    assert facts["typingUnseeded"] == "True", "typing must not seed the key before it commits"
+    assert facts["escapeUnseeded"] == "True/", "Esc must leave the key unset and the field empty"
+    assert facts["commitWrites"] == "h"
     assert facts["follows"] == "True/1", (
         "SetState must move the control; the listener runs, OnChange does not"
     )

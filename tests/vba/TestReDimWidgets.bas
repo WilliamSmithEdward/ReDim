@@ -7457,22 +7457,40 @@ Public Sub RecordSinkError(ByVal failureWords As String)
 End Sub
 
 ' The app's OnError sink gets a handler ReDim cannot run, named with the
-' control that ran it. (An error raised inside a handler never comes back
-' to ReDim: Excel does not return one from a procedure Application.Run
-' started, so it stops in the handler.)
+' control that ran it, and a state listener it cannot run, named with the
+' key; the key's other listeners and the writer's OnChange still run, and
+' a code write does not raise. (An error raised inside a handler never
+' comes back to ReDim: Excel does not return one from a procedure
+' Application.Run started, so it stops in the handler.)
 Public Function TestErrorSink() As String
     Dim app As ReDimUI
     Dim host As Worksheet
+    Dim transcript As String
 
     gSinkWords = vbNullString
+    gChangeCount = 0
     ReDimUI.AutoPump False
     Set host = NewCanvas()
     Set app = ReDimUI.Mount(host, "wid99")
     app.OnError "TestReDimWidgets.RecordSinkError"
     app.Button("missing").AtRect(24, 24, 120, 28).Text("Missing") _
         .OnClick "TestReDimWidgets.NoSuchHandler"
+    app.Toggle("flag").AtRect(24, 70, 44, 22).WritesTo("flag") _
+        .OnChange "TestReDimWidgets.RecordChange"
+    app.OnStateChanged "flag", "TestReDimWidgets.NoSuchListener"
+    app.OnStateChanged "flag", "TestReDimWidgets.RecordChange"
     app.Render
     ReDimUI.DispatchShape "rdm_wid99_missing"
+    transcript = "sink=" & gSinkWords
+    gSinkWords = vbNullString
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid99_flag"
+    transcript = transcript & "|listenerSink=" & gSinkWords
+    transcript = transcript & "|othersRan=" & gChangeCount & "/" & CStr(app.State("flag"))
+    On Error Resume Next
+    app.SetState "flag", False
+    transcript = transcript & "|codeWrite=" & Err.Number & "/" & gChangeCount
+    On Error GoTo 0
     ReDimUI.AutoPump True
-    TestErrorSink = "sink=" & gSinkWords
+    TestErrorSink = transcript
 End Function

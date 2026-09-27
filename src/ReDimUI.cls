@@ -1393,17 +1393,21 @@ End Sub
 
 ' A handler failure as the error sink or status bar reports it, naming
 ' the procedure and what ran it: "ReDim handler error 13 in Orders.Save
-' for component 'save': Type mismatch".
+' for component 'save': Type mismatch". Without a sender, forWords names
+' what ran it, such as a state key.
 Private Function HandlerFailureText( _
     ByVal senderValue As ReDimUI, _
     ByVal handlerProc As String, _
     ByVal errNumber As Long, _
-    ByVal errText As String _
+    ByVal errText As String, _
+    Optional ByVal forWords As String _
 ) As String
     HandlerFailureText = "ReDim handler error " & errNumber
     If LenB(handlerProc) > 0 Then HandlerFailureText = HandlerFailureText & " in " & handlerProc
     If Not senderValue Is Nothing Then
         HandlerFailureText = HandlerFailureText & " for " & senderValue.SenderWords
+    ElseIf LenB(forWords) > 0 Then
+        HandlerFailureText = HandlerFailureText & " for " & forWords
     End If
     HandlerFailureText = HandlerFailureText & ": " & errText
 End Function
@@ -4064,14 +4068,26 @@ Public Sub OnStateChanged(ByVal watchedKeys As Variant, ByVal handlerProc As Str
     Next stateKey
 End Sub
 
+' Runs the key's listeners in the order they were added. One ReDim cannot
+' run goes to the app's OnError sink, named with the key, as a click
+' handler does, and the key's other listeners still run.
 Private Sub InvokeStateHandlers(ByVal stateKey As String)
     Dim handlers As Collection
     Dim handlerProc As Variant
+    Dim failure As String
 
     Set handlers = FindHandlers(stateKey)
     If handlers Is Nothing Then Exit Sub
     For Each handlerProc In handlers
+        failure = vbNullString
+        On Error Resume Next
         Application.Run CStr(handlerProc)
+        If Err.Number <> 0 Then
+            failure = HandlerFailureText(Nothing, CStr(handlerProc), Err.Number, _
+                Err.Description, "state key '" & stateKey & "'")
+        End If
+        On Error GoTo 0
+        If LenB(failure) > 0 Then ReportAppError failure
     Next handlerProc
 End Sub
 
@@ -9429,6 +9445,7 @@ End Function
 Friend Sub SeedWritesTo(ByVal hostApp As ReDimUI)
     Dim seedValue As Variant
     Dim namedItem As Long
+    Dim fieldWords As String
 
     If Not SeedsWritesTo() Then Exit Sub
     If hostApp.HasState(mWritesToKey) Then Exit Sub
@@ -9453,11 +9470,17 @@ Friend Sub SeedWritesTo(ByVal hostApp As ReDimUI)
             If namedItem < 1 Or namedItem > ItemCount Then Exit Sub
             AssignVariant seedValue, ItemStateValue(ItemAt(namedItem))
         Case KIND_INPUT, KIND_COMBO
-            If LenB(mText) = 0 Then Exit Sub
-            If mKind = KIND_COMBO And ExactItemMatch(mText) > 0 Then
-                AssignVariant seedValue, ItemStateValue(mText)
+            ' Typing is not the field's value until it commits: a field
+            ' being typed in seeds with the text it had when focus came.
+            fieldWords = mText
+            If ReDimUI.IsComponentFocused(mOwnerAppId, mComponentId) Then
+                fieldWords = mFieldTextAtFocus
+            End If
+            If LenB(fieldWords) = 0 Then Exit Sub
+            If mKind = KIND_COMBO And ExactItemMatch(fieldWords) > 0 Then
+                AssignVariant seedValue, ItemStateValue(fieldWords)
             Else
-                seedValue = mText
+                seedValue = fieldWords
             End If
     End Select
     hostApp.SeedState mWritesToKey, seedValue, Me

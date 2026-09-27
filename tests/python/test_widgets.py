@@ -1931,6 +1931,13 @@ def test_error_sink(run_widgets):
     assert facts["sink"].startswith(
         "ReDim handler error 1004 in TestReDimWidgets.NoSuchHandler for component 'missing': "
     ), "the sink gets a handler ReDim cannot run, named with its control"
+    assert facts["listenerSink"].startswith(
+        "ReDim handler error 1004 in TestReDimWidgets.NoSuchListener for state key 'flag': "
+    ), "the sink gets a listener ReDim cannot run, named with its key"
+    assert facts["othersRan"] == "2/True", (
+        "the key's other listener and the toggle's OnChange must still run"
+    )
+    assert facts["codeWrite"] == "0/3", "SetState must not raise for a listener it cannot run"
 
 
 def test_tall_font_lines(run_widgets):

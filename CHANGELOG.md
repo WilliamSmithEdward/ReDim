@@ -41,6 +41,16 @@
   typed, 1.2 milliseconds a key against 0.2 without one. The count now
   rewrites only its words, as do a field's message and hint when they
   change.
+- A field whose key had no value wrote the first character typed into
+  the key while the user was still typing, and kept it after Esc took
+  the typing back. A field being typed in now seeds its key with the
+  text it had when focus came, so the key stays unset until the typing
+  commits.
+- A state listener ReDim could not run, such as a misspelled name,
+  raised error 1004 out of the write: `SetState` failed in the caller,
+  and a control's write stopped before its `OnChange` and the key's
+  later listeners. It now goes to the app's `OnError` sink, named with
+  the key, and the rest still run.
 
 ## 1.0.3 - 2026-09-26
 

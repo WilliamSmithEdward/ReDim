@@ -655,9 +655,23 @@ Public Function TestWritesToFollows() As String
     app.SelectBox("size").AddItem "Medium", , 20
     app.Stepper("qty").AtRect(24, 100, 120, 24).SliderRange(0, 50, 1).WritesTo "qty"
     app.TextInput("name").AtRect(24, 140, 150, 22).WritesTo "name"
+    app.TextInput("note").AtRect(200, 140, 150, 22).WritesTo "note"
     app.Render
     transcript = "seeded=" & CStr(app.State("darkMode") = True And app.State("qty") = 0 _
         And Not app.HasState("name") And Not app.HasState("size")) & "/" & gClickCount
+    ' Typing is not a field's value until it commits: a key with no value
+    ' stays unset while the user types and after Esc takes the typing back.
+    app.TextInput("note").Focus
+    RdxKeyChar "h"
+    transcript = transcript & "|typingUnseeded=" & CStr(Not app.HasState("note"))
+    RdxKeyChar "{ESC}"
+    transcript = transcript & "|escapeUnseeded=" & CStr(Not app.HasState("note")) & "/" & _
+        app.TextInput("note").InputValue
+    app.TextInput("note").Focus
+    RdxKeyChar "h"
+    RdxKeyChar "{ENTER}"
+    transcript = transcript & "|commitWrites=" & app.State("note")
+    ReDimUI.ClearKeyboardFocus
     app.SetState "darkMode", False
     transcript = transcript & "|follows=" & CStr(Not app.Toggle("dark").IsChecked) & "/" & gClickCount
     app.SetState "size", 20
