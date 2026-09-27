@@ -7264,13 +7264,13 @@ Private Sub ShiftIndexesForRemove(ByVal indexSet As Collection, ByVal removedAt 
     Next idx
 End Sub
 
-' Removes by 1-based position, or by first matching text; a String is
-' always text, so an item named "1" goes by its name. Removing an item
-' before the selection shifts the index; removing the selected item clears
-' the selection to the placeholder rather than guessing a neighbor.
+' Removes by 1-based position, or by first matching text, ignoring case
+' as ItemPosition does; a String is always text, so an item named "1"
+' goes by its name. Removing an item before the selection shifts the
+' index; removing the selected item clears the selection to the
+' placeholder rather than guessing a neighbor.
 Public Function RemoveItem(ByVal indexOrText As Variant) As ReDimUI
     Dim idx As Long
-    Dim probe As Long
 
     RequireRole ROLE_COMPONENT, "RemoveItem"
     If mItems Is Nothing Then
@@ -7280,13 +7280,7 @@ Public Function RemoveItem(ByVal indexOrText As Variant) As ReDimUI
     If VarType(indexOrText) <> vbString And IsNumeric(indexOrText) Then
         idx = CLng(indexOrText)
     Else
-        EnsureItemTexts
-        For probe = 1 To mItems.Count
-            If mItemTexts(probe) = CStr(indexOrText) Then
-                idx = probe
-                Exit For
-            End If
-        Next probe
+        idx = ExactItemMatch(CStr(indexOrText))
     End If
     If idx < 1 Or idx > mItems.Count Then
         Set RemoveItem = Me
@@ -12397,6 +12391,7 @@ End Function
 ' as a pass and goes to the app's error handler.
 Private Sub RunValidation(ByVal hostApp As ReDimUI)
     Dim verdict As Variant
+    Dim failure As String
 
     ' A required pick fails while nothing is picked; it has no text to
     ' check.
@@ -12428,9 +12423,12 @@ Private Sub RunValidation(ByVal hostApp As ReDimUI)
     mValidationLive = (LenB(mValidationError) > 0)
     Exit Sub
 CheckFailed:
+    ' Named like any handler ReDim cannot run: the check and its field.
+    failure = HandlerFailureText(Me, mValidateProc, Err.Number, Err.Description)
+    On Error GoTo 0
     mValidationError = vbNullString
     mValidationLive = False
-    hostApp.ReportAppError "ReDim validation error " & Err.Number & ": " & Err.Description
+    hostApp.ReportAppError failure
 End Sub
 
 ' The clear button: empties the field and leaves it focused for typing;
@@ -13148,7 +13146,10 @@ Friend Sub ForgetPartSignatures()
 End Sub
 
 ' Box at the left edge, check glyph inside it when checked, caption filling
-' the remainder. Both pieces click-toggle through the dispatcher.
+' the remainder. Both pieces click-toggle through the dispatcher. Its
+' frame (place, look, words) draws both; otherwise the box keeps a key of
+' its check and the pointer's look in row state 1, so a hover restyles
+' only the box's edge and fill, and a click its glyph as well.
 Private Sub ApplyTickBox( _
     ByVal mainShape As Shape, _
     ByVal hostSheet As Worksheet, _
@@ -13156,22 +13157,31 @@ Private Sub ApplyTickBox( _
 )
     Dim captionShape As Shape
     Dim boxSize As Double
+    Dim boxKey As String
 
-    If ExtrasCurrent(PartsState(themeValue) & ":" & CStr(mChecked) & _
-        ":" & mText & ":" & mAccessKey & ":" & PointerKey()) Then Exit Sub
     boxSize = mHeight - 2
     If boxSize > 16 Then boxSize = 16
     If boxSize < 10 Then boxSize = 10
     ' The box is a check list row's box with the face as its pointer part.
-    StyleCheckBoxFace mainShape, boxSize, mTop, mHeight, themeValue, mChecked, mChecked, _
-        vbNullString
-    Set captionShape = EnsurePartShape(hostSheet, "lbl", msoShapeRectangle)
-    PlacePart captionShape, mLeft + boxSize + 6, mTop - 1, mWidth - boxSize - 6, mHeight + 2
-    StyleCaptionPart captionShape, mText, themeValue
-    If LenB(mAccessKey) > 0 Or LenB(mAppliedAccessKey) > 0 Then
-        MarkAccessKey captionShape, mText
+    boxKey = CStr(mChecked) & ":" & CStr(PointerLookCode(vbNullString))
+    If Not ExtrasCurrent(PartsState(themeValue) & ":" & mText & ":" & mAccessKey) Then
+        ReDim mAppliedRowStates(1 To 1)
+        StyleCheckBoxFace mainShape, boxSize, mTop, mHeight, themeValue, mChecked, mChecked, _
+            vbNullString
+        Set captionShape = EnsurePartShape(hostSheet, "lbl", msoShapeRectangle)
+        PlacePart captionShape, mLeft + boxSize + 6, mTop - 1, mWidth - boxSize - 6, mHeight + 2
+        StyleCaptionPart captionShape, mText, themeValue
+        If LenB(mAccessKey) > 0 Or LenB(mAppliedAccessKey) > 0 Then
+            MarkAccessKey captionShape, mText
+        End If
+        ShowPart captionShape, BoolToMso(mVisible)
+    ElseIf Left$(boxKey, InStr(boxKey, ":")) <> _
+        Left$(mAppliedRowStates(1), InStr(mAppliedRowStates(1), ":")) Then
+        StyleCheckBoxState mainShape, boxSize, themeValue, mChecked, mChecked, vbNullString
+    ElseIf boxKey <> mAppliedRowStates(1) Then
+        StyleCheckBoxEdge mainShape, themeValue, mChecked, vbNullString
     End If
-    ShowPart captionShape, BoolToMso(mVisible)
+    mAppliedRowStates(1) = boxKey
     mAppliedChecked = mChecked
 End Sub
 

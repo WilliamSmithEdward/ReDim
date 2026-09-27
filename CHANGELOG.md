@@ -41,6 +41,9 @@
   typed, 1.2 milliseconds a key against 0.2 without one. The count now
   rewrites only its words, as do a field's message and hint when they
   change.
+- A tick box redrew its box and caption whenever the pointer came or
+  went, 2.2 milliseconds each time. The pointer now restyles only the
+  box's edge and fill, 0.15, and a click its check as well.
 - A field whose key had no value wrote the first character typed into
   the key while the user was still typing, and kept it after Esc took
   the typing back. A field being typed in now seeds its key with the
@@ -92,6 +95,13 @@
   highlight, which name rows by number, so items added in the same
   `BeginUpdate` came in selected. They go with the items now, as
   `ItemsFrom` already let them go.
+- `RemoveItem` by text matched case, so `RemoveItem "green"` left
+  "Green", where `ItemPosition` and every other item lookup ignore case.
+  It ignores case now.
+- A `Validates` check ReDim could not run reached the `OnError` sink as
+  "ReDim validation error 1004", naming neither the check nor the field.
+  It now reads like any handler's failure: "ReDim handler error 1004 in
+  Orders.CheckCode for component 'code': ...".
 
 ## 1.0.3 - 2026-09-26
 

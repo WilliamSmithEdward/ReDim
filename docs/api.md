@@ -143,8 +143,8 @@ All fluent, all return the component:
   read row by row, or a ROneCOne sequence. `Null` and `Empty` entries list nothing, and
   an error value lists as its cell shows it, such as `#N/A`.
   `AddItem(text, atPosition)` appends or inserts; `RemoveItem(indexOrText)` removes by
-  position, or by text when given a String, so `RemoveItem "1"` removes the item named
-  "1"; `ClearItems`;
+  position, or by text, ignoring case, when given a String, so `RemoveItem "1"` removes
+  the item named "1"; `ClearItems`;
   read back with `ItemCount` and `ItemTextAt(position)`, and `ItemPosition(text)` finds
   an item by its text, ignoring case (0 for none). The selected item survives inserts
   and unrelated removals; removing it clears the selection to the placeholder. So do a

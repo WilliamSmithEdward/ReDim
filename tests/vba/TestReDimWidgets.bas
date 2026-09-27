@@ -636,10 +636,31 @@ Public Function TestTickBox() As String
         CStr(boxShape.TextFrame2.TextRange.Text = ChrW(10003))
     transcript = transcript & "|changeRan=" & gChangeCount
 
+    transcript = transcript & "|checkInk=" & _
+        CStr(InkOf(host, "rdm_wid12_agree") = app.Theme.OnPrimaryColor)
+
     Sleep 200
     ReDimUI.DispatchShape "rdm_wid12_agree__lbl"
     transcript = transcript & "|captionToggles=" & _
         CStr(app.State("agreed") = False)
+    transcript = transcript & "|glyphCleared=" & _
+        CStr(LenB(boxShape.TextFrame2.TextRange.Text) = 0 _
+        And boxShape.Fill.ForeColor.RGB = app.Theme.SurfaceColor)
+
+    ' The pointer over the box gives its edge the accent, and takes it
+    ' back on leaving.
+    ReDimUI.AutoPump False
+    app.PointerEffects
+    ReDimUI.OverridePointer boxShape.Left + boxShape.Width / 2, boxShape.Top + boxShape.Height / 2
+    ReDimUI.PumpOnce
+    transcript = transcript & "|hoverEdge=" & _
+        CStr(boxShape.Line.ForeColor.RGB = app.Theme.PrimaryColor)
+    ReDimUI.OverridePointer 900, 900
+    ReDimUI.PumpOnce
+    transcript = transcript & "/" & CStr(boxShape.Line.ForeColor.RGB = app.Theme.BorderColor)
+    ReDimUI.ClearPointerOverride
+    app.PointerEffects False
+    ReDimUI.AutoPump True
     TestTickBox = transcript
 End Function
 
@@ -947,6 +968,9 @@ Public Function TestItemApi() As String
     picker.ItemsFrom host.Range("H1:H4")
     transcript = transcript & "|fromRangeSkipsBlank=" & picker.ItemCount
     transcript = transcript & "|rangeSecond=" & picker.ItemTextAt(2)
+    ' Removing by text finds the item in any case, as ItemPosition does.
+    picker.RemoveItem "GREEN"
+    transcript = transcript & "|removeAnyCase=" & picker.ItemCount & "/" & picker.ItemTextAt(2)
 
     ' Replace from a ROneCOne sequence: a ListOf feeds a picker like any
     ' other source, and passing an object never trips the array test.
@@ -7586,6 +7610,7 @@ Public Function TestErrorSink() As String
         .OnChange "TestReDimWidgets.RecordChange"
     app.OnStateChanged "flag", "TestReDimWidgets.NoSuchListener"
     app.OnStateChanged "flag", "TestReDimWidgets.RecordChange"
+    app.TextInput("code").AtRect(24, 110, 140, 22).Validates "TestReDimWidgets.NoSuchCheck"
     app.Render
     ReDimUI.DispatchShape "rdm_wid99_missing"
     transcript = "sink=" & gSinkWords
@@ -7598,6 +7623,13 @@ Public Function TestErrorSink() As String
     app.SetState "flag", False
     transcript = transcript & "|codeWrite=" & Err.Number & "/" & gChangeCount
     On Error GoTo 0
+    gSinkWords = vbNullString
+    app.TextInput("code").Focus
+    RdxKeyChar "x"
+    RdxKeyChar "{ENTER}"
+    transcript = transcript & "|checkSink=" & gSinkWords & "/" & _
+        app.TextInput("code").InputValue
+    RdxReleaseKeys
     ReDimUI.AutoPump True
     TestErrorSink = transcript
 End Function

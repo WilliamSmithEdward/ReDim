@@ -159,6 +159,9 @@ def test_tick_box(run_widgets):
     assert facts["captionToggles"] == "True", (
         "clicking the caption must toggle like the box"
     )
+    assert facts["checkInk"] == "True", "the check draws in the ink on the accent"
+    assert facts["glyphCleared"] == "True"
+    assert facts["hoverEdge"] == "True/True", "the pointer lends the box's edge the accent"
 
 
 def test_radio_group(run_widgets):
@@ -252,6 +255,7 @@ def test_item_api(run_widgets):
     assert facts["fromArray"] == "4"
     assert facts["fromRangeSkipsBlank"] == "3"
     assert facts["rangeSecond"] == "Green"
+    assert facts["removeAnyCase"] == "2/Blue", "RemoveItem by text finds the item in any case"
     assert facts["seqErrClean"] == "True", (
         "a ROneCOne item source must not trip the guarded array test or dirty Err"
     )
@@ -1953,6 +1957,10 @@ def test_error_sink(run_widgets):
         "the key's other listener and the toggle's OnChange must still run"
     )
     assert facts["codeWrite"] == "0/3", "SetState must not raise for a listener it cannot run"
+    assert facts["checkSink"].startswith(
+        "ReDim handler error 1004 in TestReDimWidgets.NoSuchCheck for component 'code': "
+    ), "the sink names a check it cannot run and its field"
+    assert facts["checkSink"].endswith("/x"), "the field still commits its text"
 
 
 def test_tall_font_lines(run_widgets):
