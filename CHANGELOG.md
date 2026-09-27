@@ -123,6 +123,22 @@
 - `Value` on a date picker kept a time given with the date, as `Now`
   brings one, and the calendar carried it into the days it wrote. It
   keeps the day.
+- A line break or tab in a table cell or header broke its row: a break
+  started a second line the row had no room for, and a tab pushed every
+  later cell a column right. Both now show as a space, and a filter
+  matches the cells as shown.
+- After a filter that matched nothing cleared, the table's first row
+  kept the one tab stop of its "No rows match" note, so its cells lost
+  their columns until the layout next changed. It takes its columns'
+  stops back.
+- `ColumnWidths` and `ColumnFormat` given before a table had columns, as
+  a chain like `.ColumnWidths(120, 0).TableFrom(...)` gives them, were
+  dropped on the first build and applied on a rebuild. They now wait for
+  their columns.
+- A table's footer and its empty-row words ran past the table when a
+  long filter or `EmptyText` did not fit; they end in an ellipsis now.
+- `SortedDescending` stayed `True` after the sorted column went, while
+  `SortColumn` read 0; both now read as no sort.
 
 ## 1.0.3 - 2026-09-26
 

@@ -475,9 +475,12 @@ ui.TickBox("beta").AtRect(24, 70, 200, 18).Text("Beta features").OnTab "tabs", 2
   array, its first row naming the columns unless `firstRowHeads:=False`. `ClearRows`
   empties it. Columns share the width by the length of their content unless
   `ColumnWidths` gives points (0 keeps a column's share), and `ColumnFormat 3, "0.00"`
-  shows a column through a `Format$` pattern. A column whose filled cells are all numbers
-  or dates aligns right, header included; text aligns left and cells too long for their
-  column end in an ellipsis. A click on a header sorts by that column, ascending and then
+  shows a column through a `Format$` pattern. Both belong to column numbers: given before
+  the columns come, as a builder chain gives them, they wait for them. A column whose
+  filled cells are all numbers or dates aligns right, header included; text aligns left
+  and cells too long for their column end in an ellipsis. A line break or tab in a cell
+  or a header shows as a space, keeping each row on one line and each cell in its
+  column. A click on a header sorts by that column, ascending and then
   descending, with an arrow on the header, which a header cut short keeps; the sort is
   stable, numbers and dates sort by
   value ahead of text, text sorts without case, and empty cells sort last either way.
@@ -487,7 +490,8 @@ ui.TickBox("beta").AtRect(24, 70, 200, 18).Text("Beta features").OnTab "tabs", 2
   and `CurrentValue` set and read the selection as the row's number in the order the
   rows came in, whatever the sort. Rows show as many as the height holds; more add a
   footer that counts them (`6-10 of 14`) with arrows that page. `RowCount`,
-  `CellValue(row, column)`, `SortColumn`, and `SortedDescending` read it back.
+  `CellValue(row, column)`, `SortColumn`, and `SortedDescending` read it back; a sort
+  whose column goes, as fewer `Columns` drop it, reads as none, 0 and `False`.
 
   Typing while the table has the keys filters it: a row shows when any cell, as shown,
   holds the text in any case, and the footer names the filter (`Filter "ap": 1-2 of 2`).
@@ -499,7 +503,8 @@ ui.TickBox("beta").AtRect(24, 70, 200, 18).Text("Beta features").OnTab "tabs", 2
   header and the rows shown, filtered and sorted, from that cell down in one write. Text
   stays text: "00123" keeps its zeros and "=A1" stays words, never a formula.
   `EmptyText "No orders yet"` words the row an empty table shows, and a filter that
-  matches nothing reads "No rows match". `OnRowOpen "Module.Proc"` runs on a double
+  matches nothing reads "No rows match"; words too long for the table, there or in the
+  footer, end in an ellipsis. `OnRowOpen "Module.Proc"` runs on a double
   click on a row, or on Enter while the table has the keys and shows its selected row,
   with the table as `ReDimUI.Sender` and the row in its `CurrentValue`.
 

@@ -6182,11 +6182,15 @@ End Function
 ' shares the width left over by the length of its content.
 Public Function ColumnWidths(ParamArray columnPoints() As Variant) As ReDimUI
     Dim colNo As Long
+    Dim givenTotal As Long
 
     RequireKind KIND_TABLE, "ColumnWidths"
-    For colNo = 1 To mTableCols
+    ' Widths given before the columns come wait for them.
+    givenTotal = UBound(columnPoints) - LBound(columnPoints) + 1
+    HoldColumnSettings givenTotal
+    For colNo = 1 To HeldColumnSettings()
         mColumnPoints(colNo) = 0
-        If colNo <= UBound(columnPoints) - LBound(columnPoints) + 1 Then
+        If colNo <= givenTotal Then
             mColumnPoints(colNo) = CDbl(columnPoints(LBound(columnPoints) + colNo - 1))
         End If
     Next colNo
@@ -6202,7 +6206,10 @@ Public Function ColumnFormat( _
     ByVal formatPattern As String _
 ) As ReDimUI
     RequireKind KIND_TABLE, "ColumnFormat"
-    If columnNumber >= 1 And columnNumber <= mTableCols Then
+    ' A format given before its column comes waits for it; a sheet has no
+    ' column past 16384.
+    If columnNumber >= 1 And columnNumber <= 16384 Then
+        HoldColumnSettings columnNumber
         mColumnFormats(columnNumber) = formatPattern
         mColumnLayoutKey = vbNullString
         ' A filter matches cells as shown, so a new format filters anew.
@@ -13353,8 +13360,10 @@ BarDrawn:
     mAppliedOptionCount = tabTotal
 End Sub
 
-' Sets the column count, keeping the cells, headers, formats, and widths
-' of the columns that remain.
+' Sets the column count, keeping the cells and headers of the columns
+' that remain. Formats and widths belong to column numbers and outlive
+' their columns: given before the columns come, as a builder chain gives
+' them, or on columns a narrower table let go, they wait for them.
 Private Sub ResizeTableColumns(ByVal columnTotal As Long)
     Dim keptCells() As Variant
     Dim rowNo As Long
@@ -13362,6 +13371,11 @@ Private Sub ResizeTableColumns(ByVal columnTotal As Long)
 
     If columnTotal < 0 Then columnTotal = 0
     If columnTotal = mTableCols Then Exit Sub
+    ' A sort on a column that went sorts nothing, either way.
+    If mSortColumn > columnTotal Then
+        mSortColumn = 0
+        mSortDescending = False
+    End If
     If columnTotal = 0 Then
         mTableCols = 0
         mTableRows = 0
@@ -13381,16 +13395,35 @@ Private Sub ResizeTableColumns(ByVal columnTotal As Long)
     End If
     If mTableCols = 0 Then
         ReDim mTableHeads(1 To columnTotal)
+    Else
+        ReDim Preserve mTableHeads(1 To columnTotal)
+    End If
+    HoldColumnSettings columnTotal
+    mTableCols = columnTotal
+End Sub
+
+' Room in the formats and widths for columnTotal columns, keeping what
+' is set; they never shrink.
+Private Sub HoldColumnSettings(ByVal columnTotal As Long)
+    Dim heldTotal As Long
+
+    heldTotal = HeldColumnSettings()
+    If heldTotal >= columnTotal Then Exit Sub
+    If heldTotal = 0 Then
         ReDim mColumnFormats(1 To columnTotal)
         ReDim mColumnPoints(1 To columnTotal)
     Else
-        ReDim Preserve mTableHeads(1 To columnTotal)
         ReDim Preserve mColumnFormats(1 To columnTotal)
         ReDim Preserve mColumnPoints(1 To columnTotal)
     End If
-    mTableCols = columnTotal
-    If mSortColumn > mTableCols Then mSortColumn = 0
 End Sub
+
+' How many columns the formats and widths hold settings for, 0 before any.
+Private Function HeldColumnSettings() As Long
+    On Error Resume Next
+    HeldColumnSettings = UBound(mColumnPoints)
+    On Error GoTo 0
+End Function
 
 ' Room for at least rowsWanted rows, doubling so appends stay cheap.
 Private Sub EnsureTableRoom(ByVal rowsWanted As Long)
@@ -13493,8 +13526,9 @@ Private Sub EnsureTableShown()
             mTableShownCount = mTableShownCount + 1
             mTableShown(mTableShownCount) = sourceRow
         Else
+            ' The filter matches the cells as shown, on one line.
             For colNo = 1 To mTableCols
-                If InStr(1, TableCellText(colNo, mTableCells(colNo, sourceRow)), _
+                If InStr(1, OneLineWords(TableCellText(colNo, mTableCells(colNo, sourceRow))), _
                     mTableFilter, vbTextCompare) > 0 Then
                     mTableShownCount = mTableShownCount + 1
                     mTableShown(mTableShownCount) = sourceRow
@@ -13598,9 +13632,16 @@ Private Function ClipCell(ByVal cellEntry As Variant) As String
             ClipCell = Format$(cellEntry, "yyyy-mm-dd hh:nn:ss")
         End If
     Else
-        ClipCell = Replace(Replace(Replace(CStr(cellEntry), vbCr, " "), vbLf, " "), _
-            vbTab, " ")
+        ClipCell = OneLineWords(CStr(cellEntry))
     End If
+End Function
+
+' Words on one line, as a table row, header, or copied cell holds them: a
+' line break or a tab reads as a space. A break started a line the row had
+' no room for, and a tab moved every later cell a column right.
+Private Function OneLineWords(ByVal someWords As String) As String
+    OneLineWords = Replace(Replace(Replace(Replace(someWords, vbCrLf, " "), vbCr, " "), _
+        vbLf, " "), vbTab, " ")
 End Function
 
 ' Orders two rows by the sort column: numbers and dates by value, before
@@ -13822,7 +13863,8 @@ Private Sub ApplyTable(ByVal hostSheet As Worksheet, ByVal themeValue As ReDimUI
     For colNo = 1 To mTableCols
         sortMark = vbNullString
         If colNo = mSortColumn Then sortMark = " " & IIf(mSortDescending, ChrW(9660), ChrW(9650))
-        headWords = FitCellText(mTableHeads(colNo), mColumnEdges(colNo) - ColumnLeftEdge(colNo), _
+        headWords = FitCellText(OneLineWords(mTableHeads(colNo)), _
+            mColumnEdges(colNo) - ColumnLeftEdge(colNo), _
             textSize, themeValue.FontName, True, sortMark)
         headFill = PointerTint(themeValue.MutedColor, themeValue.OnSurfaceColor, _
             "th" & colNo)
@@ -13858,12 +13900,15 @@ Private Sub ApplyTable(ByVal hostSheet As Worksheet, ByVal themeValue As ReDimUI
             End If
         ElseIf displayNo = 1 Then
             If mTableRows > 0 Then
-                rowWords = vbTab & Phrase(UI_NO_ROWS_MATCH)
+                rowWords = Phrase(UI_NO_ROWS_MATCH)
             ElseIf LenB(mTableEmptyText) > 0 Then
-                rowWords = vbTab & mTableEmptyText
+                rowWords = mTableEmptyText
             Else
-                rowWords = vbTab & Phrase(UI_NO_ROWS)
+                rowWords = Phrase(UI_NO_ROWS)
             End If
+            ' The note is cut to the table, as a cell is to its column.
+            rowWords = vbTab & FitWordsToWidth(OneLineWords(rowWords), _
+                mWidth - 2 - 2 * TABLE_CELL_PAD, themeValue.FontName, textSize, False)
             rowFill = -1
             rowInk = themeValue.OnMutedColor
         Else
@@ -13907,7 +13952,7 @@ Private Function TableRowWords( _
     If rowHeld Then Exit Function
     For colNo = 1 To mTableCols
         TableRowWords = TableRowWords & vbTab & FitCellText( _
-            TableCellText(colNo, mTableCells(colNo, sourceRow)), _
+            OneLineWords(TableCellText(colNo, mTableCells(colNo, sourceRow))), _
             mColumnEdges(colNo) - ColumnLeftEdge(colNo), textSize, fontFace, False)
     Next colNo
     mFittedRows.Add TableRowWords, CStr(sourceRow)
@@ -13963,6 +14008,7 @@ Private Sub SyncTableRow( _
     ByVal textSize As Double, _
     ByVal emptyNote As Boolean _
 )
+    Dim stopsKey As String
     Dim frameKey As String
     Dim lookKey As String
     Dim priorParts() As String
@@ -13978,8 +14024,12 @@ Private Sub SyncTableRow( _
         End If
         Exit Sub
     End If
-    frameKey = layoutKey & Chr$(1) & PartsState(themeValue) & ":" & CStr(rowPitch) & _
-        ":" & CStr(textSize) & ":" & CStr(emptyNote)
+    ' The tab stops follow the columns, or the empty note's one stop, so
+    ' the note is in their key: a row that held it kept its lone stop when
+    ' the rows came back and no column had moved.
+    stopsKey = layoutKey & Chr$(4) & CStr(emptyNote)
+    frameKey = stopsKey & Chr$(1) & PartsState(themeValue) & ":" & CStr(rowPitch) & _
+        ":" & CStr(textSize)
     lookKey = rowWords & Chr$(2) & CStr(fillRgb) & Chr$(2) & CStr(inkRgb)
     If mAppliedTableRowStates(slotNo) = frameKey & Chr$(3) & lookKey Then Exit Sub
     priorParts = Split(mAppliedTableRowStates(slotNo) & Chr$(3), Chr$(3))
@@ -14004,7 +14054,7 @@ Private Sub SyncTableRow( _
     PlacePart rowShape, mLeft + 1, mTop + 1 + slotNo * rowPitch, mWidth - 2, rowPitch
     PaintPart rowShape, fillRgb, themeValue.BorderColor, 0.5
     StyleTextPart rowShape, rowWords, msoAlignLeft, textSize, False, inkRgb, themeValue
-    If Split(priorParts(0) & Chr$(1), Chr$(1))(0) <> layoutKey Or partMade Then
+    If Split(priorParts(0) & Chr$(1), Chr$(1))(0) <> stopsKey Or partMade Then
         ClearTabStops rowShape
         With rowShape.TextFrame2.TextRange.ParagraphFormat.TabStops
             If emptyNote Then
@@ -14059,7 +14109,10 @@ Private Sub SyncTableFooter( _
     End If
     lastShown = mTableOffset + mTableSlots
     If lastShown > mTableShownCount Then lastShown = mTableShownCount
-    footWords = FooterWords(lastShown)
+    ' Cut to the room left of the arrows, which a long filter overran.
+    footWords = FitWordsToWidth(OneLineWords(FooterWords(lastShown)), _
+        mWidth - 2 - 2 * PAGER_TARGET - 8 - TABLE_CELL_PAD - 2, themeValue.FontName, _
+        textSize - 1, False)
     footTop = mTop + mHeight - 1 - rowPitch
     footKey = PartsState(themeValue) & Chr$(1) & footWords
     If footKey <> mAppliedTableFootSig Then

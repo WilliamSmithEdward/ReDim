@@ -7730,3 +7730,69 @@ Public Function TestDateEdges() As String
     ReDimUI.AutoPump True
     TestDateEdges = transcript
 End Function
+
+' A table at its edges: a line break or tab in a cell or header shows as a
+' space, keeping every cell in its column; the first row takes its
+' columns' tab stops back after a filter that matched nothing clears;
+' widths and formats set before the columns come wait for them; footer
+' and empty-row words are cut to the table; and a sort whose column went
+' reads as no sort, either way.
+Public Function TestTableEdges() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim transcript As String
+    Dim rowWords As String
+    Dim rowNo As Long
+
+    ReDimUI.AutoPump False
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "wid102")
+    app.Table("lines").AtRect(24, 24, 360, 120).Columns "Name", "Unit" & vbLf & "Address", "Qty"
+    app.Table("lines").AddRow "Ann", "12 High St" & vbLf & "Leeds" & vbTab & "LS1", 4
+    app.Table("clear").AtRect(24, 160, 300, 120).Columns "Item", "Qty"
+    app.Table("clear").AddRow "Pear", 3
+    app.Table("clear").AddRow "Apple", 12
+    app.Table("clear").FilterRows "zz"
+    app.Table("early").AtRect(24, 300, 300, 100).ColumnWidths(120, 0).ColumnFormat(2, "0.00") _
+        .Columns "Name", "Price"
+    app.Table("early").AddRow "Pear", 1.5
+    app.Table("narrow").AtRect(400, 24, 150, 80).Columns("Name").EmptyText _
+        "Nothing here yet, add a first order with the button above"
+    app.Table("paged").AtRect(400, 140, 150, 90).Columns "Name"
+    For rowNo = 1 To 12
+        app.Table("paged").AddRow "Row " & rowNo
+    Next rowNo
+    app.Render
+
+    rowWords = host.Shapes("rdm_wid102_lines__tr1").TextFrame2.TextRange.Text
+    transcript = "cellOneLine=" & CStr(InStr(rowWords, vbLf) = 0 And InStr(rowWords, vbCr) = 0 _
+        And Len(rowWords) - Len(Replace(rowWords, vbTab, "")) = 3)
+    rowWords = host.Shapes("rdm_wid102_lines__th2").TextFrame2.TextRange.Text
+    transcript = transcript & "|headOneLine=" & CStr(InStr(rowWords, vbLf) = 0 _
+        And InStr(rowWords, vbCr) = 0 And InStr(rowWords, Chr$(11)) = 0)
+
+    app.Table("clear").FilterRows vbNullString
+    With host.Shapes("rdm_wid102_clear__tr1").TextFrame2.TextRange.ParagraphFormat.TabStops
+        transcript = transcript & "|stopsBack=" & .Count & "/" & CStr(.Item(.Count).Type = _
+            msoTabStopRight)
+    End With
+
+    transcript = transcript & "|earlySettings=" & _
+        CStr(Abs(host.Shapes("rdm_wid102_early__th1").Width - 120) < 0.5) & "/" & _
+        CStr(InStr(host.Shapes("rdm_wid102_early__tr1").TextFrame2.TextRange.Text, "1.50") > 0)
+
+    transcript = transcript & "|emptyCut=" & CStr(Right$(Trim$(Replace( _
+        host.Shapes("rdm_wid102_narrow__tr1").TextFrame2.TextRange.Text, vbTab, "")), 1) = _
+        ChrW(8230) And TextHeld(host, "rdm_wid102_narrow__tr1"))
+    app.Table("paged").FilterRows "row with a filter longer than the table"
+    transcript = transcript & "|footCut=" & CStr(Right$( _
+        host.Shapes("rdm_wid102_paged__tf").TextFrame2.TextRange.Text, 1) = ChrW(8230) _
+        And TextHeld(host, "rdm_wid102_paged__tf"))
+
+    app.Table("clear").SortBy 2, True
+    app.Table("clear").Columns "Item"
+    transcript = transcript & "|sortGone=" & app.Table("clear").SortColumn & "/" & _
+        CStr(app.Table("clear").SortedDescending)
+    ReDimUI.AutoPump True
+    TestTableEdges = transcript
+End Function

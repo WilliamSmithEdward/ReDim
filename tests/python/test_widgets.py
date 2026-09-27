@@ -1982,6 +1982,21 @@ def test_date_edges(run_widgets):
     )
 
 
+def test_table_edges(run_widgets):
+    facts = parse_transcript(run_widgets("TestTableEdges"))
+    assert facts["cellOneLine"] == "True", "a break or tab in a cell must show as a space"
+    assert facts["headOneLine"] == "True", "a break in a header must show as a space"
+    assert facts["stopsBack"] == "2/True", (
+        "the first row takes its columns' tab stops back after a filter that matched nothing"
+    )
+    assert facts["earlySettings"] == "True/True", (
+        "widths and formats set before the columns come must wait for them"
+    )
+    assert facts["emptyCut"] == "True", "empty-row words are cut to the table"
+    assert facts["footCut"] == "True", "footer words are cut to the table"
+    assert facts["sortGone"] == "0/False", "a sort whose column went reads as no sort"
+
+
 def test_tall_font_lines(run_widgets):
     facts = parse_transcript(run_widgets("TestTallFontLines"))
     assert facts["faces"] == "North/Ada", "a tall font's faces show their values"
