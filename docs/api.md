@@ -155,8 +155,9 @@ All fluent, all return the component:
   available side clears. A
   `RadioGroup` or `CheckList` left with no items shows nothing until items return.
   Programmatic mutations re-render but do not write `WritesTo` state or fire `OnChange`;
-  those belong to user interaction and explicit `SetState`. The one exception is the first
-  render, when a `WritesTo` key with no value yet takes the control's value.
+  those belong to user interaction and explicit `SetState`. The one exception is a
+  `WritesTo` key with no value yet: it takes the control's value, silently, as soon as the
+  control has one, at the first render or when code first gives it one.
 - Item values: an item can carry a value apart from its text, `AddItem("Medium", , 20)` or
   `ItemsFrom(texts, values)` with the values in a source of the same shape (a range of
   items with gaps pairs with its range of values cell by cell; a blank value, `Empty`, is
@@ -343,23 +344,28 @@ dependencies:
   its items (see [Field rules](#field-rules)).
 - `DatePicker`: a date field. Its face shows the date in the system's short date, or in
   a `Format$` pattern given with `DateFormat "yyyy-mm-dd"`, and `Text`, or `Placeholder`,
-  is the placeholder it shows in muted ink while it holds none. A click, or Alt+Down, F4, Space, or Down
-  while it has the keys, opens a month calendar under the face, over it when there is no
-  room below: the month between two arrows, the weekday initials from the system's
-  first day of the week, and six weeks of days. The date held fills with the accent,
-  today wears an accent ring, and days of other months read muted. A day picks: the
-  calendar closes, and a new date writes to `WritesTo` as a VBA `Date` and fires
-  `OnChange`. `DateRange earliest, latest` limits what picks, with either side left
-  out; days outside read muted and take no clicks, the month arrows stop at the range's
-  first and last month and read muted there, and the arrow and page keys stop at the
-  range's first and last day, where a calendar opens when the date it holds, or today,
-  lies outside it. A latest day before the earliest raises an error. `PickDate` sets the
-  date from code
-  and `Value 0` clears it, both writing nothing and firing nothing, and `PickedDate`
-  reads it as a `Date`, or `Empty` while there is none. `BindValue` takes a `Date` or a
-  date serial. The calendar is the control's list: one list is open per app, and a
-  press off the calendar and face, a click on another control, Esc, or a move of the
-  grid selection closes it.
+  is the placeholder it shows in muted ink while it holds none. A click on the face or
+  its caption, or Alt+Down, F4, Space, or Down while it has the keys, opens a month
+  calendar under the face, over it when there is no room below; a click that opens it
+  gives it the keys. The calendar shows the month between two arrows, the weekday
+  initials from the system's first day of the week, and six weeks of days. The date held
+  fills with the accent, today wears an accent ring, and days of other months read muted.
+  A day picks: the calendar closes, and a new date writes to `WritesTo` as a VBA `Date`
+  and fires `OnChange`. `DateRange earliest, latest` limits what picks, with either side
+  left out; days outside read muted and take no clicks, the month arrows stop at the
+  range's first and last month and read muted there, and the arrow and page keys stop at
+  the range's first and last day. A calendar opens on a day inside the range when the
+  date it holds, or today, lies outside it, and an open one moves there when the range
+  changes under it. A latest day before the earliest raises an error. The calendar ends
+  where a VBA `Date` does, at 1 January 100 and 31 December 9999: the arrows and keys
+  stop there, and the days past them stay blank. `PickDate` sets the date from code and
+  `Value 0` clears it, both firing nothing and writing nothing to a key that has a value
+  (a key with none takes the date, as above), and `Value` keeps the day of a date given
+  with a time; `PickedDate` reads it as a `Date`, or `Empty` while there is none.
+  `BindValue` takes a `Date` or a date serial. The calendar is the control's list: one
+  list is open per app, and a press off the calendar and face, a click on another
+  control, Esc, a move of the grid selection, or the picker turning hidden or disabled
+  closes it.
 - `TextInput`: a text field. Float by default (`AtRect`), cell-backed with `At` when you
   want the value to live in the grid. A cell-backed field's frame covers its cell, so a
   click on the frame selects the cell: typing replaces the value and F2 edits it in place,

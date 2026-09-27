@@ -1963,6 +1963,25 @@ def test_error_sink(run_widgets):
     assert facts["checkSink"].endswith("/x"), "the field still commits its text"
 
 
+def test_date_edges(run_widgets):
+    facts = parse_transcript(run_widgets("TestDateEdges"))
+    assert facts["lastOpens"] == "True/True/True", (
+        "December 9999 opens without raising, its weeks drawn and its next arrow muted"
+    )
+    assert facts["lastKeys"] == "9999-12-31/True", "the keys stop at the last day a Date holds"
+    assert facts["firstOpens"] == "True/True", "January 100 opens, its back arrow muted"
+    assert facts["captionOpens"] == "True", "a click on the caption opens the calendar"
+    assert facts["escCloses"] == "True", "a calendar a click opened takes the keys, so Esc closes it"
+    assert facts["rangeMoves"] == "April 2026/True", (
+        "a DateRange set while the calendar is open brings it into the range"
+    )
+    assert facts["disableCloses"] == "True", "disabling the picker closes its calendar"
+    assert facts["selectCloses"] == "True", "disabling a select closes its open list"
+    assert facts["timeDropped"] == "2026-09-27 00:00/2026-09-28 00:00", (
+        "a time given through Value is no part of the day held or written"
+    )
+
+
 def test_tall_font_lines(run_widgets):
     facts = parse_transcript(run_widgets("TestTallFontLines"))
     assert facts["faces"] == "North/Ada", "a tall font's faces show their values"

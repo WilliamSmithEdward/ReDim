@@ -263,6 +263,11 @@ Private Const CAL_SLOT_TODAY As Long = 8
 Private Const CAL_SLOT_CURSOR As Long = 9
 Private Const CAL_SLOT_WEEK1 As Long = 10
 Private Const CAL_SLOTS As Long = 15
+' The first and last days a VBA Date holds, 1 January 100 and 31 December
+' 9999, as serials. The calendar's grid and keys reckon in serials and
+' stop at these, since Date arithmetic past either end raises.
+Private Const DAY_SERIAL_FIRST As Double = -657434#
+Private Const DAY_SERIAL_LAST As Double = 2958465#
 
 ' Table cells keep this many points clear at each side of their text.
 Private Const TABLE_CELL_PAD As Double = 6
@@ -6030,6 +6035,12 @@ Public Function DateRange( _
     End If
     mDateEarliest = earliestDay
     mDateLatest = latestDay
+    ' An open calendar moves into the new range, as one opening does: left
+    ' on a month the range leaves no day of, both its arrows read muted.
+    If mSelectOpen Then
+        mCalendarCursor = DayClamped(mCalendarCursor)
+        mCalendarMonth = DateSerial(Year(mCalendarCursor), Month(mCalendarCursor), 1)
+    End If
     Touch
     Set DateRange = Me
 End Function
@@ -6693,6 +6704,13 @@ Public Function Value(ByVal newNumber As Double) As ReDimUI
     ' A group header is a label, never a selection.
     If mKind = KIND_SELECT Then
         If IsGroupHeader(CLng(newNumber)) Then newNumber = 0
+    End If
+    ' A date picker holds a day: a time given with it, as Now brings one,
+    ' went on into the calendar's cursor and the days it wrote.
+    If mKind = KIND_DATE And newNumber <> 0 Then
+        If newNumber >= DAY_SERIAL_FIRST And newNumber < DAY_SERIAL_LAST + 1 Then
+            newNumber = CDbl(DayOnly(CDate(newNumber)))
+        End If
     End If
     mValue = newNumber
     If mValidationLive Then RecheckPick OwnerApp
@@ -9089,8 +9107,9 @@ Friend Sub Apply( _
     ResolveBindings hostApp
     If mKind = KIND_STEPPER Or mKind = KIND_SLIDEBAR Then HoldValueInRange
     ' A control hidden with its list or calendar open closes it, which
-    ' otherwise sprang open again when the control showed.
-    If mSelectOpen And Not mVisible Then
+    ' otherwise sprang open again when the control showed; so does one
+    ' disabled, whose open list looked live and took no clicks.
+    If mSelectOpen And (Not mVisible Or Not mEnabled) Then
         mSelectOpen = False
         mListHighlight = 0
     End If
@@ -9410,7 +9429,7 @@ Private Function DayFromState(ByRef stateValue As Variant, ByRef takenDay As Dou
         takenDay = CDbl(DayOnly(stateValue))
     ElseIf IsNumeric(stateValue) Then
         serial = CDbl(stateValue)
-        If serial < -657434# Or serial >= 2958466# Then Exit Function
+        If serial < DAY_SERIAL_FIRST Or serial >= DAY_SERIAL_LAST + 1 Then Exit Function
         takenDay = CDbl(DayOnly(CDate(serial)))
     ElseIf IsDate(stateValue) Then
         takenDay = CDbl(DayOnly(CDate(stateValue)))
@@ -14602,8 +14621,14 @@ End Function
 
 ' The first day the grid shows: the start of the week that holds the
 ' month's first day, by the system's first day of the week.
-Private Function CalendarGridStart() As Date
-    CalendarGridStart = mCalendarMonth - (Weekday(mCalendarMonth, vbUseSystemDayOfWeek) - 1)
+Private Function CalendarGridStart() As Double
+    CalendarGridStart = CDbl(mCalendarMonth) - (Weekday(mCalendarMonth, vbUseSystemDayOfWeek) - 1)
+End Function
+
+' Whether a grid cell's serial is a day a Date holds; the grid of January
+' 100 starts before the first, and December 9999's runs past the last.
+Private Function CalendarCellExists(ByVal cellSerial As Double) As Boolean
+    CalendarCellExists = (cellSerial >= DAY_SERIAL_FIRST And cellSerial <= DAY_SERIAL_LAST)
 End Function
 
 Private Sub OpenCalendar()
@@ -14624,6 +14649,8 @@ End Sub
 ' arrow turns the month, and a day picks it. True when the date changed,
 ' so the handlers run.
 Private Function ClickCalendar(ByVal hostApp As ReDimUI, ByVal partName As String) As Boolean
+    Dim cellSerial As Double
+
     ' The week rows, the day marks, and the card lie over the days; the
     ' pointer says which day a click on them meant.
     If IsCalendarCover(partName) Then
@@ -14631,11 +14658,15 @@ Private Function ClickCalendar(ByVal hostApp As ReDimUI, ByVal partName As Strin
         If LenB(partName) = 0 Then Exit Function
     End If
     Select Case partName
-        Case vbNullString, "caret"
+        Case vbNullString, "caret", "fc"
+            ' The face, its caret, or its caption. A calendar a click opens
+            ' takes the keys, as a filterable list does, so Esc closes it
+            ' and the arrows move its day.
             If mSelectOpen Then
                 mSelectOpen = False
             Else
                 OpenCalendar
+                TakeFocus hostApp, False
             End If
             Touch
         Case "cp", "cn"
@@ -14646,8 +14677,9 @@ Private Function ClickCalendar(ByVal hostApp As ReDimUI, ByVal partName As Strin
                 Exit Function
             End If
             If Not mSelectOpen Then Exit Function
-            ClickCalendar = PickCalendarDay(hostApp, _
-                CalendarGridStart() + CLng(Mid$(partName, 3)) - 1)
+            cellSerial = CalendarGridStart() + CLng(Mid$(partName, 3)) - 1
+            If Not CalendarCellExists(cellSerial) Then Exit Function
+            ClickCalendar = PickCalendarDay(hostApp, CDate(cellSerial))
     End Select
 End Function
 
@@ -14658,10 +14690,12 @@ Private Sub TurnCalendarMonth(ByVal monthStep As Long)
     ' DateRange stops the arrows at the months that hold a day it allows.
     If Not CanTurnMonth(monthStep) Then Exit Sub
     mCalendarMonth = DateAdd("m", monthStep, mCalendarMonth)
-    mCalendarCursor = DateSerial(Year(mCalendarMonth), Month(mCalendarMonth), _
-        Day(mCalendarCursor))
-    If Month(mCalendarCursor) <> Month(mCalendarMonth) Then
-        mCalendarCursor = DateSerial(Year(mCalendarMonth), Month(mCalendarMonth) + 1, 0)
+    ' The cursor keeps its day of the month, or the month's last day.
+    If Day(mCalendarCursor) > Day(MonthEndDay(mCalendarMonth)) Then
+        mCalendarCursor = MonthEndDay(mCalendarMonth)
+    Else
+        mCalendarCursor = DateSerial(Year(mCalendarMonth), Month(mCalendarMonth), _
+            Day(mCalendarCursor))
     End If
     mCalendarCursor = DayClamped(mCalendarCursor)
     Touch
@@ -14671,13 +14705,45 @@ End Sub
 Private Function CanTurnMonth(ByVal monthStep As Long) As Boolean
     Dim firstDay As Date
 
+    ' No month lies before January 100 or after December 9999.
+    If Not MonthExists(mCalendarMonth, monthStep) Then Exit Function
     firstDay = DateAdd("m", monthStep, mCalendarMonth)
     If mDateLatest <> 0 And firstDay > mDateLatest Then Exit Function
-    If mDateEarliest <> 0 _
-        And DateSerial(Year(firstDay), Month(firstDay) + 1, 0) < mDateEarliest Then
-        Exit Function
-    End If
+    If mDateEarliest <> 0 And MonthEndDay(firstDay) < mDateEarliest Then Exit Function
     CanTurnMonth = True
+End Function
+
+' Whether the month a number of months on from a day's is one a Date
+' holds: January 100 to December 9999, months 1200 to 119999 counted from
+' the year 0. The count is a Long: Year times 12 as Integers overflows
+' past the year 2730.
+Private Function MonthExists(ByVal someDay As Date, ByVal monthStep As Long) As Boolean
+    Dim monthIndex As Long
+
+    monthIndex = CLng(Year(someDay)) * 12 + Month(someDay) - 1 + monthStep
+    MonthExists = (monthIndex >= 1200 And monthIndex <= 119999)
+End Function
+
+' The last day of a day's month. DateSerial's day 0 of the next month
+' raises for December 9999, which has no next month.
+Private Function MonthEndDay(ByVal someDay As Date) As Date
+    If Month(someDay) = 12 Then
+        MonthEndDay = DateSerial(Year(someDay), 12, 31)
+    Else
+        MonthEndDay = DateSerial(Year(someDay), Month(someDay) + 1, 0)
+    End If
+End Function
+
+' A day some months on, as DateAdd gives it, stopping at the first or
+' last day a Date holds instead of raising past them.
+Private Function MonthsOn(ByVal someDay As Date, ByVal monthStep As Long) As Date
+    If MonthExists(someDay, monthStep) Then
+        MonthsOn = DateAdd("m", monthStep, someDay)
+    ElseIf monthStep < 0 Then
+        MonthsOn = CDate(DAY_SERIAL_FIRST)
+    Else
+        MonthsOn = CDate(DAY_SERIAL_LAST)
+    End If
 End Function
 
 ' Picks a calendar day: the calendar closes, and a new date writes to
@@ -14700,7 +14766,7 @@ End Function
 ' Page Down a month, Home and End to the month's first and last day,
 ' and Enter or Space picks the day the keys reached.
 Private Sub HandleDateKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
-    Dim aimDay As Date
+    Dim aimSerial As Double
 
     If Not mSelectOpen Then
         Select Case keyText
@@ -14712,28 +14778,30 @@ Private Sub HandleDateKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
         End Select
         Exit Sub
     End If
-    aimDay = mCalendarCursor
+    ' A serial, not a Date: a step past the first or last day a Date
+    ' holds stops there instead of raising.
+    aimSerial = CDbl(mCalendarCursor)
     Select Case keyText
         Case "{LEFT}"
-            aimDay = aimDay - 1
+            aimSerial = aimSerial - 1
         Case "{RIGHT}"
-            aimDay = aimDay + 1
+            aimSerial = aimSerial + 1
         Case "{UP}"
-            aimDay = aimDay - 7
+            aimSerial = aimSerial - 7
         Case "{DOWN}"
-            aimDay = aimDay + 7
+            aimSerial = aimSerial + 7
         Case "{PGUP}"
-            aimDay = DateAdd("m", -1, aimDay)
+            aimSerial = CDbl(MonthsOn(mCalendarCursor, -1))
         Case "{PGDN}"
-            aimDay = DateAdd("m", 1, aimDay)
+            aimSerial = CDbl(MonthsOn(mCalendarCursor, 1))
         Case "{CTRLPGUP}"
-            aimDay = DateAdd("yyyy", -1, aimDay)
+            aimSerial = CDbl(MonthsOn(mCalendarCursor, -12))
         Case "{CTRLPGDN}"
-            aimDay = DateAdd("yyyy", 1, aimDay)
+            aimSerial = CDbl(MonthsOn(mCalendarCursor, 12))
         Case "{HOME}"
-            aimDay = DateSerial(Year(aimDay), Month(aimDay), 1)
+            aimSerial = CDbl(DateSerial(Year(mCalendarCursor), Month(mCalendarCursor), 1))
         Case "{END}"
-            aimDay = DateSerial(Year(aimDay), Month(aimDay) + 1, 0)
+            aimSerial = CDbl(MonthEndDay(mCalendarCursor))
         Case "{ENTER}", " "
             If PickCalendarDay(hostApp, mCalendarCursor) Then RunClickHandlers hostApp
             Exit Sub
@@ -14743,7 +14811,9 @@ Private Sub HandleDateKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
         Case Else
             Exit Sub
     End Select
-    mCalendarCursor = DayClamped(aimDay)
+    If aimSerial < DAY_SERIAL_FIRST Then aimSerial = DAY_SERIAL_FIRST
+    If aimSerial > DAY_SERIAL_LAST Then aimSerial = DAY_SERIAL_LAST
+    mCalendarCursor = DayClamped(CDate(aimSerial))
     mCalendarMonth = DateSerial(Year(mCalendarCursor), Month(mCalendarCursor), 1)
     Touch
 End Sub
@@ -14803,7 +14873,7 @@ Private Sub SyncCalendar(ByVal hostSheet As Worksheet, ByVal themeValue As ReDim
     Dim cardTop As Double
     Dim gridTop As Double
     Dim textSize As Double
-    Dim gridStart As Date
+    Dim gridStart As Double
     Dim heldCell As Long
     Dim todayCell As Long
     Dim cursorCell As Long
@@ -14887,10 +14957,10 @@ Private Sub SyncCalendar(ByVal hostSheet As Worksheet, ByVal themeValue As ReDim
 End Sub
 
 ' The grid cell, 1 to 42, that shows a day; 0 when the six weeks miss it.
-Private Function CalendarCellOf(ByVal shownDay As Date, ByVal gridStart As Date) As Long
+Private Function CalendarCellOf(ByVal shownDay As Date, ByVal gridStart As Double) As Long
     Dim dayIndex As Long
 
-    dayIndex = CLng(DayOnly(shownDay) - gridStart)
+    dayIndex = CLng(CDbl(DayOnly(shownDay)) - gridStart)
     If dayIndex >= 0 And dayIndex < 42 Then CalendarCellOf = dayIndex + 1
 End Function
 
@@ -14990,7 +15060,7 @@ Private Sub SyncCalendarWeek( _
     ByVal hostSheet As Worksheet, _
     ByVal themeValue As ReDimUI, _
     ByVal weekNo As Long, _
-    ByVal gridStart As Date, _
+    ByVal gridStart As Double, _
     ByVal gridTop As Double, _
     ByVal textSize As Double, _
     ByVal heldCell As Long, _
@@ -15002,6 +15072,7 @@ Private Sub SyncCalendarWeek( _
     Dim mutedDays As String
     Dim columnNo As Long
     Dim runFrom As Long
+    Dim cellSerial As Double
     Dim cellDay As Date
     Dim heldColumn As Long
     Dim todayColumn As Long
@@ -15012,14 +15083,22 @@ Private Sub SyncCalendarWeek( _
     Dim weekMade As Boolean
 
     For columnNo = 1 To 7
-        cellDay = gridStart + (weekNo - 1) * 7 + columnNo - 1
+        cellSerial = gridStart + (weekNo - 1) * 7 + columnNo - 1
         weekWords = weekWords & vbTab
         dayStarts(columnNo) = Len(weekWords) + 1
-        weekWords = weekWords & CStr(Day(cellDay))
-        dayEnds(columnNo) = Len(weekWords)
-        If Month(cellDay) = Month(mCalendarMonth) And DayInRange(cellDay) Then
-            mutedDays = mutedDays & "0"
+        ' A cell before 1 January 100 or after 31 December 9999 holds no
+        ' day: it stays blank and reads as muted.
+        If CalendarCellExists(cellSerial) Then
+            cellDay = CDate(cellSerial)
+            weekWords = weekWords & CStr(Day(cellDay))
+            dayEnds(columnNo) = Len(weekWords)
+            If Month(cellDay) = Month(mCalendarMonth) And DayInRange(cellDay) Then
+                mutedDays = mutedDays & "0"
+            Else
+                mutedDays = mutedDays & "1"
+            End If
         Else
+            dayEnds(columnNo) = Len(weekWords)
             mutedDays = mutedDays & "1"
         End If
     Next columnNo
@@ -15056,8 +15135,10 @@ Private Sub SyncCalendarWeek( _
                     If Mid$(mutedDays, columnNo + 1, 1) <> "1" Then Exit Do
                     columnNo = columnNo + 1
                 Loop
-                .Characters(dayStarts(runFrom), dayEnds(columnNo) - dayStarts(runFrom) + 1) _
-                    .Font.Fill.ForeColor.RGB = themeValue.OnMutedColor
+                If dayEnds(columnNo) >= dayStarts(runFrom) Then
+                    .Characters(dayStarts(runFrom), dayEnds(columnNo) - dayStarts(runFrom) + 1) _
+                        .Font.Fill.ForeColor.RGB = themeValue.OnMutedColor
+                End If
             End If
             columnNo = columnNo + 1
         Loop
@@ -15154,7 +15235,7 @@ Private Sub SyncCalendarWeekdays( _
     ByVal hostSheet As Worksheet, _
     ByVal themeValue As ReDimUI, _
     ByVal cardTop As Double, _
-    ByVal gridStart As Date, _
+    ByVal gridStart As Double, _
     ByVal textSize As Double _
 )
     Dim weekWords As String
@@ -15164,10 +15245,13 @@ Private Sub SyncCalendarWeekdays( _
 
     ' Weekday counts from Sunday and WeekdayName from the system's first
     ' day unless told, so both are told: on a Monday-first system the
-    ' names sat one column off the days.
+    ' names sat one column off the days. January 100's grid starts before
+    ' the first day a Date holds; a week later names the same weekdays.
+    If Not CalendarCellExists(gridStart) Then gridStart = gridStart + 7
     For dayNo = 1 To 7
         weekWords = weekWords & vbTab & _
-            Left$(WeekdayName(Weekday(gridStart + dayNo - 1, vbSunday), True, vbSunday), 2)
+            Left$(WeekdayName(Weekday(CDate(gridStart + dayNo - 1), vbSunday), True, _
+            vbSunday), 2)
     Next dayNo
     weekKey = PartsState(themeValue) & ":" & CStr(cardTop) & ":" & weekWords & _
         ":" & CStr(textSize)

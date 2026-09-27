@@ -102,6 +102,27 @@
   "ReDim validation error 1004", naming neither the check nor the field.
   It now reads like any handler's failure: "ReDim handler error 1004 in
   Orders.CheckCode for component 'code': ...".
+- A date picker holding 31 December 9999, as a record with no end date
+  often does, or 1 January 100, failed to draw its calendar: the month
+  arrows and the grid reckoned past the last or first day a VBA `Date`
+  holds, which raises, and a click reported the error against the
+  picker's `OnChange`. The calendar now ends where a `Date` does: the
+  arrows read muted there, the keys stop at the last and first day, and
+  the days past them stay blank.
+- A click on a date picker's `Caption` did nothing; it opens the
+  calendar, as a click on a select's caption opens its list.
+- A calendar opened by a click never had the keys, so Esc, the arrows,
+  and Enter went to the sheet. A click that opens it now gives it the
+  keys, as a filterable select's click does.
+- A `DateRange` set while the calendar was open could leave it on a
+  month with no day in the range, every day muted and both arrows dead.
+  The open calendar now moves into the range.
+- Disabling a date picker, select, or combo with its list open left the
+  list drawn and taking no clicks. The list closes, as it does when the
+  control hides.
+- `Value` on a date picker kept a time given with the date, as `Now`
+  brings one, and the calendar carried it into the days it wrote. It
+  keeps the day.
 
 ## 1.0.3 - 2026-09-26
 

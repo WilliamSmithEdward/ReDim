@@ -353,6 +353,20 @@ Private Function InkOf(ByVal host As Worksheet, ByVal shapeName As String) As Lo
     InkOf = host.Shapes(shapeName).TextFrame2.TextRange.Font.Fill.ForeColor.RGB
 End Function
 
+' The text color of a drawn shape, or -1 when there is no such shape.
+Private Function InkOrNone(ByVal host As Worksheet, ByVal shapeName As String) As Long
+    InkOrNone = -1
+    If ShapeExists(host, shapeName) Then InkOrNone = InkOf(host, shapeName)
+End Function
+
+' The words a drawn shape shows, or "(none)" when there is no such shape.
+Private Function WordsOrNone(ByVal host As Worksheet, ByVal shapeName As String) As String
+    WordsOrNone = "(none)"
+    If ShapeExists(host, shapeName) Then
+        WordsOrNone = host.Shapes(shapeName).TextFrame2.TextRange.Text
+    End If
+End Function
+
 ' The horizontal middle of a drawn shape.
 Private Function ShapeCenterX(ByVal host As Worksheet, ByVal shapeName As String) As Double
     With host.Shapes(shapeName)
@@ -7632,4 +7646,87 @@ Public Function TestErrorSink() As String
     RdxReleaseKeys
     ReDimUI.AutoPump True
     TestErrorSink = transcript
+End Function
+
+' A date picker at the ends of the days VBA holds opens and moves without
+' raising, its arrows muted there and the keys stopping at the last day;
+' a click on its caption opens it; a calendar a click opened takes the
+' keys, so Esc closes it; a DateRange set while it is open brings it into
+' the range; disabling it closes it; and a time given through Value is
+' no part of the day it holds or writes.
+Public Function TestDateEdges() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim transcript As String
+
+    gSinkWords = vbNullString
+    ReDimUI.AutoPump False
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "wid101")
+    app.OnError "TestReDimWidgets.RecordSinkError"
+    app.DatePicker("last").AtRect(24, 24, 150, 24).WritesTo "lastDay"
+    app.DatePicker("first").AtRect(220, 24, 150, 24).PickDate DateSerial(100, 1, 1)
+    app.DatePicker("capt").AtRect(24, 320, 150, 24).Caption "Due date"
+    app.DatePicker("ranged").AtRect(220, 320, 150, 24).PickDate DateSerial(2026, 6, 15)
+    app.DatePicker("timed").AtRect(420, 320, 150, 24).WritesTo "timedKey"
+    app.DatePicker("timed").Value CDbl(DateSerial(2026, 9, 27) + TimeSerial(14, 30, 0))
+    app.SelectBox("sel").AtRect(420, 24, 150, 24).Items "One", "Two", "Three"
+    app.Render
+
+    ReDimUI.DispatchShape "rdm_wid101_sel"
+    app.SelectBox("sel").Enabled False
+    transcript = "selectCloses=" & CStr(Not ShapeExists(host, "rdm_wid101_sel__opt1")) & "|"
+    Sleep 200
+
+    app.SetState "lastDay", DateSerial(9999, 12, 15)
+    ReDimUI.DispatchShape "rdm_wid101_last"
+    transcript = transcript & "lastOpens=" & CStr(LenB(gSinkWords) = 0) & "/" & _
+        CStr(ShapeExists(host, "rdm_wid101_last__cr5")) & "/" & _
+        CStr(InkOrNone(host, "rdm_wid101_last__cn") = app.Theme.OnMutedColor)
+    RdxKeyChar "{PGDN}"
+    RdxKeyChar "{RIGHT}"
+    RdxKeyChar "{CTRLPGDN}"
+    RdxKeyChar "{ENTER}"
+    transcript = transcript & "|lastKeys=" & Format$(app.State("lastDay"), "yyyy-mm-dd") & _
+        "/" & CStr(LenB(gSinkWords) = 0)
+    ReDimUI.EndKeyboardFocus
+
+    app.DatePicker("first").Focus
+    RdxKeyChar "{ALTDOWN}"
+    RdxKeyChar "{LEFT}"
+    RdxKeyChar "{PGUP}"
+    transcript = transcript & "|firstOpens=" & _
+        CStr(ShapeExists(host, "rdm_wid101_first__cr1")) & "/" & _
+        CStr(InkOrNone(host, "rdm_wid101_first__cp") = app.Theme.OnMutedColor)
+    RdxKeyChar "{ESC}"
+    ReDimUI.EndKeyboardFocus
+
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid101_capt__fc"
+    transcript = transcript & "|captionOpens=" & CStr(ShapeExists(host, "rdm_wid101_capt__cb"))
+    RdxKeyChar "{ESC}"
+    transcript = transcript & "|escCloses=" & CStr(Not ShapeExists(host, "rdm_wid101_capt__cb"))
+    ReDimUI.EndKeyboardFocus
+
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid101_ranged"
+    app.DatePicker("ranged").DateRange DateSerial(2026, 3, 1), DateSerial(2026, 4, 15)
+    transcript = transcript & "|rangeMoves=" & WordsOrNone(host, "rdm_wid101_ranged__ch") & _
+        "/" & CStr(InkOrNone(host, "rdm_wid101_ranged__cp") = app.Theme.OnSurfaceColor)
+    app.DatePicker("ranged").Enabled False
+    transcript = transcript & "|disableCloses=" & _
+        CStr(Not ShapeExists(host, "rdm_wid101_ranged__cb"))
+    ReDimUI.EndKeyboardFocus
+
+    transcript = transcript & "|timeDropped=" & _
+        Format$(app.DatePicker("timed").PickedDate, "yyyy-mm-dd hh:nn")
+    app.DatePicker("timed").Focus
+    RdxKeyChar "{ALTDOWN}"
+    RdxKeyChar "{RIGHT}"
+    RdxKeyChar "{ENTER}"
+    transcript = transcript & "/" & Format$(app.State("timedKey"), "yyyy-mm-dd hh:nn")
+    ReDimUI.EndKeyboardFocus
+    RdxReleaseKeys
+    ReDimUI.AutoPump True
+    TestDateEdges = transcript
 End Function

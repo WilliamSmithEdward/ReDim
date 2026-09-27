@@ -218,7 +218,9 @@ End Sub
 ' Whole months from the one a date falls in to this one: 0 for a date
 ' this month, 1 for last month.
 Private Function MonthsBefore(ByVal spentOn As Date) As Long
-    MonthsBefore = (Year(Date) * 12 + Month(Date)) - (Year(spentOn) * 12 + Month(spentOn))
+    ' Long arithmetic: a year times 12 as Integers overflows past 2730.
+    MonthsBefore = (CLng(Year(Date)) * 12 + Month(Date)) - _
+        (CLng(Year(spentOn)) * 12 + Month(spentOn))
 End Function
 
 ' The month's total, the badge that compares it with last month (red
