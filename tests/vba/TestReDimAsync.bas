@@ -188,6 +188,22 @@ Public Function TestOnClickAsyncSugar() As String
     ReDimUI.DispatchShape "rdm_async2_btnrun"
     ReDimUI.PumpOnce
     transcript = transcript & "|secondRunWorks=" & CStr(gWorkRan = 2)
+
+    ' The body runs in the pump with the button clicked as Sender, so one
+    ' procedure serves buttons told apart by their Tag.
+    gTagSeen = vbNullString
+    app.Button("tagged").AtRect(200, 24, 90, 28).Text("B").Tag("B") _
+        .OnClickAsync "TestReDimAsync.RecordTag"
+    ReDimUI.DispatchShape "rdm_async2_tagged"
+    ReDimUI.PumpOnce
+    transcript = transcript & "|bodySender=" & gTagSeen
+
+    ' A click op at rest has nothing to cancel, token source or none.
+    On Error Resume Next
+    app.CancelAsync "click_btnrun"
+    transcript = transcript & "|restCancelQuiet=" & CStr(Err.Number = 0)
+    Err.Clear
+    On Error GoTo 0
     ReDimUI.AutoPump True
     TestOnClickAsyncSugar = transcript
 End Function
@@ -520,4 +536,40 @@ Public Function TestRealTimerEndToEnd() As String
     transcript = transcript & "|autoDisarmed=" & CStr(Not RdxPumpArmed())
     RdxStopPump
     TestRealTimerEndToEnd = transcript
+End Function
+
+' Ops that share a spinner and a control they disable keep both busy
+' until the last of them finishes, and a dialog waiting on its own asks
+' nothing of the pump.
+Public Function TestSharedBusy() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim transcript As String
+
+    Set host = NewCanvas()
+    ReDimUI.AutoPump False
+    Set app = ReDimUI.Mount(host, "async12")
+    app.Button("next").AtRect(24, 24, 90, 28).Text "Next"
+    app.Spinner("spn").AtRect(130, 24, 24, 24).Visible False
+    app.Async("short").RunsTask(ROneCOne.Task.Delay(50)).ShowsSpinner("spn").Disables "next"
+    app.Async("long").RunsTask(ROneCOne.Task.Delay(600)).ShowsSpinner("spn").Disables "next"
+    app.Render
+    app.Async("short").Start
+    app.Async("long").Start
+    Sleep 150
+    ReDimUI.PumpOnce
+    transcript = "whileOneRuns=" & CStr(app.Async("short").OpIsRunning) & "/" & _
+        CStr(app.Button("next").IsBusy) & "/" & CStr(app.Spinner("spn").IsVisible)
+    Sleep 600
+    ReDimUI.PumpOnce
+    transcript = transcript & "|afterLast=" & CStr(app.Button("next").IsBusy) & "/" & _
+        CStr(app.Spinner("spn").IsVisible)
+
+    app.Confirm "Proceed?", "Go on?", "TestReDimAsync.RecordDone"
+    transcript = transcript & "|dialogAsksPump=" & CStr(ReDimUI.HasPendingWork)
+    RdxKeyChar "{ESC}"
+    RdxReleaseKeys
+    RdxStopPump
+    ReDimUI.AutoPump True
+    TestSharedBusy = transcript
 End Function

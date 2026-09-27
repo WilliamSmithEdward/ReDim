@@ -33,6 +33,8 @@ def test_on_click_async_sugar(run_async):
     assert facts["busyAfterTick"] == "False"
     assert facts["restoredText"] == "Run"
     assert facts["secondRunWorks"] == "True"
+    assert facts["bodySender"] == "B", "an OnClickAsync body must see its button as Sender"
+    assert facts["restCancelQuiet"] == "True", "cancelling an op at rest does nothing"
 
 
 def test_outcome_handlers(run_async):
@@ -141,3 +143,12 @@ def test_real_timer_end_to_end(run_async):
     assert facts["autoDisarmed"] == "True", (
         "the pump must kill its own timer once work drains"
     )
+
+
+def test_shared_busy(run_async):
+    facts = parse_transcript(run_async("TestSharedBusy"))
+    assert facts["whileOneRuns"] == "False/True/True", (
+        "a spinner and a disabled control stay busy while another op still runs"
+    )
+    assert facts["afterLast"] == "False/False", "the last op to finish lets them go"
+    assert facts["dialogAsksPump"] == "False", "a waiting dialog alone must not keep the pump"

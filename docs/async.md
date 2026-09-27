@@ -40,7 +40,9 @@ the op a ROneCOne token source: `ui.CancelAsync "refresh"` cancels a running op 
 has nothing to cancel), `Token` exposes the token for task factories such as
 `ROneCOne.Task.Delay(5000, op.Token)`. A cancelled op finishes with a fresh token, so its next
 run, and a `Token` read for it, start uncancelled. Disabled controls show busy
-state (buttons swap to `BusyText`); everything restores on any terminal state. `OnCancel` names
+state (buttons swap to `BusyText`); everything restores on any terminal state, and a spinner
+or control that several running ops share stays busy until the last of them finishes. The
+op's body runs inside the pump with the op as `ReDimUI.Sender`. `OnCancel` names
 the handler a cancel runs, as `OnDone` and `OnFail` name theirs. `AsyncError(opId)` returns the
 failure message after a fault. `ui.Async("refresh").IsRunning` says whether the op is running
 now, so a second click can wait for the first run; `ui.Job(id).IsRunning` does the same for a
@@ -64,7 +66,9 @@ End Sub
 `JobOnFail`, and `JobOnCancel` handlers run with the job as the sender the same way.
 
 `btn.OnClickAsync "Module.Proc"` is the one-line form: a per-button op that disables the button,
-runs the procedure, and restores it. Clicks while busy are ignored.
+runs the procedure, and restores it. Clicks while busy are ignored. The procedure runs with the
+button as `ReDimUI.Sender`, as a click handler does, so buttons told apart by their `Tag` can
+share it.
 
 ## Jobs
 
@@ -108,7 +112,8 @@ traps its own errors, as a handler does.
 - The pump stops itself when no ops, jobs, toasts, or visible spinners remain, and re-arms on
   the next `Start`.
 - The armed timer id is stored in a workbook-scoped name. After VBA state loss, the next arm
-  kills the orphan first.
+  kills the orphan first, and a tick from a timer the current state did not arm kills that
+  timer and gives back the timer resolution its arming raised.
 - `WorkbookBeforeClose` and `ReDimUI.Shutdown` stop the pump deterministically, so no TIMERPROC
   outlives its project. A close keeps the apps mounted in case it is cancelled at the save
   prompt; nothing arms the pump again until the user clicks or selects in the workbook.

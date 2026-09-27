@@ -165,6 +165,32 @@
   a list filtered as the user typed stayed filtered by the lost text. A
   waiting call no longer runs, and a field that had reported typing runs
   `OnInput` once more with the text it went back to.
+- An `OnClickAsync` procedure ran in the pump with no `ReDimUI.Sender`,
+  so reading `ReDimUI.Sender.TagValue`, as the docs suggest for buttons
+  sharing one procedure, raised error 91. It runs with the clicked
+  control as Sender, and any other op's body with the op, as its outcome
+  handlers already do.
+- Ops sharing a spinner, or a control they disable, let it go when the
+  first of them finished: the spinner hid, and the control took clicks,
+  while the others still ran. It stays busy until the last finishes.
+- A `Confirm` asked for while another waited, from a toast's action, an
+  op's outcome, or a job, took over the first dialog's buttons, and
+  neither of the first's handlers ever ran. It now waits its turn; the
+  same dialog asked again still draws in place.
+- A toast shown while a dialog waited was drawn over the dialog, and a
+  click on it took the dialog's keys. Shapes drawn while a dialog waits
+  now go under it.
+- A waiting dialog alone kept the 16 ms pump running, since the focus it
+  holds counted as work though a dialog's button keeps no watch. It asks
+  for no frames now.
+- `CancelAsync` on an op at rest raised when the op had no
+  `WithCancellation`, as every `OnClickAsync` op has none, where the docs
+  say an op at rest has nothing to cancel. It does nothing now.
+- After a VBA reset, the orphaned pump timer's first idle tick erased the
+  id the next arm would have killed it by, so it ticked on for the life
+  of Excel beside the new pump. A tick from a timer the current state did
+  not arm now kills that timer and gives back the timer resolution its
+  arming raised.
 
 ## 1.0.3 - 2026-09-26
 

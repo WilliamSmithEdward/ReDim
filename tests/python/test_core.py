@@ -298,6 +298,12 @@ def test_focus_handoff(run_core):
         "Esc must go back to what the field held once the field left had committed"
     )
     assert facts["tabOnSilent"] == "0", "tabbing on without an edit must fire nothing"
+    assert facts["firstShown"] == "True", "a dialog asked for while one waits must wait its turn"
+    assert facts["secondShown"] == "True/1/OK", (
+        "answering the first shows the second, with the default OK words, after its handler"
+    )
+    assert facts["bothAnswered"] == "1/1/True", "each answer must run its own dialog's handler"
+    assert facts["toastUnder"] == "True", "a toast shown while a dialog waits goes under it"
 
 
 def test_error_words(run_core):

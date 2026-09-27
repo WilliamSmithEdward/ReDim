@@ -356,6 +356,14 @@ Public Sub RdxPumpCallback( _
     ByVal idEvent As LongPtr, _
     ByVal dwTime As Long _
 )
+    ' A tick from a timer this state did not arm comes from one a VBA
+    ' reset orphaned. It stops itself and gives back the timer resolution
+    ' its arming raised, where it ticked on beside the new pump, and on its
+    ' first idle tick erased the id the next arm would have killed it by.
+    If idEvent <> gTimerId Then
+        If KillTimer(0, idEvent) <> 0 Then timeEndPeriod 1
+        Exit Sub
+    End If
     If gInTick Then Exit Sub
     gInTick = True
     On Error Resume Next
@@ -386,16 +394,19 @@ Public Sub RdxEnsurePump(Optional ByVal intervalMs As Long = PUMP_DEFAULT_INTERV
 End Sub
 
 Public Sub RdxStopPump()
+    ' Only the timer this state armed has its stored id cleared: an id
+    ' stored with no timer here names one a reset orphaned, for the next
+    ' arm to kill.
     If gTimerId <> 0 Then
         KillTimer 0, gTimerId
         gTimerId = 0
+        RdxClearStoredTimerId
     End If
     RdxReleaseCursorPin
     If gTimerResolutionRaised Then
         timeEndPeriod 1
         gTimerResolutionRaised = False
     End If
-    RdxClearStoredTimerId
 End Sub
 
 ' Cursor pinning is opt-in. Pinning suppresses Excel's busy-cursor flip
@@ -465,7 +476,10 @@ Private Sub RdxKillOrphanTimer()
     stored = Replace(stored, "=", vbNullString)
     If IsNumeric(stored) Then
         orphanId = CLngLng(stored)
-        If orphanId <> 0 And orphanId <> gTimerId Then KillTimer 0, orphanId
+        ' A live orphan killed gives back the timer resolution it raised.
+        If orphanId <> 0 And orphanId <> gTimerId Then
+            If KillTimer(0, orphanId) <> 0 Then timeEndPeriod 1
+        End If
     End If
     RdxClearStoredTimerId
 End Sub

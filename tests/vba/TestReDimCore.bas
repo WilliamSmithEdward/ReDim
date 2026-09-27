@@ -1114,6 +1114,7 @@ End Sub
 Public Function TestFocusHandoff() As String
     Dim app As ReDimUI
     Dim host As Worksheet
+    Dim toastValue As ReDimUI
     Dim transcript As String
 
     gClickCount = 0
@@ -1149,6 +1150,34 @@ Public Function TestFocusHandoff() As String
     RdxKeyChar "{TAB}"
     RdxKeyChar "{TAB}"
     transcript = transcript & "|tabOnSilent=" & gListenerRuns
+    RdxReleaseKeys
+    ReDimUI.EndKeyboardFocus
+
+    ' A dialog asked for while one waits, as a toast's action or an op's
+    ' outcome asks, waits its turn, and each answer runs its own handler.
+    gClickCount = 0
+    gListenerRuns = 0
+    app.Confirm "First", "One", "TestReDimCore.CoreClickHandler"
+    app.Confirm "Second", "Two", "TestReDimCore.CoreCountCity"
+    transcript = transcript & "|firstShown=" & _
+        CStr(InStr(host.Shapes("rdm_core15_mdl_card").TextFrame2.TextRange.Text, "First") > 0)
+    Sleep 250
+    ReDimUI.DispatchShape "rdm_core15_mdl_ok"
+    transcript = transcript & "|secondShown=" & _
+        CStr(InStr(host.Shapes("rdm_core15_mdl_card").TextFrame2.TextRange.Text, "Second") > 0) & _
+        "/" & gClickCount & "/" & host.Shapes("rdm_core15_mdl_ok").TextFrame2.TextRange.Text
+    Sleep 250
+    ReDimUI.DispatchShape "rdm_core15_mdl_ok"
+    transcript = transcript & "|bothAnswered=" & gClickCount & "/" & gListenerRuns & "/" & _
+        CStr(host.Shapes("rdm_core15_mdl_card").Visible = msoFalse)
+
+    ' A toast shown while a dialog waits goes under the dialog.
+    app.Confirm "Third", "Three"
+    Set toastValue = app.Toast("Sync finished")
+    transcript = transcript & "|toastUnder=" & CStr( _
+        host.Shapes("rdm_core15_" & toastValue.ComponentId).ZOrderPosition < _
+        host.Shapes("rdm_core15_mdl_card").ZOrderPosition)
+    RdxKeyChar "{ESC}"
     RdxReleaseKeys
     ReDimUI.EndKeyboardFocus
     app.Unmount True

@@ -509,6 +509,13 @@ Private mToastCounter As Long
 ' Enter itself, and the control that held focus when a modal opened.
 Private mDefaultButtonId As String
 Private mFocusBeforeModal As String
+' Confirms asked for while a dialog waited, each shown in its turn, and
+' what the dialog up now asks.
+Private mModalQueue As Collection
+Private mModalShowing As Variant
+' Shapes the app has made, so a draw that made any under a waiting dialog
+' can put the dialog back on top.
+Private mShapesMade As Long
 Private mFieldPrevButtonDown As Boolean
 Private mToastTrayAnchor As String
 Private mToastRailLeft As Double
@@ -1089,6 +1096,8 @@ Private mOpCts As ROneCOne
 Private mOpRunsProc As String
 Private mOpDisableIds As Collection
 Private mOpSpinnerId As String
+' The control whose click started an OnClickAsync op, Sender to its body.
+Private mOpSenderId As String
 Private mOpDoneProc As String
 Private mOpFailProc As String
 Private mOpCancelProc As String
@@ -1316,6 +1325,25 @@ End Property
 Friend Property Get FactorySenderApp() As ReDimUI
     Set FactorySenderApp = mSenderApp
 End Property
+
+' Makes a control, op, or job ReDimUI.Sender for code ReDim runs outside a
+' handler call, as an op's body inside the pump, handing back what was
+' Sender so the caller can put it back the same way.
+Friend Sub SwapSender( _
+    ByVal hostApp As ReDimUI, _
+    ByVal senderValue As ReDimUI, _
+    ByRef priorApp As ReDimUI, _
+    ByRef priorSender As ReDimUI _
+)
+    If Not IsFactory(Me) Then
+        ReDimUI.SwapSender hostApp, senderValue, priorApp, priorSender
+        Exit Sub
+    End If
+    Set priorApp = mSenderApp
+    Set priorSender = mSenderComponent
+    Set mSenderApp = hostApp
+    Set mSenderComponent = senderValue
+End Sub
 
 ' Entry point for ReDimHost.RdxDispatch. Resolves the clicked shape to its
 ' component, applies click guards, and invokes the handler with sender context.
@@ -3404,8 +3432,25 @@ Public Sub Confirm( _
     Dim cardTop As Double
     Dim okWords As String
     Dim cancelWords As String
+    Dim asked As Variant
+    Dim waiting As Variant
 
     RequireRole ROLE_APP, "Confirm"
+    ' A dialog asked for while one waits, as a toast's action, an op's
+    ' outcome, or a job can ask, waits its turn: shown over the first, it
+    ' took the first's buttons, and neither of its handlers ever ran. The
+    ' same dialog asked again draws in place, its handlers the same, and
+    ' one already waiting its turn is not asked twice.
+    asked = Array(titleText, messageText, okProc, cancelProc, okText, cancelText)
+    If ModalUp() And Not SameConfirm(asked, mModalShowing) Then
+        If mModalQueue Is Nothing Then Set mModalQueue = New Collection
+        For Each waiting In mModalQueue
+            If SameConfirm(asked, waiting) Then Exit Sub
+        Next waiting
+        mModalQueue.Add asked
+        Exit Sub
+    End If
+    mModalShowing = asked
     If IsMissing(okText) Then
         okWords = Phrase(UI_OK)
     Else
@@ -3454,10 +3499,50 @@ Public Sub Confirm( _
 End Sub
 
 Public Sub CloseModal()
+    RequireRole ROLE_APP, "CloseModal"
+    HideModal
+    ShowQueuedConfirm
+End Sub
+
+' Whether two Confirm requests ask the same: the same words and handlers,
+' a word left out on both.
+Private Function SameConfirm(ByRef firstAsked As Variant, ByRef secondAsked As Variant) As Boolean
+    Dim partNo As Long
+
+    If Not IsArrayValue(firstAsked) Or Not IsArrayValue(secondAsked) Then Exit Function
+    For partNo = 0 To 5
+        If IsMissing(firstAsked(partNo)) Or IsMissing(secondAsked(partNo)) Then
+            If Not (IsMissing(firstAsked(partNo)) And IsMissing(secondAsked(partNo))) Then
+                Exit Function
+            End If
+        ElseIf CStr(firstAsked(partNo)) <> CStr(secondAsked(partNo)) Then
+            Exit Function
+        End If
+    Next partNo
+    SameConfirm = True
+End Function
+
+' The next Confirm that waited its turn, once no dialog is up. A dialog
+' button's click shows it after the button's handler, so a dialog the
+' handler puts up in reply comes first.
+Friend Sub ShowQueuedConfirm()
+    Dim asked As Variant
+
+    RequireRole ROLE_APP, "ShowQueuedConfirm"
+    If mModalQueue Is Nothing Then Exit Sub
+    If mModalQueue.Count = 0 Or ModalUp() Then Exit Sub
+    asked = mModalQueue.Item(1)
+    mModalQueue.Remove 1
+    Confirm asked(0), asked(1), asked(2), asked(3), asked(4), asked(5)
+End Sub
+
+' Takes the dialog down and gives focus back to the control that held it
+' before the dialog.
+Friend Sub HideModal()
     Dim heldByDialog As Boolean
     Dim modalId As Variant
 
-    RequireRole ROLE_APP, "CloseModal"
+    RequireRole ROLE_APP, "HideModal"
     heldByDialog = Left$(ReDimUI.FocusedComponentId, 4) = "mdl_" _
         And ReDimUI.IsComponentFocused(mAppId, ReDimUI.FocusedComponentId)
     BeginUpdate
@@ -3473,6 +3558,7 @@ Public Sub CloseModal()
         ReturnFocusTo mFocusBeforeModal
     End If
     mFocusBeforeModal = vbNullString
+    mModalShowing = Empty
 End Sub
 
 ' The parts Confirm draws, bottom to top.
@@ -4255,9 +4341,11 @@ Public Sub FlushDirty()
     Dim drawPass As Long
     Dim priorScreenUpdating As Boolean
     Dim toggledScreen As Boolean
+    Dim shapesBefore As Long
 
     RequireRole ROLE_APP, "FlushDirty"
     If mDirtyIds.Count = 0 Then Exit Sub
+    shapesBefore = mShapesMade
     priorScreenUpdating = Application.ScreenUpdating
     ' Several controls, or one list or calendar opening or closing (a dozen
     ' parts drawn or deleted at once), paint once at the end rather than
@@ -4289,6 +4377,12 @@ Public Sub FlushDirty()
         Next drawIndex
     Loop
     Set pendingIds = Nothing
+    ' A shape made while a dialog waits, as a toast an op's outcome shows,
+    ' lands on top of everything; the dialog goes back above it, where the
+    ' toast covered the dialog and a click on it took the dialog's keys.
+    If mShapesMade <> shapesBefore And Not mDrawingChrome Then
+        If ModalUp() Then RaiseModalZOrder
+    End If
     ReleaseLostFocus
     ProcessPendingReflows
     If mToastRestackPending Then
@@ -5207,6 +5301,7 @@ Friend Function HasAppWork() As Boolean
     Dim opValue As ReDimUI
     Dim jobValue As ReDimUI
     Dim componentValue As ReDimUI
+    Dim focusedId As String
 
     For Each opValue In mAsyncOps
         If opValue.OpIsRunning Then
@@ -5224,10 +5319,15 @@ Friend Function HasAppWork() As Boolean
         HasAppWork = True
         Exit Function
     End If
-    ' Keyboard focus keeps the frames coming for its click-away watch.
-    If ReDimUI.IsComponentFocused(mAppId, ReDimUI.FocusedComponentId) Then
-        HasAppWork = True
-        Exit Function
+    ' Keyboard focus keeps the frames coming for its click-away watch. A
+    ' dialog's button keeps no such watch, so a dialog waiting alone kept
+    ' the 16 ms timer running for nothing; the palette's field keeps one.
+    focusedId = ReDimUI.FocusedComponentId
+    If ReDimUI.IsComponentFocused(mAppId, focusedId) Then
+        If Left$(focusedId, 4) <> "mdl_" Or focusedId = PALETTE_FIELD_ID Then
+            HasAppWork = True
+            Exit Function
+        End If
     End If
     For Each componentValue In Tickables()
         If componentValue.NeedsAnimation Then
@@ -8201,6 +8301,7 @@ End Function
 Friend Sub NoteShapeDrawn(ByVal drawnName As String)
     Dim drawnMark As Variant
 
+    mShapesMade = mShapesMade + 1
     If Not mSurfaceFresh Then Exit Sub
     If TryGetItem(mDrawnShapes, drawnName, drawnMark) Then Exit Sub
     mDrawnShapes.Add True, drawnName
@@ -9069,14 +9170,19 @@ End Sub
 ' click, and one that fails goes to the app's error sink and navigates
 ' nowhere.
 Private Sub RunClickHandlers(ByVal hostApp As ReDimUI)
+    Dim handlerRan As Boolean
+
     If LenB(mAsyncClickProc) > 0 Then
         hostApp.StartAsyncClick Me, mAsyncClickProc
         Exit Sub
     End If
-    If mCloseModalOnClick Then hostApp.CloseModal
-    If LenB(mClickProc) > 0 Then
-        If Not ReDimUI.RunHandlerAs(hostApp, Me, mClickProc) Then Exit Sub
-    End If
+    If mCloseModalOnClick Then hostApp.HideModal
+    handlerRan = True
+    If LenB(mClickProc) > 0 Then handlerRan = ReDimUI.RunHandlerAs(hostApp, Me, mClickProc)
+    ' A dialog that waited behind this one shows once its answer's handler
+    ' has run, after any dialog the handler put up in reply.
+    If mCloseModalOnClick Then hostApp.ShowQueuedConfirm
+    If Not handlerRan Then Exit Sub
     If LenB(mNavTargetId) > 0 Then ReDimUI.Navigate mNavTargetId
 End Sub
 
@@ -20604,6 +20710,7 @@ Friend Sub ConfigureClickOp( _
 )
     RequireRole ROLE_ASYNC_OP, "ConfigureClickOp"
     mOpRunsProc = handlerProc
+    mOpSenderId = targetComponentId
     Set mOpTask = Nothing
     Set mOpDisableIds = New Collection
     mOpDisableIds.Add targetComponentId
@@ -20738,19 +20845,46 @@ End Property
 
 Friend Sub RequestOpCancel()
     RequireRole ROLE_ASYNC_OP, "RequestOpCancel"
+    ' An op at rest has nothing to cancel, with or without a token source:
+    ' cancelling its token would cancel the next run the moment it
+    ' started, and one built without WithCancellation raised, as every
+    ' OnClickAsync op is, from a Cancel button pressed with nothing running.
+    If Not mOpRunning Then Exit Sub
     If mOpCts Is Nothing Then
         RaiseError ERROR_INVALID_OPERATION, "CancelAsync", _
             "Async op '" & mComponentId & "' was not built with WithCancellation."
     End If
-    ' An op at rest has nothing to cancel; cancelling its token would
-    ' cancel the next run the moment it started.
-    If Not mOpRunning Then Exit Sub
     mOpCts.Cancel
 End Sub
 
 Friend Sub TickOp(ByVal hostApp As ReDimUI)
+    Dim senderValue As ReDimUI
+    Dim priorApp As ReDimUI
+    Dim priorSender As ReDimUI
+    Dim discardedApp As ReDimUI
+    Dim discardedSender As ReDimUI
+    Dim advanceError As Long
+    Dim advanceSource As String
+    Dim advanceDescription As String
+
     If Not mOpRunning Then Exit Sub
+    ' The body runs here, in the pump, long after the click: an
+    ' OnClickAsync body sees the control clicked as ReDimUI.Sender, so
+    ' buttons told apart by their Tag can share it, and any other op's body
+    ' sees the op, as its outcome handlers do.
+    Set senderValue = Me
+    If LenB(mOpSenderId) > 0 Then
+        If Not hostApp.TryGetComponent(mOpSenderId, senderValue) Then Set senderValue = Me
+    End If
+    ReDimUI.SwapSender hostApp, senderValue, priorApp, priorSender
+    On Error Resume Next
     mOpTask.AdvanceTask
+    advanceError = Err.Number
+    advanceSource = Err.Source
+    advanceDescription = Err.Description
+    On Error GoTo 0
+    ReDimUI.SwapSender priorApp, priorSender, discardedApp, discardedSender
+    If advanceError <> 0 Then Err.Raise advanceError, advanceSource, advanceDescription
     If Not mOpTask.IsCompleted Then Exit Sub
     FinishOp hostApp
 End Sub
@@ -20814,17 +20948,59 @@ Private Sub SetOpControlsBusy(ByVal hostApp As ReDimUI, ByVal busyValue As Boole
     Dim componentValue As ReDimUI
     Dim spinnerValue As ReDimUI
 
+    ' An op finishing lets a control go only when no other op still
+    ' running holds it: ops sharing a spinner hid it, and freed a button
+    ' they disabled, while one of them was still at work.
     For Each disabledId In mOpDisableIds
-        If hostApp.TryGetComponent(CStr(disabledId), componentValue) Then
-            componentValue.SetBusy busyValue
+        If busyValue Or Not hostApp.OtherOpHolds(CStr(disabledId), Me) Then
+            If hostApp.TryGetComponent(CStr(disabledId), componentValue) Then
+                componentValue.SetBusy busyValue
+            End If
         End If
     Next disabledId
     If LenB(mOpSpinnerId) > 0 Then
-        If hostApp.TryGetComponent(mOpSpinnerId, spinnerValue) Then
-            spinnerValue.Visible busyValue
+        If busyValue Or Not hostApp.OtherOpHolds(mOpSpinnerId, Me) Then
+            If hostApp.TryGetComponent(mOpSpinnerId, spinnerValue) Then
+                spinnerValue.Visible busyValue
+            End If
         End If
     End If
 End Sub
+
+' Whether the op, while it runs, holds a control: disables it or shows it
+' as its spinner.
+Friend Function OpHoldsControl(ByVal heldId As String) As Boolean
+    Dim disabledId As Variant
+
+    If Not mOpRunning Then Exit Function
+    If StrComp(mOpSpinnerId, heldId, vbTextCompare) = 0 Then
+        OpHoldsControl = True
+        Exit Function
+    End If
+    If mOpDisableIds Is Nothing Then Exit Function
+    For Each disabledId In mOpDisableIds
+        If StrComp(CStr(disabledId), heldId, vbTextCompare) = 0 Then
+            OpHoldsControl = True
+            Exit Function
+        End If
+    Next disabledId
+End Function
+
+' Whether an op of the app other than exceptOp still running holds the
+' control.
+Friend Function OtherOpHolds(ByVal heldId As String, ByVal exceptOp As ReDimUI) As Boolean
+    Dim opValue As ReDimUI
+
+    RequireRole ROLE_APP, "OtherOpHolds"
+    For Each opValue In mAsyncOps
+        If Not opValue Is exceptOp Then
+            If opValue.OpHoldsControl(heldId) Then
+                OtherOpHolds = True
+                Exit Function
+            End If
+        End If
+    Next opValue
+End Function
 
 Private Sub RequireNotRunning(ByVal memberName As String)
     If mOpRunning Then
