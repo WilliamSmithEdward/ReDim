@@ -1699,6 +1699,9 @@ def test_row_list_window(run_widgets):
     assert facts["homeTop"] == "True"
     assert facts["endBottom"] == "True", "End must bring the last row into view"
     assert facts["pageDownKey"] == "True", "Page Down must page a windowed list"
+    assert facts["scrollMoves"] == "True", (
+        "a one-row scroll moves the kept rows up a slot, box and caption together"
+    )
     assert facts["radioFollows"] == "4/True", (
         "a RadioGroup's window must follow the selection the keys move"
     )
@@ -2043,6 +2046,28 @@ def test_layout_edges(run_widgets):
     assert facts["notedDropsCount"] == "True", (
         "a float field moved to a cell with a message showing drops its count"
     )
+
+
+def test_list_edges(run_widgets):
+    facts = parse_transcript(run_widgets("TestListEdges"))
+    assert facts["clickable"] == "True/True", (
+        "a progress fill and a transfer header run the dispatcher when clicked"
+    )
+    assert facts["disabledKeeps"] == "True", "a disabled progress bar keeps its amount"
+    assert facts["oneLine"] == "True", "a line break in an item reads as a space in its row"
+    assert facts["sparkDates"] == "True", "a sparkline plots dates and times"
+    assert facts["sparkDisabled"] == "True", "a disabled sparkline takes the muted ink"
+    assert facts["badgeEdge"] == "True", "a Secondary badge has an edge"
+    assert facts["slotNotItem"] == "4/Bravo", (
+        "a second click on a row now holding another item selects it"
+    )
+    assert facts["arrowsNeedSelection"] == "Golf", "the reorder arrows move only a selection"
+    assert facts["enterFiltered"] == "5", (
+        "Enter moves the cursor's row when no selected row shows"
+    )
+    assert facts["escOther"] == "True", "Esc clears the filter of the panel the cursor left"
+    assert facts["hiddenSpace"] == "0/0", "Space passes over a check list row the filter hides"
+    assert facts["unsized"] == "True/0", "an unsized array lists nothing"
 
 
 def test_long_chains(run_widgets):

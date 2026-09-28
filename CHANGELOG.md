@@ -52,6 +52,9 @@
   changes, a chain resolves from its far end, and a move draws the links
   after it in turn. Growing the first of 150 chained fields went from 51
   to 11 milliseconds, and drawing them from 277 to 239.
+- A key that scrolled a windowed check list a row drew every row it
+  kept in full, 16 milliseconds a key in a list of 40. A row the scroll
+  moves now only takes its new place, as a radio group's does: 4.9.
 - A field whose key had no value wrote the first character typed into
   the key while the user was still typing, and kept it after Esc took
   the typing back. A field being typed in now seeds its key with the
@@ -237,6 +240,39 @@
   one, was lost: key dispatch cleared the error before `TickFaultCount`
   could count it, and the app's `OnError` sink never heard of it. It is
   counted and reported now, as a click's failure is.
+- A progress bar's fill and a transfer list's panel headers took no
+  click macro, so a click selected them for dragging, and `Render` left
+  a dragged fill where it went. They run the dispatcher, as every ReDim
+  shape does.
+- A disabled or busy progress bar filled in the track's color and read
+  as empty, and a disabled sparkline's line all but vanished. Both take
+  the muted ink, as a disabled slider's fill does.
+- A `Secondary` badge, filled in the surface color, showed only its
+  words on the canvas or a card. It takes an edge, as a `Secondary`
+  button does.
+- `ValuesFrom` left dates and times out of a sparkline, since it read
+  each entry as text first ("6:00:00 AM"); a column of durations drew
+  "Trend, no values". They count as the numbers Excel keeps for them.
+- `ItemsFrom`, `ChosenFrom`, `CheckedFrom`, or `ValuesFrom` given a
+  dynamic array never sized raised "Subscript out of range". It lists
+  nothing, as `Array()` does.
+- An item holding a line break drew on two lines over its neighbors in a
+  check list, transfer list, or radio group row, and in a tab. It reads
+  as one line, as a table cell does.
+- In a transfer list, a click on a row within the double-click time of
+  a click on the same row double-clicked it even when a move or a page
+  between the two had put another item there, moving an item never
+  picked. A double click is now two clicks on one item.
+- A transfer list's reorder arrows moved the row last clicked when no
+  row was selected; the cursor's row stands in only for Alt+Up and
+  Alt+Down, as the docs say.
+- Enter in a transfer panel whose filter hid its selected rows moved
+  nothing; it moves the cursor's row, as with nothing selected. Esc with
+  the cursor in the other panel left the list with the first panel still
+  filtered; it clears that filter before focus leaves.
+- Space in a check list whose filter matched nothing checked a row it
+  hid, writing the key and firing `OnChange`. It toggles only a row that
+  shows.
 
 ## 1.0.3 - 2026-09-26
 

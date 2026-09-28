@@ -6221,6 +6221,8 @@ Public Function TestRowListWindow() As String
     Dim transcript As String
     Dim names(0 To 19) As String
     Dim idx As Long
+    Dim firstTop As Double
+    Dim pitch As Double
 
     For idx = 0 To 19
         names(idx) = "Item" & Format$(idx + 1, "00")
@@ -6265,6 +6267,21 @@ Public Function TestRowListWindow() As String
     RdxKeyChar "{PGDN}"
     transcript = transcript & "|pageDownKey=" & CStr(IsShown(host, "rdm_wid84_tags__t5") And _
         Not IsShown(host, "rdm_wid84_tags__t1"))
+    ' A scroll of one row moves the rows it keeps up a slot each, box and
+    ' caption together, as a row drawn in full stands.
+    RdxKeyChar "{HOME}"
+    firstTop = host.Shapes("rdm_wid84_tags__t1").Top
+    pitch = host.Shapes("rdm_wid84_tags__t2").Top - firstTop
+    For idx = 1 To 5
+        RdxKeyChar "{DOWN}"
+    Next idx
+    transcript = transcript & "|scrollMoves=" & CStr(Not IsShown(host, "rdm_wid84_tags__t1") _
+        And Abs(host.Shapes("rdm_wid84_tags__t2").Top - firstTop) < 0.5 _
+        And Abs(host.Shapes("rdm_wid84_tags__t4").Top - firstTop - 2 * pitch) < 0.5 _
+        And Abs(host.Shapes("rdm_wid84_tags__t5").Top - firstTop - 3 * pitch) < 0.5 _
+        And Abs((host.Shapes("rdm_wid84_tags__b2").Top - host.Shapes("rdm_wid84_tags__t2").Top) _
+            - (host.Shapes("rdm_wid84_tags__b5").Top - host.Shapes("rdm_wid84_tags__t5").Top)) < 0.5 _
+        And host.Shapes("rdm_wid84_tags__t2").TextFrame2.TextRange.Text = "Item02")
     app.RadioGroup("tier").Focus
     RdxKeyChar "{HOME}"
     RdxKeyChar "{DOWN}"
@@ -8023,6 +8040,110 @@ Public Function TestLayoutEdges() As String
         And Not ShapeExists(host, "rdm_wid103_lot__mc"))
     ReDimUI.AutoPump True
     TestLayoutEdges = transcript
+End Function
+
+' Lists and small widgets at their edges: a progress bar's fill and a
+' transfer panel's header run the dispatcher when clicked, and a disabled
+' bar keeps its amount in the muted ink; a second click on a row that now
+' holds another item selects that item; the reorder arrows move only a
+' selection; Enter in a filtered panel moves the cursor's row when no
+' selected row shows, and Esc clears the panel the cursor left; Space
+' passes over a check list row the filter hides; a sparkline plots dates
+' and times; an unsized array lists nothing; an item's line break reads
+' as a space; and a Secondary badge has an edge.
+Public Function TestListEdges() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim transcript As String
+    Dim picks() As String
+
+    gChangeCount = 0
+    ReDimUI.AutoPump False
+    Set host = NewCanvas()
+    host.Range("K2").Value = DateSerial(2026, 1, 1)
+    host.Range("K3").Value = TimeSerial(6, 0, 0)
+    host.Range("K4").Value = 4
+    host.Range("K5").Value = "none"
+    Set app = ReDimUI.Mount(host, "wid106")
+    app.ProgressBar("p").AtRect(24, 24, 200, 12).Value 60
+    app.TransferList("tr").AtRect(24, 50, 360, 140) _
+        .ItemsFrom(Array("Alpha", "Bravo", "Charlie", "Delta" & vbLf & "Force")) _
+        .ChosenFrom(Array("Echo", "Foxtrot", "Golf")).Reorderable _
+        .WritesTo("tr").OnChange "TestReDimWidgets.RecordChange"
+    app.CheckList("c").AtRect(420, 50, 160, 90).Items("Red" & vbLf & "Rose", "Green", "Blue") _
+        .WithSelectAll(False).WritesTo("c").OnChange "TestReDimWidgets.RecordChange"
+    app.RadioGroup("r").AtRect(420, 160, 160, 60).Items "One" & vbLf & "Unit", "Two"
+    app.Sparkline("s").AtRect(24, 210, 120, 30).ValuesFrom host.Range("K2:K5")
+    app.Badge("b").AtRect(200, 210, 0, 18).Secondary.Text "First month"
+    app.Render
+
+    transcript = "clickable=" & CStr(LenB(host.Shapes("rdm_wid106_p__fill").OnAction) > 0) & _
+        "/" & CStr(LenB(host.Shapes("rdm_wid106_tr__hl").OnAction) > 0)
+    app.ProgressBar("p").Enabled False
+    transcript = transcript & "|disabledKeeps=" & CStr( _
+        host.Shapes("rdm_wid106_p__fill").Fill.ForeColor.RGB = app.Theme.OnMutedColor _
+        And host.Shapes("rdm_wid106_p__fill").Visible = msoTrue)
+    transcript = transcript & "|oneLine=" & CStr( _
+        InStr(host.Shapes("rdm_wid106_tr__al4").TextFrame2.TextRange.Text, vbLf) = 0 _
+        And InStr(host.Shapes("rdm_wid106_c__t1").TextFrame2.TextRange.Text, vbLf) = 0 _
+        And InStr(host.Shapes("rdm_wid106_r__t1").TextFrame2.TextRange.Text, vbLf) = 0)
+    transcript = transcript & "|sparkDates=" & CStr( _
+        InStr(host.Shapes("rdm_wid106_s").AlternativeText, "3 values") > 0)
+    app.Sparkline("s").Enabled False
+    transcript = transcript & "|sparkDisabled=" & CStr( _
+        host.Shapes("rdm_wid106_s__sl").Line.ForeColor.RGB = app.Theme.OnMutedColor)
+    transcript = transcript & "|badgeEdge=" & CStr( _
+        host.Shapes("rdm_wid106_b").Line.Visible = msoTrue)
+
+    ' Bravo selected and moved across puts Charlie in its row; a click
+    ' there within the double-click time selects Charlie.
+    ReDimUI.DispatchShape "rdm_wid106_tr__al2"
+    Sleep 180
+    ReDimUI.DispatchShape "rdm_wid106_tr__mvr"
+    Sleep 180
+    ReDimUI.DispatchShape "rdm_wid106_tr__al2"
+    transcript = transcript & "|slotNotItem=" & app.TransferList("tr").ChosenCount & "/" & _
+        app.TransferList("tr").ChosenTextAt(4)
+
+    ' Golf clicked twice, apart, ends unselected: the up arrow moves
+    ' nothing.
+    Sleep 600
+    ReDimUI.DispatchShape "rdm_wid106_tr__cl3"
+    Sleep 600
+    ReDimUI.DispatchShape "rdm_wid106_tr__cl3"
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid106_tr__mvu"
+    transcript = transcript & "|arrowsNeedSelection=" & app.TransferList("tr").ChosenTextAt(3)
+
+    ' Charlie still selected, Delta filtered to alone: Enter moves Delta.
+    ' Esc from the other panel clears the filter and keeps focus.
+    app.TransferList("tr").Focus
+    RdxKeyChar "{LEFT}"
+    RdxKeyChar "d"
+    RdxKeyChar "e"
+    RdxKeyChar "{ENTER}"
+    transcript = transcript & "|enterFiltered=" & app.TransferList("tr").ChosenCount
+    RdxKeyChar "{RIGHT}"
+    RdxKeyChar "{ESC}"
+    transcript = transcript & "|escOther=" & CStr(ReDimUI.IsComponentFocused("wid106", "tr"))
+    ReDimUI.EndKeyboardFocus
+
+    gChangeCount = 0
+    app.CheckList("c").Focus
+    RdxKeyChar "z"
+    RdxKeyChar " "
+    transcript = transcript & "|hiddenSpace=" & app.CheckList("c").CheckedCount & "/" & gChangeCount
+    ReDimUI.EndKeyboardFocus
+
+    On Error Resume Next
+    app.CheckList("none").AtRect(420, 240, 160, 60).ItemsFrom picks
+    transcript = transcript & "|unsized=" & CStr(Err.Number = 0) & "/" & _
+        app.CheckList("none").ItemCount
+    On Error GoTo 0
+    RdxReleaseKeys
+    RdxStopPump
+    ReDimUI.AutoPump True
+    TestListEdges = transcript
 End Function
 
 ' Chains of 300 fields placed Below one another, one declared from its

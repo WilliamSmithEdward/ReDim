@@ -141,7 +141,9 @@ All fluent, all return the component:
   `Items("A", "B", ...)` replaces; `ItemsFrom(source)` replaces from a 1D array, a
   Collection, a Range (one item per non-empty cell) or the 2D array its `Value` gives,
   read row by row, or a ROneCOne sequence. `Null` and `Empty` entries list nothing, and
-  an error value lists as its cell shows it, such as `#N/A`.
+  an error value lists as its cell shows it, such as `#N/A`. A dynamic array never sized
+  lists nothing, as `Array()` does. A line break or tab in an item reads as a space in a
+  row, a radio button, or a tab.
   `AddItem(text, atPosition)` appends or inserts; `RemoveItem(indexOrText)` removes by
   position, or by text, ignoring case, when given a String, so `RemoveItem "1"` removes
   the item named "1"; `ClearItems`;
@@ -428,12 +430,15 @@ dependencies:
   takes the primary color unless a variant says otherwise (`Success`, `Warning`,
   `Danger`, `Secondary`), and widens to its text: the rectangle's left and top place it,
   its height sets the pill's, and its width is a minimum, so `AtRect(24, 24, 0, 18)`
-  fits the text exactly.
+  fits the text exactly. A `Secondary` pill, in the surface color, is edged as a
+  `Secondary` button is.
 - `Sparkline`: a small trend line. `ValuesFrom` takes its numbers, in order, from an
-  array, a Collection, a Range (row by row), or a ROneCOne sequence, leaving out blanks
-  and text. The line runs from the rectangle's left to its right with its lowest value at
-  the bottom and its highest at the top, and a dot marks the last value; equal values run
-  along the middle, and one value is a dot alone. It takes the primary color unless a
+  array, a Collection, a Range (row by row), or a ROneCOne sequence: a date or a time
+  counts as the number Excel keeps for it, and text as the number it reads as, while
+  blanks, other text, truth values, and error values are left out. The line runs from the
+  rectangle's left to its right with its lowest value at the bottom and its highest at
+  the top, and a dot marks the last value; equal values run along the middle, and one
+  value is a dot alone. It takes the primary color unless a
   variant says otherwise, and screen readers hear a summary: "Trend, 12 values, low 380,
   high 820, last 820".
 
@@ -940,7 +945,7 @@ someone who clicks a button in Excel expects the grid to keep the keys.
 | SlideBar | Arrows move a step, Page Up and Page Down a tenth of the range in whole steps, Home and End go to the ends. Digits typed within a second of each other set the value, as a Stepper's do. |
 | SelectBox | Closed: arrows, Home, End, Page Up, and Page Down change the selection, and Space, Alt+Down, or F4 opens the list. Open: they move the highlight; Enter, Space, or Alt+Up takes it, Tab takes it and moves on, and Esc or F4 closes. Letters jump to the next item that starts with them, open or closed: letters typed within a second build a prefix, and one letter typed again steps through its items. Every move passes over disabled items and group headers. With `Filterable`, letters filter the open list instead (see SelectBox). |
 | CheckList | Up and Down move the row cursor, the select-all header included; Home and End jump; Page Up and Page Down page a windowed list (see Long lists) and jump to the ends otherwise; Space toggles the cursor's row; Ctrl+A checks every row that shows. Other characters filter the list, Backspace takes one off, and Esc clears the filter. |
-| TransferList | Up and Down move the row cursor, Home and End go to the panel's first and last row, Page Up and Page Down move a panel's height, Left and Right switch panels, Space toggles the cursor's row in the selection, and Enter moves the panel's selection across, or the cursor's row when nothing is selected; Ctrl+A selects every row of the cursor's panel that shows. Other characters filter the cursor's panel, Backspace takes one off, and Esc clears the filter. With `Reorderable`, Alt+Up and Alt+Down move the chosen side's selection. |
+| TransferList | Up and Down move the row cursor, Home and End go to the panel's first and last row, Page Up and Page Down move a panel's height, Left and Right switch panels, Space toggles the cursor's row in the selection, and Enter moves the panel's selection across, or the cursor's row when no selected row shows; Ctrl+A selects every row of the cursor's panel that shows. Other characters filter the cursor's panel, Backspace takes one off, and Esc clears the filters, the cursor's panel's first, before focus leaves. With `Reorderable`, Alt+Up and Alt+Down move the chosen side's selection. |
 | TextInput, ComboBox | The editing keys under [Text editing](#text-editing); a combo also opens with Alt+Down or F4, closes with Alt+Up, pages its list with Page Up and Page Down, and takes its suggestion with Right at the end of the text or Tab. |
 
 ## Accessibility

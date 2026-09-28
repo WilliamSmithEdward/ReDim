@@ -7340,12 +7340,14 @@ Public Function ValuesFrom(ByVal valueSource As Variant) As ReDimUI
     Dim kept As Long
 
     RequireKind KIND_SPARKLINE, "ValuesFrom"
-    Set gathered = ReadItemSource(valueSource, "ValuesFrom")
+    ' The entries as they are: a date or a time is a number, as Excel
+    ' plots it, where reading each as text first ("6:00:00 AM") left it out.
+    Set gathered = ReadRawSource(valueSource, "ValuesFrom")
     Erase mSparkValues
     If gathered.Count > 0 Then
         ReDim mSparkValues(1 To gathered.Count)
         For Each entry In gathered
-            If IsNumeric(entry) Then
+            If PlotsAsNumber(entry) Then
                 kept = kept + 1
                 mSparkValues(kept) = CDbl(entry)
             End If
@@ -7355,6 +7357,20 @@ Public Function ValuesFrom(ByVal valueSource As Variant) As ReDimUI
     mSparkVersion = mSparkVersion + 1
     Touch
     Set ValuesFrom = Me
+End Function
+
+' Whether a source entry is a sparkline value: a number, a date or time,
+' or text that reads as a number; not a blank, a truth value, or an error.
+Private Function PlotsAsNumber(ByVal entry As Variant) As Boolean
+    ' VarType reads an object's default member, which a ROneCOne raises on.
+    If IsObject(entry) Then Exit Function
+    Select Case VarType(entry)
+        Case vbEmpty, vbNull, vbBoolean, vbError, vbDataObject
+        Case vbDate
+            PlotsAsNumber = True
+        Case Else
+            If Not IsArrayValue(entry) Then PlotsAsNumber = IsNumeric(entry)
+    End Select
 End Function
 
 ' Reads an item source into a fresh Collection of strings. Accepts a 1D
@@ -7398,6 +7414,9 @@ Private Sub GatherArray(ByVal gathered As Collection, ByVal arrayValue As Varian
     Dim rowIdx As Long
     Dim colIdx As Long
 
+    ' A dynamic array never sized, as `Dim picks() As String` left empty,
+    ' lists nothing, as Array() does, where its bounds raised error 9.
+    If Not ArraySized(arrayValue) Then Exit Sub
     If IsTwoDimensional(arrayValue) Then
         For rowIdx = LBound(arrayValue, 1) To UBound(arrayValue, 1)
             For colIdx = LBound(arrayValue, 2) To UBound(arrayValue, 2)
@@ -7410,6 +7429,15 @@ Private Sub GatherArray(ByVal gathered As Collection, ByVal arrayValue As Varian
         Next rowIdx
     End If
 End Sub
+
+' Whether a dynamic array has been sized; asking one that has not for its
+' bounds raises.
+Private Function ArraySized(ByVal arrayValue As Variant) As Boolean
+    On Error GoTo NotSized
+    ArraySized = (UBound(arrayValue) >= LBound(arrayValue) - 1)
+    Exit Function
+NotSized:
+End Function
 
 ' Whether an array has a second dimension; asking a 1D array for its
 ' second bounds raises.
@@ -9238,7 +9266,11 @@ Friend Sub RunClickBehavior()
                 PageTransferPanel transferPart
             ElseIf TransferRowOf(transferPart, clickedPanel, transferRow) Then
                 ' Window rows map through the scroll offset and the filter.
-                If RowDoubleClicked(transferPart) Then
+                ' A double click is two clicks on one item: a move or a
+                ' page between them puts another item in the row, which a
+                ' second click then moved across.
+                If RowDoubleClicked(transferPart & vbTab & _
+                    TransferItemWords(clickedPanel, transferRow)) Then
                     MoveTransferRow hostApp, (clickedPanel = 0), transferRow
                 Else
                     IndexSetToggle mPanelSel(clickedPanel), transferRow
@@ -9254,7 +9286,7 @@ Friend Sub RunClickBehavior()
             ElseIf transferPart = "mval" Then
                 TransferAll hostApp, False
             ElseIf transferPart = "mvu" Or transferPart = "mvd" Then
-                ReorderChosen hostApp, (transferPart = "mvu")
+                ReorderChosen hostApp, (transferPart = "mvu"), False
             End If
             Exit Sub
         Case KIND_DATE
@@ -10600,7 +10632,13 @@ Private Sub ApplyStyle(ByVal mainShape As Shape, ByVal themeValue As ReDimUI)
             End If
         Case KIND_BADGE
             If Not mAppliedValid Or mAppliedFill <> resolvedFill Then
-                PaintPart mainShape, resolvedFill
+                ' A surface-filled pill takes an edge, as a Secondary
+                ' button does: on the canvas or a card only its words showed.
+                If mStyleVariant = VARIANT_SECONDARY And mEnabled And Not mBusy Then
+                    PaintPart mainShape, resolvedFill, themeValue.BorderColor, 1
+                Else
+                    PaintPart mainShape, resolvedFill
+                End If
                 mAppliedFill = resolvedFill
             End If
         Case KIND_CARD, KIND_TOAST, KIND_TABLE
@@ -12100,7 +12138,12 @@ Private Sub HandleCheckListKey(ByVal hostApp As ReDimUI, ByVal keyText As String
     If Not MoveKeyAim(keyText, aimRow, firstRow, shownTotal, windowRows, aimRow, stepDirection) Then
         Select Case keyText
             Case " "
-                If ToggleCheckRow(hostApp, mKeyRow) Then RunClickHandlers hostApp
+                ' Space toggles the cursor's row only while it shows: a
+                ' filter matching nothing left the cursor on a hidden row,
+                ' which Space checked unseen.
+                If (mKeyRow = 0 And mSelectAllRow) Or PanelShownPosition(0, mKeyRow) >= 1 Then
+                    If ToggleCheckRow(hostApp, mKeyRow) Then RunClickHandlers hostApp
+                End If
             Case "{SELECTALL}"
                 If CheckAllShown(hostApp) Then RunClickHandlers hostApp
             Case "{ENTER}"
@@ -12218,7 +12261,7 @@ Private Sub HandleTransferKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
                 ' Alt+Up and Alt+Down reorder the chosen side from its rows,
                 ' and the window follows the cursor's row.
                 If Not mReorderable Or mKeyPanel <> 1 Then Exit Sub
-                ReorderChosen hostApp, (keyText = "{ALTUP}")
+                ReorderChosen hostApp, (keyText = "{ALTUP}"), True
                 aimRow = PanelShownPosition(mKeyPanel, mKeyRow)
             Case "{LEFT}"
                 mKeyPanel = 0
@@ -12241,7 +12284,10 @@ Private Sub HandleTransferKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
                 Touch
                 Exit Sub
             Case "{ENTER}"
-                If mPanelSel(mKeyPanel).Count = 0 And aimRow >= 1 Then
+                ' The cursor's row moves when no selected row shows: a
+                ' selection the filter hides moves nothing, and kept the
+                ' cursor's row from moving too.
+                If Not ShowsSelection(mKeyPanel) And aimRow >= 1 Then
                     mPanelSel(mKeyPanel).Add mKeyRow
                 End If
                 TransferSelected hostApp, (mKeyPanel = 0)
@@ -12974,7 +13020,7 @@ Private Sub ApplyKindExtras( _
             Dim progressSig As String
             progressSig = CStr(mValue) & "|" & CStr(ResolveFill(themeValue)) _
                 & "|" & CStr(mVisible) & "|" & CStr(mLeft) & "|" & CStr(mTop) _
-                & "|" & CStr(mWidth) & "|" & CStr(mHeight)
+                & "|" & CStr(mWidth) & "|" & CStr(mHeight) & "|" & mAppliedOnAction
             If Not mAppliedValid Or mAppliedProgressSig <> progressSig Then
                 ApplyProgressFill hostSheet, themeValue
                 mAppliedProgressSig = progressSig
@@ -13058,7 +13104,13 @@ Private Sub ApplySparkline(ByVal hostSheet As Worksheet, ByVal themeValue As ReD
     Dim lineMade As Boolean
     Dim dotMade As Boolean
 
-    inkRgb = ResolveFill(themeValue)
+    ' A disabled line takes the muted ink: the muted fill all but vanished
+    ' on the canvas.
+    If mEnabled And Not mBusy Then
+        inkRgb = ResolveFill(themeValue)
+    Else
+        inkRgb = themeValue.OnMutedColor
+    End If
     sparkKey = PartsState(themeValue) & ":" & CStr(mSparkVersion) & ":" & CStr(inkRgb)
     If sparkKey = mAppliedSparkSig Then Exit Sub
     mAppliedSparkSig = sparkKey
@@ -13704,8 +13756,8 @@ Private Sub ApplyTabs( _
             mHeight - 3
         RoundCorners tabShape, mHeight - 3
         PaintPart tabShape, tabFill
-        tabWords = FitWordsToWidth(ItemAt(idx), tabWidths(idx) - 8, themeValue.FontName, _
-            textSize, True)
+        tabWords = FitWordsToWidth(OneLineWords(ItemAt(idx)), tabWidths(idx) - 8, _
+            themeValue.FontName, textSize, True)
         StyleTextPart tabShape, tabWords, msoAlignCenter, textSize, (idx = tabNow), tabInk, _
             themeValue, leftInset:=4, rightInset:=4
         ShowPart tabShape, BoolToMso(mVisible)
@@ -16174,8 +16226,8 @@ Private Sub ApplyRadioGroup( _
         ShowPart dot, BoolToMso(mVisible And isPicked)
         Set captionShape = EnsurePartShape(hostSheet, "t" & idx, msoShapeRectangle)
         PlacePart captionShape, mLeft + circleSize + 8, rowTop, rowTextRoom, rowPitch
-        StyleCaptionPart captionShape, FittedCaption(ItemAt(idx), rowTextRoom, themeValue), _
-            themeValue
+        StyleCaptionPart captionShape, _
+            FittedCaption(OneLineWords(ItemAt(idx)), rowTextRoom, themeValue), themeValue
         ' A disabled item reads muted and takes no clicks.
         If Not ItemPickable(idx) Then
             captionShape.TextFrame2.TextRange.Font.Fill.ForeColor.RGB = themeValue.OnMutedColor
@@ -16225,6 +16277,18 @@ Private Function RowKeyPlace(ByVal rowKey As String) As String
 
     splitAt = InStrRev(rowKey, Chr$(3))
     If splitAt > 0 Then RowKeyPlace = Mid$(rowKey, splitAt + 1)
+End Function
+
+' A list row key without its place: what the row shows.
+Private Function RowKeyLook(ByVal rowKey As String) As String
+    Dim splitAt As Long
+
+    splitAt = InStrRev(rowKey, Chr$(3))
+    If splitAt > 0 Then
+        RowKeyLook = Left$(rowKey, splitAt - 1)
+    Else
+        RowKeyLook = rowKey
+    End If
 End Function
 
 ' Takes a windowed list's paging arrows down.
@@ -16431,17 +16495,23 @@ Private Sub ApplyCheckListParts( _
             Set captionShape = EnsurePartShape( _
                 hostSheet, "t" & idx, msoShapeRectangle, captionCreated)
             If LenB(priorKey) > 0 And priorKey <> "~" _
-                And Not (boxCreated Or captionCreated) _
-                And RowKeyPlace(priorKey) = RowKeyPlace(rowKey) Then
-                ' Drawn under this layout in this place: rewrite only the box
-                ' state or the caption text, whichever moved.
+                And Not (boxCreated Or captionCreated) Then
+                ' Drawn under this layout: a row a scroll moved takes its
+                ' new place, where each drew in full, 16 ms a row scrolled
+                ' in a list of 40; then only the box state or the caption
+                ' text that changed is rewritten.
+                If RowKeyPlace(priorKey) <> RowKeyPlace(rowKey) Then
+                    PlacePart box, mLeft, rowTop + (rowPitch - boxSize) / 2, boxSize, boxSize
+                    PlacePart captionShape, mLeft + boxSize + 8, rowTop, _
+                        rowTextRoom - boxSize, rowPitch
+                End If
                 If Left$(priorKey, 1) <> Left$(rowKey, 1) Then
                     StyleCheckBoxState box, boxSize, themeValue, _
                         checkedFlags(idx), checkedFlags(idx), "row" & idx
                 End If
-                If Mid$(priorKey, 2) <> Mid$(rowKey, 2) Then
+                If Mid$(RowKeyLook(priorKey), 2) <> Mid$(RowKeyLook(rowKey), 2) Then
                     captionShape.TextFrame2.TextRange.Text = _
-                        FittedCaption(ItemAt(idx), rowTextRoom - boxSize, themeValue)
+                        FittedCaption(OneLineWords(ItemAt(idx)), rowTextRoom - boxSize, themeValue)
                 End If
             Else
                 If idx > 1 Then
@@ -16454,7 +16524,8 @@ Private Sub ApplyCheckListParts( _
                 PlacePart captionShape, mLeft + boxSize + 8, rowTop, rowTextRoom - boxSize, _
                     rowPitch
                 StyleCaptionPart captionShape, _
-                    FittedCaption(ItemAt(idx), rowTextRoom - boxSize, themeValue), themeValue
+                    FittedCaption(OneLineWords(ItemAt(idx)), rowTextRoom - boxSize, themeValue), _
+                    themeValue
                 ShowPart captionShape, BoolToMso(mVisible)
             End If
         End If
@@ -16812,7 +16883,16 @@ Private Sub ApplyProgressFill( _
         fillPart.Visible = BoolToMso(mVisible)
     End If
     fillPart.Fill.Visible = msoTrue
-    fillPart.Fill.ForeColor.RGB = ResolveFill(themeValue)
+    ' A disabled or busy bar keeps its amount in the muted ink, as a
+    ' slider's fill does: the muted fill matched the track and read empty.
+    If mEnabled And Not mBusy Then
+        fillPart.Fill.ForeColor.RGB = ResolveFill(themeValue)
+    Else
+        fillPart.Fill.ForeColor.RGB = themeValue.OnMutedColor
+    End If
+    ' A click on the fill runs the dispatcher, as on every ReDim shape,
+    ' where it selected the fill for dragging.
+    fillPart.OnAction = mAppliedOnAction
 End Sub
 
 ' Dual listbox: the main shape is the left panel; the right panel, two
@@ -16942,7 +17022,7 @@ Private Sub ApplyTransferHeader( _
     Set headerShape = EnsurePartShape(hostSheet, partName, msoShapeRectangle)
     PlacePart headerShape, headerLeft, mTop - 1, headerWidth, headerHeight
     StyleCaptionPart headerShape, FittedCaption(headerText, wordsRoom, themeValue), themeValue
-    headerShape.Visible = BoolToMso(mVisible)
+    ShowPart headerShape, BoolToMso(mVisible)
 End Sub
 
 ' Small paging arrows on a panel's right edge, shown only when the list
@@ -17061,7 +17141,11 @@ End Function
 ' rows the panel shows, a block at a time, stopping at the ends. With
 ' nothing selected the keys move the cursor's row. The cursor goes with
 ' its row.
-Private Sub ReorderChosen(ByVal hostApp As ReDimUI, ByVal upward As Boolean)
+Private Sub ReorderChosen( _
+    ByVal hostApp As ReDimUI, _
+    ByVal upward As Boolean, _
+    ByVal cursorWithout As Boolean _
+)
     Dim itemTotal As Long
     Dim texts() As String
     Dim marked() As Boolean
@@ -17087,7 +17171,10 @@ Private Sub ReorderChosen(ByVal hostApp As ReDimUI, ByVal upward As Boolean)
     For Each entry In mPanelSel(1)
         If CLng(entry) >= 1 And CLng(entry) <= itemTotal Then marked(CLng(entry)) = True
     Next entry
+    ' With nothing selected, Alt+Up and Alt+Down move the cursor's row; the
+    ' arrows move only a selection, where they moved the row last clicked.
     If mPanelSel(1).Count = 0 Then
+        If Not cursorWithout Then Exit Sub
         If mKeyPanel <> 1 Or mKeyRow < 1 Or mKeyRow > itemTotal Then Exit Sub
         marked(mKeyRow) = True
         cursorOnly = True
@@ -17316,7 +17403,18 @@ End Sub
 ' Esc on a filtered list clears the filter first. True when it did.
 Private Function ClearListFilter() As Boolean
     If mKind = KIND_TRANSFER Or mKind = KIND_CHECKLIST Then
-        If LenB(PanelFilter(mKeyPanel)) = 0 Then Exit Function
+        If LenB(PanelFilter(mKeyPanel)) = 0 Then
+            ' The panel the cursor left may keep its filter: Esc clears
+            ' that one before focus leaves, where it left the list with
+            ' rows hidden that >> then passed over.
+            If mKind <> KIND_TRANSFER Then Exit Function
+            If LenB(PanelFilter(1 - mKeyPanel)) = 0 Then Exit Function
+            mPanelFilter(1 - mKeyPanel) = vbNullString
+            mPanelOffset(1 - mKeyPanel) = 0
+            Touch
+            ClearListFilter = True
+            Exit Function
+        End If
     ElseIf mKind = KIND_TABLE Then
         If LenB(mTableFilter) = 0 Then Exit Function
         SetTableFilter vbNullString
@@ -17508,7 +17606,8 @@ Private Sub SyncTransferRows( _
         rowFill = PointerTint(rowFill, rowInk, partPrefix & idx)
         ' Past its insets and the gutter, a long item ends in an ellipsis
         ' instead of running into the move buttons and the other panel.
-        rowText = GutterText(rowSelected, FitWordsToWidth(CStr(itemsRef.Item(itemIndex)), _
+        rowText = GutterText(rowSelected, _
+            FitWordsToWidth(OneLineWords(CStr(itemsRef.Item(itemIndex))), _
             rowWidth - 10 - LIST_GUTTER, themeValue.FontName, resolvedSize, False))
         rowKey = layoutKey & Chr$(1) & CStr(rowFill) & ":" & _
             CStr(rowInk) & ":" & rowText
@@ -18331,6 +18430,15 @@ Friend Sub EndHold(ByVal hostApp As ReDimUI, ByVal repeated As Boolean)
 HandlerFailed:
     hostApp.ReportAppError HandlerFailureText(Me, mClickProc, Err.Number, Err.Description)
 End Sub
+
+' The words of an item in a transfer panel: 0 the available, 1 the chosen.
+Private Function TransferItemWords(ByVal panelIndex As Long, ByVal itemIndex As Long) As String
+    If panelIndex = 0 Then
+        TransferItemWords = ItemAt(itemIndex)
+    Else
+        TransferItemWords = ChosenTextAt(itemIndex)
+    End If
+End Function
 
 ' The second click on the same row within the Windows double-click time
 ' is a double click.
