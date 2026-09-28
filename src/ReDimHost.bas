@@ -79,6 +79,11 @@ Private gCursorPinned As Boolean
 ' calls, so focus moving between controls keeps them instead of paying
 ' a release and a rebind.
 Private gKeysBound As Boolean
+' The captured keys, and the OnKey codes each key name answers to, made
+' once: with a shortcut declared, every named key sent to a control
+' built the whole table again to look its codes up.
+Private gCapturedKeys As Collection
+Private gCapturedCodes As Collection
 
 ' Keyboard capture target. Application.OnKey can only call a standard
 ' module procedure, so focused text entry routes every character through
@@ -102,6 +107,10 @@ Private Function CapturedKeys() As Collection
     Dim keyTable As Collection
     Dim code As Long
 
+    If Not gCapturedKeys Is Nothing Then
+        Set CapturedKeys = gCapturedKeys
+        Exit Function
+    End If
     Set keyTable = New Collection
     For code = Asc("a") To Asc("z")
         keyTable.Add Array(Chr$(code), Chr$(code))
@@ -215,6 +224,7 @@ Private Function CapturedKeys() As Collection
     keyTable.Add Array("?", "?")
     keyTable.Add Array("`", "`")
     keyTable.Add Array("{~}", "~")
+    Set gCapturedKeys = keyTable
     Set CapturedKeys = keyTable
 End Function
 
@@ -254,13 +264,36 @@ End Sub
 ' control could belong to.
 Public Function RdxCapturedCodes(ByVal keyText As String) As String
     Dim binding As Variant
+    Dim codesFound As String
 
+    If gCapturedCodes Is Nothing Then Set gCapturedCodes = New Collection
+    ' Key names differ by case ("a" and "A"), which Collection keys do
+    ' not, so the key carries each character's code.
+    On Error Resume Next
+    RdxCapturedCodes = gCapturedCodes.Item(CodedKeyName(keyText))
+    If Err.Number = 0 Then
+        On Error GoTo 0
+        Exit Function
+    End If
+    On Error GoTo 0
     For Each binding In CapturedKeys()
         If binding(1) = keyText Then
-            If LenB(RdxCapturedCodes) = 0 Then RdxCapturedCodes = Chr$(1)
-            RdxCapturedCodes = RdxCapturedCodes & binding(0) & Chr$(1)
+            If LenB(codesFound) = 0 Then codesFound = Chr$(1)
+            codesFound = codesFound & binding(0) & Chr$(1)
         End If
     Next binding
+    gCapturedCodes.Add codesFound, CodedKeyName(keyText)
+    RdxCapturedCodes = codesFound
+End Function
+
+' A key name as a Collection key that tells case apart: its characters'
+' codes, joined.
+Private Function CodedKeyName(ByVal keyText As String) As String
+    Dim idx As Long
+
+    For idx = 1 To Len(keyText)
+        CodedKeyName = CodedKeyName & CStr(AscW(Mid$(keyText, idx, 1))) & "."
+    Next idx
 End Function
 
 ' Whether the focus capture holds an OnKey code now: a shortcut on the

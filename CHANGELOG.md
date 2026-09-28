@@ -55,6 +55,11 @@
 - A key that scrolled a windowed check list a row drew every row it
   kept in full, 16 milliseconds a key in a list of 40. A row the scroll
   moves now only takes its new place, as a radio group's does: 4.9.
+- With a `Shortcut` declared on the sheet, every arrow, Tab, Enter, or
+  other named key sent to a focused control built the table of captured
+  keys anew to see whether a shortcut claimed it: an arrow on a radio
+  group went from 0.23 to 0.36 milliseconds. The table and each key's
+  answer are made once, and the arrow costs 0.24.
 - A field whose key had no value wrote the first character typed into
   the key while the user was still typing, and kept it after Esc took
   the typing back. A field being typed in now seeds its key with the
