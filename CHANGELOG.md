@@ -329,6 +329,7 @@
   ring, key cursor, tooltip, or open list saved on the sheet stayed. The
   first render on such a sheet sweeps them; a sheet of 640 shapes
   rendered in the same time within noise.
+- Requires ROneCOne 1.9.1 or later, and is tested against 1.10.1.
 
 ## 1.0.3 - 2026-09-26
 
