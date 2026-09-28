@@ -8364,6 +8364,72 @@ Public Function TestListEdges() As String
     TestListEdges = transcript
 End Function
 
+' Filters bound to state keys: a search field that writes its key as the
+' user types narrows a table filtered by the key, and Esc brings every row
+' back; a field with a pause writes once typing pauses; a status pick
+' filters its column, "All" lifting it; a key of joined picks lets a row
+' through on any of them; and every filter holds at once, the table's
+' own included, with the footer counting what shows.
+Public Function TestBoundFilters() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim transcript As String
+
+    ReDimUI.AutoPump False
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "wid110")
+    app.TextInput("q").AtRect(24, 24, 160, 22).WritesTo("q").WritesLive True, 0
+    app.TextInput("q2").AtRect(24, 60, 160, 22).WritesTo("q2").WritesLive True, 150
+    app.SelectBox("status").AtRect(200, 24, 120, 22).Items("All", "Open", "Shipped") _
+        .WritesTo "status"
+    app.Table("orders").AtRect(24, 120, 480, 200).Columns "Item", "Region", "Status"
+    With app.Table("orders")
+        .AddRow "Apple", "North", "Open"
+        .AddRow "Apricot", "South", "Shipped"
+        .AddRow "Banana", "East", "Open"
+        .AddRow "Cherry", "North", "Shipped"
+        .AddRow "Grape", "South", "Open"
+        .FilterBy "q"
+        .FilterColumn 3, "status", "All"
+        .FilterColumn 2, "regions"
+    End With
+    app.Render
+    transcript = "start=" & app.Table("orders").ShownRowCount
+
+    app.TextInput("q").Focus
+    RdxKeyChar "a"
+    RdxKeyChar "p"
+    transcript = transcript & "|typing=" & app.Table("orders").ShownRowCount & "/" & _
+        CStr(app.State("q"))
+    RdxKeyChar "{ESC}"
+    transcript = transcript & "|escBack=" & app.Table("orders").ShownRowCount & "/" & _
+        CStr(app.State("q"))
+
+    app.TextInput("q2").Focus
+    RdxKeyChar "b"
+    transcript = transcript & "|paused=" & CStr(app.HasState("q2"))
+    Sleep 200
+    ReDimUI.PumpOnce
+    transcript = transcript & "/" & CStr(app.State("q2"))
+    ReDimUI.EndKeyboardFocus
+
+    app.SetState "status", "Open"
+    transcript = transcript & "|status=" & app.Table("orders").ShownRowCount & "/" & _
+        host.Shapes("rdm_wid110_orders__tf").TextFrame2.TextRange.Text
+    app.SetState "regions", "North, East"
+    transcript = transcript & "|regions=" & app.Table("orders").ShownRowCount
+    app.Table("orders").FilterRows "an"
+    transcript = transcript & "|together=" & app.Table("orders").ShownRowCount
+    app.Table("orders").FilterRows ""
+    app.SetState "status", "All"
+    app.SetState "regions", ""
+    transcript = transcript & "|lifted=" & app.Table("orders").ShownRowCount
+    RdxReleaseKeys
+    RdxStopPump
+    ReDimUI.AutoPump True
+    TestBoundFilters = transcript
+End Function
+
 ' Controls on a tab's panel keep their tab as tabs are removed or
 ' inserted before it, and a removed tab's controls stay hidden: numbered
 ' as they were, they showed under the tab that took their number.

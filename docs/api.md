@@ -193,10 +193,11 @@ All fluent, all return the component:
   `BindVisible(key, invert)`, `BindEnabled(key, invert)`, `WritesTo(key)`. The invert flag
   serves the disable-while-busy pattern: `BindEnabled "anyRunning", True`. An error value
   in a key, such as a lookup's `#N/A` written from its cell, shows as its cell shows it.
-- `WritesTo(key)` goes both ways. A user's change writes the key, and the control follows
-  the key: `SetState "darkMode", True` flips a switch that writes `darkMode`, firing no
-  `OnChange`. On the first render a key with no value takes the control's, as
-  `SetStateDefault` would, with no listener run, and controls bound to the key show it; an
+- `WritesTo(key)` goes both ways. A user's change writes the key (a float field's when its
+  text commits, or as it is typed with `WritesLive`), and the control follows the key:
+  `SetState "darkMode", True` flips a switch that writes `darkMode`, firing no `OnChange`.
+  On the first render a key with no value takes the control's, as `SetStateDefault`
+  would, with no listener run, and controls bound to the key show it; an
   empty field or a pick with nothing picked leaves the key unset. A key that has a value
   shows on the control at every `Render`, so a rebuild keeps the value in play over the one
   the build declares. A setter such as `Checked` or `Value` changes the control until the
@@ -508,6 +509,22 @@ ui.TickBox("beta").AtRect(24, 70, 200, 18).Text("Beta features").OnTab "tabs", 2
   holds the text in any case, and the footer names the filter (`Filter "ap": 1-2 of 2`).
   Backspace takes a letter off, Esc clears the filter before it ends focus, and
   `FilterRows "ap"` filters from code; `ShownRowCount` counts the rows it lets through.
+  Filters can also follow state keys, so another control narrows the table:
+  `FilterBy "q"` filters by the key's text as typing does, and `FilterColumn 3,
+  "status", "All"` shows the rows whose third column, as shown, is the key's text in any
+  case, or any one of the values a check list or transfer list joins into it with ", ".
+  An empty key lifts either filter, and so does the key holding the lifting word given
+  (`"All"` here); `FilterBy ""` and `FilterColumn 3, ""` stop following. Every filter
+  holds at once, the typed one included, the rows go back to the top when a key's filter
+  changes, and the footer counts what shows. A search field that writes its key as the
+  user types, with `WritesLive`, narrows the table while the search is typed:
+
+  ```vba
+  ui.TextInput("find").Placeholder("Search orders").WritesTo("q").WritesLive
+  ui.SelectBox("status").Items("All", "Open", "Shipped").WritesTo "status"
+  ui.Table("orders").FilterBy("q").FilterColumn 3, "status", "All"
+  ```
+
   Ctrl+C copies the selected row, or every row shown when none is selected or the filter
   hides it, under the header row as tab-separated text that pastes into cells, dates as
   yyyy-mm-dd so the sheet reads them back as dates. `ExportTo Range("H1")` writes the
@@ -665,6 +682,11 @@ Builders for float `TextInput` and `ComboBox` fields. A float field moved to a c
   pauses that long; a pending call runs before a commit, and Esc drops it. When Esc takes
   back typing `OnInput` already told of, it runs once more with the text the field went
   back to. `OnChange` still fires once per commit.
+- `WritesLive` writes the field's `WritesTo` key as the user types, once typing pauses
+  200 ms (`WritesLive True, 0` writes on every edit, `WritesLive True, 500` waits longer),
+  as well as on commit, so a table filtered by the key follows the search as it is typed.
+  Esc writes back the text the field returns to. `OnChange` still fires only on commit,
+  and `WritesLive False` goes back to writing on commit alone.
 - `Numeric` keeps digits, one decimal separator, and a leading minus. The separator is the
   locale's, and both the period and the comma type it. `Numeric allowDecimal:=False` refuses
   the separator and `Numeric allowNegative:=False` the minus.

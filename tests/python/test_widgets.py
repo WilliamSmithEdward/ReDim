@@ -2097,6 +2097,18 @@ def test_list_edges(run_widgets):
     assert facts["unsized"] == "True/0", "an unsized array lists nothing"
 
 
+def test_bound_filters(run_widgets):
+    facts = parse_transcript(run_widgets("TestBoundFilters"))
+    assert facts["start"] == "5"
+    assert facts["typing"] == "3/ap", "a search field writing as it types narrows the table"
+    assert facts["escBack"] == "5/", "Esc writes back the text at focus and every row returns"
+    assert facts["paused"] == "False/b", "a field with a pause writes once typing pauses"
+    assert facts["status"] == "3/1-3 of 3", "a status pick filters its column, the footer counting"
+    assert facts["regions"] == "2", "joined picks let a row through on any of them"
+    assert facts["together"] == "1", "every filter holds at once, the table's own included"
+    assert facts["lifted"] == "5", "an empty key or the lifting word lifts a filter"
+
+
 def test_tab_panels_follow(run_widgets):
     facts = parse_transcript(run_widgets("TestTabPanelsFollow"))
     assert facts["removedBefore"] == "l3", "a tab removed before the shown one keeps its panel"

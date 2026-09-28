@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.1.0 - unreleased
+
+- A table can filter by state keys, so another control narrows it:
+  `FilterBy "q"` filters by a key's text as typing does, and
+  `FilterColumn 3, "status", "All"` keeps the rows whose third column is
+  the key's text, or any of the values a check list joins into it, with
+  an empty key or the lifting word showing every row. All filters hold at
+  once, the table's own included, and the footer counts what shows.
+- `WritesLive` makes a float field write its `WritesTo` key as the user
+  types, once typing pauses, as well as on commit, so a search box
+  narrows a table as it is typed; Esc writes back the text the field
+  returns to.
+
 ## 1.0.4 - 2026-09-27
 
 - The docs said an error raised inside a handler reaches the app's

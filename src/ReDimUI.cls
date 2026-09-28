@@ -799,6 +799,12 @@ Private mDebounceMs As Long
 Private mInputDueMs As LongLong
 ' The text OnInput last told of, or the text at focus before it has.
 Private mInputReported As String
+' WritesLive: the key takes the typing once it pauses this long, and the
+' text last written so, or the text at focus before any is.
+Private mWritesLive As Boolean
+Private mLiveWriteMs As Long
+Private mLiveDueMs As LongLong
+Private mLiveWritten As String
 Private mNumeric As Boolean
 Private mNumericDecimal As Boolean
 Private mNumericNegative As Boolean
@@ -888,6 +894,15 @@ Private mAppliedTableSlotsDrawn As Long
 ' rebuilds, the empty row's words, and the handler a row's double
 ' click or Enter runs.
 Private mTableFilter As String
+' Filters bound to state keys: the key a search reads, and each column
+' filter as Array(column, key, the word that lifts it); what they hold as
+' the table last read them, the search's words and each column's accepted
+' words, with a key of it all for the rows shown.
+Private mFilterByKey As String
+Private mColumnFilters As Collection
+Private mBoundSearch As String
+Private mBoundColumns As Collection
+Private mBoundFilterSig As String
 Private mTableShown() As Long
 Private mTableShownCount As Long
 Private mTableShownKey As String
@@ -6714,6 +6729,42 @@ Public Function FilterRows(ByVal filterText As String) As ReDimUI
     Set FilterRows = Me
 End Function
 
+' Filters the rows by a state key's text, as typing does: a row shows when
+' any of its cells, as shown, holds the text, case aside. The key is
+' written by a search field (WritesTo with WritesLive), code, or anything
+' else; an empty key shows every row. "" stops following a key.
+Public Function FilterBy(ByVal stateKey As String) As ReDimUI
+    RequireKind KIND_TABLE, "FilterBy"
+    mFilterByKey = stateKey
+    Touch
+    Set FilterBy = Me
+End Function
+
+' Filters the rows by one column against a state key: a row shows when
+' the column's cell, as shown, is the key's text, case aside, or any one
+' of the values a check list or transfer list joins into the key with
+' ", ". An empty key, or one holding allWord (such as "All"), lifts the
+' filter. A stateKey of "" drops the column's filter.
+Public Function FilterColumn( _
+    ByVal columnNumber As Long, _
+    ByVal stateKey As String, _
+    Optional ByVal allWord As String _
+) As ReDimUI
+    Dim idx As Long
+
+    RequireKind KIND_TABLE, "FilterColumn"
+    If columnNumber < 1 Then
+        RaiseError ERROR_INVALID_ARGUMENT, "FilterColumn", "Columns number from 1."
+    End If
+    If mColumnFilters Is Nothing Then Set mColumnFilters = New Collection
+    For idx = mColumnFilters.Count To 1 Step -1
+        If mColumnFilters.Item(idx)(0) = columnNumber Then mColumnFilters.Remove idx
+    Next idx
+    If LenB(stateKey) > 0 Then mColumnFilters.Add Array(columnNumber, stateKey, allWord)
+    Touch
+    Set FilterColumn = Me
+End Function
+
 ' Writes the header and the rows the table shows, filtered and sorted,
 ' to the sheet from exportAnchor's top-left cell down, values as they
 ' are, in one write.
@@ -6820,6 +6871,23 @@ Public Function DebounceMs(ByVal pauseMs As Long) As ReDimUI
     If pauseMs < 0 Then pauseMs = 0
     mDebounceMs = pauseMs
     Set DebounceMs = Me
+End Function
+
+' A float field writes its WritesTo key as the user types, once typing
+' pauses pauseMs, as well as when the text commits: a table filtered by
+' the key narrows while the search is typed. Esc writes back the text
+' the field returns to. False writes on commit only.
+Public Function WritesLive( _
+    Optional ByVal liveOn As Boolean = True, _
+    Optional ByVal pauseMs As Long = 200 _
+) As ReDimUI
+    RequireRole ROLE_COMPONENT, "WritesLive"
+    RequireFieldKind "WritesLive"
+    If pauseMs < 0 Then pauseMs = 0
+    mWritesLive = liveOn
+    mLiveWriteMs = pauseMs
+    If Not liveOn Then mLiveDueMs = 0
+    Set WritesLive = Me
 End Function
 
 ' Digits only, plus one decimal separator (the locale's; . and , both
@@ -8753,6 +8821,62 @@ Friend Function IsBoundTo(ByVal stateKey As String) As Boolean
     If Not IsBoundTo And SameStateKey(mWritesToKey, stateKey) Then
         IsBoundTo = FollowsWritesTo()
     End If
+    If Not IsBoundTo And mKind = KIND_TABLE Then IsBoundTo = FiltersByKey(stateKey)
+End Function
+
+' Whether a table's bound filters read the key.
+Private Function FiltersByKey(ByVal stateKey As String) As Boolean
+    Dim columnFilter As Variant
+
+    If SameStateKey(mFilterByKey, stateKey) Then
+        FiltersByKey = True
+        Exit Function
+    End If
+    If mColumnFilters Is Nothing Then Exit Function
+    For Each columnFilter In mColumnFilters
+        If SameStateKey(CStr(columnFilter(1)), stateKey) Then
+            FiltersByKey = True
+            Exit Function
+        End If
+    Next columnFilter
+End Function
+
+' A table's bound filters read their keys: the search's words, and each
+' column filter's words with the values a list joined into them, none
+' while its key is empty or holds the word that lifts it. The rows go
+' back to the top when any of it changed, as a typed filter's do.
+Private Sub ReadBoundFilters(ByVal hostApp As ReDimUI)
+    Dim columnFilter As Variant
+    Dim boundWords As String
+    Dim filterSig As String
+
+    mBoundSearch = vbNullString
+    If LenB(mFilterByKey) > 0 Then mBoundSearch = BoundKeyWords(hostApp, mFilterByKey)
+    filterSig = mBoundSearch
+    Set mBoundColumns = New Collection
+    If Not mColumnFilters Is Nothing Then
+        For Each columnFilter In mColumnFilters
+            boundWords = BoundKeyWords(hostApp, CStr(columnFilter(1)))
+            If LenB(boundWords) > 0 _
+                And StrComp(boundWords, CStr(columnFilter(2)), vbTextCompare) <> 0 Then
+                mBoundColumns.Add Array(CLng(columnFilter(0)), boundWords, Split(boundWords, ", "))
+                filterSig = filterSig & Chr$(2) & CStr(columnFilter(0)) & Chr$(3) & boundWords
+            End If
+        Next columnFilter
+    End If
+    If filterSig <> mBoundFilterSig Then
+        mBoundFilterSig = filterSig
+        mTableOffset = 0
+    End If
+End Sub
+
+' A key's value as the words a filter reads, "" for a key with none.
+Private Function BoundKeyWords(ByVal hostApp As ReDimUI, ByVal stateKey As String) As String
+    Dim bound As Variant
+
+    If Not hostApp.HasState(stateKey) Then Exit Function
+    AssignVariant bound, hostApp.State(stateKey)
+    BoundKeyWords = OneLineWords(StateText(bound))
 End Function
 
 Private Function SameStateKey(ByVal boundKey As String, ByVal stateKey As String) As Boolean
@@ -9871,7 +9995,7 @@ Private Function AccessibleDescription() As String
                         Phrase(UI_ALT_SORTED_ASCENDING, mTableHeads(mSortColumn))
                 End If
             End If
-            If LenB(mTableFilter) > 0 Then
+            If LenB(mTableFilter) > 0 Or LenB(mBoundFilterSig) > 0 Then
                 EnsureTableShown
                 described = described & ", " & Phrase(UI_ALT_SHOWN, mTableShownCount)
             End If
@@ -10170,6 +10294,7 @@ Private Sub ResolveBindings(ByVal hostApp As ReDimUI)
             mText = FormatBoundText(bound)
         End If
     End If
+    If mKind = KIND_TABLE Then ReadBoundFilters hostApp
     ' A BindValue on the key the control follows adds nothing: the follow
     ' has mapped and clamped the value already.
     If LenB(mBindValueKey) > 0 And Not FollowsWritesTo() Then
@@ -12931,16 +13056,32 @@ Private Sub SelectWordAt(ByVal atPos As Long)
     mCaretPos = wordTo
 End Sub
 
-' After any edit: OnInput now or once typing pauses, and a recheck while
-' a validation message shows.
+' After any edit: OnInput now or once typing pauses, the key written as
+' the typing goes with WritesLive, and a recheck while a validation
+' message shows.
 Private Sub NoteFieldEdit(ByVal hostApp As ReDimUI)
     If mValidationLive Then RunValidation hostApp
+    If mWritesLive And LenB(mWritesToKey) > 0 Then
+        If mLiveWriteMs <= 0 Then
+            WriteLive hostApp
+        Else
+            mLiveDueMs = GetTickCount64() + mLiveWriteMs
+        End If
+    End If
     If LenB(mInputProc) = 0 Then Exit Sub
     If mDebounceMs <= 0 Then
         FireInput hostApp
     Else
         mInputDueMs = GetTickCount64() + mDebounceMs
     End If
+End Sub
+
+' WritesLive: the key takes the text typed so far.
+Private Sub WriteLive(ByVal hostApp As ReDimUI)
+    mLiveDueMs = 0
+    If mText = mLiveWritten Then Exit Sub
+    mLiveWritten = mText
+    WriteFieldKey hostApp, mText
 End Sub
 
 Private Sub FireInput(ByVal hostApp As ReDimUI)
@@ -14162,10 +14303,10 @@ Private Sub EnsureTableShown()
     Dim shownKey As String
     Dim displayNo As Long
     Dim sourceRow As Long
-    Dim colNo As Long
 
     EnsureTableOrder
-    shownKey = mTableFilter & Chr$(1) & CStr(mTableOrderGen) & Chr$(1) & CStr(mTableVersion)
+    shownKey = mTableFilter & Chr$(1) & mBoundFilterSig & Chr$(1) & CStr(mTableOrderGen) & _
+        Chr$(1) & CStr(mTableVersion)
     If shownKey = mTableShownKey Then Exit Sub
     mTableShownKey = shownKey
     mTableShownCount = 0
@@ -14173,22 +14314,62 @@ Private Sub EnsureTableShown()
     ReDim mTableShown(1 To mTableRows)
     For displayNo = 1 To mTableRows
         sourceRow = mTableOrder(displayNo)
-        If LenB(mTableFilter) = 0 Then
+        If TableRowShows(sourceRow) Then
             mTableShownCount = mTableShownCount + 1
             mTableShown(mTableShownCount) = sourceRow
-        Else
-            ' The filter matches the cells as shown, on one line.
-            For colNo = 1 To mTableCols
-                If InStr(1, OneLineWords(TableCellText(colNo, mTableCells(colNo, sourceRow))), _
-                    mTableFilter, vbTextCompare) > 0 Then
-                    mTableShownCount = mTableShownCount + 1
-                    mTableShown(mTableShownCount) = sourceRow
-                    Exit For
-                End If
-            Next colNo
         End If
     Next displayNo
 End Sub
+
+' Whether a row shows under every filter at once: the typed one, a bound
+' search, and each bound column filter. Filters match the cells as
+' shown, on one line.
+Private Function TableRowShows(ByVal sourceRow As Long) As Boolean
+    Dim columnFilter As Variant
+    Dim acceptedWords As Variant
+    Dim cellWords As String
+    Dim matched As Boolean
+
+    If LenB(mTableFilter) > 0 Then
+        If Not TableRowHolds(sourceRow, mTableFilter) Then Exit Function
+    End If
+    If LenB(mBoundSearch) > 0 Then
+        If Not TableRowHolds(sourceRow, mBoundSearch) Then Exit Function
+    End If
+    If Not mBoundColumns Is Nothing Then
+        For Each columnFilter In mBoundColumns
+            ' A column the table does not have yet filters nothing.
+            If columnFilter(0) <= mTableCols Then
+                cellWords = OneLineWords(TableCellText(columnFilter(0), _
+                    mTableCells(columnFilter(0), sourceRow)))
+                matched = (StrComp(cellWords, columnFilter(1), vbTextCompare) = 0)
+                If Not matched Then
+                    For Each acceptedWords In columnFilter(2)
+                        If StrComp(cellWords, acceptedWords, vbTextCompare) = 0 Then
+                            matched = True
+                            Exit For
+                        End If
+                    Next acceptedWords
+                End If
+                If Not matched Then Exit Function
+            End If
+        Next columnFilter
+    End If
+    TableRowShows = True
+End Function
+
+' Whether any of a row's cells, as shown on one line, holds the words.
+Private Function TableRowHolds(ByVal sourceRow As Long, ByVal filterWords As String) As Boolean
+    Dim colNo As Long
+
+    For colNo = 1 To mTableCols
+        If InStr(1, OneLineWords(TableCellText(colNo, mTableCells(colNo, sourceRow))), _
+            filterWords, vbTextCompare) > 0 Then
+            TableRowHolds = True
+            Exit Function
+        End If
+    Next colNo
+End Function
 
 Private Sub SetTableFilter(ByVal filterText As String)
     If filterText = mTableFilter Then Exit Sub
@@ -14498,7 +14679,8 @@ Private Sub ApplyTable(ByVal hostSheet As Worksheet, ByVal themeValue As ReDimUI
     slotTotal = Int((mHeight - 2 - rowPitch) / rowPitch)
     If slotTotal < 1 Then slotTotal = 1
     ' The footer shows while rows page or a filter holds.
-    mTableFooterOn = (mTableShownCount > slotTotal) Or LenB(mTableFilter) > 0
+    mTableFooterOn = (mTableShownCount > slotTotal) Or LenB(mTableFilter) > 0 _
+        Or LenB(mBoundFilterSig) > 0
     If mTableFooterOn Then
         slotTotal = Int((mHeight - 2 - 2 * rowPitch) / rowPitch)
         If slotTotal < 1 Then slotTotal = 1
@@ -20115,6 +20297,8 @@ Friend Sub FocusField(ByVal hostApp As ReDimUI, Optional ByVal openList As Boole
     ReDimUI.SetKeyboardFocus hostApp, Me
     mFieldTextAtFocus = mText
     mInputReported = mText
+    mLiveWritten = mText
+    mLiveDueMs = 0
     mErrorAtFocus = mValidationError
     mErrorLiveAtFocus = mValidationLive
     mFieldSelAtFocus = CurrentSelectionKey()
@@ -20184,21 +20368,29 @@ Friend Sub BlurField(ByVal hostApp As ReDimUI, ByVal keepEdits As Boolean)
             End If
         End If
         RunValidation hostApp
+        mLiveDueMs = 0
         If mText <> mFieldTextAtFocus Then
             WriteFieldKey hostApp, mText
             RunChangeHandler hostApp
+        ElseIf mText <> mLiveWritten Then
+            ' Typing written as it went, then undone, leaves the key as
+            ' the field is.
+            WriteFieldKey hostApp, mText
         End If
     Else
         ' The text, its check's verdict, and a combo's item go back to
         ' what they were when focus arrived. A waiting OnInput would tell
         ' of typing thrown away, so it does not run; one that told of the
-        ' typing already hears of the text the field went back to.
+        ' typing already hears of the text the field went back to, and a
+        ' key written as the typing went takes that text back.
         mInputDueMs = 0
+        mLiveDueMs = 0
         mText = mFieldTextAtFocus
         mValidationError = mErrorAtFocus
         mValidationLive = mErrorLiveAtFocus
         If mKind = KIND_COMBO Then mValue = ExactItemMatch(mText)
         If mText <> mInputReported Then FireInput hostApp
+        If mText <> mLiveWritten Then WriteFieldKey hostApp, mText
     End If
     mSelectOpen = False
     Touch
@@ -21079,6 +21271,9 @@ Friend Function PickComboItem( _
             ReDimUI.ClearKeyboardFocus
             mCaretOn = False
         End If
+        ' The pick writes the key; a live write still waiting would only
+        ' write it again.
+        mLiveDueMs = 0
         mText = picked
         ' A pick commits as a blur does: an OnInput still waiting reports
         ' the picked text, and the checks run on it.
@@ -21273,6 +21468,9 @@ Friend Sub TickAnimation(ByVal hostSheet As Worksheet, ByVal elapsedMs As Long)
         Case KIND_INPUT, KIND_COMBO
             If mInputDueMs > 0 Then
                 If GetTickCount64() >= mInputDueMs Then FireInput OwnerApp
+            End If
+            If mLiveDueMs > 0 Then
+                If GetTickCount64() >= mLiveDueMs Then WriteLive OwnerApp
             End If
             ' Insertion bar blink for the focused float field, at the
             ' Windows rate; a caret set not to blink stays on.
