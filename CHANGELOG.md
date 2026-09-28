@@ -238,6 +238,10 @@
   runs nothing then, as a busy button's entry does. A failure inside
   ReDim while the palette runs an entry is now trapped and counted, as
   at the other entry points, where it stopped in VBA's error dialog.
+- The command palette's key was bound in every workbook for as long as
+  the app was mounted, so Excel's own Ctrl+Shift+P did nothing anywhere
+  else. It binds as a control's `Shortcut` does, while the app's sheet
+  is in front, and Excel keeps it elsewhere.
 - Esc or Tab out of the command palette left no control with the keys,
   and Tab first took the palette's suggestion. Both now close the palette
   and give the keys back to the control that had them.

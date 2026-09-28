@@ -1462,6 +1462,9 @@ def test_command_palette(run_widgets):
     assert facts["appEntry"] == "app:Say hello/2"
     assert facts["leaveCancels"] == "True", "leaving the palette runs nothing"
     assert facts["keyOpens"] == "True"
+    assert facts["keyScoped"] == "True/True/True", (
+        "the palette key is bound only while the app's sheet is in front, and opens it"
+    )
 
 
 def test_menu_edges(run_widgets):

@@ -559,6 +559,7 @@ Private mPendingReflows As Collection
 ' The command palette: whether it is on, what each entry it lists runs,
 ' and the control that had the keys when it opened.
 Private mPaletteOn As Boolean
+Private mPaletteKey As String
 ' Set while Confirm or the palette draws its parts, whose ids start
 ' "mdl_"; an app cannot make a component with such an id itself.
 Private mDrawingChrome As Boolean
@@ -1898,6 +1899,22 @@ Private Function CodeListAdd(ByVal codeList As String, ByVal keyCode As String) 
     CodeListAdd = codeList & keyCode & Chr$(1)
 End Function
 
+' The first app on the active sheet whose palette key this is opens its
+' palette; True when one did.
+Private Function ActiveSheetOpensPalette(ByVal keyCode As String) As Boolean
+    Dim appValue As ReDimUI
+
+    For Each appValue In mApps
+        If appValue.Sheet Is ActiveSheet Then
+            If appValue.PaletteKeyIs(keyCode) Then
+                appValue.OpenCommandPalette
+                ActiveSheetOpensPalette = True
+                Exit Function
+            End If
+        End If
+    Next appValue
+End Function
+
 ' The first app on the active sheet with a control declaring the key, as
 ' a shortcut or an access key, clicks that control; True when one did.
 Private Function ActiveSheetActivates(ByVal keyText As String, ByVal byShortcut As Boolean) As Boolean
@@ -1922,6 +1939,7 @@ Friend Sub DispatchShortcut(ByVal keyCode As String)
     End If
     EnsureFactory
     If ActiveSheetActivates(keyCode, True) Then Exit Sub
+    If ActiveSheetOpensPalette(keyCode) Then Exit Sub
     ' Nothing on the sheet in front took the key. A binding left by a sheet
     ' change Excel did not report, or by a reset of the project, is set
     ' right, and a key that no control here declares goes back to Excel,
@@ -3715,8 +3733,19 @@ End Sub
 Public Function CommandPalette(Optional ByVal paletteKey As String = "^+p") As ReDimUI
     RequireRole ROLE_APP, "CommandPalette"
     mPaletteOn = True
-    If LenB(paletteKey) > 0 Then HotKey paletteKey, "RdxOpenPalette"
+    ' The key binds as a control's Shortcut does, while the app's sheet is
+    ' in front, and is Excel's elsewhere; bound as a HotKey it took Excel's
+    ' Ctrl+Shift+P from every workbook while the app was mounted.
+    mPaletteKey = vbNullString
+    If LenB(paletteKey) > 0 Then mPaletteKey = CanonicalShortcut(paletteKey)
+    ReDimUI.RefreshAccessKeys LenB(mPaletteKey) > 0
     Set CommandPalette = Me
+End Function
+
+' Whether a shortcut code is this app's palette key.
+Friend Function PaletteKeyIs(ByVal keyCode As String) As Boolean
+    If Not mPaletteOn Or LenB(mPaletteKey) = 0 Then Exit Function
+    PaletteKeyIs = (StrComp(mPaletteKey, keyCode, vbTextCompare) = 0)
 End Function
 
 Friend Property Get PaletteOn() As Boolean
@@ -4925,9 +4954,9 @@ Public Sub ClearHotKeys()
 
     RequireRole ROLE_APP, "ClearHotKeys"
     HoldHotKeys True
-    ' A key another app binds too, as two apps' CommandPalette each bind
-    ' Ctrl+Shift+P, goes back to that app, where unmounting one left the
-    ' key with Excel for both.
+    ' A key another app binds too, as two apps' HotKey calls on one key
+    ' do, goes back to that app, where unmounting one left the key with
+    ' Excel for both.
     If Not mHotKeys Is Nothing Then
         For Each hotKeyEntry In mHotKeys
             ReDimUI.RebindHotKeyElsewhere CStr(hotKeyEntry(0)), mAppId
@@ -8869,6 +8898,11 @@ Friend Function ShortcutCodes() As String
             End If
         End If
     Next componentValue
+    If mPaletteOn And LenB(mPaletteKey) > 0 Then
+        If Not CodeListHas(ShortcutCodes, mPaletteKey) Then
+            ShortcutCodes = CodeListAdd(ShortcutCodes, mPaletteKey)
+        End If
+    End If
 End Function
 
 ' Clicks the first control in creation order that declares the key, as

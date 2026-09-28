@@ -5355,6 +5355,7 @@ End Function
 Public Function TestCommandPalette() As String
     Dim app As ReDimUI
     Dim host As Worksheet
+    Dim other As Worksheet
     Dim transcript As String
 
     gChangeCount = 0
@@ -5405,6 +5406,21 @@ Public Function TestCommandPalette() As String
 
     RdxOpenPalette
     transcript = transcript & "|keyOpens=" & CStr( _
+        host.Shapes("rdm_wid62_mdl_pal_field").Visible = msoTrue)
+    ReDimUI.EndKeyboardFocus
+
+    ' The palette key is bound while the app's sheet is in front, as a
+    ' shortcut is, is Excel's on another sheet, and opens the palette.
+    transcript = transcript & "|keyScoped=" & _
+        CStr(InStr(ReDimUI.BoundShortcuts, Chr$(1) & "^+p" & Chr$(1)) > 0)
+    Set other = NewCanvas()
+    ReDimUI.RefreshAccessKeys
+    transcript = transcript & "/" & CStr(other Is ActiveSheet _
+        And InStr(ReDimUI.BoundShortcuts, Chr$(1) & "^+p" & Chr$(1)) = 0)
+    host.Activate
+    ReDimUI.RefreshAccessKeys
+    ReDimUI.DispatchShortcut "^+p"
+    transcript = transcript & "/" & CStr( _
         host.Shapes("rdm_wid62_mdl_pal_field").Visible = msoTrue)
     ReDimUI.EndKeyboardFocus
     RdxReleaseKeys
