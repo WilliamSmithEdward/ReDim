@@ -97,7 +97,7 @@ framework. Also:
 | `Async(opId)` / `CancelAsync opId` / `AsyncError(opId)` | Async ops (see [async.md](async.md)); `Async(opId).IsRunning` reads whether one runs now. |
 | `Job(jobId)` / `CancelJob jobId` | Chunked or paced background work; `Job(jobId).IsRunning` reads whether it runs now. |
 | `OnError "Module.Proc"` | One-argument sink for the handler failures ReDim sees, such as a handler it cannot run, named with the control, op, job, or state key that ran it: "ReDim handler error 1004 in Orders.Save for component 'save': Cannot run the macro". An error raised inside a handler never reaches it: Excel does not return an error from a procedure `Application.Run` started, so VBA stops in the handler with its own dialog, and End there resets the project and every app with it until the build runs again. A handler traps its own errors. |
-| `TickFaultCount` / `ResetTickFaults` (on `ReDimUI`) | The pump and key dispatch trap errors silently by design; every trapped fault increments this factory counter. Read it in tests or diagnostics to prove a run was clean, reset it to scope a measurement. |
+| `TickFaultCount` / `ResetTickFaults` (on `ReDimUI`) | The pump and key dispatch trap errors silently by design; every trapped fault increments this factory counter. A key's failure also goes to the app's `OnError` sink, named with the control that had the keys, as a click's does. Read it in tests or diagnostics to prove a run was clean, reset it to scope a measurement. |
 | `ProtectSurface protectOn, allowCellSelection` | Opt-in app-sheet protection (UserInterfaceOnly): users cannot enter cell edit mode or drag shapes there, framework writes keep working, cell-anchored TextInput cells stay editable, and float fields type normally since they never enter cell edit. By default locked canvas cells are also unselectable - no selection rectangle on the app surface, no protected-cell warnings for stray keys - while unlocked TextInput cells stay selectable; pass `allowCellSelection:=True` to keep the whole grid selectable. OnKey capture (fields, HotKey) is unaffected. Protection state does not persist across reopen, so builds should call `ProtectSurface False` first and `ProtectSurface` after Render, as every demo does. Unmount unprotects. |
 | `Unmount deleteShapes` | Remove components (and shapes) and forget the app. Its running ops and jobs stop without running their outcome handlers. |
 
@@ -414,7 +414,9 @@ dependencies:
   default, with a caret. The menu runs as wide as its widest command needs, never
   narrower than the button, and ends at the button's right edge when it would pass the
   window's, as a `SelectBox` or `ComboBox` list does with a long item. It shares the drop
-  list's windowing, keys, and dismissal, and `ClearItems` drops the commands.
+  list's windowing, keys, and dismissal, and `ClearItems` drops the commands. A click that
+  opens the menu gives it the keys, and so do its `AccessKey` and `Shortcut`, which open
+  it the same way. A menu with no commands opens on its keys to show "No items".
 - `Expander`: a collapsible section. Its header shows a chevron and its `Text` in bold;
   a click, or Space and Enter while it has the keys, opens and closes it, and Right opens
   and Left closes. Controls join its panel with `InExpander "adv"`, the same as
@@ -768,10 +770,11 @@ entry: the one highlighted, or with none highlighted the top match. Enter with n
 matching leaves the palette open; it never commits the typed text or clicks the app's
 `DefaultButton`. An app entry runs its handler with the app as `ReDimUI.SenderApp`, whose
 `LastCommand` names it. A button entry clicks the button, with its debounce, busy state,
-and handlers. A menu entry runs through the menu. Esc closes the list and then the
-palette, and so does a click or press anywhere else; leaving it never runs what was
-typed. Opening it again while it is open keeps the control it gives the keys back to. A
-text listed twice keeps its first entry.
+and handlers. A menu entry runs through the menu, and runs nothing while the menu is busy
+or the command is disabled. Esc closes the list and then the palette, and so does a
+click or press anywhere else; leaving it never runs what was typed. Esc and Tab give the
+keys back to the control that had them. Opening it again while it is open keeps the
+control it gives the keys back to. A text listed twice keeps its first entry.
 
 ```vba
 ui.AddCommand "Clear the form", "Form.ClearAll", "Delete"
@@ -859,8 +862,8 @@ steppers, sliders, selects, check lists, transfer lists, tab strips, date picker
 images whose click runs something (`OnClick`, `OnClickAsync`, or `NavigatesTo`), and float
 fields. Focus comes from the keyboard or from code: Tab and Shift+Tab walk the app's
 controls, `component.Focus` and `ui.FocusFirst` place it, and a modal takes it. A click
-focuses only a text field, since someone who clicks a button in Excel expects the grid to
-keep the keys.
+focuses only a text field, or a calendar, menu, or `Filterable` list it opens, since
+someone who clicks a button in Excel expects the grid to keep the keys.
 
 - Tab order: controls with a positive `TabIndex` come first, in ascending order, then the
   rest in creation order. `TabIndex(-1)` leaves a control out of Tab while `Focus` still

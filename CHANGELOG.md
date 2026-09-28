@@ -214,6 +214,29 @@
   moved the members under it. The row is reserved at once.
 - A float field moved to a cell with `At` left its `MaxLength` count and
   clear button where the field had been. They go with the move.
+- A `Filterable` MenuButton ran its highlighted command on Alt+Up once
+  letters had filtered it, where Alt+Up only closes a menu. It closes
+  now.
+- Enter on a MenuButton with no commands clicked the app's
+  `DefaultButton`, and Space, Down, and F4 did nothing. The keys that
+  open a menu now open it to show "No items", and Enter or Space closes
+  an open empty list.
+- A menu opened by a click, or by its `AccessKey` or `Shortcut`, never
+  had the keys: the arrows moved the grid's selection, which closed the
+  menu, and Esc did nothing. Opening it now gives it the keys, as it does
+  a calendar and a `Filterable` list.
+- The command palette ran a menu's command while an op kept the menu
+  busy, or after the command was disabled since the palette opened. It
+  runs nothing then, as a busy button's entry does. A failure inside
+  ReDim while the palette runs an entry is now trapped and counted, as
+  at the other entry points, where it stopped in VBA's error dialog.
+- Esc or Tab out of the command palette left no control with the keys,
+  and Tab first took the palette's suggestion. Both now close the palette
+  and give the keys back to the control that had them.
+- A key whose handling failed inside ReDim, a draw on a deleted sheet for
+  one, was lost: key dispatch cleared the error before `TickFaultCount`
+  could count it, and the app's `OnError` sink never heard of it. It is
+  counted and reported now, as a click's failure is.
 
 ## 1.0.3 - 2026-09-26
 

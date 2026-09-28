@@ -327,9 +327,17 @@ Public Sub RdxOpenPalette()
     End If
 End Sub
 
-' The command palette field's OnChange: runs the entry picked.
+' The command palette field's OnChange: runs the entry picked. Never
+' raises: Application.Run starts it, so a failure would stop in VBA's
+' own dialog.
 Public Sub RdxPalettePick()
+    On Error Resume Next
+    Err.Clear
     ReDimUI.RunPalettePick
+    If Err.Number <> 0 Then
+        Err.Clear
+        ReDimUI.NoteTickFault
+    End If
 End Sub
 
 ' Shape.OnAction target for every ReDim component. Application.Caller carries

@@ -5412,6 +5412,120 @@ Public Function TestCommandPalette() As String
     TestCommandPalette = transcript
 End Function
 
+' Menus and the palette at their edges: Alt+Up closes a filtered menu
+' and runs nothing; Enter opens an empty menu and leaves the default
+' button alone; a click that opens a menu gives it the keys; the palette
+' runs no command of a busy menu or of one disabled since it opened;
+' leaving the palette gives the keys back; and a key whose draw fails is
+' counted and reported.
+Public Function TestMenuEdges() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim transcript As String
+    Dim goneApp As ReDimUI
+    Dim gone As Worksheet
+
+    gChangeCount = 0
+    gCommandCount = 0
+    gLastCommand = vbNullString
+    gSinkWords = vbNullString
+    ReDimUI.AutoPump False
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "wid105")
+    app.OnError "TestReDimWidgets.RecordSinkError"
+    app.Button("save").AtRect(24, 24, 90, 28).Text("Save").OnClick "TestReDimWidgets.RecordChange"
+    app.DefaultButton "save"
+    app.MenuButton("act").AtRect(24, 70, 110, 28).Text("Actions").Filterable _
+        .AddCommand("Delete", "TestReDimWidgets.RecordCommand") _
+        .AddCommand "Duplicate", "TestReDimWidgets.RecordCommand"
+    app.MenuButton("recent").AtRect(150, 70, 110, 28).Text "Recent"
+    app.MenuButton("file").AtRect(280, 70, 110, 28).Text("File") _
+        .AddCommand("Open", "TestReDimWidgets.RecordCommand") _
+        .AddCommand "Close", "TestReDimWidgets.RecordCommand"
+    app.MenuButton("tools").AtRect(410, 70, 110, 28).Text("Tools") _
+        .AddCommand "Sync", "TestReDimWidgets.RecordCommand"
+    app.RadioGroup("size").AtRect(24, 120, 120, 60).Items "Small", "Large"
+    app.Async("hold").RunsTask(ROneCOne.Task.Delay(300)).Disables "tools"
+    app.CommandPalette
+    app.Render
+
+    app.MenuButton("act").Focus
+    RdxKeyChar "d"
+    RdxKeyChar "{ALTUP}"
+    transcript = "filterAltUp=" & gCommandCount & "/" & _
+        CStr(Not ShapeExists(host, "rdm_wid105_act__opt1"))
+
+    app.MenuButton("recent").Focus
+    RdxKeyChar "{ENTER}"
+    transcript = transcript & "|emptyOpens=" & gChangeCount & "/" & _
+        CStr(ShapeExists(host, "rdm_wid105_recent__optn"))
+    RdxKeyChar "{ENTER}"
+    transcript = transcript & "/" & gChangeCount & "/" & _
+        CStr(Not ShapeExists(host, "rdm_wid105_recent__optn"))
+
+    ReDimUI.EndKeyboardFocus
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid105_file"
+    transcript = transcript & "|clickTakesKeys=" & _
+        CStr(ReDimUI.IsComponentFocused("wid105", "file"))
+    RdxKeyChar "{DOWN}"
+    RdxKeyChar "{ENTER}"
+    transcript = transcript & "/" & gLastCommand
+
+    gCommandCount = 0
+    app.Async("hold").Start
+    app.OpenCommandPalette
+    TypeText "sync"
+    RdxKeyChar "{ENTER}"
+    transcript = transcript & "|busyUnrun=" & gCommandCount
+    Sleep 350
+    ReDimUI.PumpOnce
+    app.OpenCommandPalette
+    app.MenuButton("act").ItemEnabled 2, False
+    TypeText "dupl"
+    RdxKeyChar "{ENTER}"
+    transcript = transcript & "|disabledUnrun=" & gCommandCount
+
+    app.RadioGroup("size").Focus
+    app.OpenCommandPalette
+    RdxKeyChar "{ESC}"
+    If host.Shapes("rdm_wid105_mdl_pal_field").Visible = msoTrue Then RdxKeyChar "{ESC}"
+    transcript = transcript & "|escGivesBack=" & _
+        CStr(ReDimUI.IsComponentFocused("wid105", "size"))
+    app.OpenCommandPalette
+    TypeText "sa"
+    RdxKeyChar "{TAB}"
+    transcript = transcript & "|tabGivesBack=" & _
+        CStr(ReDimUI.IsComponentFocused("wid105", "size")) & "/" & _
+        CStr(host.Shapes("rdm_wid105_mdl_pal_field").Visible = msoFalse) & "/" & gChangeCount
+
+    ReDimUI.EndKeyboardFocus
+
+    ' A key whose draw fails, here on a sheet deleted under the focused
+    ' control, counts as a fault and reaches the app's sink.
+    Set gone = NewCanvas()
+    Set goneApp = ReDimUI.Mount(gone, "wid105g")
+    goneApp.OnError "TestReDimWidgets.RecordSinkError"
+    goneApp.RadioGroup("pick").AtRect(24, 24, 120, 60).Items "One", "Two"
+    goneApp.Render
+    goneApp.RadioGroup("pick").Focus
+    ReDimUI.ResetTickFaults
+    gSinkWords = vbNullString
+    Application.DisplayAlerts = False
+    gone.Delete
+    Application.DisplayAlerts = True
+    RdxKeyChar "{DOWN}"
+    transcript = transcript & "|keyFault=" & ReDimUI.TickFaultCount & "/" & _
+        CStr(InStr(gSinkWords, "'pick'") > 0)
+    ReDimUI.ClearKeyboardFocus
+    RdxReleaseKeys
+    On Error Resume Next
+    ReDimUI.AutoPump True
+    RdxStopPump
+    On Error GoTo 0
+    TestMenuEdges = transcript
+End Function
+
 ' Table data tools: typing filters the rows on any cell and the footer
 ' names the filter; Backspace takes a letter back and Esc clears it.
 ' Ctrl+C copies every row shown, or the selected one, under the header,

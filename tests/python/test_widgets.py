@@ -1464,6 +1464,24 @@ def test_command_palette(run_widgets):
     assert facts["keyOpens"] == "True"
 
 
+def test_menu_edges(run_widgets):
+    facts = parse_transcript(run_widgets("TestMenuEdges"))
+    assert facts["filterAltUp"] == "0/True", "Alt+Up closes a filtered menu and runs nothing"
+    assert facts["emptyOpens"] == "0/True/0/True", (
+        "Enter opens and closes an empty menu and never clicks the default button"
+    )
+    assert facts["clickTakesKeys"] == "True/Open", "a menu opened by a click takes the keys"
+    assert facts["busyUnrun"] == "0", "the palette runs no command of a busy menu"
+    assert facts["disabledUnrun"] == "0", (
+        "the palette runs no command disabled since it opened"
+    )
+    assert facts["escGivesBack"] == "True", "Esc out of the palette gives the keys back"
+    assert facts["tabGivesBack"] == "True/True/0", (
+        "Tab closes the palette, gives the keys back, and runs nothing"
+    )
+    assert facts["keyFault"] == "1/True", "a key whose draw fails is counted and reported"
+
+
 def test_table_data(run_widgets):
     facts = parse_transcript(run_widgets("TestTableData"))
     assert facts["typed"] == '2/Filter "ap": 1-2 of 2', "typing filters and the footer names it"

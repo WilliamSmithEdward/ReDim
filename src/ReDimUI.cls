@@ -1496,6 +1496,8 @@ End Property
 Friend Sub DispatchKey(ByVal keyText As String)
     Dim appValue As ReDimUI
     Dim componentValue As ReDimUI
+    Dim keyError As Long
+    Dim keyErrorText As String
 
     If Not IsFactory(Me) Then
         ReDimUI.DispatchKey keyText
@@ -1521,9 +1523,18 @@ Friend Sub DispatchKey(ByVal keyText As String)
         ClearKeyboardFocus
         Exit Sub
     End If
+    ' A key's failure counts as a pump fault and goes to the app's sink,
+    ' as a click's does; clearing the trap here hid it from both.
     On Error Resume Next
     componentValue.HandleKey appValue, keyText
+    keyError = Err.Number
+    keyErrorText = Err.Description
     On Error GoTo 0
+    If keyError <> 0 Then
+        NoteTickFault
+        appValue.ReportAppError HandlerFailureText(componentValue, vbNullString, _
+            keyError, keyErrorText)
+    End If
 End Sub
 
 Friend Sub SetKeyboardFocus(ByVal hostApp As ReDimUI, ByVal componentValue As ReDimUI)
@@ -6942,8 +6953,12 @@ Private Sub RunMenuCommand(ByVal hostApp As ReDimUI, ByVal commandWords As Strin
     End If
 End Sub
 
-' The palette runs a menu's command by its text.
+' The palette runs a menu's command by its text, while the menu takes
+' clicks and the command can be picked: an op that made the menu busy,
+' or a command disabled since the palette opened, ran anyway.
 Friend Sub RunCommandNamed(ByVal hostApp As ReDimUI, ByVal commandWords As String)
+    If Not mVisible Or Not mEnabled Or mBusy Then Exit Sub
+    If Not ItemPickable(ExactItemMatch(commandWords)) Then Exit Sub
     RunMenuCommand hostApp, commandWords
 End Sub
 
@@ -9182,8 +9197,10 @@ Friend Sub RunClickBehavior()
             Else
                 ToggleDropList hostApp.Sheet
                 ' A Filterable list opened by a click takes the keys, so
-                ' typing filters it.
-                If mFilterable And mSelectOpen Then TakeFocus hostApp, False
+                ' typing filters it, and so does a menu, whose AccessKey
+                ' and Shortcut open it through this click: the arrows and
+                ' Esc went to the sheet.
+                If (mFilterable Or mIsMenu) And mSelectOpen Then TakeFocus hostApp, False
                 Exit Sub
             End If
         Case KIND_TICKBOX
@@ -11782,7 +11799,23 @@ Private Sub HandleSelectKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
 
     itemTotal = ItemCount
     If itemTotal = 0 Then
-        If keyText = "{ENTER}" Then hostApp.ClickDefaultButton
+        ' An open empty list closes on the keys that take a pick. A
+        ' closed empty menu opens on its keys and shows it has no items,
+        ' as a click does, where Enter clicked the app's default button;
+        ' Enter on a closed empty select is still the form's.
+        If mSelectOpen Then
+            Select Case keyText
+                Case "{ENTER}", " ", "{ALTUP}", "{ALTDOWN}", "{F4}"
+                    CloseDropList
+            End Select
+        ElseIf mIsMenu Then
+            Select Case keyText
+                Case " ", "{ENTER}", "{DOWN}", "{UP}", "{ALTDOWN}", "{F4}"
+                    OpenListByKey hostApp.Sheet, 1
+            End Select
+        ElseIf keyText = "{ENTER}" Then
+            hostApp.ClickDefaultButton
+        End If
         Exit Sub
     End If
     If mFilterable Then
@@ -11924,7 +11957,12 @@ Private Function SelectFilterKey(ByVal hostApp As ReDimUI, ByVal keyText As Stri
     End If
     If Not mSelectOpen Or LenB(mSelectFilter) = 0 Or mListMatches Is Nothing Then Exit Function
     If Not MoveKeyAim(keyText, mListHighlight, 1, mListMatches.Count, mListRows, aimMatch, stepDirection) Then
-        If keyText = "{ENTER}" Or keyText = "{ALTUP}" Then
+        If keyText = "{ALTUP}" And mIsMenu Then
+            ' Alt+Up only closes a menu, filtered or not: its highlight is
+            ' a command to run.
+            CloseDropList
+            SelectFilterKey = True
+        ElseIf keyText = "{ENTER}" Or keyText = "{ALTUP}" Then
             pickedItem = HighlightedItem()
             If pickedItem >= 1 Then
                 If PickSelectItem(hostApp, pickedItem) Then RunClickHandlers hostApp
@@ -19876,7 +19914,13 @@ Friend Sub HandleKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
         Case "{TAB}", "{BACKTAB}"
             ' Tab takes a combo's suggestion, commits, and moves focus
             ' on; with no other control to move to, it commits and
-            ' leaves.
+            ' leaves. Tab leaves the palette as Esc does, giving the keys
+            ' back to the control that had them, where it took the
+            ' suggestion and moved on to the app's first control.
+            If mComponentId = PALETTE_FIELD_ID Then
+                hostApp.ClosePalette True
+                Exit Sub
+            End If
             If keyText = "{TAB}" Then
                 If AcceptGhost(hostApp.Sheet) Then NoteFieldEdit hostApp
             End If
@@ -19890,9 +19934,13 @@ Friend Sub HandleKey(ByVal hostApp As ReDimUI, ByVal keyText As String)
         Case "{ESC}"
             ' Esc closes an open list first, keeping focus and text;
             ' with the list closed it reverts the field to the text it
-            ' had when focus arrived and leaves, firing nothing.
+            ' had when focus arrived and leaves, firing nothing. The
+            ' palette closes and gives the keys back to the control that
+            ' had them, which the revert's close left without them.
             If mKind = KIND_COMBO And mSelectOpen Then
                 CloseDropList
+            ElseIf mComponentId = PALETTE_FIELD_ID Then
+                hostApp.ClosePalette True
             Else
                 BlurField hostApp, False
             End If
