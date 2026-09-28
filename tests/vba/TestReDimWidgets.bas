@@ -8042,6 +8042,36 @@ Public Function TestLayoutEdges() As String
     TestLayoutEdges = transcript
 End Function
 
+' A workbook whose name holds an apostrophe, as "Bob's Budget.xlsm": the
+' app draws, and the click macro on its shapes resolves. Excel refused the
+' OnAction with the apostrophe left single inside the quotes, and every
+' Render raised 1004. It saves the workbook under that name, so it runs
+' in a session of its own (test_workbook_name.py).
+Public Function TestApostropheName(ByVal renamedPath As String) As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim transcript As String
+
+    Application.DisplayAlerts = False
+    ThisWorkbook.SaveAs renamedPath, xlOpenXMLWorkbookMacroEnabled
+    Application.DisplayAlerts = True
+    ReDimUI.AutoPump False
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "wid108")
+    app.Button("go").AtRect(24, 24, 90, 28).Text "Go"
+    On Error Resume Next
+    app.Render
+    transcript = "name=" & CStr(InStr(ThisWorkbook.Name, "'") > 0) & _
+        "|renders=" & CStr(Err.Number = 0)
+    Err.Clear
+    Application.Run host.Shapes("rdm_wid108_go").OnAction
+    transcript = transcript & "|resolves=" & CStr(Err.Number = 0)
+    Err.Clear
+    On Error GoTo 0
+    ReDimUI.AutoPump True
+    TestApostropheName = transcript
+End Function
+
 ' The app's life at its edges: an error value in state shows as its cell
 ' does; a theme re-render that fails leaves the other apps to follow the
 ' Windows look; shapes saved under a recased app id are adopted; a theme

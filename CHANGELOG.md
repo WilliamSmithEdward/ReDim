@@ -297,6 +297,12 @@
 - A theme's color, font, and tint getters answered on any value, so
   `ui.PrimaryColor` without `.Theme` returned 0 and painted black. They
   raise the role error every other member does.
+- In a workbook whose name holds an apostrophe, such as "Bob's
+  Budget.xlsm", `Render` raised error 1004: Excel refused the click
+  macro ReDim gives every shape, whose quoted workbook name left the
+  apostrophe single. It is doubled now. The macro is also named in the
+  workbook that holds ReDim's code rather than the sheet's, so an
+  add-in's app mounted on another workbook's sheet dispatches clicks.
 - A control adopted from an earlier session knew nothing of the parts
   that session drew: a radio group, check list, tabs, or skeleton saved
   with more rows than it now has kept the extra rows, dead, and a focus

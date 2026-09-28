@@ -13071,7 +13071,11 @@ End Sub
 Private Sub ApplyBehavior(ByVal mainShape As Shape, ByVal hostSheet As Worksheet)
     Dim desiredAction As String
 
-    desiredAction = "'" & hostSheet.Parent.Name & "'!RdxDispatch"
+    ' The dispatcher lives in the workbook that holds this code, which an
+    ' add-in's app on another workbook's sheet is not, and an apostrophe
+    ' in its name doubles inside the quotes: "Bob's Budget.xlsm" made
+    ' Excel refuse the OnAction, and every Render raised 1004.
+    desiredAction = "'" & Replace(ThisWorkbook.Name, "'", "''") & "'!RdxDispatch"
     If Not mAppliedValid Or mAppliedOnAction <> desiredAction Then
         mainShape.OnAction = desiredAction
         mAppliedOnAction = desiredAction

@@ -1030,7 +1030,9 @@ a check list, `Available`, `Selected`, and `PanelFiltered` head a transfer list'
 ## Shapes are framework-owned
 
 Every ReDim shape carries the dispatcher as its `OnAction`, including kinds with no click
-behavior. A shape with a macro assigned runs it instead of being selected, so plain clicks
+behavior. The macro is named in the workbook that holds ReDim's code, so an add-in's app on
+another workbook's sheet dispatches too, and a workbook name with an apostrophe in it
+works. A shape with a macro assigned runs it instead of being selected, so plain clicks
 cannot drag a modal card, label, or progress bar out of position. For deliberate design-time
 manipulation, Ctrl+click selects a shape as usual; geometry diffs against the live shape, so
 the next `Render` (or the next flush touching that component) snaps it back to its declared
