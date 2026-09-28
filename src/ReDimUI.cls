@@ -2975,7 +2975,16 @@ Friend Sub CheckSystemLook(Optional ByVal forceRead As Boolean = False)
                 ReadSystemLook darkOn, accentRgb
                 lookKey = CStr(darkOn) & ":" & CStr(accentRgb)
             End If
+            ' A re-render that fails counts as a fault, and the apps after
+            ' it still follow: sheet events run this, where the raise
+            ' stopped in VBA's own dialog and left the rest on the old look.
+            On Error Resume Next
             appValue.MatchSystemLook lookKey
+            If Err.Number <> 0 Then
+                Err.Clear
+                NoteTickFault
+            End If
+            On Error GoTo 0
         End If
     Next appValue
 End Sub
@@ -4398,6 +4407,7 @@ End Sub
 Public Sub Render()
     Dim orderedId As Variant
     Dim componentValue As ReDimUI
+    Dim adoptedSheet As Boolean
 
     RequireRole ROLE_APP, "Render"
     For Each orderedId In mComponentOrder
@@ -4415,10 +4425,16 @@ Public Sub Render()
     For Each componentValue In mComponents
         componentValue.SeedWritesTo Me
     Next componentValue
+    ' The first render on a sheet an earlier session drew sweeps what that
+    ' session left: the parts only a focus, an open list, or a tooltip
+    ' has, before anything draws, and a list's rows past what it now draws,
+    ' after.
+    adoptedSheet = (Not mRendered And Not mSurfaceFresh)
+    If adoptedSheet Then SweepTransientParts
     mRendered = True
     mDrawnThemeRevision = mTheme.ThemeRevision
     FlushDirty
-    PruneOrphanShapes
+    PruneOrphanShapes adoptedSheet
     ' Anything rendered that needs frames (a slider's press watch, a
     ' spinner, a toast) arms the pump right here; demand alone only keeps
     ' an already-armed pump alive.
@@ -4428,8 +4444,11 @@ End Sub
 
 ' Shapes with this app's prefix but no registered component are leftovers
 ' from renamed or removed components in an earlier build. Render sweeps them
-' so iterating on app code never litters the sheet.
-Private Sub PruneOrphanShapes()
+' so iterating on app code never litters the sheet. With adoptedRows, the
+' first render on a sheet an earlier session drew, a list's rows past the
+' rows it draws now go too: a radio group saved with six items and opened
+' with four kept two dead rows.
+Private Sub PruneOrphanShapes(Optional ByVal adoptedRows As Boolean)
     Dim candidateShape As Shape
     Dim orphanNames As Collection
     Dim orphanName As Variant
@@ -4438,12 +4457,16 @@ Private Sub PruneOrphanShapes()
     Dim orphanComponentId As String
     Dim partAt As Long
     Dim componentValue As ReDimUI
+    Dim candidateName As String
 
     Set orphanNames = New Collection
     namePrefix = SHAPE_PREFIX & mAppId & "_"
     For Each candidateShape In mSheet.Shapes
-        If Left$(candidateShape.Name, Len(namePrefix)) = namePrefix Then
-            remainder = Mid$(candidateShape.Name, Len(namePrefix) + 1)
+        ' Names compare as ids do, without case: shapes saved as
+        ' rdm_Orders_ belong to the app mounted as "orders".
+        candidateName = candidateShape.Name
+        If StrComp(Left$(candidateName, Len(namePrefix)), namePrefix, vbTextCompare) = 0 Then
+            remainder = Mid$(candidateName, Len(namePrefix) + 1)
             partAt = InStr(1, remainder, PART_SEPARATOR)
             If partAt > 0 Then
                 orphanComponentId = Left$(remainder, partAt - 1)
@@ -4451,7 +4474,11 @@ Private Sub PruneOrphanShapes()
                 orphanComponentId = remainder
             End If
             If Not TryGetComponent(orphanComponentId, componentValue) Then
-                orphanNames.Add candidateShape.Name
+                orphanNames.Add candidateName
+            ElseIf adoptedRows And partAt > 0 Then
+                If componentValue.RowPartStale(Mid$(remainder, partAt + Len(PART_SEPARATOR))) Then
+                    orphanNames.Add candidateName
+                End If
             End If
         End If
     Next candidateShape
@@ -4461,6 +4488,52 @@ Private Sub PruneOrphanShapes()
     Next orphanName
     On Error GoTo 0
 End Sub
+
+' Before the first draw on a sheet an earlier session drew: the focus
+' ring, key cursor, tooltip, and open list rows no control has yet in this
+' session go, which stayed, dead and deaf, when the workbook was saved or
+' the project reset while one showed.
+Private Sub SweepTransientParts()
+    Dim candidateShape As Shape
+    Dim doomedNames As Collection
+    Dim doomedName As Variant
+    Dim namePrefix As String
+    Dim candidateName As String
+    Dim partAt As Long
+
+    Set doomedNames = New Collection
+    namePrefix = SHAPE_PREFIX & mAppId & "_"
+    For Each candidateShape In mSheet.Shapes
+        candidateName = candidateShape.Name
+        If StrComp(Left$(candidateName, Len(namePrefix)), namePrefix, vbTextCompare) = 0 Then
+            partAt = InStr(Len(namePrefix) + 1, candidateName, PART_SEPARATOR)
+            If partAt > 0 Then
+                If TransientPart(LCase$(Mid$(candidateName, partAt + Len(PART_SEPARATOR)))) Then
+                    doomedNames.Add candidateName
+                End If
+            End If
+        End If
+    Next candidateShape
+    On Error Resume Next
+    For Each doomedName In doomedNames
+        mSheet.Shapes(CStr(doomedName)).Delete
+    Next doomedName
+    On Error GoTo 0
+End Sub
+
+' A part only a focused control, an open drop list, or a showing tooltip
+' has: the focus ring, a list's key cursor, the tip, and a drop list's
+' rows, pagers, and empty row.
+Private Function TransientPart(ByVal partName As String) As Boolean
+    Select Case partName
+        Case "fr", "kr", "tt", "optu", "optd", "optn"
+            TransientPart = True
+        Case Else
+            If Left$(partName, 3) = "opt" And Len(partName) > 3 Then
+                TransientPart = (Mid$(partName, 4) Like String$(Len(partName) - 3, "#"))
+            End If
+    End Select
+End Function
 
 Friend Sub NotifyDirty(ByVal targetComponentId As String)
     Dim existing As Variant
@@ -8521,7 +8594,7 @@ Private Function SheetHoldsPrefix(ByVal hostSheet As Worksheet, ByVal namePrefix
 
     prefixLength = Len(namePrefix)
     For Each candidateShape In hostSheet.Shapes
-        If Left$(candidateShape.Name, prefixLength) = namePrefix Then
+        If StrComp(Left$(candidateShape.Name, prefixLength), namePrefix, vbTextCompare) = 0 Then
             SheetHoldsPrefix = True
             Exit Function
         End If
@@ -9858,7 +9931,8 @@ Private Function ItemNamesState(ByVal itemNumber As Long, ByRef stateValue As Va
     If IsNumeric(itemValue) And IsNumeric(stateValue) And VarType(stateValue) <> vbString Then
         ItemNamesState = (CDbl(itemValue) = CDbl(stateValue))
     Else
-        ItemNamesState = (StrComp(CStr(itemValue), CStr(stateValue), vbTextCompare) = 0)
+        ItemNamesState = (StrComp(ValueWords(itemValue), ValueWords(stateValue), _
+            vbTextCompare) = 0)
     End If
 End Function
 
@@ -9869,7 +9943,10 @@ Private Function SeedsWritesTo() As Boolean
     If FollowsWritesTo() Then
         SeedsWritesTo = True
     ElseIf LenB(mWritesToKey) > 0 Then
-        SeedsWritesTo = (mKind = KIND_CHECKLIST Or mKind = KIND_TRANSFER)
+        ' A cell-backed field seeds with its cell, as a float field does
+        ' with its text, though it does not follow the key.
+        SeedsWritesTo = (mKind = KIND_CHECKLIST Or mKind = KIND_TRANSFER _
+            Or mKind = KIND_INPUT Or mKind = KIND_COMBO)
     End If
 End Function
 
@@ -9920,7 +9997,8 @@ Friend Sub SeedWritesTo(ByVal hostApp As ReDimUI)
         Case KIND_INPUT, KIND_COMBO
             ' Typing is not the field's value until it commits: a field
             ' being typed in seeds with the text it had when focus came.
-            fieldWords = mText
+            ' A cell-backed field's text is its cell's.
+            fieldWords = FieldTextNow(hostApp.Sheet)
             If ReDimUI.IsComponentFocused(mOwnerAppId, mComponentId) Then
                 fieldWords = mFieldTextAtFocus
             End If
@@ -10034,7 +10112,9 @@ End Function
 Private Function StateText(ByRef stateValue As Variant) As String
     If IsObject(stateValue) Or IsArrayValue(stateValue) Then Exit Function
     If IsNull(stateValue) Then Exit Function
-    StateText = CStr(stateValue)
+    ' An error value, as a lookup's #N/A written from its cell, shows as
+    ' its cell does; CStr raised Type mismatch on every draw.
+    StateText = ValueWords(stateValue)
 End Function
 
 ' A state value as the True or False a binding follows: what CBool
@@ -15925,6 +16005,36 @@ Friend Property Get HasDrawn() As Boolean
     HasDrawn = mAppliedValid
 End Property
 
+' Whether a part is a row of this list numbered past the rows it draws
+' now: a radio group's circle, dot, or caption, a check list's box or
+' caption, a tab, or a skeleton bar.
+Friend Function RowPartStale(ByVal partName As String) As Boolean
+    Dim digitsAt As Long
+    Dim rowLetters As String
+    Dim rowDigits As String
+
+    For digitsAt = 1 To Len(partName)
+        If Mid$(partName, digitsAt, 1) Like "#" Then Exit For
+    Next digitsAt
+    If digitsAt = 1 Or digitsAt > Len(partName) Then Exit Function
+    rowLetters = LCase$(Left$(partName, digitsAt - 1))
+    rowDigits = Mid$(partName, digitsAt)
+    If Len(rowDigits) > 9 Or Not rowDigits Like String$(Len(rowDigits), "#") Then Exit Function
+    Select Case mKind
+        Case KIND_RADIO
+            If rowLetters <> "c" And rowLetters <> "d" And rowLetters <> "t" Then Exit Function
+        Case KIND_CHECKLIST
+            If rowLetters <> "b" And rowLetters <> "t" Then Exit Function
+        Case KIND_TABS
+            If rowLetters <> "tb" Then Exit Function
+        Case KIND_SKELETON
+            If rowLetters <> "sk" Then Exit Function
+        Case Else
+            Exit Function
+    End Select
+    RowPartStale = (CLng(rowDigits) > mAppliedOptionCount)
+End Function
+
 Friend Property Get TabShut() As Boolean
     TabShut = mTabShut
 End Property
@@ -20941,8 +21051,8 @@ Private Sub DeleteShapesNamed( _
     ReDim doomedNames(1 To hostSheet.Shapes.Count)
     For Each candidateShape In hostSheet.Shapes
         shapeLabel = candidateShape.Name
-        If Left$(shapeLabel, Len(namePrefix)) = namePrefix _
-            Or (LenB(exactName) > 0 And shapeLabel = exactName) Then
+        If StrComp(Left$(shapeLabel, Len(namePrefix)), namePrefix, vbTextCompare) = 0 _
+            Or (LenB(exactName) > 0 And StrComp(shapeLabel, exactName, vbTextCompare) = 0) Then
             doomedCount = doomedCount + 1
             doomedNames(doomedCount) = shapeLabel
         End If
@@ -21599,40 +21709,49 @@ Private Sub ReviseTheme()
 End Sub
 
 Public Property Get PrimaryColor() As Long
+    If mRole <> ROLE_THEME Then RequireRole ROLE_THEME, "PrimaryColor"
     PrimaryColor = mThemePrimary
 End Property
 
 Public Property Get OnPrimaryColor() As Long
+    If mRole <> ROLE_THEME Then RequireRole ROLE_THEME, "OnPrimaryColor"
     OnPrimaryColor = mThemeOnPrimary
 End Property
 
 Public Property Get SurfaceColor() As Long
+    If mRole <> ROLE_THEME Then RequireRole ROLE_THEME, "SurfaceColor"
     SurfaceColor = mThemeSurface
 End Property
 
 Public Property Get OnSurfaceColor() As Long
+    If mRole <> ROLE_THEME Then RequireRole ROLE_THEME, "OnSurfaceColor"
     OnSurfaceColor = mThemeOnSurface
 End Property
 
 Public Property Get MutedColor() As Long
+    If mRole <> ROLE_THEME Then RequireRole ROLE_THEME, "MutedColor"
     MutedColor = mThemeMuted
 End Property
 
 Public Property Get OnMutedColor() As Long
+    If mRole <> ROLE_THEME Then RequireRole ROLE_THEME, "OnMutedColor"
     OnMutedColor = mThemeOnMuted
 End Property
 
 Public Property Get SuccessColor() As Long
+    If mRole <> ROLE_THEME Then RequireRole ROLE_THEME, "SuccessColor"
     SuccessColor = mThemeSuccess
 End Property
 
 Public Property Get DangerColor() As Long
+    If mRole <> ROLE_THEME Then RequireRole ROLE_THEME, "DangerColor"
     DangerColor = mThemeDanger
 End Property
 
 ' Amber for warnings: dark on light surfaces and bright on dark ones, so
 ' it keeps its contrast in every theme without a slot of its own.
 Public Property Get WarningColor() As Long
+    If mRole <> ROLE_THEME Then RequireRole ROLE_THEME, "WarningColor"
     If RelativeLuminance(mThemeSurface) < 0.2 Then
         WarningColor = RGB(252, 200, 60)
     Else
@@ -21641,26 +21760,32 @@ Public Property Get WarningColor() As Long
 End Property
 
 Public Property Get BorderColor() As Long
+    If mRole <> ROLE_THEME Then RequireRole ROLE_THEME, "BorderColor"
     BorderColor = mThemeBorder
 End Property
 
 Public Property Get CanvasColor() As Long
+    If mRole <> ROLE_THEME Then RequireRole ROLE_THEME, "CanvasColor"
     CanvasColor = mThemeCanvas
 End Property
 
 Public Property Get FontName() As String
+    If mRole <> ROLE_THEME Then RequireRole ROLE_THEME, "FontName"
     FontName = mThemeFontName
 End Property
 
 Public Property Get BaseFontSize() As Double
+    If mRole <> ROLE_THEME Then RequireRole ROLE_THEME, "BaseFontSize"
     BaseFontSize = mThemeFontSize
 End Property
 
 Public Property Get HoverTintPercent() As Double
+    If mRole <> ROLE_THEME Then RequireRole ROLE_THEME, "HoverTintPercent"
     HoverTintPercent = mThemeHoverTint
 End Property
 
 Public Property Get PressTintPercent() As Double
+    If mRole <> ROLE_THEME Then RequireRole ROLE_THEME, "PressTintPercent"
     PressTintPercent = mThemePressTint
 End Property
 

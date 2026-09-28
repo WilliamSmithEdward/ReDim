@@ -2048,6 +2048,22 @@ def test_layout_edges(run_widgets):
     )
 
 
+def test_lifecycle_edges(run_widgets):
+    facts = parse_transcript(run_widgets("TestLifecycleEdges"))
+    assert facts["errorState"] == "True/#N/A/#N/A", (
+        "an error value in state shows as its cell does and picks the item that shows it"
+    )
+    assert facts["cellSeeds"] == "Alice", "a cell-backed field seeds its key from its cell"
+    assert facts["themeRole"] == "True", "a theme token read from an app raises"
+    assert facts["followFault"] == "True/1/True", (
+        "a theme re-render that fails is counted and the other apps still follow"
+    )
+    assert facts["caseAdopts"] == "1", "shapes saved under a recased app id are adopted"
+    assert facts["adoptSweeps"] == "True", (
+        "the first render on an adopted sheet sweeps dead rows, rings, and list rows"
+    )
+
+
 def test_list_edges(run_widgets):
     facts = parse_transcript(run_widgets("TestListEdges"))
     assert facts["clickable"] == "True/True", (

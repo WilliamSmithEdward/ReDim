@@ -43,7 +43,9 @@ Shape naming: `rdm_<appId>_<componentId>` for a component's main shape, and
 `rdm_<appId>_<componentId>__<part>` for the parts of composite widgets, such as a toggle's knob,
 a list's rows, or a calendar's weeks. `Mount` is idempotent: an existing shape with a matching
 name is adopted, so re-running setup code never duplicates shapes and app code can be re-entered
-safely after a crash.
+safely after a crash. A control starts knowing nothing of the parts an earlier session drew, so
+the first render on such a sheet sweeps them: before anything draws, the parts only a focus, an
+open list, or a tooltip has, and after, a list's rows numbered past what it now draws.
 
 Every control is drawn from shapes; native form controls went in 0.5.0. Composite widgets keep
 the look each part was last drawn with and rewrite only the parts whose look changed, and a part

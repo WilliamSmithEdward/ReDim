@@ -273,6 +273,31 @@
 - Space in a check list whose filter matched nothing checked a row it
   hid, writing the key and firing `OnChange`. It toggles only a row that
   shows.
+- An error value in a key, as a lookup's `#N/A` written from its cell,
+  showed as "Error 2042" in a `BindText` label, and a `SelectBox` whose
+  items came from cells holding it could not pick that item. Both read
+  it as its cell shows it.
+- A cell-backed field with `WritesTo` left its key unset until the cell
+  was edited, so a label bound to the key stayed blank. On the first
+  render it seeds an unset key with its cell's text, as the docs say
+  every control does.
+- A re-render for `FollowSystemTheme` that failed, on a sheet since
+  deleted for one, raised out of the sheet event that noticed the
+  Windows look change, into VBA's error dialog. It counts in
+  `TickFaultCount` now, as the pump's own check does.
+- Shapes saved under an app id in another case, `rdm_Orders_` for an
+  app mounted as "orders", read as another app's: the build drew a
+  second set over them, and neither `Render` nor `Unmount` ever removed
+  the first. The prefix scans ignore case, as ids do.
+- A theme's color, font, and tint getters answered on any value, so
+  `ui.PrimaryColor` without `.Theme` returned 0 and painted black. They
+  raise the role error every other member does.
+- A control adopted from an earlier session knew nothing of the parts
+  that session drew: a radio group, check list, tabs, or skeleton saved
+  with more rows than it now has kept the extra rows, dead, and a focus
+  ring, key cursor, tooltip, or open list saved on the sheet stayed. The
+  first render on such a sheet sweeps them; a sheet of 640 shapes
+  rendered in the same time within noise.
 
 ## 1.0.3 - 2026-09-26
 

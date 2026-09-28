@@ -8042,6 +8042,119 @@ Public Function TestLayoutEdges() As String
     TestLayoutEdges = transcript
 End Function
 
+' The app's life at its edges: an error value in state shows as its cell
+' does; a theme re-render that fails leaves the other apps to follow the
+' Windows look; shapes saved under a recased app id are adopted; a theme
+' token read from an app raises; a cell-backed field seeds its key from
+' its cell; and the first render on a sheet an earlier session drew
+' sweeps that session's dead rows, focus ring, and open list rows.
+Public Function TestLifecycleEdges() As String
+    Dim app As ReDimUI
+    Dim goneApp As ReDimUI
+    Dim liveApp As ReDimUI
+    Dim host As Worksheet
+    Dim gone As Worksheet
+    Dim live As Worksheet
+    Dim transcript As String
+    Dim tokenValue As Long
+    Dim leftover As Shape
+    Dim candidate As Shape
+    Dim sameNamed As Long
+
+    ReDimUI.AutoPump False
+    Set host = NewCanvas()
+    host.Range("C3").Value = "Alice"
+    host.Range("E2").Value = CVErr(xlErrNA)
+    host.Range("E3").Value = "West"
+    Set app = ReDimUI.Mount(host, "wid107")
+    app.Label("tot").AtRect(24, 24, 120, 20).BindText "total"
+    app.SelectBox("region").AtRect(24, 60, 120, 22).ItemsFrom(host.Range("E2:E3")) _
+        .WritesTo "region"
+    app.TextInput("who").At("C3").WritesTo "who"
+    app.Render
+
+    On Error Resume Next
+    app.SetState "total", CVErr(xlErrNA)
+    app.SetState "region", CVErr(xlErrNA)
+    transcript = "errorState=" & CStr(Err.Number = 0) & "/" & _
+        host.Shapes("rdm_wid107_tot").TextFrame2.TextRange.Text & "/" & _
+        app.SelectBox("region").SelectedText
+    Err.Clear
+    transcript = transcript & "|cellSeeds=" & CStr(app.State("who"))
+    Err.Clear
+    tokenValue = app.PrimaryColor
+    transcript = transcript & "|themeRole=" & CStr(Err.Number <> 0 And tokenValue = 0)
+    Err.Clear
+    On Error GoTo 0
+
+    ' Two apps follow the Windows look; the first one's sheet is gone.
+    Set gone = NewCanvas()
+    Set goneApp = ReDimUI.Mount(gone, "wid107a")
+    goneApp.Button("go").AtRect(24, 24, 100, 30).Text "Go"
+    goneApp.FollowSystemTheme
+    goneApp.Render
+    Set live = NewCanvas()
+    Set liveApp = ReDimUI.Mount(live, "wid107b")
+    liveApp.Button("go").AtRect(24, 24, 100, 30).Text "Go"
+    liveApp.FollowSystemTheme
+    liveApp.Render
+    Application.DisplayAlerts = False
+    gone.Delete
+    Application.DisplayAlerts = True
+    ReDimUI.ResetTickFaults
+    ReDimUI.OverrideSystemLook True, RGB(0, 120, 212)
+    On Error Resume Next
+    ReDimUI.CheckSystemLook True
+    transcript = transcript & "|followFault=" & CStr(Err.Number = 0) & "/" & _
+        ReDimUI.TickFaultCount & "/" & _
+        CStr(liveApp.Theme.SurfaceColor = ReDimUI.ThemeDark.SurfaceColor)
+    Err.Clear
+    On Error GoTo 0
+    goneApp.FollowSystemTheme False
+    liveApp.FollowSystemTheme False
+    ReDimUI.OverrideSystemLook False, -1
+    ReDimUI.ClearSystemLookOverride
+
+    ' A shape saved under the app id in another case is the app's.
+    Set leftover = host.Shapes.AddShape(msoShapeRectangle, 300, 24, 60, 24)
+    leftover.Name = "rdm_Wid107c_btn"
+    ReDimUI.Mount(host, "wid107c").Button("btn").AtRect(300, 24, 60, 24).Text "Go"
+    ReDimUI.App("wid107c").Render
+    For Each candidate In host.Shapes
+        If StrComp(candidate.Name, "rdm_wid107c_btn", vbTextCompare) = 0 Then
+            sameNamed = sameNamed + 1
+        End If
+    Next candidate
+    transcript = transcript & "|caseAdopts=" & sameNamed
+
+    ' An earlier session drew six rows, a focus ring, and an open list's
+    ' row; this one draws four rows with no focus and the list closed.
+    With ReDimUI.Mount(host, "wid107d")
+        .RadioGroup("r").AtRect(24, 120, 120, 150).Items "A", "B", "C", "D", "E", "F"
+        .SelectBox("s").AtRect(200, 120, 120, 22).Items "One", "Two"
+        .Render
+        .Unmount False
+    End With
+    host.Shapes.AddShape(msoShapeRectangle, 20, 116, 128, 158).Name = "rdm_wid107d_r__fr"
+    host.Shapes.AddShape(msoShapeRectangle, 200, 142, 120, 20).Name = "rdm_wid107d_s__opt1"
+    With ReDimUI.Mount(host, "wid107d")
+        .RadioGroup("r").AtRect(24, 120, 120, 100).Items "A", "B", "C", "D"
+        .SelectBox("s").AtRect(200, 120, 120, 22).Items "One", "Two"
+        .Render
+    End With
+    transcript = transcript & "|adoptSweeps=" & CStr(ShapeExists(host, "rdm_wid107d_r__t4") _
+        And Not ShapeExists(host, "rdm_wid107d_r__t5") _
+        And Not ShapeExists(host, "rdm_wid107d_r__d6") _
+        And Not ShapeExists(host, "rdm_wid107d_r__c6") _
+        And Not ShapeExists(host, "rdm_wid107d_r__fr") _
+        And Not ShapeExists(host, "rdm_wid107d_s__opt1"))
+    On Error Resume Next
+    ReDimUI.AutoPump True
+    RdxStopPump
+    On Error GoTo 0
+    TestLifecycleEdges = transcript
+End Function
+
 ' Lists and small widgets at their edges: a progress bar's fill and a
 ' transfer panel's header run the dispatcher when clicked, and a disabled
 ' bar keeps its amount in the muted ink; a second click on a row that now

@@ -11,7 +11,7 @@ names the control that raised it.
 
 | Member | Purpose |
 |---|---|
-| `ReDimUI.Mount(sheet, appId)` | Create or fetch the app bound to a worksheet. Idempotent. |
+| `ReDimUI.Mount(sheet, appId)` | Create or fetch the app bound to a worksheet. Idempotent. Shapes an earlier session drew on the sheet, under the id in any case, are the app's to adopt; the first `Render` sweeps what that session left and the build no longer draws: rows past a list's items, and the parts only a focused control, an open list, or a tooltip has. |
 | `ReDimUI.App(appId)` | Fetch a mounted app; raises if missing. |
 | `ReDimUI.HasApp(appId)` | Existence probe. |
 | `ReDimUI.Sender`, `SenderApp`, `SenderId` | Click context, valid inside handlers. |
@@ -92,7 +92,7 @@ framework. Also:
 | `PointerEffects effectsOn` | Hover and press looks for the app's controls, and an open list whose highlight follows the pointer (see [Pointer](#pointer)). Off by default. |
 | `AddCommand commandWords, handlerProc, iconName` | Adds an entry to the app's command palette: its text, the Public procedure it runs, and an optional icon. Inside the handler, `ReDimUI.SenderApp.LastCommand` names the entry. On a `MenuButton` the same builder adds a menu row. |
 | `CommandPalette paletteKey` / `OpenCommandPalette` | Turns on the command palette and binds its key, Ctrl+Shift+P unless another OnKey code is given (`""` binds none); `OpenCommandPalette` opens it from code (see [Command palette](#command-palette)). |
-| `FollowSystemTheme followOn` | The app takes `ReDimUI.ThemeSystem` now, and again whenever Windows switches between light and dark mode or changes its accent. The app notices as its sheets activate, the selection moves, or the pump runs, reading the registry at most every two seconds. Called before `Render`, it sets the theme without rendering early. `False` stops following and keeps the theme in place. |
+| `FollowSystemTheme followOn` | The app takes `ReDimUI.ThemeSystem` now, and again whenever Windows switches between light and dark mode or changes its accent. The app notices as its sheets activate, the selection moves, or the pump runs, reading the registry at most every two seconds. Called before `Render`, it sets the theme without rendering early. A re-render that fails counts in `TickFaultCount` and never raises from the sheet event that noticed the change. `False` stops following and keeps the theme in place. |
 | `CloseModal` | Hide the modal set. |
 | `Async(opId)` / `CancelAsync opId` / `AsyncError(opId)` | Async ops (see [async.md](async.md)); `Async(opId).IsRunning` reads whether one runs now. |
 | `Job(jobId)` / `CancelJob jobId` | Chunked or paced background work; `Job(jobId).IsRunning` reads whether it runs now. |
@@ -191,7 +191,8 @@ All fluent, all return the component:
   its own pager.
 - Bindings: `BindText(key, template)` where `{0}` is the value, `BindValue(key)`,
   `BindVisible(key, invert)`, `BindEnabled(key, invert)`, `WritesTo(key)`. The invert flag
-  serves the disable-while-busy pattern: `BindEnabled "anyRunning", True`.
+  serves the disable-while-busy pattern: `BindEnabled "anyRunning", True`. An error value
+  in a key, such as a lookup's `#N/A` written from its cell, shows as its cell shows it.
 - `WritesTo(key)` goes both ways. A user's change writes the key, and the control follows
   the key: `SetState "darkMode", True` flips a switch that writes `darkMode`, firing no
   `OnChange`. On the first render a key with no value takes the control's, as
@@ -208,8 +209,9 @@ All fluent, all return the component:
   the control cannot show leaves it as it is. A `CheckList`
   or `TransferList` writes a joined list and does not follow, though it seeds an unset key
   with its checks or picks on the first render; nor does a cell-backed field, whose value
-  is its cell. `BindValue(key)` follows a different key one way; on a
-  `SelectBox`, `RadioGroup`, or `Tabs` a number is a position and a text names an item,
+  is its cell, though it seeds an unset key with its cell's text. `BindValue(key)`
+  follows a different key one way; on a `SelectBox`, `RadioGroup`, or `Tabs` a number is
+  a position and a text names an item,
   so an item's value read back as text finds it; numeric text that names none is a position.
   State keys ignore case in bindings as in the store.
 - Behavior: `OnClick "Module.Proc"`, `OnClickAsync "Module.Proc"`, `OnChange "Module.Proc"`.
