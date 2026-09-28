@@ -74,7 +74,7 @@ framework. Also:
 | `StateKeys` | Every key in the store once, in the order it was first set, as an array from 0, whether code or a control's `WritesTo` set it. |
 | `SetStateDefault key, value` | Sets only when the key has no value; the right form for initial values. |
 | (persistence) | The state store is deliberately in-memory and session-scoped; ReDim ships no persistence. Durability belongs to the host application: walk the store with `StateKeys` and `State`, save wherever fits (a hidden sheet, workbook names, a file), and reseed on build with `SetStateDefault`, which never clobbers a value already in play. `ROneCOne.Json.Serialize`/`Deserialize` are available if JSON is the format of choice. |
-| `HotKey keyCode, "Module.Proc"` / `ClearHotKeys` | Application.OnKey with cleanup on Unmount and Shutdown. |
+| `HotKey keyCode, "Module.Proc"` / `ClearHotKeys` | Application.OnKey with cleanup on Unmount and Shutdown. A key a focused control or a protected surface took comes back to its hot key when they let it go. |
 | `OnStateChanged key, "Module.Proc"` | Zero-argument listener runs after the key changes and the controls bound to it redraw, so a listener reading one sees the new value (inside `BeginUpdate`, the redraw waits for `EndUpdate`). A write that leaves the value as it was (the same type and value) still redraws but runs no listener, so a listener that writes back the value it read, rounded or clamped, settles. `Array("a", "b")` in place of the key listens on each; a listener already on a key is not added again, so a build that runs twice still fires it once. A listener ReDim cannot run goes to the `OnError` sink, named with the key, and the key's other listeners still run. |
 | `BeginUpdate` / `EndUpdate` | Batch several changes into one flush. |
 | `Render` | Mark everything dirty and paint. Call once after building the UI. |
@@ -99,7 +99,7 @@ framework. Also:
 | `OnError "Module.Proc"` | One-argument sink for the handler failures ReDim sees, such as a handler it cannot run, named with the control, op, job, or state key that ran it: "ReDim handler error 1004 in Orders.Save for component 'save': Cannot run the macro". An error raised inside a handler never reaches it: Excel does not return an error from a procedure `Application.Run` started, so VBA stops in the handler with its own dialog, and End there resets the project and every app with it until the build runs again. A handler traps its own errors. |
 | `RebuildsWith "Module.Build"` | A reset of the project, End in VBA's error dialog or an edit in the VBA editor, forgets every app, and its shapes stop answering. With `RebuildsWith`, the first click on one of the app's shapes after a reset runs the build macro, which should mount and render the app, and then carries out the click. The macro's name is kept in a hidden workbook name (`rdm_rebuild_` and the app id), which a reset leaves alone and which is written only when it changes; `""` forgets it, and so does `Unmount`. An app of several windows can name one build for all. |
 | `TickFaultCount` / `ResetTickFaults` (on `ReDimUI`) | The pump and key dispatch trap errors silently by design; every trapped fault increments this factory counter. A key's failure also goes to the app's `OnError` sink, named with the control that had the keys, as a click's does. Read it in tests or diagnostics to prove a run was clean, reset it to scope a measurement. |
-| `ProtectSurface protectOn, allowCellSelection` | Opt-in app-sheet protection (UserInterfaceOnly): users cannot enter cell edit mode or drag shapes there, framework writes keep working, cell-anchored TextInput cells stay editable, and float fields type normally since they never enter cell edit. By default locked canvas cells are also unselectable - no selection rectangle on the app surface, no protected-cell warnings for stray keys - while unlocked TextInput cells stay selectable; pass `allowCellSelection:=True` to keep the whole grid selectable. OnKey capture (fields, HotKey) is unaffected. Protection state does not persist across reopen, so builds should call `ProtectSurface False` first and `ProtectSurface` after Render, as every demo does. Unmount unprotects. |
+| `ProtectSurface protectOn, allowCellSelection` | Opt-in app-sheet protection (UserInterfaceOnly): users cannot enter cell edit mode or drag shapes there, framework writes keep working, cell-anchored TextInput cells stay editable, and float fields type normally since they never enter cell edit. By default locked canvas cells are also unselectable - no selection rectangle on the app surface - while unlocked TextInput cells stay selectable; pass `allowCellSelection:=True` to keep the whole grid selectable. With no control focused and a locked cell active, the surface holds the keys that type into a cell, so a stray key raises no protected-cell notice (see [Float fields and keyboard focus](#float-fields-and-keyboard-focus)). OnKey capture (fields, HotKey) works under protection. Protection state does not persist across reopen, so builds should call `ProtectSurface False` first and `ProtectSurface` after Render, as every demo does. Unmount unprotects. |
 | `Unmount deleteShapes` | Remove components (and shapes) and forget the app. Its running ops and jobs stop without running their outcome handlers. |
 
 ## Component builders
@@ -615,8 +615,9 @@ Focus mechanics, all automatic:
   `1/2` stays words rather than a date, and `=A1` never becomes a formula. What someone
   types into the cell by hand is Excel's to read, as in any cell.
 
-Capture uses `Application.OnKey`, bound only while a control holds focus and released when
-it leaves, so sheet typing is untouched the rest of the time. The bound set is the
+Capture uses `Application.OnKey`, bound while a control holds focus and released when it
+leaves, so sheet typing is untouched the rest of the time; a `ProtectSurface` sheet keeps
+some of it, as below. The bound set is the
 practical editing and navigation set: the letters a to z (with Shift capitals), digits,
 space, punctuation and symbols (bound by character, so each follows the active keyboard
 layout), Backspace, Del, the arrow keys, Home, End, Page Up, Page Down, Tab and
@@ -625,14 +626,21 @@ clipboard, and undo chords under [Text editing](#text-editing). Editing is full 
 editing: arrows move the insertion point, characters insert at it, Backspace and Del
 delete around it, Home and End jump the line edges, and Up and Down move across hard
 lines with the column clamped (a long wrapped line counts as one line). While a field is
-focused the arrows belong to editing, so they do not move the cell selection. Keys outside
-the bound set, accented letters and IME input among them, fall through to the grid as
-usual; on a `ProtectSurface` sheet Excel answers those with its
-protected-cell notice, and protection stays on the whole time - OnKey capture works fine
-under protection (verified with message-level keystrokes). Apps that bind arrow HotKeys
-should re-arm them after field focus sessions if they mix the two. `ReDimUI.HasKeyboardFocus`
-and `ReDimUI.FocusedComponentId` report the current holder; `RdxReleaseKeys` is the panic
-release that unbinds everything regardless of state.
+focused the arrows belong to editing, so they do not move the cell selection.
+
+A key that reaches a locked cell of a `ProtectSurface` sheet gets Excel's protected-cell
+notice. So while such a sheet is in front with no control focused and a locked cell
+active, ReDim holds the keys that type into a cell: the letters, digits, space,
+punctuation and symbols, Backspace, and Del. A stray key goes nowhere. Every other key
+stays Excel's, and a held key meant for somewhere else goes on to it: one typed into an
+unlocked cell, such as a cell-backed TextInput's, into a box that has the keyboard
+instead of the grid, such as the ribbon's search, or on another sheet. Keys outside the
+bound set, accented letters and IME input among them, still reach the grid, where a
+locked cell answers them with the notice. Protection stays on the whole time, and OnKey
+capture works under it (verified with message-level keystrokes). When a control or the
+surface lets a key go, an app's `HotKey` on that key takes it back.
+`ReDimUI.HasKeyboardFocus` and `ReDimUI.FocusedComponentId` report the current holder;
+`RdxReleaseKeys` is the panic release that unbinds everything regardless of state.
 
 ## Text editing
 

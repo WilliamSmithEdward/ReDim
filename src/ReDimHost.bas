@@ -63,6 +63,34 @@ Private Declare PtrSafe Function GetKeyState Lib "user32" ( _
 
 Private Const VK_CAPITAL As Long = &H14
 
+' A key the capture took that was not ReDim's to keep goes on to the
+' window with the keyboard, posted as Windows would have delivered it.
+Private Declare PtrSafe Function GetFocus Lib "user32" () As LongPtr
+
+Private Declare PtrSafe Function GetClassNameW Lib "user32" ( _
+    ByVal windowHandle As LongPtr, _
+    ByVal classBuffer As LongPtr, _
+    ByVal bufferChars As Long _
+) As Long
+
+Private Declare PtrSafe Function PostMessageW Lib "user32" ( _
+    ByVal windowHandle As LongPtr, _
+    ByVal messageCode As Long, _
+    ByVal wParam As LongPtr, _
+    ByVal lParam As LongPtr _
+) As Long
+
+Private Declare PtrSafe Function MapVirtualKeyW Lib "user32" ( _
+    ByVal keyCode As Long, _
+    ByVal mapType As Long _
+) As Long
+
+Private Const WM_KEYDOWN As Long = &H100
+Private Const WM_KEYUP As Long = &H101
+Private Const WM_CHAR As Long = &H102
+Private Const VK_BACK As Long = &H8
+Private Const VK_DELETE As Long = &H2E
+
 ' Animation frame interval. Work (ops, budget jobs, toast expiry) runs on a
 ' 50 ms cadence inside ReDimUI.TickAll regardless of the frame rate.
 Private Const PUMP_DEFAULT_INTERVAL_MS As Long = 16
@@ -79,6 +107,10 @@ Private gCursorPinned As Boolean
 ' calls, so focus moving between controls keeps them instead of paying
 ' a release and a rebind.
 Private gKeysBound As Boolean
+' True while a protected app surface holds the keys that type into a cell,
+' with no control focused. A control letting go of the keys leaves those
+' bound.
+Private gSurfaceKeysHeld As Boolean
 ' The captured keys, and the OnKey codes each key name answers to, made
 ' once: with a shortcut declared, every named key sent to a control
 ' built the whole table again to look its codes up.
@@ -247,16 +279,108 @@ Public Sub RdxBindKeys()
 
     If gKeysBound Then Exit Sub
     On Error Resume Next
+    ' Every key, the ones a protected surface holds included: an app's hot
+    ' key may have taken one of those back since.
     For Each binding In CapturedKeys()
-        If binding(1) Like "[a-zA-Z]" Then
-            Application.OnKey binding(0), "'RdxKeyLetter """ & binding(1) & """'"
-        Else
-            Application.OnKey binding(0), _
-                "'RdxKeyChar """ & Replace(binding(1), """", """""") & """'"
-        End If
+        BindCapturedKey binding
     Next binding
     On Error GoTo 0
     gKeysBound = True
+End Sub
+
+Private Sub BindCapturedKey(ByVal binding As Variant)
+    If binding(1) Like "[a-zA-Z]" Then
+        Application.OnKey binding(0), "'RdxKeyLetter """ & binding(1) & """'"
+    Else
+        Application.OnKey binding(0), _
+            "'RdxKeyChar """ & Replace(binding(1), """", """""") & """'"
+    End If
+End Sub
+
+' A protected app surface in front with no control focused holds the keys
+' that type into a cell, so a stray one never reaches a locked cell and
+' Excel's protected-cell notice; every other key stays Excel's. From a
+' focused control's capture, only the others are let go.
+Public Sub RdxHoldSurfaceKeys()
+    Dim binding As Variant
+
+    If gSurfaceKeysHeld And Not gKeysBound Then Exit Sub
+    On Error Resume Next
+    For Each binding In CapturedKeys()
+        If TypesIntoCell(binding(1)) Then
+            If Not gKeysBound And Not gSurfaceKeysHeld Then BindCapturedKey binding
+        ElseIf gKeysBound Then
+            Application.OnKey binding(0)
+        End If
+    Next binding
+    On Error GoTo 0
+    gKeysBound = False
+    gSurfaceKeysHeld = True
+End Sub
+
+' Whether a captured key's name types into a cell: a character, or one of
+' the named keys that edit or clear one. These are the keys a protected
+' surface holds.
+Public Function RdxKeyTypesIntoCell(ByVal keyText As String) As Boolean
+    RdxKeyTypesIntoCell = TypesIntoCell(keyText)
+End Function
+
+Private Function TypesIntoCell(ByVal keyText As String) As Boolean
+    Select Case keyText
+        Case "{BS}", "{DEL}", "{DECIMAL}", "{APOS}", "{QUOTE}"
+            TypesIntoCell = True
+        Case Else
+            TypesIntoCell = (Len(keyText) = 1)
+    End Select
+End Function
+
+' Whether a key typed now goes to a worksheet's grid: the window with the
+' keyboard is a grid, or no window has it. The Name Box, the ribbon's
+' boxes, task panes, and forms are windows of their own.
+Public Function RdxKeyboardOnGrid() As Boolean
+    Dim focusWindow As LongPtr
+    Dim classBuffer As String
+    Dim classLength As Long
+
+    focusWindow = GetFocus()
+    If focusWindow = 0 Then
+        RdxKeyboardOnGrid = True
+        Exit Function
+    End If
+    classBuffer = String$(16, vbNullChar)
+    classLength = GetClassNameW(focusWindow, StrPtr(classBuffer), 16)
+    RdxKeyboardOnGrid = (Left$(classBuffer, classLength) = "EXCEL7")
+End Function
+
+' A typing key the capture took that was not ReDim's to keep, sent on to
+' the window with the keyboard: a character as the character Windows made
+' of the key, Backspace and Delete as the keys themselves. The capture
+' must have let the key go first, or it would come straight back.
+Public Sub RdxSendKeyOn(ByVal typedText As String)
+    Dim focusWindow As LongPtr
+
+    focusWindow = GetFocus()
+    If focusWindow = 0 Then Exit Sub
+    Select Case typedText
+        Case "{BS}"
+            PostKeyPress focusWindow, VK_BACK, False
+        Case "{DEL}"
+            PostKeyPress focusWindow, VK_DELETE, True
+        Case Else
+            If Len(typedText) = 1 Then
+                PostMessageW focusWindow, WM_CHAR, AscW(typedText) And &HFFFF&, 1
+            End If
+    End Select
+End Sub
+
+Private Sub PostKeyPress(ByVal focusWindow As LongPtr, ByVal virtualKey As Long, ByVal extendedKey As Boolean)
+    Dim keyBits As LongPtr
+
+    keyBits = 1 Or CLngPtr(MapVirtualKeyW(virtualKey, 0)) * &H10000
+    If extendedKey Then keyBits = keyBits Or &H1000000
+    PostMessageW focusWindow, WM_KEYDOWN, virtualKey, keyBits
+    ' Key-up marks: the key was down, and is going up.
+    PostMessageW focusWindow, WM_KEYUP, virtualKey, keyBits Or CLngPtr(&HC000&) * &H10000
 End Sub
 
 ' The OnKey codes capture binds to one key name, "^y" and "^+z" for
@@ -322,6 +446,7 @@ Public Sub RdxReleaseKeys()
     Next binding
     On Error GoTo 0
     gKeysBound = False
+    gSurfaceKeysHeld = False
 End Sub
 
 ' Target for a control's Shortcut, bound only while an app sheet that
@@ -537,4 +662,9 @@ End Sub
 ' Whether the typing keys are captured for a focused control, for tests.
 Public Function RdxKeysCaptured() As Boolean
     RdxKeysCaptured = gKeysBound
+End Function
+
+' Whether a protected surface holds the keys that type into a cell.
+Public Function RdxSurfaceKeysHeld() As Boolean
+    RdxSurfaceKeysHeld = gSurfaceKeysHeld
 End Function

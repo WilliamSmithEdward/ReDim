@@ -18,6 +18,18 @@
   the build again and then carries out the click. The macro's name
   lives in a hidden workbook name, which the reset leaves alone, and
   `Unmount` forgets it. Every demo now rebuilds this way.
+- Typing on a `ProtectSurface` sheet with no control focused raised
+  Excel's protected-cell notice at every key, as on the What's New
+  demo's Filters tab after Enter left the search box. The docs said
+  unselectable locked cells prevented it. They do not, under either
+  selection rule. While a locked cell is active, the surface now holds
+  the keys that type into a cell, so a stray key goes nowhere. A key
+  typed into an unlocked cell, into a box such as the ribbon's search,
+  or on another sheet goes on to it. `test_surface_keys.py` types on a
+  protected surface through Excel's own key handling.
+- An app's `HotKey` takes its key back when a focused control lets the
+  keys go. Arrow hot keys no longer need arming again after a field had
+  focus.
 
 ## 1.0.4 - 2026-09-27
 

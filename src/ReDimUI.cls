@@ -1245,6 +1245,9 @@ Friend Sub HoldForClose()
     On Error GoTo 0
     ClearKeyboardFocus
     mCloseHeld = True
+    ' No key stays bound through a close: a protected surface in front
+    ' kept the typing keys when focus went.
+    RdxReleaseKeys
     On Error Resume Next
     For Each appValue In mApps
         appValue.HoldAppForClose True
@@ -1270,6 +1273,7 @@ Private Sub ResumeAfterClose()
     Next appValue
     On Error GoTo 0
     RefreshAccessKeys
+    SyncSurfaceKeys
     If HasPendingWork() Then RequestPump
 End Sub
 
@@ -1303,6 +1307,9 @@ Private Sub mExcelApp_SheetSelectionChange(ByVal Sh As Object, ByVal Target As R
         If Not Sh.Parent Is ThisWorkbook Then Exit Sub
         ResumeAfterClose
     End If
+    ' An unlocked cell selected on a protected surface types as any cell
+    ' does; a locked one has the surface hold its keys again.
+    SyncSurfaceKeys
     CheckSystemLook
 End Sub
 
@@ -1399,6 +1406,9 @@ Friend Sub DispatchShape(ByVal clickedName As String)
     EnsureFactory
     ' A click on a control after a close began: the close was cancelled.
     ResumeAfterClose
+    ' The surface holds its keys again after a box such as the Name Box
+    ' had them, or after a sheet change events did not report.
+    SyncSurfaceKeys
     If Not ParseShapeName(clickedName, targetAppId, targetComponentId, targetPart) Then
         Exit Sub
     End If
@@ -1547,7 +1557,9 @@ End Property
 ' Keyboard focus: one field at a time owns typed characters, routed
 ' through ReDimHost.RdxKeyChar because OnKey can only target a standard
 ' module. Keys are bound only while a field is focused, so ordinary sheet
-' typing is untouched the rest of the time.
+' typing is untouched the rest of the time. The exception is a protected
+' app surface with a locked cell active, which holds the keys that type
+' into a cell while nothing is focused.
 ' ---------------------------------------------------------------
 
 Friend Sub DispatchKey(ByVal keyText As String)
@@ -1562,10 +1574,7 @@ Friend Sub DispatchKey(ByVal keyText As String)
     End If
     EnsureFactory
     If LenB(mFocusComponentId) = 0 Then
-        ' A captured key with nothing focused: the capture outlived its
-        ' focus, as it does after the VBA project resets under a focused
-        ' field. Letting the keys go gives typing back to the sheet.
-        ReleaseTypingKeys
+        HandleUnfocusedKey keyText
         Exit Sub
     End If
     ' The keypad's decimal key types the separator Excel would.
@@ -1652,13 +1661,114 @@ Friend Sub SetKeyboardFocus(ByVal hostApp As ReDimUI, ByVal componentValue As Re
     End If
 End Sub
 
+' A captured key with nothing focused. On a protected app surface whose
+' locked cell has the keyboard, a key that types into a cell ends here:
+' in the cell, Excel would answer it with its protected-cell notice. Any
+' other key was not the surface's to keep: typed into a box that has the
+' keyboard instead of the grid, into an unlocked cell, on another sheet,
+' or left bound by a reset of the project under a focused field. The keys
+' go back to Excel, and a typing key goes on to where it was typed.
+Private Sub HandleUnfocusedKey(ByVal keyText As String)
+    If SurfaceWantsKeys(True) Then
+        ' A capture a reset left behind drops to the keys the surface holds.
+        HoldSurfaceKeys
+        If RdxKeyTypesIntoCell(keyText) Then Exit Sub
+    Else
+        ReleaseTypingKeys
+    End If
+    If Not RdxKeyTypesIntoCell(keyText) Then Exit Sub
+    Select Case keyText
+        Case "{APOS}"
+            RdxSendKeyOn "'"
+        Case "{QUOTE}"
+            RdxSendKeyOn """"
+        Case "{DECIMAL}"
+            RdxSendKeyOn DecimalMark()
+        Case Else
+            RdxSendKeyOn keyText
+    End Select
+End Sub
+
+' Whether the sheet in front is a protected app surface whose active cell
+' is locked, with no control focused and no close under way: a key that
+' types into a cell there would raise Excel's protected-cell notice. For a
+' key in hand, the grid must also have the keyboard, since a box that has
+' it instead, the ribbon's search say, takes its own typing.
+Private Function SurfaceWantsKeys(Optional ByVal forKey As Boolean = False) As Boolean
+    Dim appValue As ReDimUI
+    Dim frontSheet As Object
+    Dim surfaceFound As Boolean
+
+    If mCloseHeld Or LenB(mFocusComponentId) > 0 Then Exit Function
+    On Error GoTo NotWanted
+    Set frontSheet = ActiveSheet
+    For Each appValue In mApps
+        If appValue.Sheet Is frontSheet Then
+            If appValue.IsSurfaceProtected Then surfaceFound = True
+        End If
+    Next appValue
+    If Not surfaceFound Then Exit Function
+    ' The live protection too: one taken off by hand, or by another app's
+    ' Unmount, leaves the cells to the user.
+    If Not frontSheet.ProtectContents Then Exit Function
+    ' A merged cell of mixed locking reads Null, which counts as locked.
+    If ActiveCell.Locked = False Then Exit Function
+    If forKey Then
+        If Not RdxKeyboardOnGrid() Then Exit Function
+    End If
+    SurfaceWantsKeys = True
+NotWanted:
+End Function
+
+' The keys a protected surface holds follow the sheet in front and its
+' active cell while no control is focused: held on a protected app sheet
+' whose active cell is locked, and let go everywhere else.
+Friend Sub SyncSurfaceKeys()
+    If Not IsFactory(Me) Then
+        ReDimUI.SyncSurfaceKeys
+        Exit Sub
+    End If
+    EnsureFactory
+    If LenB(mFocusComponentId) > 0 Then Exit Sub
+    If SurfaceWantsKeys() Then
+        HoldSurfaceKeys
+    ElseIf RdxSurfaceKeysHeld() Or RdxKeysCaptured() Then
+        ReleaseTypingKeys
+    End If
+End Sub
+
+' The surface's keys held, and a focused control's other keys let go, with
+' the shortcuts and hot keys those shared bound again.
+Private Sub HoldSurfaceKeys()
+    If RdxSurfaceKeysHeld() And Not RdxKeysCaptured() Then Exit Sub
+    RdxHoldSurfaceKeys
+    RebindShortcuts
+    RearmHotKeys
+End Sub
+
+' An app's hot keys go back to it once the typing keys change hands: a
+' focused field's capture took any it shared, the surface's keys take a
+' typing key one binds, and a key let go resets to Excel's.
+Private Sub RearmHotKeys()
+    Dim appValue As ReDimUI
+
+    If mCloseHeld Or mApps Is Nothing Then Exit Sub
+    For Each appValue In mApps
+        appValue.RebindHotKeys
+    Next appValue
+End Sub
+
 ' The keys follow the focused app's sheet: captured while it is in
-' front, released while another sheet is.
+' front, released while another sheet is. With nothing focused they are
+' the surface's to hold or let go.
 Private Sub SyncKeyCapture()
     Dim appValue As ReDimUI
     Dim componentValue As ReDimUI
 
-    If LenB(mFocusComponentId) = 0 Then Exit Sub
+    If LenB(mFocusComponentId) = 0 Then
+        SyncSurfaceKeys
+        Exit Sub
+    End If
     Set appValue = FindKeyed(mApps, mFocusAppId)
     If appValue Is Nothing Then Exit Sub
     If SheetInFront(appValue) Then
@@ -1670,11 +1780,12 @@ Private Sub SyncKeyCapture()
     End If
 End Sub
 
-' The typing keys go back to Excel, and the shortcuts that share some of
-' them (Ctrl+Z, say) take theirs again.
+' The typing keys go back to Excel, and the shortcuts and hot keys that
+' share some of them (Ctrl+Z, say, or an arrow) take theirs again.
 Private Sub ReleaseTypingKeys()
     RdxReleaseKeys
     RebindShortcuts
+    RearmHotKeys
 End Sub
 
 ' The Windows caret blink interval, or 0 when the user turned blinking
@@ -2099,7 +2210,13 @@ Friend Sub ClearKeyboardFocus()
     mFocusAppId = vbNullString
     mFocusComponentId = vbNullString
     If Not mFocusHandoff Then
-        ReleaseTypingKeys
+        ' A protected surface in front keeps the keys that type into a
+        ' cell; the rest go back to Excel.
+        If SurfaceWantsKeys() Then
+            HoldSurfaceKeys
+        Else
+            ReleaseTypingKeys
+        End If
     End If
 End Sub
 
@@ -2583,6 +2700,8 @@ Public Sub Shutdown()
     Next appValue
     On Error GoTo 0
     Set mApps = New Collection
+    ' A protected surface kept the typing keys when focus went above.
+    RdxReleaseKeys
     ' Windows go with their apps; a rebuild would otherwise tab to them.
     Set mWindows = Nothing
     Set mNavStack = Nothing
@@ -4990,11 +5109,13 @@ End Sub
 ' edit mode or drag shapes there, which also keeps the pump from stalling
 ' in edit mode, while UserInterfaceOnly leaves every framework write free.
 ' Locked canvas cells are also unselectable by default - no selection
-' rectangle on the app surface, no protected-cell warnings for stray
-' keys - while deliberately unlocked cells (cell-backed TextInput) stay
-' selectable and editable; pass allowCellSelection:=True to keep the
-' grid selectable. OnKey capture is unaffected either way. Opt-in, and
-' scoped to this one sheet. Call after Render.
+' rectangle on the app surface - while deliberately unlocked cells
+' (cell-backed TextInput) stay selectable and editable; pass
+' allowCellSelection:=True to keep the grid selectable. With no control
+' focused and a locked cell active, the surface holds the keys that type
+' into a cell, since Excel answers any of them there with its
+' protected-cell notice, whatever the selection rule. Opt-in, and scoped
+' to this one sheet. Call after Render.
 Public Function ProtectSurface( _
     Optional ByVal protectOn As Boolean = True, _
     Optional ByVal allowCellSelection As Boolean = False _
@@ -5020,6 +5141,7 @@ Public Function ProtectSurface( _
         On Error GoTo 0
         mSurfaceProtected = False
     End If
+    ReDimUI.SyncSurfaceKeys
     Set ProtectSurface = Me
 End Function
 
@@ -5096,6 +5218,11 @@ Friend Sub RebindHotKey(ByVal keyCode As String)
             Exit Sub
         End If
     Next hotKeyEntry
+End Sub
+
+' The app's hot keys bound again, over whatever took their keys meanwhile.
+Friend Sub RebindHotKeys()
+    HoldHotKeys False
 End Sub
 
 ' A workbook close lets the app's hot keys go before its code unloads,

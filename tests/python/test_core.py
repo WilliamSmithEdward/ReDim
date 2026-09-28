@@ -182,6 +182,32 @@ def test_protect_surface(run_core):
     assert facts["unmountUnprotects"] == "True"
 
 
+def test_surface_keys(run_core):
+    facts = parse_transcript(run_core("TestSurfaceKeys"))
+    assert facts["beforeProtect"] == "False", "an unprotected sheet holds no key"
+    assert facts["held"] == "True/False", (
+        "a protected surface holds the typing keys while nothing is focused"
+    )
+    assert facts["strayKept"] == "True/", "a stray key ends at the surface, not in the cell"
+    assert facts["focused"] == "True", "a focused field takes every key"
+    assert facts["typed"] == "hi/False/True", (
+        "the field types, and Enter hands the typing keys back to the surface"
+    )
+    assert facts["unlockedActive"] == "C7/False", (
+        "protecting moves the active cell to an unlocked one, which types as usual"
+    )
+    assert facts["clickHolds"] == "True", "a click on the app with a locked cell active holds"
+    assert facts["keyLets"] == "False", (
+        "a key typed into an unlocked cell no event reported lets the typing keys go"
+    )
+    assert facts["eventHolds"] == "True", "selecting a locked cell holds the keys"
+    assert facts["eventLets"] == "False", "selecting an unlocked cell lets them go"
+    assert facts["unprotectLets"] == "False"
+    assert facts["reprotectHolds"] == "True"
+    assert facts["unmountLets"] == "False"
+    assert facts["faults"] == "0"
+
+
 def test_writes_to_follows(run_core):
     facts = parse_transcript(run_core("TestWritesToFollows"))
     assert facts["seeded"] == "True/0", (

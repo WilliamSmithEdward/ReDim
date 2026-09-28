@@ -6,6 +6,9 @@ Option Explicit
 ' because module globals do not survive across harness round trips.
 
 Private Declare PtrSafe Sub Sleep Lib "kernel32" (ByVal milliseconds As Long)
+Private Declare PtrSafe Function FindWindowExW Lib "user32" (ByVal parentHandle As LongPtr, _
+    ByVal afterHandle As LongPtr, ByVal className As LongPtr, ByVal windowName As LongPtr) As LongPtr
+Private Declare PtrSafe Function SetFocus Lib "user32" (ByVal windowHandle As LongPtr) As LongPtr
 
 Private gClickCount As Long
 Private gLastSenderId As String
@@ -471,6 +474,156 @@ Public Function TestProtectSurface() As String
         CStr(Not host.ProtectContents)
     ReDimUI.AutoPump True
     TestProtectSurface = transcript
+End Function
+
+' A protected surface holds the keys that type into a cell while nothing
+' is focused, so a stray key never reaches a locked cell, where Excel
+' answers it with its protected-cell notice. A focused field takes every
+' key; an unlocked cell, lifted protection, or Unmount gives the typing
+' keys back. The hidden harness Excel gives no window the keyboard, which
+' counts as the grid having it, and runs with events off, so a selection
+' tells ReDim nothing until a key or a click arrives, or events go on.
+Public Function TestSurfaceKeys() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim transcript As String
+    Dim eventsWere As Boolean
+
+    Set host = NewCanvas()
+    ReDimUI.AutoPump False
+    ReDimUI.ResetTickFaults
+    RdxReleaseKeys
+    Set app = ReDimUI.Mount(host, "core16")
+    app.Button("btn").AtRect(20, 20, 80, 24).Text "Go"
+    app.TextInput("float").AtRect 20, 60, 160, 22
+    app.Render
+    transcript = "beforeProtect=" & CStr(RdxSurfaceKeysHeld())
+    app.ProtectSurface
+    transcript = transcript & "|held=" & CStr(RdxSurfaceKeysHeld()) & "/" & _
+        CStr(RdxKeysCaptured())
+    RdxKeyChar "x"
+    RdxKeyChar "{BS}"
+    transcript = transcript & "|strayKept=" & CStr(RdxSurfaceKeysHeld()) & "/" & _
+        CStr(host.Range("A1").Value)
+
+    ReDimUI.DispatchShape "rdm_core16_float"
+    transcript = transcript & "|focused=" & CStr(RdxKeysCaptured())
+    RdxKeyChar "h"
+    RdxKeyChar "i"
+    RdxKeyChar "{ENTER}"
+    transcript = transcript & "|typed=" & app.TextInput("float").InputValue & "/" & _
+        CStr(RdxKeysCaptured()) & "/" & CStr(RdxSurfaceKeysHeld())
+
+    ' An unlocked cell: protecting moves the active cell to it, and it
+    ' types as any cell does.
+    app.ProtectSurface False
+    host.Range("C7").Locked = False
+    app.ProtectSurface
+    transcript = transcript & "|unlockedActive=" & ActiveCell.Address(False, False) & "/" & _
+        CStr(RdxSurfaceKeysHeld())
+    host.Range("A1").Select
+    ReDimUI.DispatchShape "rdm_core16_btn"
+    transcript = transcript & "|clickHolds=" & CStr(RdxSurfaceKeysHeld())
+    ' Selected with no event to say so, the unlocked cell's first key lets
+    ' the typing keys go.
+    host.Range("C7").Select
+    RdxKeyChar "7"
+    transcript = transcript & "|keyLets=" & CStr(RdxSurfaceKeysHeld())
+    eventsWere = Application.EnableEvents
+    Application.EnableEvents = True
+    host.Range("A1").Select
+    transcript = transcript & "|eventHolds=" & CStr(RdxSurfaceKeysHeld())
+    host.Range("C7").Select
+    transcript = transcript & "|eventLets=" & CStr(RdxSurfaceKeysHeld())
+    host.Range("A1").Select
+    Application.EnableEvents = eventsWere
+
+    app.ProtectSurface False
+    transcript = transcript & "|unprotectLets=" & CStr(RdxSurfaceKeysHeld())
+    host.Range("C7").Locked = True
+    app.ProtectSurface
+    transcript = transcript & "|reprotectHolds=" & CStr(RdxSurfaceKeysHeld())
+    app.Unmount True
+    transcript = transcript & "|unmountLets=" & CStr(RdxSurfaceKeysHeld()) & _
+        "|faults=" & ReDimUI.TickFaultCount
+    RdxReleaseKeys
+    ReDimUI.AutoPump True
+    TestSurfaceKeys = transcript
+End Function
+
+' The steps of tests/python/test_surface_keys.py, which posts keystrokes
+' to this Excel's grid between them. Called with run_raw, which rewrites
+' no module, so the app and its keys last from one step to the next.
+' Setup mounts a protected surface with nothing focused, a hot key on a
+' typing key, and gives the grid the keyboard as a user's click would;
+' it returns the grid window's handle. A tooltip keeps the pump running,
+' reading the pointer, as in a live session: with no pump, the hidden
+' harness Excel let a stray key pass without the notice a user sees.
+Public Function SurfaceKeysSetup() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim deskHandle As LongPtr
+    Dim gridHandle As LongPtr
+
+    Set host = NewCanvas()
+    ReDimUI.AutoPump True
+    ReDimUI.ResetTickFaults
+    gClickCount = 0
+    Set app = ReDimUI.Mount(host, "core17")
+    app.Button("btn").AtRect(20, 20, 80, 24).Text("Go").Tooltip "Runs it"
+    app.TextInput("float").AtRect 20, 60, 160, 22
+    app.Render
+    app.HotKey "q", "TestReDimCore.CoreStateHandler"
+    app.ProtectSurface
+    host.Range("A1").Select
+    deskHandle = FindWindowExW(Application.Hwnd, 0, StrPtr("XLDESK"), 0)
+    gridHandle = FindWindowExW(deskHandle, 0, StrPtr("EXCEL7"), 0)
+    If gridHandle <> 0 Then SetFocus gridHandle
+    SurfaceKeysSetup = CStr(gridHandle)
+End Function
+
+Public Function SurfaceKeysState() As String
+    Dim app As ReDimUI
+
+    Set app = ReDimUI.App("core17")
+    SurfaceKeysState = "held=" & CStr(RdxSurfaceKeysHeld()) & "|captured=" & _
+        CStr(RdxKeysCaptured()) & "|A1=" & CStr(app.Sheet.Range("A1").Value) & _
+        "|C7=" & CStr(app.Sheet.Range("C7").Value) & "|float=" & _
+        app.TextInput("float").InputValue & "|hotKey=" & gClickCount & _
+        "|faults=" & ReDimUI.TickFaultCount & "|pump=" & CStr(RdxPumpArmed())
+End Function
+
+Public Function SurfaceKeysFocusField() As String
+    ReDimUI.DispatchShape "rdm_core17_float"
+    SurfaceKeysFocusField = SurfaceKeysState()
+End Function
+
+' An unlocked cell selected with no event to say so, which the harness's
+' events being off stands in for: the surface still holds its keys, and
+' the next key typed must reach the cell all the same.
+Public Function SurfaceKeysUnlockedCell() As String
+    Dim app As ReDimUI
+
+    Set app = ReDimUI.App("core17")
+    app.ProtectSurface False
+    app.Sheet.Range("C7").Locked = False
+    app.ProtectSurface
+    app.Sheet.Range("A1").Select
+    ReDimUI.DispatchShape "rdm_core17_btn"
+    app.Sheet.Range("C7").Select
+    SurfaceKeysUnlockedCell = SurfaceKeysState()
+End Function
+
+' The pump is stopped before the harness goes on: a timer left armed
+' would call into the project after it closed.
+Public Function SurfaceKeysTeardown() As String
+    RdxStopPump
+    ReDimUI.AutoPump False
+    If ReDimUI.HasApp("core17") Then ReDimUI.App("core17").Unmount True
+    RdxReleaseKeys
+    RdxStopPump
+    ReDimUI.AutoPump True
+    SurfaceKeysTeardown = CStr(RdxSurfaceKeysHeld())
 End Function
 
 Public Sub NavShowA()
