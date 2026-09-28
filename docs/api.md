@@ -110,9 +110,9 @@ All fluent, all return the component:
   `RightOf(otherId, gap)` place relative to another component with `Sized(w, h)` for
   dimensions. The last of these called wins. A control placed against another follows it
   whenever that one moves or resizes, by a builder, its stack, or text it grows to, and
-  `RightOf` starts past a badge's pill and a switch's caption. Circular relative chains
-  raise a clear error. `InStack(stackId)` hands the
-  position to a `Stack` (see [Layout](#layout)).
+  whichever of the two was made first; `RightOf` starts past a badge's pill and a
+  switch's caption. Circular relative chains raise a clear error. `InStack(stackId)`
+  hands the position to a `Stack` (see [Layout](#layout)).
 - Content: `Text`, `FontSize`, `Bold`, `BusyText` (what a busy button shows, the
   `Working` [UI text](#ui-text) unless given; `BusyText ""` keeps the button's text).
 - Style: `Primary`, `Secondary`, `Success`, `Warning`, `Danger`, `Fill(color)`,
@@ -638,7 +638,8 @@ A focused float field edits the way a Windows text box does.
 
 ## Field rules
 
-Builders for float `TextInput` and `ComboBox` fields:
+Builders for float `TextInput` and `ComboBox` fields. A float field moved to a cell with
+`At` becomes the cell's, and its length count and clear button go.
 
 - `Placeholder "Search..."` shows a hint in muted ink while the field is empty, focused or
   not. The hint is not text: `InputValue` stays empty, and the alternative text includes
@@ -733,8 +734,9 @@ no message shows, so a message that comes and goes moves nothing.
   was given a width of 0.
 - A stack can sit in another, such as a row of buttons across at the foot of a form.
 - A stack is clear and takes no clicks; `Fill(color)` paints it as a panel. It is drawn
-  behind its members. `Visible False` hides it with every member, and a member's own
-  `Visible` still applies inside.
+  behind its members and over a stack it sits in, so a filled row inside a filled form
+  shows. `Visible False` hides it with every member, and a member's own `Visible` still
+  applies inside.
 
 ```vba
 ui.Stack("form").AtRect(24, 24, 280, 0).Gap(10).Stretch

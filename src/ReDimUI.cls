@@ -513,6 +513,17 @@ Private mFocusBeforeModal As String
 ' what the dialog up now asks.
 Private mModalQueue As Collection
 Private mModalShowing As Variant
+' The controls placed Below or RightOf each control, by the id of the one
+' placed against: a list of ids each.
+Private mPlacedAgainst As Collection
+' Anchors whose dependents wait to draw, taken in turn by the one call
+' already drawing dependents, so a long chain never nests one draw in
+' the next.
+Private mReapplyQueue As Collection
+Private mReapplying As Boolean
+' Counts the changes NotifyDirty hears of: a control resolved since the
+' last one stands where it resolved.
+Private mGeometryPass As Long
 ' Shapes the app has made, so a draw that made any under a waiting dialog
 ' can put the dialog back on top.
 Private mShapesMade As Long
@@ -1072,6 +1083,8 @@ Private mRelMode As Long
 Private mRelTargetId As String
 Private mRelGap As Double
 Private mGeometryResolving As Boolean
+' The app's geometry pass the control last resolved its place in.
+Private mResolvedPass As Long
 
 ' Applied-property cache. Empty until the first Apply so adopted shapes are
 ' fully restyled exactly once. Geometry is deliberately absent: it diffs
@@ -3843,6 +3856,24 @@ Friend Sub NoteStackTouched(ByVal stackId As String)
     End If
 End Sub
 
+' Sends a stack and each stack it sits in to the back, nearest first, so
+' the outermost ends behind them all. A stack made inside another went to
+' the back alone, behind its parent, whose fill then covered it.
+Friend Sub SendStacksBack(ByVal stackId As String)
+    Dim stackValue As ReDimUI
+    Dim stackShape As Shape
+    Dim hops As Long
+
+    RequireRole ROLE_APP, "SendStacksBack"
+    Do While LenB(stackId) > 0 And hops < 50
+        hops = hops + 1
+        If Not TryGetComponent(stackId, stackValue) Then Exit Do
+        Set stackShape = DrawnShape(mSheet, stackValue.ShapeName)
+        If Not stackShape Is Nothing Then stackShape.ZOrder msoSendToBack
+        stackId = stackValue.StackOwnerId
+    Loop
+End Sub
+
 ' Whether a stack hides its members: it exists and is hidden.
 Friend Function StackHidden(ByVal stackId As String) As Boolean
     Dim stackValue As ReDimUI
@@ -3863,7 +3894,7 @@ End Sub
 ' The stacks whose members' flow changed lay out again once the flush has
 ' drawn everything, each moving only the members whose place changed; a
 ' stack that grew queues the stack it sits in.
-Private Sub ProcessPendingReflows()
+Friend Sub ProcessPendingReflows()
     Dim stackId As String
     Dim stackValue As ReDimUI
     Dim roundNo As Long
@@ -3893,16 +3924,114 @@ Friend Sub ReflowStackNow(ByVal stackId As String)
 End Sub
 
 ' Components placed Below or RightOf one that moved or changed size follow
-' it; each one's draw moves the ones placed against it in turn.
-Friend Sub ReapplyDependents(ByVal anchorId As String)
+' it; each one's draw moves the ones placed against it in turn. A draw
+' this starts queues its own dependents for the loop here, where drawing
+' them inside it nested a draw per link: a chain of 200 fields ran out of
+' stack space when the first grew.
+Friend Sub ReapplyDependents(ByVal anchorId As String, Optional ByVal drawnOnly As Boolean)
     Dim componentValue As ReDimUI
+    Dim noted As Variant
+    Dim queued As Variant
+    Dim dependentId As Variant
 
     RequireRole ROLE_APP, "ReapplyDependents"
-    For Each componentValue In mComponents
-        If StrComp(componentValue.PlacedRelativeTo, anchorId, vbTextCompare) = 0 Then
-            componentValue.Apply mSheet, mTheme, Me
+    ' Only a control something was placed against has dependents: a
+    ' first draw of any other looks no further.
+    If mPlacedAgainst Is Nothing Then Exit Sub
+    If Not TryGetItem(mPlacedAgainst, anchorId, noted) Then Exit Sub
+    If mReapplyQueue Is Nothing Then Set mReapplyQueue = New Collection
+    mReapplyQueue.Add Array(anchorId, drawnOnly)
+    If mReapplying Then Exit Sub
+    mReapplying = True
+    On Error GoTo Unwind
+    Do While mReapplyQueue.Count > 0
+        queued = mReapplyQueue.Item(1)
+        mReapplyQueue.Remove 1
+        If TryGetItem(mPlacedAgainst, CStr(queued(0)), noted) Then
+            For Each dependentId In noted
+                ' One since placed elsewhere, or removed, stays put.
+                If TryGetComponent(CStr(dependentId), componentValue) Then
+                    If StrComp(componentValue.PlacedRelativeTo, queued(0), vbTextCompare) = 0 Then
+                        If Not queued(1) Or componentValue.HasDrawn Then
+                            componentValue.Apply mSheet, mTheme, Me
+                        End If
+                    End If
+                End If
+            Next dependentId
         End If
-    Next componentValue
+    Loop
+    mReapplying = False
+    Exit Sub
+
+Unwind:
+    Dim capturedNumber As Long
+    Dim capturedSource As String
+    Dim capturedDescription As String
+    capturedNumber = Err.Number
+    capturedSource = Err.Source
+    capturedDescription = Err.Description
+    mReapplying = False
+    Set mReapplyQueue = Nothing
+    Err.Raise capturedNumber, capturedSource, capturedDescription
+End Sub
+
+' The count of changes that can move a control: a change to any control,
+' or a stack laying out again. A control resolved since the last stands
+' where it resolved.
+Friend Property Get GeometryPass() As Long
+    GeometryPass = mGeometryPass
+End Property
+
+Friend Sub NextGeometryPass()
+    If mGeometryPass = 2147483647 Then mGeometryPass = 0
+    mGeometryPass = mGeometryPass + 1
+End Sub
+
+' Resolves a target placed Below or RightOf others with the chain behind
+' it, from the far end, each link against one already resolved: the last
+' of 300 chained fields resolved the others nested one inside the next,
+' out of stack space, and each draw along the chain did it again. A
+' circle stops at the component count, and its resolution raises.
+Friend Sub ResolveChainTo(ByVal hostSheet As Worksheet, ByVal targetValue As ReDimUI)
+    Dim chainLinks() As ReDimUI
+    Dim linkCount As Long
+    Dim linkValue As ReDimUI
+    Dim linkId As String
+
+    Set linkValue = targetValue
+    Do
+        linkCount = linkCount + 1
+        If linkCount = 1 Then
+            ReDim chainLinks(1 To 16)
+        ElseIf linkCount > UBound(chainLinks) Then
+            ReDim Preserve chainLinks(1 To 2 * UBound(chainLinks))
+        End If
+        Set chainLinks(linkCount) = linkValue
+        linkId = linkValue.PlacedRelativeTo
+        If LenB(linkId) = 0 Or linkCount > mComponents.Count Then Exit Do
+        If Not TryGetComponent(linkId, linkValue) Then Exit Do
+        If linkValue.ResolvedIn(mGeometryPass) Then Exit Do
+    Loop
+    For linkCount = linkCount To 1 Step -1
+        chainLinks(linkCount).EnsureGeometryResolved hostSheet, Me
+    Next linkCount
+End Sub
+
+' Notes a control placed against another, whose draws then move it.
+Friend Sub NoteAnchor(ByVal anchorId As String, ByVal dependentId As String)
+    Dim noted As Variant
+    Dim dependentIds As Collection
+
+    If LenB(anchorId) = 0 Then Exit Sub
+    If mPlacedAgainst Is Nothing Then Set mPlacedAgainst = New Collection
+    If TryGetItem(mPlacedAgainst, anchorId, noted) Then
+        Set dependentIds = noted
+    Else
+        Set dependentIds = New Collection
+        mPlacedAgainst.Add dependentIds, anchorId
+    End If
+    If TryGetItem(dependentIds, dependentId, noted) Then Exit Sub
+    dependentIds.Add dependentId, dependentId
 End Sub
 
 Friend Sub HandleSheetChange(ByVal changed As Range)
@@ -4325,6 +4454,7 @@ End Sub
 Friend Sub NotifyDirty(ByVal targetComponentId As String)
     Dim existing As Variant
 
+    NextGeometryPass
     If TryGetItem(mDirtyIds, targetComponentId, existing) Then Exit Sub
     mDirtyIds.Add targetComponentId, targetComponentId
 End Sub
@@ -5601,6 +5731,7 @@ Private Sub PlaceRelative( _
     mRelTargetId = otherComponentId
     mRelGap = gapPoints
     mAnchor = vbNullString
+    OwnerApp.NoteAnchor otherComponentId, mComponentId
     Touch
 End Sub
 
@@ -6552,6 +6683,8 @@ Public Function Validates(ByVal checkProc As String) As ReDimUI
     RequireRole ROLE_COMPONENT, "Validates"
     RequireFieldKind "Validates"
     mValidateProc = checkProc
+    ' A stack keeps a row for the check's message: the draw reserves it.
+    Touch
     Set Validates = Me
 End Function
 
@@ -8226,13 +8359,17 @@ Public Sub Remove()
     ' Controls placed Below or RightOf it stay where they are, rather than
     ' failing every later draw for want of their anchor.
     hostApp.PinPlacedAgainst mComponentId
+    If mRelMode <> REL_NONE Then hostApp.ForgetDependent mRelTargetId, mComponentId
     If mKind = KIND_STACK Then hostApp.FreeStackMembers mComponentId
     hostApp.ForgetComponent mComponentId
     ' A key it declared goes back to Excel, unless another control has it.
     If LenB(mShortcut) > 0 Or LenB(mAccessKey) > 0 Then ReDimUI.RefreshAccessKeys
-    ' Its panels show again, ungated.
+    ' Its panels show again, ungated. A member in a stack queued its
+    ' stack's reflow as it showed, which no flush here drains: the stack
+    ' kept the member out of its layout until something else drew.
     If mKind = KIND_TABS Or mKind = KIND_EXPANDER Then
         hostApp.ReapplyTabMembers mComponentId, -1
+        hostApp.ProcessPendingReflows
     End If
     ' The members after it in its stack close the gap.
     If LenB(mStackId) > 0 Then hostApp.ReflowStackNow mStackId
@@ -8249,11 +8386,30 @@ End Sub
 
 Friend Sub PinPlacedAgainst(ByVal targetComponentId As String)
     Dim componentValue As ReDimUI
+    Dim noted As Variant
+    Dim dependentId As Variant
 
     RequireRole ROLE_APP, "PinPlacedAgainst"
-    For Each componentValue In mComponents
-        componentValue.PinPlacement mSheet, targetComponentId
-    Next componentValue
+    If mPlacedAgainst Is Nothing Then Exit Sub
+    If Not TryGetItem(mPlacedAgainst, targetComponentId, noted) Then Exit Sub
+    For Each dependentId In noted
+        If TryGetComponent(CStr(dependentId), componentValue) Then
+            componentValue.PinPlacement mSheet, targetComponentId
+        End If
+    Next dependentId
+    mPlacedAgainst.Remove targetComponentId
+End Sub
+
+' A control going away leaves the list of the one it was placed against.
+Friend Sub ForgetDependent(ByVal anchorId As String, ByVal dependentId As String)
+    Dim noted As Variant
+    Dim dependentIds As Collection
+
+    RequireRole ROLE_APP, "ForgetDependent"
+    If mPlacedAgainst Is Nothing Then Exit Sub
+    If Not TryGetItem(mPlacedAgainst, anchorId, noted) Then Exit Sub
+    Set dependentIds = noted
+    If TryGetItem(dependentIds, dependentId, noted) Then dependentIds.Remove dependentId
 End Sub
 
 ' A control placed relative to the one going: its place is worked out
@@ -8262,7 +8418,7 @@ Friend Sub PinPlacement(ByVal hostSheet As Worksheet, ByVal goingId As String)
     If mRelMode = REL_NONE Then Exit Sub
     If StrComp(mRelTargetId, goingId, vbTextCompare) <> 0 Then Exit Sub
     On Error Resume Next
-    ResolvePlacement hostSheet
+    ResolvePlacement hostSheet, OwnerApp
     On Error GoTo 0
     mRelMode = REL_NONE
     mRelTargetId = vbNullString
@@ -9297,7 +9453,7 @@ Friend Sub Apply( _
         mAppliedThemeRevision = themeValue.ThemeRevision
         mAppliedValid = False
     End If
-    EnsureGeometryResolved hostSheet
+    EnsureGeometryResolved hostSheet, hostApp
     Set mainShape = EnsureShape(hostSheet)
     ApplyGeometry mainShape
     ApplyStyle mainShape, themeValue
@@ -9307,9 +9463,21 @@ Friend Sub Apply( _
     If IsFloatField() Then
         ApplyClearButton mainShape, hostSheet, themeValue
         ApplyFieldNotes hostSheet, themeValue
-    ElseIf (IsPickKind() And (mRequired Or LenB(mErrorText) > 0)) _
-        Or LenB(mAppliedMessageSig) > 0 Then
-        ApplyFieldNotes hostSheet, themeValue
+    Else
+        ' A float field moved to a cell with At leaves its float parts:
+        ' the length count and the clear button stayed where it was.
+        If LenB(mAppliedCountSig) > 0 Then
+            mAppliedCountSig = vbNullString
+            DropPart hostSheet, "mc"
+        End If
+        If LenB(mAppliedClearSig) > 0 Then
+            mAppliedClearSig = vbNullString
+            DropPart hostSheet, "cx"
+        End If
+        If (IsPickKind() And (mRequired Or LenB(mErrorText) > 0)) _
+            Or LenB(mAppliedMessageSig) > 0 Then
+            ApplyFieldNotes hostSheet, themeValue
+        End If
     End If
     If LenB(mCaptionText) > 0 Or LenB(mAppliedCaptionSig) > 0 _
         Or LenB(mHintText) > 0 Or LenB(mAppliedHintSig) > 0 Then
@@ -9333,6 +9501,12 @@ Friend Sub Apply( _
     If LenB(mAppliedBoundsKey) > 0 And boundsKey <> mAppliedBoundsKey Then
         mAppliedBoundsKey = boundsKey
         hostApp.ReapplyDependents mComponentId
+    ElseIf LenB(mAppliedBoundsKey) = 0 Then
+        ' A first draw moves the dependents drawn before it, as a control
+        ' made before its anchor is: those placed themselves against
+        ' bounds the anchor had not reached, a switch's caption unmeasured.
+        mAppliedBoundsKey = boundsKey
+        hostApp.ReapplyDependents mComponentId, True
     End If
     mAppliedBoundsKey = boundsKey
     If mKind = KIND_TABS Or mKind = KIND_EXPANDER Then SyncTabPanels hostApp
@@ -9831,24 +10005,24 @@ End Function
 
 ' A control's rectangle: its stack's slot for it, or its own placement;
 ' then a stack lays its members out, which sizes it.
-Private Sub ResolveGeometry(ByVal hostSheet As Worksheet)
+Private Sub ResolveGeometry(ByVal hostSheet As Worksheet, ByVal hostApp As ReDimUI)
     Dim stacked As Boolean
 
-    If LenB(mStackId) > 0 Then stacked = PlaceInStack(hostSheet)
-    If Not stacked Then ResolvePlacement hostSheet
+    If LenB(mStackId) > 0 Then stacked = PlaceInStack(hostSheet, hostApp)
+    If Not stacked Then ResolvePlacement hostSheet, hostApp
     If mKind = KIND_STACK Then ArrangeStack
 End Sub
 
 ' True when the control's stack placed it: at its slot, or where it stood
 ' while hidden. A stack that no longer exists places nothing.
-Private Function PlaceInStack(ByVal hostSheet As Worksheet) As Boolean
+Private Function PlaceInStack(ByVal hostSheet As Worksheet, ByVal hostApp As ReDimUI) As Boolean
     Dim stackValue As ReDimUI
     Dim slotLeft As Double
     Dim slotTop As Double
     Dim slotSpan As Double
 
-    If Not OwnerApp.TryGetComponent(mStackId, stackValue) Then Exit Function
-    stackValue.EnsureGeometryResolved hostSheet
+    If Not hostApp.TryGetComponent(mStackId, stackValue) Then Exit Function
+    stackValue.EnsureGeometryResolved hostSheet, hostApp
     If stackValue.StackSlot(mComponentId, slotLeft, slotTop, slotSpan) Then
         mLeft = slotLeft
         mTop = slotTop
@@ -9885,17 +10059,21 @@ Friend Sub LeaveGoneStack(ByVal stackId As String)
     Touch
 End Sub
 
-Private Sub ResolvePlacement(ByVal hostSheet As Worksheet)
+Private Sub ResolvePlacement(ByVal hostSheet As Worksheet, ByVal hostApp As ReDimUI)
     Dim anchorRange As Range
     Dim relTarget As ReDimUI
 
     If mRelMode <> REL_NONE Then
-        If Not OwnerApp.TryGetComponent(mRelTargetId, relTarget) Then
+        If Not hostApp.TryGetComponent(mRelTargetId, relTarget) Then
             RaiseError ERROR_NOT_FOUND, RelModeName(), _
                 RelModeName() & " names '" & mRelTargetId & _
                 "', which is not a component of this app."
         End If
-        relTarget.EnsureGeometryResolved hostSheet
+        ' A target resolved since the last change stands where it is; one
+        ' that is not resolves with the chain behind it.
+        If Not relTarget.ResolvedIn(hostApp.GeometryPass) Then
+            hostApp.ResolveChainTo hostSheet, relTarget
+        End If
         If mRelMode = REL_BELOW Then
             mLeft = relTarget.BoundsLeft
             mTop = relTarget.BoundsTop + relTarget.BoundsHeight + mRelGap
@@ -9936,16 +10114,20 @@ End Function
 
 ' Relative chains resolve the anchor's geometry first. The flag turns a
 ' circular chain into a clear error instead of infinite recursion.
-Friend Sub EnsureGeometryResolved(ByVal hostSheet As Worksheet)
+Friend Sub EnsureGeometryResolved(ByVal hostSheet As Worksheet, ByVal hostApp As ReDimUI)
+    Dim passAtStart As Long
+
     If mGeometryResolving Then
         RaiseError ERROR_INVALID_OPERATION, RelModeName(), _
             "its " & RelModeName() & " placement is circular."
     End If
+    passAtStart = hostApp.GeometryPass
     mGeometryResolving = True
     On Error GoTo Unwind
-    ResolveGeometry hostSheet
+    ResolveGeometry hostSheet, hostApp
     If mAutoGrowLines > 0 Or mGrowAdded <> 0 Then GrowToText hostSheet
     mGeometryResolving = False
+    mResolvedPass = passAtStart
     Exit Sub
 
 Unwind:
@@ -9956,8 +10138,15 @@ Unwind:
     capturedSource = Err.Source
     capturedDescription = Err.Description
     mGeometryResolving = False
+    mResolvedPass = 0
     Err.Raise capturedNumber, capturedSource, capturedDescription
 End Sub
+
+' Whether the control resolved its place in the app's geometry pass given,
+' with nothing changed since.
+Friend Function ResolvedIn(ByVal currentPass As Long) As Boolean
+    ResolvedIn = (mResolvedPass <> 0 And mResolvedPass = currentPass)
+End Function
 
 Friend Property Get BoundsHeight() As Double
     BoundsHeight = mHeight
@@ -10159,11 +10348,13 @@ Private Function CreateShapeForKind(ByVal hostSheet As Worksheet) As Shape
                 msoShapeRoundedRectangle, mLeft, mTop, BadgeSpan(), mHeight)
             mainShape.Adjustments(1) = 0.5
         Case KIND_STACK
-            ' Behind the controls it holds, whenever it was made.
+            ' Behind the controls it holds, whenever it was made, and over
+            ' the stacks it is in, which go back behind it.
             Set mainShape = hostSheet.Shapes.AddShape( _
                 msoShapeRectangle, mLeft, mTop, IIf(mWidth > 0, mWidth, 1), _
                 IIf(mHeight > 0, mHeight, 1))
             mainShape.ZOrder msoSendToBack
+            If LenB(mStackId) > 0 Then OwnerApp.SendStacksBack mStackId
         Case KIND_TABS
             ' The rule along the strip's foot; the tabs are parts.
             Set mainShape = hostSheet.Shapes.AddShape( _
@@ -12085,7 +12276,8 @@ Private Sub ApplyFieldNotes(ByVal hostSheet As Worksheet, ByVal themeValue As Re
     SyncFieldNote hostSheet, themeValue, "me", noteKey, ShownError(), _
         themeValue.DangerColor, msoAlignLeft, noteSize, mAppliedMessageSig
     noteKey = vbNullString
-    If mMaxLength > 0 And mVisible Then noteKey = PartsState(themeValue)
+    ' The count is a float field's: a cell's text is the cell's.
+    If mMaxLength > 0 And mVisible And IsFloatField() Then noteKey = PartsState(themeValue)
     SyncFieldNote hostSheet, themeValue, "mc", noteKey, _
         Len(mText) & "/" & mMaxLength, themeValue.OnMutedColor, msoAlignRight, _
         noteSize, mAppliedCountSig
@@ -14772,6 +14964,7 @@ Friend Sub ReflowMembers( _
     ByVal hostApp As ReDimUI _
 )
     MarkStackStale
+    hostApp.NextGeometryPass
     Apply hostSheet, themeValue, hostApp
 End Sub
 
@@ -15630,6 +15823,16 @@ End Property
 
 Friend Property Get TabOwnerId() As String
     TabOwnerId = mTabOwnerId
+End Property
+
+' The stack the control flows in, "" for none.
+Friend Property Get StackOwnerId() As String
+    StackOwnerId = mStackId
+End Property
+
+' Whether the control has been drawn.
+Friend Property Get HasDrawn() As Boolean
+    HasDrawn = mAppliedValid
 End Property
 
 Friend Property Get TabShut() As Boolean

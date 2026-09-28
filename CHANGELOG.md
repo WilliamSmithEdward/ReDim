@@ -44,6 +44,14 @@
 - A tick box redrew its box and caption whenever the pointer came or
   went, 2.2 milliseconds each time. The pointer now restyles only the
   box's edge and fill, 0.15, and a click its check as well.
+- A long chain of controls placed with `Below` or `RightOf` ran out of
+  stack space: drawing 300 chained fields raised error 28, and so did
+  growing the first of 200. Each link resolved every link before it,
+  nested one inside the next, and each move drew the next link inside
+  the draw before it. A resolved link now stands until something
+  changes, a chain resolves from its far end, and a move draws the links
+  after it in turn. Growing the first of 150 chained fields went from 51
+  to 11 milliseconds, and drawing them from 277 to 239.
 - A field whose key had no value wrote the first character typed into
   the key while the user was still typing, and kept it after Esc took
   the typing back. A field being typed in now seeds its key with the
@@ -191,6 +199,21 @@
   of Excel beside the new pump. A tick from a timer the current state did
   not arm now kills that timer and gives back the timer resolution its
   arming raised.
+- Removing a `Tabs` control showed the members of its panels, but a
+  stack they sat in laid out without them until something else drew. The
+  stack makes room for them at once.
+- A `Stack` placed in another went behind it when drawn, so the outer
+  stack's `Fill` hid a filled row inside it. A stack is now drawn over
+  the stacks it sits in, still behind its own members.
+- A control placed `RightOf` or `Below` one made after it was placed
+  before that control drew, against bounds that left out its caption:
+  `RightOf` a `Toggle` landed on the toggle's caption. A control's first
+  draw now moves the controls already drawn against it.
+- `Validates` added to a field in a stack after it drew reserved no row
+  for the message until something redrew the field, so the first message
+  moved the members under it. The row is reserved at once.
+- A float field moved to a cell with `At` left its `MaxLength` count and
+  clear button where the field had been. They go with the move.
 
 ## 1.0.3 - 2026-09-26
 

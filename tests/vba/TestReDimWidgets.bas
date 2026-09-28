@@ -7843,3 +7843,123 @@ Public Function TestTableEdges() As String
     ReDimUI.AutoPump True
     TestTableEdges = transcript
 End Function
+
+' Layout at its edges: removing a Tabs control reflows the stack its
+' panel members sit in; a stack in a stack draws over it; a control made
+' before its anchor moves once the anchor first draws; Validates keeps a
+' stack's row for its message at once; and a float field moved to a cell
+' leaves no length count behind.
+Public Function TestLayoutEdges() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim transcript As String
+    Dim saveTop As Double
+    Dim phoneTop As Double
+    Dim hadCount As Boolean
+    Dim hadClear As Boolean
+
+    ReDimUI.AutoPump False
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "wid103")
+    app.Tabs("tabs").AtRect(24, 24, 360, 32).Items "General", "Advanced"
+    app.Stack("form").AtRect 24, 70, 280, 0
+    app.TextInput("name").Sized(200, 22).OnTab("tabs", 1).InStack "form"
+    app.TickBox("beta").Sized(200, 18).Text("Beta").OnTab("tabs", 2).InStack "form"
+    app.Button("save").Sized(90, 30).Text("Save").InStack "form"
+    app.Stack("outer").AtRect(420, 24, 200, 0).Fill RGB(245, 245, 245)
+    app.TextInput("inField").Sized(100, 22).InStack "outer"
+    app.Stack("inner").Across.Gap(8).Fill(RGB(225, 225, 225)).InStack "outer"
+    app.Button("ok").Sized(90, 30).Text("OK").InStack "inner"
+    app.Button("apply").Sized(80, 22).Text("Apply").RightOf "dark"
+    app.Toggle("dark").AtRect(24, 300, 44, 22).Text "Dark mode"
+    app.Stack("notes").AtRect 24, 360, 280, 0
+    app.TextInput("email").Sized(200, 22).Caption("Email").InStack "notes"
+    app.TextInput("phone").Sized(200, 22).Caption("Phone").InStack "notes"
+    app.TextInput("qty").AtRect(420, 300, 80, 22).MaxLength(5).Clearable.Text "12"
+    app.TextInput("lot").AtRect(420, 360, 80, 22).MaxLength(5).ErrorText "Too many"
+    app.Render
+
+    saveTop = host.Shapes("rdm_wid103_save").Top
+    app.Component("tabs").Remove
+    transcript = "removeReflows=" & CStr(host.Shapes("rdm_wid103_beta").Visible = msoTrue _
+        And host.Shapes("rdm_wid103_beta").Top > host.Shapes("rdm_wid103_name").Top _
+        And host.Shapes("rdm_wid103_save").Top > saveTop)
+    transcript = transcript & "|innerOverOuter=" & CStr( _
+        host.Shapes("rdm_wid103_inner").ZOrderPosition > _
+        host.Shapes("rdm_wid103_outer").ZOrderPosition)
+    transcript = transcript & "|pastCaption=" & CStr(host.Shapes("rdm_wid103_apply").Left >= _
+        host.Shapes("rdm_wid103_dark__lbl").Left + host.Shapes("rdm_wid103_dark__lbl").Width)
+
+    phoneTop = host.Shapes("rdm_wid103_phone").Top
+    app.TextInput("email").Validates "TestReDimWidgets.CheckEmail"
+    transcript = transcript & "|validatesReserves=" & _
+        CStr(host.Shapes("rdm_wid103_phone").Top > phoneTop)
+
+    hadCount = ShapeExists(host, "rdm_wid103_qty__mc")
+    hadClear = ShapeExists(host, "rdm_wid103_qty__cx")
+    app.TextInput("qty").At "B40"
+    transcript = transcript & "|cellDropsCount=" & CStr(hadCount _
+        And Not ShapeExists(host, "rdm_wid103_qty__mc"))
+    transcript = transcript & "|cellDropsClear=" & CStr(hadClear _
+        And Not ShapeExists(host, "rdm_wid103_qty__cx"))
+    ' With a message showing, the notes draw again after the move.
+    hadCount = ShapeExists(host, "rdm_wid103_lot__mc")
+    app.TextInput("lot").At "B44"
+    transcript = transcript & "|notedDropsCount=" & CStr(hadCount _
+        And Not ShapeExists(host, "rdm_wid103_lot__mc"))
+    ReDimUI.AutoPump True
+    TestLayoutEdges = transcript
+End Function
+
+' Chains of 300 fields placed Below one another, one declared from its
+' first field and one from its last, draw and follow their first field
+' when it grows. Each link resolved the links before it nested one inside
+' the next, and each draw along a chain drew the next inside it, out of
+' stack space at 300 links and 200.
+Public Function TestLongChains() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim transcript As String
+    Dim fieldNo As Long
+    Dim forwardTop As Double
+    Dim backwardTop As Double
+
+    ReDimUI.AutoPump False
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "wid104")
+    app.TextInput("a1").AtRect 24, 24, 120, 22
+    For fieldNo = 2 To 300
+        app.TextInput("a" & fieldNo).Sized(120, 22).Below "a" & (fieldNo - 1), 4
+    Next fieldNo
+    For fieldNo = 300 To 2 Step -1
+        app.TextInput("b" & fieldNo).Sized(120, 22).Below "b" & (fieldNo - 1), 4
+    Next fieldNo
+    app.TextInput("b1").AtRect 200, 24, 120, 22
+    On Error Resume Next
+    app.Render
+    transcript = "renders=" & CStr(Err.Number = 0)
+    Err.Clear
+    forwardTop = host.Shapes("rdm_wid104_a300").Top
+    backwardTop = host.Shapes("rdm_wid104_b300").Top
+    transcript = transcript & "|spans=" & CStr(Round(forwardTop - 24, 0)) & "/" & _
+        CStr(Round(backwardTop - 24, 0))
+    app.TextInput("a1").Sized 120, 40
+    app.TextInput("b1").Sized 120, 40
+    transcript = transcript & "|grows=" & CStr(Err.Number = 0)
+    transcript = transcript & "|follows=" & _
+        CStr(Round(host.Shapes("rdm_wid104_a300").Top - forwardTop, 0)) & "/" & _
+        CStr(Round(host.Shapes("rdm_wid104_b300").Top - backwardTop, 0))
+    ' A link removed pins the links after it where they stand; the links
+    ' before it still follow the first.
+    forwardTop = host.Shapes("rdm_wid104_a300").Top
+    backwardTop = host.Shapes("rdm_wid104_a149").Top
+    app.Component("a150").Remove
+    app.TextInput("a1").Sized 120, 50
+    app.TextInput("a151").Text "Still here"
+    transcript = transcript & "|cut=" & CStr(Err.Number = 0) & "/" & _
+        CStr(Round(host.Shapes("rdm_wid104_a149").Top - backwardTop, 0)) & "/" & _
+        CStr(Round(host.Shapes("rdm_wid104_a300").Top - forwardTop, 0))
+    On Error GoTo 0
+    ReDimUI.AutoPump True
+    TestLongChains = transcript
+End Function

@@ -31,6 +31,14 @@ against last-applied props and touches only changed shape members. A flush that 
 components, or opens or closes a drop list or calendar, runs with `ScreenUpdating` off, so Excel
 paints the result once instead of part by part.
 
+A control resolves its rectangle as it draws: from a cell, its own points, its stack's slot, or
+the control it sits `Below` or `RightOf`. A resolved rectangle stands until the app hears of a
+change (any control marked dirty, or a stack laying out again), so a chain of relative controls
+resolves each link once, from the chain's far end, rather than each draw resolving every link
+before it, nested one inside the next. A draw that moves a control queues the controls placed
+against it, and the draw already running takes them in turn, so a move down a long chain nests
+no draws either; both had run out of stack space near 200 links.
+
 Shape naming: `rdm_<appId>_<componentId>` for a component's main shape, and
 `rdm_<appId>_<componentId>__<part>` for the parts of composite widgets, such as a toggle's knob,
 a list's rows, or a calendar's weeks. `Mount` is idempotent: an existing shape with a matching

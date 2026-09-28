@@ -2008,6 +2008,36 @@ def test_table_edges(run_widgets):
     assert facts["sortGone"] == "0/False", "a sort whose column went reads as no sort"
 
 
+def test_layout_edges(run_widgets):
+    facts = parse_transcript(run_widgets("TestLayoutEdges"))
+    assert facts["removeReflows"] == "True", (
+        "removing a Tabs control reflows the stack its panel members sit in"
+    )
+    assert facts["innerOverOuter"] == "True", "a stack in a stack draws over it"
+    assert facts["pastCaption"] == "True", (
+        "a control made before its anchor moves once the anchor first draws"
+    )
+    assert facts["validatesReserves"] == "True", "Validates keeps its message row at once"
+    assert facts["cellDropsCount"] == "True", "a float field moved to a cell drops its count"
+    assert facts["cellDropsClear"] == "True", (
+        "a float field moved to a cell drops its clear button"
+    )
+    assert facts["notedDropsCount"] == "True", (
+        "a float field moved to a cell with a message showing drops its count"
+    )
+
+
+def test_long_chains(run_widgets):
+    facts = parse_transcript(run_widgets("TestLongChains"))
+    assert facts["renders"] == "True", "chains of 300 fields placed Below draw"
+    assert facts["spans"] == "7774/7774", "each link sits 4 points under the last"
+    assert facts["grows"] == "True", "a chain follows its first field as it grows"
+    assert facts["follows"] == "18/18", "the last link moves by the first one's growth"
+    assert facts["cut"] == "True/10/0", (
+        "a removed link pins the links after it, and the links before it still follow"
+    )
+
+
 def test_tall_font_lines(run_widgets):
     facts = parse_transcript(run_widgets("TestTallFontLines"))
     assert facts["faces"] == "North/Ada", "a tall font's faces show their values"
