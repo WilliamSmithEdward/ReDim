@@ -3154,10 +3154,45 @@ Friend Sub ConfigureApp(ByVal targetAppId As String, ByVal hostSheet As Workshee
     Set mTheme = ReDimUI.ThemeLight
 End Sub
 
+' Mount of an app already mounted: its own sheet fetches it. Another
+' sheet while the app's is still open raises, where the app drew over the
+' new sheet and left a live copy on the old, which Render and Unmount
+' never reached again. A sheet standing in for one since deleted or closed
+' takes the app, which knows nothing of it yet: the next Render draws
+' there as a first one.
 Friend Sub RebindSheet(ByVal hostSheet As Worksheet)
     RequireRole ROLE_APP, "RebindSheet"
+    If hostSheet Is mSheet Then Exit Sub
+    If SheetStillOpen(mSheet) Then
+        If SameSheet(hostSheet, mSheet) Then Exit Sub
+        RaiseError ERROR_INVALID_OPERATION, "Mount", _
+            "App '" & mAppId & "' is mounted on sheet '" & mSheet.Name & _
+            "'; Unmount it before mounting it on sheet '" & hostSheet.Name & _
+            "', or give that app another id."
+    End If
     Set mSheet = hostSheet
+    Set mDrawnShapes = New Collection
+    mSurfaceFresh = Not SheetHoldsPrefix(hostSheet, SHAPE_PREFIX & mAppId & "_")
+    mSurfaceProtected = False
+    mRendered = False
 End Sub
+
+' Whether a sheet can still be reached: one deleted, or in a workbook
+' since closed, raises when asked its name.
+Private Function SheetStillOpen(ByVal someSheet As Worksheet) As Boolean
+    If someSheet Is Nothing Then Exit Function
+    On Error GoTo Gone
+    SheetStillOpen = (LenB(someSheet.Name) > 0)
+Gone:
+End Function
+
+' Whether two sheet references name one sheet: its workbook and its name.
+Private Function SameSheet(ByVal sheetA As Worksheet, ByVal sheetB As Worksheet) As Boolean
+    On Error GoTo Unreadable
+    SameSheet = (StrComp(sheetA.Parent.FullName, sheetB.Parent.FullName, vbTextCompare) = 0 _
+        And StrComp(sheetA.Name, sheetB.Name, vbTextCompare) = 0)
+Unreadable:
+End Function
 
 Public Property Get AppId() As String
     RequireRole ROLE_APP, "AppId"
@@ -3708,6 +3743,19 @@ End Function
 ' Re-applies the controls on a Tabs control's panels that the tab now
 ' shown hides or shows. One that hides while it has keyboard focus
 ' commits and lets focus go first.
+' A Tabs control's tab inserted (a step of 1) or removed (-1) at a
+' position: its panel members' tab numbers follow their tabs.
+Friend Sub ShiftTabMembers(ByVal tabsId As String, ByVal atPosition As Long, ByVal stepSize As Long)
+    Dim componentValue As ReDimUI
+
+    RequireRole ROLE_APP, "ShiftTabMembers"
+    For Each componentValue In mComponents
+        If StrComp(componentValue.TabOwnerId, tabsId, vbTextCompare) = 0 Then
+            componentValue.ShiftTabNumber atPosition, stepSize
+        End If
+    Next componentValue
+End Sub
+
 Friend Sub ReapplyTabMembers(ByVal tabsId As String, ByVal panelNow As Long)
     Dim componentValue As ReDimUI
     Dim shutNow As Boolean
@@ -6023,6 +6071,19 @@ Public Function OnTab(ByVal tabsId As String, ByVal tabNumber As Long) As ReDimU
     Set OnTab = Me
 End Function
 
+' The control's tab moved: a tab inserted at or before it (a step of 1),
+' or one removed before it (-1); its own tab removed leaves it on none,
+' hidden.
+Friend Sub ShiftTabNumber(ByVal atPosition As Long, ByVal stepSize As Long)
+    If stepSize > 0 Then
+        If mTabNumber >= atPosition Then mTabNumber = mTabNumber + 1
+    ElseIf mTabNumber = atPosition Then
+        mTabNumber = 0
+    ElseIf mTabNumber > atPosition Then
+        mTabNumber = mTabNumber - 1
+    End If
+End Sub
+
 ' A toast's action button, such as Undo: a click dismisses the toast and
 ' runs handlerProc. A toast with an action stays four seconds longer.
 Public Function Action(ByVal actionLabel As String, ByVal handlerProc As String) As ReDimUI
@@ -7664,6 +7725,14 @@ End Function
 Private Sub ShiftItemMarks(ByVal atPosition As Long, ByVal stepSize As Long)
     Dim listMarks As Variant
 
+    If mKind = KIND_TABS Then
+        ' The controls on a tab's panel keep their tab as tabs come and go
+        ' before it, and a removed tab's stay hidden: numbered as they
+        ' were, they showed under the tab that took their number.
+        OwnerApp.ShiftTabMembers mComponentId, atPosition, stepSize
+        mAppliedPanelTab = -1
+    End If
+
     For Each listMarks In Array(mCheckedSet, mDisabledItems, mGroupHeaders, mPanelSel(0))
         If stepSize > 0 Then
             ShiftIndexesForInsert listMarks, atPosition
@@ -8220,7 +8289,7 @@ Public Property Let InputValue(ByVal assignedText As String)
         priorEvents = Application.EnableEvents
         Application.EnableEvents = False
         On Error Resume Next
-        targetCell.Value = assignedText
+        WriteCellWords targetCell, assignedText
         writeError = Err.Number
         writeDescription = Err.Description
         On Error GoTo 0
@@ -8231,6 +8300,30 @@ Public Property Let InputValue(ByVal assignedText As String)
     End If
     WriteFieldKey OwnerApp, assignedText
 End Property
+
+' Writes a field's text to its cell as that text. A plain number goes in
+' as the number, for formulas and the cell's own number format; any other
+' text goes in as text, behind the apostrophe Excel hides, where Excel's
+' reading of it turned "02134" into 2134, "1/2" into a date, and "=x"
+' into a live formula.
+Private Sub WriteCellWords(ByVal cell As Range, ByVal cellWords As String)
+    If LenB(cellWords) = 0 Then
+        cell.Value = cellWords
+    ElseIf PlainNumberWords(cellWords) Then
+        cell.Value = CDbl(cellWords)
+    Else
+        cell.Value = "'" & cellWords
+    End If
+End Sub
+
+' Whether text is a number spelled as VBA spells it back: "7", "-2",
+' "3.5", but not "007", "+7", "1e3", or "1,234".
+Private Function PlainNumberWords(ByVal someWords As String) As Boolean
+    If Not IsNumeric(someWords) Then Exit Function
+    On Error GoTo NotPlain
+    PlainNumberWords = (CStr(CDbl(someWords)) = someWords)
+NotPlain:
+End Function
 
 Friend Function InputCell(ByVal hostSheet As Worksheet) As Range
     If LenB(mAnchor) = 0 Then
@@ -20996,7 +21089,7 @@ Friend Function PickComboItem( _
         Application.EnableEvents = False
         On Error Resume Next
         Set cell = InputCell(hostApp.Sheet)
-        If Not cell Is Nothing Then cell.Value = picked
+        If Not cell Is Nothing Then WriteCellWords cell, picked
         On Error GoTo 0
         Application.EnableEvents = priorEvents
     End If

@@ -301,6 +301,22 @@
 - A theme's color, font, and tint getters answered on any value, so
   `ui.PrimaryColor` without `.Theme` returned 0 and painted black. They
   raise the role error every other member does.
+- A `Tabs` control's `AddItem` at a position or `RemoveItem` left its
+  panel members on the numbers they had, so a removed tab's controls
+  showed under the tab that took its number, and every panel after it
+  moved to the wrong tab. The numbers follow their tabs now, and a
+  removed tab's controls stay hidden.
+- `Mount` of an app already mounted, given another sheet, moved only the
+  app's idea of its sheet: its controls drew over the new sheet while a
+  live copy stayed on the old one, which `Render` and `Unmount` never
+  reached again. It raises while the app's own sheet is open, and moves
+  the app whole to a sheet standing in for one since deleted or closed.
+- A cell-backed `ComboBox` pick or `InputValue` wrote its text through
+  Excel's reading of it: "02134" went in as 2134, so the combo no longer
+  named its item and every pick of it fired `OnChange` again; "1/2" became
+  a date whose format then clung to the cell; and an item such as "=A1"
+  became a live formula. The cell now takes a plain number as the number
+  and any other text as text.
 - In a workbook whose name holds an apostrophe, such as "Bob's
   Budget.xlsm", `Render` raised error 1004: Excel refused the click
   macro ReDim gives every shape, whose quoted workbook name left the

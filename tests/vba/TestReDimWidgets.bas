@@ -8103,6 +8103,10 @@ Public Function TestLifecycleEdges() As String
     Dim live As Worksheet
     Dim transcript As String
     Dim tokenValue As Long
+    Dim pickRound As Long
+    Dim moved As Worksheet
+    Dim mountRefuses As Boolean
+    Dim mountFetches As Boolean
     Dim leftover As Shape
     Dim candidate As Shape
     Dim sameNamed As Long
@@ -8133,6 +8137,34 @@ Public Function TestLifecycleEdges() As String
     Err.Clear
     On Error GoTo 0
 
+    ' A cell-backed field's cell holds the text it was given: a plain
+    ' number as the number, any other text as text, a formula's text
+    ' included, which never runs.
+    app.TextInput("zip").At "G3"
+    app.TextInput("zip").InputValue = "02134"
+    transcript = transcript & "|cellWords=" & CStr(VarType(host.Range("G3").Value) = vbString _
+        And host.Range("G3").Text = "02134")
+    app.TextInput("zip").InputValue = "=1+1"
+    transcript = transcript & "/" & CStr(Not host.Range("G3").HasFormula _
+        And host.Range("G3").Text = "=1+1")
+    app.TextInput("zip").InputValue = "1/2"
+    transcript = transcript & "/" & CStr(VarType(host.Range("G3").Value) = vbString)
+    app.TextInput("zip").InputValue = "7"
+    transcript = transcript & "/" & CStr(VarType(host.Range("G3").Value) = vbDouble)
+    app.TextInput("zip").InputValue = "50%"
+    transcript = transcript & "/" & CStr(VarType(host.Range("G3").Value) = vbString _
+        And host.Range("G3").Text = "50%")
+    ' Picking the item a leading zero starts again changes nothing.
+    gChangeCount = 0
+    app.ComboBox("code").At("G5").Items("02134", "10001").OnChange "TestReDimWidgets.RecordChange"
+    For pickRound = 1 To 2
+        Sleep 200
+        ReDimUI.DispatchShape "rdm_wid107_code"
+        Sleep 200
+        ReDimUI.DispatchShape "rdm_wid107_code__opt1"
+    Next pickRound
+    transcript = transcript & "|repick=" & gChangeCount & "/" & app.ComboBox("code").SelectedText
+
     ' Two apps follow the Windows look; the first one's sheet is gone.
     Set gone = NewCanvas()
     Set goneApp = ReDimUI.Mount(gone, "wid107a")
@@ -8160,6 +8192,33 @@ Public Function TestLifecycleEdges() As String
     liveApp.FollowSystemTheme False
     ReDimUI.OverrideSystemLook False, -1
     ReDimUI.ClearSystemLookOverride
+
+    ' Mount on the app's own sheet fetches it; on another while its own
+    ' is open it raises; on one standing in for a deleted sheet it moves
+    ' there and draws.
+    ReDimUI.Mount(host, "wid107m").Button("go").AtRect(24, 300, 60, 24).Text "Go"
+    ReDimUI.App("wid107m").Render
+    Set moved = NewCanvas()
+    On Error Resume Next
+    ReDimUI.Mount moved, "wid107m"
+    mountRefuses = (Err.Number <> 0 And InStr(Err.Description, "Unmount it") > 0)
+    Err.Clear
+    ReDimUI.Mount host, "wid107m"
+    mountFetches = (Err.Number = 0 And ShapeExists(host, "rdm_wid107m_go"))
+    Err.Clear
+    On Error GoTo 0
+    ReDimUI.Mount(moved, "wid107n").Button("go").AtRect(24, 24, 60, 24).Text "Go"
+    ReDimUI.App("wid107n").Render
+    Application.DisplayAlerts = False
+    moved.Delete
+    Application.DisplayAlerts = True
+    Set moved = NewCanvas()
+    On Error Resume Next
+    ReDimUI.Mount(moved, "wid107n").Render
+    transcript = transcript & "|mountSheet=" & CStr(mountRefuses) & "/" & CStr(mountFetches) & _
+        "/" & CStr(Err.Number = 0 And ShapeExists(moved, "rdm_wid107n_go"))
+    Err.Clear
+    On Error GoTo 0
 
     ' A shape saved under the app id in another case is the app's.
     Set leftover = host.Shapes.AddShape(msoShapeRectangle, 300, 24, 60, 24)
@@ -8303,6 +8362,47 @@ Public Function TestListEdges() As String
     RdxStopPump
     ReDimUI.AutoPump True
     TestListEdges = transcript
+End Function
+
+' Controls on a tab's panel keep their tab as tabs are removed or
+' inserted before it, and a removed tab's controls stay hidden: numbered
+' as they were, they showed under the tab that took their number.
+Public Function TestTabPanelsFollow() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim transcript As String
+
+    ReDimUI.AutoPump False
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "wid109")
+    app.Tabs("tabs").AtRect(24, 24, 360, 32).Items "One", "Two", "Three"
+    app.Label("l1").AtRect(24, 70, 100, 20).Text("On one").OnTab "tabs", 1
+    app.Label("l2").AtRect(24, 70, 100, 20).Text("On two").OnTab "tabs", 2
+    app.Label("l3").AtRect(24, 70, 100, 20).Text("On three").OnTab "tabs", 3
+    app.Render
+    app.Tabs("tabs").Value 3
+    app.Tabs("tabs").RemoveItem 1
+    transcript = "removedBefore=" & ShownLabels(host)
+    app.Tabs("tabs").AddItem "Zero", 1
+    transcript = transcript & "|insertedBefore=" & ShownLabels(host)
+    app.Tabs("tabs").Value 1
+    app.Tabs("tabs").RemoveItem "Two"
+    app.Tabs("tabs").Value 2
+    transcript = transcript & "|removedOwn=" & ShownLabels(host)
+    ReDimUI.AutoPump True
+    TestTabPanelsFollow = transcript
+End Function
+
+' Which of the three tab labels show, as "l3" or "none".
+Private Function ShownLabels(ByVal host As Worksheet) As String
+    Dim idx As Long
+
+    For idx = 1 To 3
+        If host.Shapes("rdm_wid109_l" & idx).Visible = msoTrue Then
+            ShownLabels = ShownLabels & "l" & idx
+        End If
+    Next idx
+    If LenB(ShownLabels) = 0 Then ShownLabels = "none"
 End Function
 
 ' Chains of 300 fields placed Below one another, one declared from its

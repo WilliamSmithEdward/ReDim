@@ -11,7 +11,7 @@ names the control that raised it.
 
 | Member | Purpose |
 |---|---|
-| `ReDimUI.Mount(sheet, appId)` | Create or fetch the app bound to a worksheet. Idempotent. Shapes an earlier session drew on the sheet, under the id in any case, are the app's to adopt; the first `Render` sweeps what that session left and the build no longer draws: rows past a list's items, and the parts only a focused control, an open list, or a tooltip has. |
+| `ReDimUI.Mount(sheet, appId)` | Create or fetch the app bound to a worksheet. Idempotent. An app already mounted on another sheet that is still open raises: `Unmount` it first, or give the new app another id. A sheet standing in for the app's sheet, deleted or in a closed workbook, takes the app, and its next `Render` draws there in full. Shapes an earlier session drew on the sheet, under the id in any case, are the app's to adopt; the first `Render` sweeps what that session left and the build no longer draws: rows past a list's items, and the parts only a focused control, an open list, or a tooltip has. |
 | `ReDimUI.App(appId)` | Fetch a mounted app; raises if missing. |
 | `ReDimUI.HasApp(appId)` | Existence probe. |
 | `ReDimUI.Sender`, `SenderApp`, `SenderId` | Click context, valid inside handlers. |
@@ -471,7 +471,9 @@ ui.Sparkline("errors").AtRect(120, 50, 120, 30).Danger.ValuesFrom Array(2, 8, 3,
   is hidden waits for the tab. A panel that hides closes its open list, and a field
   on it that has keyboard focus commits and lets focus go. Hiding the `Tabs` control
   hides every panel, `Remove` shows them all, and a `Tabs` control can itself sit on
-  another's panel.
+  another's panel. A tab inserted or removed with `AddItem` or `RemoveItem` carries the
+  numbers after it along, so each control stays on its tab, and a removed tab's controls
+  stay hidden.
 
 ```vba
 ui.Tabs("tabs").AtRect(24, 24, 360, 32).Items("General", "Advanced").WritesTo "tab"
@@ -588,7 +590,11 @@ Focus mechanics, all automatic:
   natural flow on an app surface anyway.
 - `InputValue` reads and writes the buffer in float mode, the cell in cell mode. In float
   mode a written line break becomes LF, and a single-line field takes breaks and tabs as
-  spaces, as a paste does; so does the text a field shows from the key it writes.
+  spaces, as a paste does; so does the text a field shows from the key it writes. In cell
+  mode `InputValue` and a combo's pick write the cell as that text: a plain number, such
+  as `7` or `-2.5`, as the number, and any other text as text, so `02134` keeps its zero,
+  `1/2` stays words rather than a date, and `=A1` never becomes a formula. What someone
+  types into the cell by hand is Excel's to read, as in any cell.
 
 Capture uses `Application.OnKey`, bound only while a control holds focus and released when
 it leaves, so sheet typing is untouched the rest of the time. The bound set is the

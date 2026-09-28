@@ -2058,10 +2058,18 @@ def test_lifecycle_edges(run_widgets):
     )
     assert facts["cellSeeds"] == "Alice", "a cell-backed field seeds its key from its cell"
     assert facts["themeRole"] == "True", "a theme token read from an app raises"
+    assert facts["cellWords"] == "True/True/True/True/True", (
+        "a cell-backed field's cell holds its text; plain numbers stay numbers"
+    )
+    assert facts["repick"] == "1/02134", "picking the same leading-zero item again changes nothing"
     assert facts["followFault"] == "True/1/True", (
         "a theme re-render that fails is counted and the other apps still follow"
     )
     assert facts["caseAdopts"] == "1", "shapes saved under a recased app id are adopted"
+    assert facts["mountSheet"] == "True/True/True", (
+        "Mount fetches on the app's sheet, refuses another while it is open, "
+        "and moves to one standing in for a deleted sheet"
+    )
     assert facts["adoptSweeps"] == "True", (
         "the first render on an adopted sheet sweeps dead rows, rings, and list rows"
     )
@@ -2087,6 +2095,15 @@ def test_list_edges(run_widgets):
     assert facts["escOther"] == "True", "Esc clears the filter of the panel the cursor left"
     assert facts["hiddenSpace"] == "0/0", "Space passes over a check list row the filter hides"
     assert facts["unsized"] == "True/0", "an unsized array lists nothing"
+
+
+def test_tab_panels_follow(run_widgets):
+    facts = parse_transcript(run_widgets("TestTabPanelsFollow"))
+    assert facts["removedBefore"] == "l3", "a tab removed before the shown one keeps its panel"
+    assert facts["insertedBefore"] == "l3", "a tab inserted before the shown one keeps its panel"
+    assert facts["removedOwn"] == "l3", (
+        "a removed tab's controls stay hidden and the rest keep their tabs"
+    )
 
 
 def test_long_chains(run_widgets):
