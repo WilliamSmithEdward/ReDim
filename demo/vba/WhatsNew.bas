@@ -84,12 +84,14 @@ Public Sub BuildWhatsNew()
     ui.AddCommand "Show Forms", "WhatsNew.HandleShowSection", "View"
     ui.AddCommand "Show Look", "WhatsNew.HandleShowSection", "View"
     ui.AddCommand "Show Async and errors", "WhatsNew.HandleShowSection", "View"
+    ui.AddCommand "Show Filters", "WhatsNew.HandleShowSection", "View"
 
-    ui.Label("title").AtRect(24, 14, 420, 30).Text("What's new in ReDim 1.0.3").FontSize(20).Bold
+    ui.Label("title").AtRect(24, 14, 420, 30).Text("What's new in ReDim").FontSize(20).Bold
     ui.Label("subtitle").AtRect(24, 44, 620, 18) _
         .Text "Try each tab; the log on the right says what happened. Ctrl+Shift+P jumps to a tab."
     ui.Tabs(SECTIONS_ID).AtRect(24, 70, 620, 30) _
-        .Items("Two-way state", "Lists", "Forms", "Look", "Async and errors").WritesTo "section"
+        .Items("Two-way state", "Lists", "Forms", "Look", "Async and errors", "Filters") _
+        .WritesTo "section"
     ' A card's words sit at its top, so the log reads down from there.
     ui.Label("logTitle").AtRect(668, 70, 280, 20).Bold.Text "What just happened"
     ui.Card("log").AtRect(668, 94, 280, 446).FontSize(9).BindText "log"
@@ -99,6 +101,7 @@ Public Sub BuildWhatsNew()
     BuildFormsTab ui
     BuildLookTab ui
     BuildAsyncTab ui
+    BuildFiltersTab ui
 
     ui.SetStateDefault "log", "Nothing yet. Pick, type, or click on the left."
     ui.SetStateDefault "roll", "No roll yet."
@@ -106,6 +109,8 @@ Public Sub BuildWhatsNew()
     ui.OnStateChanged Array("size", "paused", "count"), "WhatsNew.HandleStateChange"
     ui.OnStateChanged Array("themeName", "fontName", "tint"), "WhatsNew.HandleLookChange"
     ui.OnStateChanged Array("hover", "rings"), "WhatsNew.HandlePointerLooks"
+    ui.OnStateChanged Array("orderSearch", "orderStatus", "orderRegions"), _
+        "WhatsNew.HandleOrderFilters"
     ApplyLookNow ui, False
     ApplyPointerLooksNow ui, False
     ui.Render
@@ -322,6 +327,52 @@ Private Sub BuildLookTab(ByVal ui As ReDimUI)
     ui.TextInput("sampleNotes").AtRect(430, 334, 200, 22).Caption("AutoGrow in the font") _
         .AutoGrow(4).OnTab SECTIONS_ID, 4
     ui.TextInput("sampleNotes").InputValue = "One" & vbLf & "Two" & vbLf & "Three"
+End Sub
+
+' Filters bound to state keys: a search box that writes its key as it is
+' typed, a status pick, and a region check list narrow one table at once.
+Private Sub BuildFiltersTab(ByVal ui As ReDimUI)
+    ui.Label("filtersIntro").AtRect(24, 104, 620, 48).FontSize(10).OnTab(SECTIONS_ID, 6) _
+        .Text "The search box writes its key as you type; the table filters by it, by the " & _
+        "status picked, and by the regions checked, all at once. And after End resets the " & _
+        "project, the next click on any demo builds it again."
+    ui.TextInput("orderSearch").AtRect(24, 176, 180, 22).Caption("Search orders") _
+        .Placeholder("Type to filter").WritesTo("orderSearch").WritesLive _
+        .OnTab SECTIONS_ID, 6
+    ui.SelectBox("orderStatus").AtRect(230, 176, 150, 24).Caption("Status") _
+        .Items("All", "Open", "Shipped", "Returned").Value(1).WritesTo("orderStatus") _
+        .OnTab SECTIONS_ID, 6
+    ui.CheckList("orderRegions").AtRect(406, 154, 220, 96).Caption("Regions; none shows all") _
+        .Items("North", "South", "East", "West").WithSelectAll(False) _
+        .WritesTo("orderRegions").OnTab SECTIONS_ID, 6
+    With ui.Table("orders")
+        .AtRect(24, 266, 602, 200).Columns("Order", "Customer", "Region", "Status") _
+            .OnTab SECTIONS_ID, 6
+        .AddRow 1001, "Ada Byron", "North", "Open"
+        .AddRow 1002, "Grace Hopper", "South", "Shipped"
+        .AddRow 1003, "Alan Turing", "East", "Open"
+        .AddRow 1004, "Katherine Johnson", "West", "Returned"
+        .AddRow 1005, "Edsger Dijkstra", "North", "Shipped"
+        .AddRow 1006, "Margaret Hamilton", "East", "Shipped"
+        .AddRow 1007, "Donald Knuth", "South", "Open"
+        .AddRow 1008, "Barbara Liskov", "West", "Shipped"
+        .AddRow 1009, "John McCarthy", "North", "Returned"
+        .AddRow 1010, "Frances Allen", "East", "Open"
+        .AddRow 1011, "Ken Thompson", "South", "Shipped"
+        .AddRow 1012, "Radia Perlman", "West", "Open"
+        .FilterBy "orderSearch"
+        .FilterColumn 4, "orderStatus", "All"
+        .FilterColumn 3, "orderRegions"
+    End With
+End Sub
+
+' Any of the orders table's filter keys changed.
+Public Sub HandleOrderFilters()
+    Dim ui As ReDimUI
+
+    Set ui = WhatsNewApp()
+    LogEvent "The orders table filters by three keys and shows " & _
+        ui.Table("orders").ShownRowCount & " of " & ui.Table("orders").RowCount & " orders"
 End Sub
 
 ' An op, two jobs, the error sink, and a Confirm that opens another.

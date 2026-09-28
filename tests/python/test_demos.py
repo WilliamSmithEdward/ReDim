@@ -451,6 +451,8 @@ Public Function SmokeWhatsNew() As String
         ReDimUI.PumpOnce
     Next ticks
     transcript = transcript & "|filled=" & app.State("jobA") & "/" & app.State("jobB")
+    app.SetState "orderStatus", "Shipped"
+    transcript = transcript & "|filtered=" & app.Table("orders").ShownRowCount
     transcript = transcript & "|protected=" & CStr(app.Sheet.ProtectContents)
     RdxReleaseKeys
     RdxStopPump
@@ -625,6 +627,7 @@ def test_whats_new_smoke(demo_paths):
         assert facts["trapped"] == "True", "the failing handler traps its own error"
         assert facts["rolled"] == "True", "the done handler reads the task's result"
         assert facts["filled"] == "100/100", "two jobs share one step by their Tag"
+        assert facts["filtered"] == "5", "the orders table filters by the status key"
         assert facts["protected"] == "True"
 
 
