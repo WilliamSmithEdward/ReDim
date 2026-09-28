@@ -86,6 +86,9 @@ Private Sub BuildBrowse()
 
     Set host = EnsureSheet("DexBrowse")
     Set ui = ReDimUI.Mount(host, "dexbrowse")
+    ' After End or an edit resets the project, the next click rebuilds
+    ' all three windows.
+    ui.RebuildsWith "PokeDex.BuildPokeDex"
     ui.ProtectSurface False
     ui.PrepareCanvas
     ui.SetTheme PokeTheme(False)
@@ -161,6 +164,7 @@ Private Sub BuildTeam()
 
     Set host = EnsureSheet("DexTeam")
     Set ui = ReDimUI.Mount(host, "dexteam")
+    ui.RebuildsWith "PokeDex.BuildPokeDex"
     ui.ProtectSurface False
     ui.PrepareCanvas
     ui.SetTheme PokeTheme(False)
@@ -204,6 +208,7 @@ Private Sub BuildTrainer()
 
     Set host = EnsureSheet("DexTrainer")
     Set ui = ReDimUI.Mount(host, "dextrainer")
+    ui.RebuildsWith "PokeDex.BuildPokeDex"
     ui.ProtectSurface False
     ui.PrepareCanvas
     ui.SetTheme PokeTheme(False)

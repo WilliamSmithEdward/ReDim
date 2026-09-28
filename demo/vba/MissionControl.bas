@@ -54,6 +54,8 @@ Public Sub BuildMissionControl()
 
     Set host = ThisWorkbook.Worksheets(1)
     Set ui = ReDimUI.Mount(host, APP_ID)
+    ' After End or an edit resets the project, the next click rebuilds.
+    ui.RebuildsWith "MissionControl.BuildMissionControl"
     ' UserInterfaceOnly protection does not survive reopen, so builds
     ' unprotect first and re-protect at the end.
     ui.ProtectSurface False

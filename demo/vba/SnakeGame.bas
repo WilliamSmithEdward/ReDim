@@ -61,6 +61,8 @@ Public Sub BuildSnake()
 
     Set host = ThisWorkbook.Worksheets(1)
     Set ui = ReDimUI.Mount(host, APP_ID)
+    ' After End or an edit resets the project, the next click rebuilds.
+    ui.RebuildsWith "SnakeGame.BuildSnake"
     ui.ProtectSurface False
     ui.PrepareCanvas
 

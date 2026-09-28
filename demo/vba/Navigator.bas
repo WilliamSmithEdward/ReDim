@@ -62,6 +62,9 @@ Private Sub BuildHome()
     Dim ui As ReDimUI
 
     Set ui = ReDimUI.Mount(EnsureSheet("NavHome"), "navhome")
+    ' After End or an edit resets the project, the next click rebuilds
+    ' all three windows.
+    ui.RebuildsWith "Navigator.BuildNavigator"
     ui.ProtectSurface False
     ui.PrepareCanvas
     ui.AsWindow.WindowTitle "Home"
@@ -82,6 +85,7 @@ Private Sub BuildSettings()
     Dim ui As ReDimUI
 
     Set ui = ReDimUI.Mount(EnsureSheet("NavSettings"), "navsettings")
+    ui.RebuildsWith "Navigator.BuildNavigator"
     ui.ProtectSurface False
     ui.PrepareCanvas
     ui.AsWindow.WindowTitle "Settings"
@@ -107,6 +111,7 @@ Private Sub BuildAbout()
     Dim ui As ReDimUI
 
     Set ui = ReDimUI.Mount(EnsureSheet("NavAbout"), "navabout")
+    ui.RebuildsWith "Navigator.BuildNavigator"
     ui.ProtectSurface False
     ui.PrepareCanvas
     ui.AsWindow.WindowTitle "About"

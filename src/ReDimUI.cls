@@ -146,6 +146,9 @@ Private Const PALETTE_FIELD_ID As String = "mdl_pal_field"
 ' The workbook name that lists the keys ReDim has bound, as OnKey codes, so
 ' a reset of the project cannot leave a key bound with no record of it.
 Private Const BOUND_KEYS_NAME As String = "rdm_bound_keys"
+' The hidden workbook name that keeps an app's RebuildsWith macro, the
+' app's id after it.
+Private Const REBUILD_NAME_PREFIX As String = "rdm_rebuild_"
 
 Private Const SHAPE_PREFIX As String = "rdm_"
 Private Const PART_SEPARATOR As String = "__"
@@ -414,6 +417,9 @@ Private mFocusHandoff As Boolean
 ' cancel at Excel's save prompt. The next event from the workbook takes
 ' the keys and the pump back.
 Private mCloseHeld As Boolean
+' True while a forgotten app's RebuildsWith macro runs, so a click in it
+' never starts another.
+Private mRebuilding As Boolean
 ' Test seam: the next real tick treats the field-watch press edge as
 ' fired, so in-tick blur paths are testable without physical input.
 Private mForcePressEdge As Boolean
@@ -1396,7 +1402,12 @@ Friend Sub DispatchShape(ByVal clickedName As String)
     If Not ParseShapeName(clickedName, targetAppId, targetComponentId, targetPart) Then
         Exit Sub
     End If
-    If Not TryGetObject(mApps, targetAppId, appValue) Then Exit Sub
+    If Not TryGetObject(mApps, targetAppId, appValue) Then
+        ' An app a reset of the project forgot builds again from the macro
+        ' it recorded, and the click goes on to the control it drew.
+        If Not RebuildForgottenApp(targetAppId) Then Exit Sub
+        If Not TryGetObject(mApps, targetAppId, appValue) Then Exit Sub
+    End If
     If Not appValue.TryGetComponent(targetComponentId, componentValue) Then Exit Sub
     ' A click on the control: the press that led to it was on it.
     componentValue.CancelOffPress
@@ -1455,6 +1466,36 @@ HandlerFailed:
     mSenderPartName = vbNullString
     appValue.ReportAppError failure
 End Sub
+
+' An app a reset of the project forgot, whose shape was clicked: runs the
+' macro it recorded with RebuildsWith, once, and says whether the app is
+' mounted again. A macro that cannot run leaves the app forgotten.
+Private Function RebuildForgottenApp(ByVal targetAppId As String) As Boolean
+    Dim recorded As String
+    Dim appValue As ReDimUI
+
+    If mRebuilding Then Exit Function
+    recorded = RecordedRebuild(targetAppId)
+    If LenB(recorded) = 0 Then Exit Function
+    mRebuilding = True
+    On Error Resume Next
+    Application.Run recorded
+    On Error GoTo 0
+    mRebuilding = False
+    RebuildForgottenApp = TryGetObject(mApps, targetAppId, appValue)
+End Function
+
+' The macro an app recorded with RebuildsWith, "" for none.
+Private Function RecordedRebuild(ByVal targetAppId As String) As String
+    Dim recorded As String
+
+    On Error Resume Next
+    recorded = ThisWorkbook.Names(REBUILD_NAME_PREFIX & targetAppId).RefersTo
+    On Error GoTo 0
+    ' A text name reads back as ="Module.Build".
+    If Len(recorded) < 4 Then Exit Function
+    RecordedRebuild = Replace(Mid$(recorded, 3, Len(recorded) - 3), """""", """")
+End Function
 
 ' A handler failure as the error sink or status bar reports it, naming
 ' the procedure and what ran it: "ReDim handler error 13 in Orders.Save
@@ -5120,6 +5161,9 @@ Public Sub Unmount(Optional ByVal deleteShapes As Boolean = True)
     Set mTickables = Nothing
     ReDimUI.ForgetApp mAppId
     ReDimUI.RefreshAccessKeys
+    ' An app taken down on purpose stays down: a click on a shape it left
+    ' builds nothing.
+    If LenB(RecordedRebuild(mAppId)) > 0 Then RebuildsWith vbNullString
 End Sub
 
 Friend Sub ForgetApp(ByVal targetAppId As String)
@@ -5154,6 +5198,27 @@ Public Sub OnError(ByVal handlerProc As String)
     RequireRole ROLE_APP, "OnError"
     mErrorHandlerProc = handlerProc
 End Sub
+
+' A reset of the project, End in VBA's error dialog or an edit in the VBA
+' editor, forgets every app, and its shapes stop answering clicks. With
+' RebuildsWith, the first click on one of the app's shapes after that runs
+' buildProc, which mounts and renders the app again, and then carries out
+' the click. The name is kept in a hidden workbook name, which a reset
+' leaves alone, and written only when it changes. "" forgets it, as
+' Unmount does.
+Public Function RebuildsWith(ByVal buildProc As String) As ReDimUI
+    RequireRole ROLE_APP, "RebuildsWith"
+    If buildProc <> RecordedRebuild(mAppId) Then
+        On Error Resume Next
+        ThisWorkbook.Names(REBUILD_NAME_PREFIX & mAppId).Delete
+        On Error GoTo 0
+        If LenB(buildProc) > 0 Then
+            ThisWorkbook.Names.Add REBUILD_NAME_PREFIX & mAppId, _
+                "=""" & Replace(buildProc, """", """""") & """", False
+        End If
+    End If
+    Set RebuildsWith = Me
+End Function
 
 ' One app tick, split into isolated sections so a fault in one duty can
 ' never silently skip the rest: the compaction bug hid for months

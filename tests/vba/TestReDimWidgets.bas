@@ -8364,6 +8364,52 @@ Public Function TestListEdges() As String
     TestListEdges = transcript
 End Function
 
+' The build TestRebuildsWith records: an app on the sheet named
+' RebuildCanvas with a button that counts its clicks.
+Public Sub BuildRebuildDemo()
+    Dim app As ReDimUI
+
+    Set app = ReDimUI.Mount(ThisWorkbook.Worksheets("RebuildCanvas"), "wid111")
+    app.RebuildsWith "TestReDimWidgets.BuildRebuildDemo"
+    app.Button("go").AtRect(24, 24, 90, 28).Text("Go").OnClick "TestReDimWidgets.RecordChange"
+    app.Render
+End Sub
+
+' After a reset forgets an app, a click on one of its shapes runs the
+' build it recorded with RebuildsWith and then carries out the click; an
+' app taken down with Unmount stays down.
+Public Function TestRebuildsWith() As String
+    Dim host As Worksheet
+    Dim transcript As String
+
+    ReDimUI.AutoPump False
+    Set host = NewCanvas()
+    host.Name = "RebuildCanvas"
+    BuildRebuildDemo
+    transcript = "recorded=" & CStr(WorkbookNameExists("rdm_rebuild_wid111"))
+    ' A reset forgets the app; its shapes stay on the sheet.
+    ReDimUI.ForgetApp "wid111"
+    gChangeCount = 0
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid111_go"
+    transcript = transcript & "|rebuilds=" & CStr(ReDimUI.HasApp("wid111")) & "/" & gChangeCount
+    ReDimUI.App("wid111").Unmount False
+    transcript = transcript & "|unmountForgets=" & CStr(Not WorkbookNameExists("rdm_rebuild_wid111"))
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_wid111_go"
+    transcript = transcript & "|staysDown=" & CStr(Not ReDimUI.HasApp("wid111")) & "/" & gChangeCount
+    ReDimUI.AutoPump True
+    TestRebuildsWith = transcript
+End Function
+
+Private Function WorkbookNameExists(ByVal nameText As String) As Boolean
+    Dim probe As Name
+
+    On Error Resume Next
+    Set probe = ThisWorkbook.Names(nameText)
+    WorkbookNameExists = Not probe Is Nothing
+End Function
+
 ' Filters bound to state keys: a search field that writes its key as the
 ' user types narrows a table filtered by the key, and Esc brings every row
 ' back; a field with a pause writes once typing pauses; a status pick

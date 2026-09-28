@@ -70,6 +70,8 @@ Public Sub BuildWhatsNew()
     If host.Name <> VIEW_SHEET Then host.Name = VIEW_SHEET
     host.Activate
     Set ui = ReDimUI.Mount(host, APP_ID)
+    ' After End or an edit resets the project, the next click rebuilds.
+    ui.RebuildsWith "WhatsNew.BuildWhatsNew"
     ' A rebuild over the shapes already drawn applies each control once,
     ' at Render, instead of once per builder call.
     ui.BeginUpdate

@@ -2097,6 +2097,16 @@ def test_list_edges(run_widgets):
     assert facts["unsized"] == "True/0", "an unsized array lists nothing"
 
 
+def test_rebuilds_with(run_widgets):
+    facts = parse_transcript(run_widgets("TestRebuildsWith"))
+    assert facts["recorded"] == "True", "RebuildsWith keeps the build in a hidden name"
+    assert facts["rebuilds"] == "True/1", (
+        "a click on a forgotten app's shape rebuilds it and carries out the click"
+    )
+    assert facts["unmountForgets"] == "True", "Unmount forgets the build"
+    assert facts["staysDown"] == "True/1", "an app taken down on purpose stays down"
+
+
 def test_bound_filters(run_widgets):
     facts = parse_transcript(run_widgets("TestBoundFilters"))
     assert facts["start"] == "5"

@@ -47,6 +47,8 @@ Public Sub BuildWidgetGallery()
 
     Set host = ThisWorkbook.Worksheets(1)
     Set ui = ReDimUI.Mount(host, APP_ID)
+    ' After End or an edit resets the project, the next click rebuilds.
+    ui.RebuildsWith "WidgetGallery.BuildWidgetGallery"
     ' A rebuild over the shapes already drawn applies each control once,
     ' at Render, instead of once per builder call.
     ui.BeginUpdate

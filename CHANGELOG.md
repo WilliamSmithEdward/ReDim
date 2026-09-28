@@ -12,6 +12,12 @@
   types, once typing pauses, as well as on commit, so a search box
   narrows a table as it is typed; Esc writes back the text the field
   returns to.
+- `RebuildsWith "Module.Build"` brings an app back after a reset of the
+  project, End in VBA's error dialog or an edit in the VBA editor, which
+  forgot every app and left its shapes dead: the first click on one runs
+  the build again and then carries out the click. The macro's name
+  lives in a hidden workbook name, which the reset leaves alone, and
+  `Unmount` forgets it. Every demo now rebuilds this way.
 
 ## 1.0.4 - 2026-09-27
 
