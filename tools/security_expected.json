@@ -61,7 +61,6 @@
     },
     "ReDimHost": {
       "AutoExec: Auto_Close": "auto-close",
-      "Suspicious: kill": "prose",
       "Suspicious: Run": "prose",
       "Suspicious: command": "prose",
       "Suspicious: call": "prose",

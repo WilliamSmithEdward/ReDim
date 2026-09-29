@@ -5197,8 +5197,8 @@ End Function
 
 ' Sets the sheet's selection rule, or keeps it for later while no window is
 ' active: EnableSelection set then fails past any error trap, and under
-' test it took Excel down. A Workbook_Open that runs after Enable Editing
-' in Protected View, before the workbook's window shows, is such a moment.
+' test it took Excel down. A workbook's open event that runs after Enable
+' Editing in Protected View, before its window shows, is such a moment.
 ' The rule waits for the next sheet or workbook to come forward.
 Private Sub ApplySelectionRule(ByVal selectionRule As XlEnableSelection)
     mSelectionRule = selectionRule

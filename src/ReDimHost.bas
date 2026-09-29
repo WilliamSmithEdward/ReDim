@@ -562,7 +562,7 @@ End Sub
 Public Sub RdxStopPump()
     ' Only the timer this state armed has its stored id cleared: an id
     ' stored with no timer here names one a reset orphaned, for the next
-    ' arm to kill.
+    ' arm to stop.
     If gTimerId <> 0 Then
         KillTimer 0, gTimerId
         gTimerId = 0
@@ -617,7 +617,7 @@ Public Sub RdxPumpOnce()
 End Sub
 
 ' The armed timer id survives VBA state loss inside a workbook-scoped name,
-' so a rebuilt session can kill the orphan before arming a fresh timer.
+' so a rebuilt session can stop the orphan before arming a fresh timer.
 Private Sub RdxStoreTimerId(ByVal timerId As LongPtr)
     On Error Resume Next
     ThisWorkbook.Names(PUMP_ID_NAME).Delete
@@ -650,7 +650,7 @@ Private Sub RdxKillOrphanTimer()
     RdxClearStoredTimerId
 End Sub
 
-' Best-effort rail: kill the pump when the hosting workbook closes so no
+' Best-effort rail: stop the pump when the hosting workbook closes so no
 ' TIMERPROC outlives its VBA project, and give every key back. The apps
 ' stay mounted, as BeforeClose leaves them, in case the close is
 ' cancelled at Excel's save prompt.
