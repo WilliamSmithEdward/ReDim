@@ -62,10 +62,21 @@ def test_short_encoded_rule():
 def test_every_expected_finding_names_a_reason():
     expected = json.loads(security_scan.EXPECTED_PATH.read_text(encoding="utf-8"))
     reasons = expected["reasons"]
-    for module, entries in expected["modules"].items():
-        for key, reason in entries.items():
-            assert reason in reasons, f"{module} {key} names no reason: {reason}"
-            assert ": " in key, f"{module} {key} is not 'Type: keyword'"
-    used = {reason for entries in expected["modules"].values() for reason in entries.values()}
+    used = set()
+    for section in ("modules", "mraptor"):
+        for module, entries in expected[section].items():
+            for key, reason in entries.items():
+                assert reason in reasons, f"{section} {module} {key} names no reason: {reason}"
+                assert ": " in key, f"{section} {module} {key} is not 'Type: keyword'"
+                used.add(reason)
+    for module, entries in expected["mraptor"].items():
+        assert all(key[0] in "AWX" for key in entries), f"mraptor {module}: flags are A, W, X"
     assert "encoded" in reasons
     assert set(reasons) - used - {"encoded"} == set(), "reasons no entry uses"
+
+
+def test_raptor_token_names_whole_line_matches():
+    assert security_scan.raptor_token(
+        "Declare PtrSafe Function SetTimer Lib") == "Declare ... Lib"
+    assert security_scan.raptor_token("Open fileSpec For Binary") == "Open ... Binary"
+    assert security_scan.raptor_token("SaveToFile") == "SaveToFile"

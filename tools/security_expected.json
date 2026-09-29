@@ -1,7 +1,7 @@
 {
-  "description": "Every olevba finding security_scan.py may meet in ReDim's VBA, by module, with the reason ReDim has it. A finding missing here fails the scan. Keys read \"Type: keyword\" as olevba reports them, compared without case; values name a reason below.",
+  "description": "Every olevba finding and mraptor match security_scan.py may meet in ReDim's VBA, by module, with the reason ReDim has it. One missing here fails the scan. Under modules, keys read \"Type: keyword\" as olevba reports them; under mraptor, \"Flag: match\" for its A (runs on its own), W (writes), and X (runs code outside VBA) patterns. Keys compare without case; values name a reason below.",
   "reasons": {
-    "prose": "An English word in a comment, a name, or a demo's text. olevba matches its keywords as whole words anywhere in the code, comments included.",
+    "prose": "An English word in a comment, a name, or a demo's text. The scanners match their keywords as whole words anywhere in the code, comments included.",
     "chr": "Chr and ChrW build characters from their codes: icon glyphs, key names, and separators.",
     "xor": "Bitwise Xor in flag arithmetic.",
     "encoded": "Numbers and short words that happen to read as hex or base64, such as 2147483647 or LEFT. The scan passes an encoded-looking string only when it is 16 characters or fewer, and olevba scans every decoded string for its keywords as well.",
@@ -28,8 +28,8 @@
     "rc-xor": "Bitwise Xor in ROneCOne's hash functions.",
     "rc-task-run": "Task.Run starts an app's procedure as a task; the word also appears in comments.",
     "rc-http-put": "The HTTP method PUT, in the HttpClient's PutAsync.",
-    "rc-register": "CancellationToken.Register, which records a callback. olevba reads Register as the Excel 4 macro REGISTER.",
-    "rc-event-name": "A constant named ROLE_FILE_CHANGE. olevba reads any name ending in _Change as an ActiveX event handler.",
+    "rc-register": "CancellationToken.Register, which records a callback. The scanners read Register as the Excel 4 macro REGISTER.",
+    "rc-event-name": "A constant named ROLE_FILE_CHANGE. The scanners read any name ending in _Change as an ActiveX event handler.",
     "doc-guid": "The workbook's document module holds no code, only Excel's attribute lines. Its VB_Base line names Excel's Workbook or Worksheet class by GUID, which reads as hex."
   },
   "modules": {
@@ -161,6 +161,67 @@
       "Suspicious: call": "prose",
       "Suspicious: Base64 Strings": "encoded",
       "IOC: https://github.com/WilliamSmithEdward/ReDim": "repo-url"
+    }
+  },
+  "mraptor": {
+    "ReDimUI": {
+      "W: RtlMoveMemory": "ui-memory",
+      "X: Declare ... Lib": "ui-win32",
+      "X: SetTimer": "ui-settimer",
+      "X: run": "ui-run",
+      "X: call": "prose"
+    },
+    "ReDimHost": {
+      "A: Auto_Close": "auto-close",
+      "X: Declare ... Lib": "host-win32",
+      "X: SetTimer": "host-timer",
+      "X: Run": "prose",
+      "X: call": "prose"
+    },
+    "ROneCOne": {
+      "A: ROLE_FILE_CHANGE": "rc-event-name",
+      "W: RtlMoveMemory": "rc-memory",
+      "W: ADODB.Stream": "rc-files",
+      "W: CopyFile": "rc-files",
+      "W: Kill": "rc-files",
+      "W: Open ... Binary": "rc-files",
+      "W: SaveToFile": "rc-files",
+      "W: WriteText": "rc-files",
+      "X: Declare ... Lib": "rc-win32",
+      "X: CreateObject": "rc-createobject",
+      "X: shell": "rc-process",
+      "X: Exec": "rc-process",
+      "X: Run": "rc-task-run",
+      "X: Register": "rc-register",
+      "X: call": "prose"
+    },
+    "ExpenseTracker": {
+      "A: Auto_Open": "auto-open",
+      "X: run": "prose",
+      "X: call": "prose"
+    },
+    "MissionControl": {
+      "A: Auto_Open": "auto-open",
+      "X: run": "prose"
+    },
+    "Navigator": {
+      "A: Auto_Open": "auto-open"
+    },
+    "PokeDex": {
+      "A: Auto_Open": "auto-open"
+    },
+    "SnakeGame": {
+      "A: Auto_Open": "auto-open"
+    },
+    "WhatsNew": {
+      "A: Auto_Open": "auto-open",
+      "X: run": "prose",
+      "X: call": "prose"
+    },
+    "WidgetGallery": {
+      "A: Auto_Open": "auto-open",
+      "X: Run": "prose",
+      "X: call": "prose"
     }
   }
 }

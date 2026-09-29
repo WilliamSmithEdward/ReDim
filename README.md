@@ -1,5 +1,12 @@
 # ReDim
 
+[![CI](https://github.com/WilliamSmithEdward/ReDim/actions/workflows/analyze.yml/badge.svg)](https://github.com/WilliamSmithEdward/ReDim/actions/workflows/analyze.yml)
+[![Security](https://github.com/WilliamSmithEdward/ReDim/actions/workflows/security.yml/badge.svg)](https://github.com/WilliamSmithEdward/ReDim/actions/workflows/security.yml)
+[![Latest release](https://img.shields.io/github/v/release/WilliamSmithEdward/ReDim)](https://github.com/WilliamSmithEdward/ReDim/releases/latest)
+[![MIT license](https://img.shields.io/github/license/WilliamSmithEdward/ReDim)](LICENSE)
+[![Microsoft 365 Excel on Windows x64](https://img.shields.io/badge/Excel-Microsoft_365_Windows_x64-217346)](#installation)
+[![Built on ROneCOne](https://img.shields.io/badge/built_on-ROneCOne-0078D4)](https://github.com/WilliamSmithEdward/ROneCOne)
+
 A stateful UI framework for Excel worksheets. Build interactive, async-aware applications out of
 worksheet shapes and form controls the way you would with a component framework on the web. No
 UserForms, no ActiveX, no add-ins, no VBIDE access.
@@ -129,8 +136,8 @@ and it builds itself (each ships an `Auto_Open`); the entry macro rebuilds on de
 Report a vulnerability privately from the repository's Security tab; [SECURITY.md](SECURITY.md)
 has the details. It also sets out what ReDim's VBA does with Windows, keys, and the clipboard,
 what the embedded ROneCOne runtime can do, and why macro scanners flag it. From 1.1.0, each
-release attaches `ReDim_X.Y.Z_Security_Report.md`: olevba's findings for every workbook and
-source file, each explained, with the files' SHA-256 hashes.
+release attaches `vX.Y.Z-security-report.md`: olevba's findings and mraptor's matches for every
+workbook and source file, each explained, with the files' SHA-256 hashes.
 
 ## Documentation
 
@@ -148,7 +155,7 @@ python tools/check.py          # pyvbaanalysis static gate, zero findings in ReD
 python tools/stamp_release.py  # after a version bump: header in every release source
 python tools/build_workbooks.py
 python tools/security_scan.py --strict src/ReDimUI.cls src/ReDimHost.bas demo/*.xlsm
-                               # olevba: every finding explained in tools/security_expected.json
+                               # olevba, mraptor: every finding in tools/security_expected.json
 python -m pytest tests/python  # live Excel suite via pyvbaharness
 python tools/bench.py --save before   # timings in live Excel; later runs add --compare before
 ```
@@ -160,9 +167,9 @@ guard that exports the runtime, the demos, and sample host code through the VBE 
 every name back as written.
 
 It drives a real Excel instance, so it cannot run on hosted CI. Continuous integration runs
-the two static gates instead: the newest pyvbaanalysis over the same sources plus the ROneCOne
-runtime, and the olevba scan over the runtime and demo workbooks it builds. The live suite is a local
-step before release.
+two static gates instead: the newest pyvbaanalysis over the same sources plus the ROneCOne
+runtime (CI), and the olevba and mraptor scan over the runtime and the demo workbooks it builds
+(Security). The live suite is a local step before release.
 
 ## License
 

@@ -1,10 +1,9 @@
-name: analyze
+name: CI
 
 # The live suite drives a real Excel instance and cannot run on a hosted
-# runner, so CI covers two static gates: the newest pyvbaanalysis over
-# every VBA source, with zero findings in ReDim's own, and olevba over the
-# runtime and the demo workbooks, with every finding explained in
-# tools/security_expected.json. The live suite stays a local step.
+# runner, so CI covers the static gate: the newest pyvbaanalysis over every
+# VBA source, with zero findings in ReDim's own. The olevba and mraptor
+# scan runs in security.yml. The live suite stays a local step.
 
 on:
   push:
@@ -48,47 +47,3 @@ jobs:
         env:
           REDIM_RONECONE_PATH: ${{ github.workspace }}/.ronecone/src/ROneCOne.cls
         run: python tools/check.py
-
-  olevba:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check out ReDim
-        uses: actions/checkout@v5
-
-      # The workbooks embed the ROneCOne release ReDim ships, as above.
-      - name: Check out ROneCOne
-        uses: actions/checkout@v5
-        with:
-          repository: WilliamSmithEdward/ROneCOne
-          ref: v1.10.1
-          path: .ronecone
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: '3.12'
-
-      # oletools brings olevba and pcodedmp; pyOpenVBA builds the demo
-      # workbooks from source, as a release does.
-      - name: Install the scanner
-        run: pip install oletools==0.60.2 pyopenvba==6.3.0
-
-      - name: Build the demo workbooks
-        env:
-          REDIM_RONECONE_PATH: ${{ github.workspace }}/.ronecone/src/ROneCOne.cls
-        run: python tools/build_workbooks.py
-
-      # --strict also fails on an expected finding that no longer occurs,
-      # so tools/security_expected.json lists exactly what olevba reports.
-      - name: Scan with olevba
-        run: >-
-          python tools/security_scan.py --strict --report security-report.md
-          src/ReDimUI.cls src/ReDimHost.bas .ronecone/src/ROneCOne.cls demo/*.xlsm
-
-      - name: Keep the report
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: security-report
-          path: security-report.md
-          if-no-files-found: ignore

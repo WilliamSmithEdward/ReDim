@@ -1,4 +1,4 @@
-"""Security scan of ReDim's VBA with olevba, plus a p-code check.
+"""Security scan of ReDim's VBA with olevba and mraptor, plus a p-code check.
 
 CI runs it over the sources and freshly built demo workbooks on every push;
 the release workflow runs it over a release's assets and attaches the report
@@ -10,6 +10,13 @@ finding must be listed for its module in security_expected.json with the
 reason ReDim has it, or the scan fails. A hex or base64 string passes when
 it is 16 characters or fewer: a number or a short word that decodes by
 chance. olevba scans every decoded string for its keywords as well.
+
+mraptor (oletools' MacroRaptor) calls a file suspicious when its VBA runs
+on its own (A) and writes a file or memory (W) or runs code outside VBA
+(X). Every ReDim workbook is: the demos build themselves in Auto_Open,
+and the runtime declares Windows API functions. So the scan records
+mraptor's verdict for each file and lists every match of its three
+patterns by module; each must be listed in security_expected.json too.
 
 A workbook's VBA project must hold no p-code lines. ReDim builds its
 workbooks from source alone and Excel compiles them when they open, so
@@ -52,6 +59,8 @@ class Module:
     files: list[str] = field(default_factory=list)
     # (type, keyword, olevba's note, reason or None when unexpected)
     verdicts: list[tuple[str, str, str, str | None]] = field(default_factory=list)
+    # (mraptor flag, match, reason or None when unexpected)
+    raptor: list[tuple[str, str, str | None]] = field(default_factory=list)
 
 
 @dataclass
@@ -61,6 +70,7 @@ class ScannedFile:
     size: int
     modules: list[str] = field(default_factory=list)
     pcode: dict | None = None
+    raptor: str | None = None
 
 
 def sha256_of(data: bytes) -> str:
@@ -119,6 +129,54 @@ def judge_module(module: Module, expected: dict) -> None:
         module.verdicts.append((kind, keyword, note, reasons.get(reason_id)))
 
 
+RAPTOR_FLAGS = (("A", "re_autoexec"), ("W", "re_write"), ("X", "re_execute"))
+
+
+def raptor_token(text: str) -> str:
+    """A match as the expected list names it. mraptor's Declare and Open
+    patterns take the rest of the line, so a Declare reads "Declare ... Lib"
+    and an Open statement "Open ... " and its mode."""
+    words = text.split()
+    if words and words[0].casefold() == "declare":
+        return "Declare ... Lib"
+    if words and words[0].casefold() == "open":
+        return f"Open ... {words[-1]}"
+    return text
+
+
+def judge_raptor(module: Module, expected: dict) -> None:
+    """Every distinct match of mraptor's three patterns in the module, each
+    with its reason from the expected list."""
+    from oletools import mraptor, olevba
+
+    allowed = {key.casefold(): reason
+               for key, reason in expected["mraptor"].get(module.name, {}).items()}
+    reasons = expected["reasons"]
+    collapsed = olevba.vba_collapse_long_lines(module.code)
+    for flag, pattern_name in RAPTOR_FLAGS:
+        seen: set[str] = set()
+        for match in getattr(mraptor, pattern_name).finditer(collapsed):
+            text = raptor_token(match.group())
+            if text.casefold() in seen:
+                continue
+            seen.add(text.casefold())
+            reason_id = allowed.get(f"{flag}: {text}".casefold())
+            module.raptor.append((flag, text, reasons.get(reason_id)))
+
+
+def raptor_verdict(path: Path) -> str:
+    """mraptor's verdict on a whole file, as its command line gives it."""
+    from oletools import mraptor, olevba
+
+    parser = olevba.VBA_Parser(str(path))
+    try:
+        raptor = mraptor.MacroRaptor(parser.get_vba_code_all_modules())
+        raptor.scan()
+        return f"{raptor.get_flags()} {'SUSPICIOUS' if raptor.suspicious else 'Macro OK'}"
+    finally:
+        parser.close()
+
+
 def pcode_lines(pcodedmp_output: str) -> dict[str, list[str]]:
     """The p-code instructions pcodedmp disassembled, by module. A module
     stored as source alone has none; pcodedmp reports an error for it."""
@@ -164,10 +222,11 @@ def check_pcode(path: Path) -> dict:
 
 
 def tool_versions() -> dict[str, str]:
-    from oletools import olevba
+    from oletools import mraptor, olevba
     from pcodedmp import pcodedmp
 
-    return {"olevba": olevba.__version__, "pcodedmp": pcodedmp.__VERSION__}
+    return {"olevba": olevba.__version__, "mraptor": mraptor.__version__,
+            "pcodedmp": pcodedmp.__VERSION__}
 
 
 def write_report(target: Path, title: str, files: list[ScannedFile],
@@ -175,8 +234,8 @@ def write_report(target: Path, title: str, files: list[ScannedFile],
     versions = tool_versions()
     stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     out: list[str] = [f"# {title}", "",
-                      f"Scanned {stamp} with olevba {versions['olevba']} (oletools) "
-                      f"and pcodedmp {versions['pcodedmp']}."]
+                      f"Scanned {stamp} with olevba {versions['olevba']} and mraptor "
+                      f"{versions['mraptor']} (oletools), and pcodedmp {versions['pcodedmp']}."]
     run_id = os.environ.get("GITHUB_RUN_ID")
     if run_id:
         server = os.environ.get("GITHUB_SERVER_URL", "https://github.com")
@@ -189,10 +248,12 @@ def write_report(target: Path, title: str, files: list[ScannedFile],
         out.append("**Nothing unexpected.** Every finding below is one ReDim expects, "
                    "with the reason it is there.")
     out += ["", "## Files", "",
-            "| File | SHA-256 | Bytes | Modules |", "| --- | --- | ---: | --- |"]
+            "| File | SHA-256 | Bytes | mraptor | Modules |",
+            "| --- | --- | ---: | --- | --- |"]
     for scanned in files:
         names = ", ".join(scanned.modules) or "none"
-        out.append(f"| {scanned.path.name} | `{scanned.digest}` | {scanned.size:,} | {names} |")
+        out.append(f"| {scanned.path.name} | `{scanned.digest}` | {scanned.size:,} | "
+                   f"{scanned.raptor or 'not read'} | {names} |")
     workbooks = [scanned for scanned in files if scanned.pcode is not None]
     if workbooks:
         out += ["", "## Workbook p-code", "",
@@ -224,6 +285,25 @@ def write_report(target: Path, title: str, files: list[ScannedFile],
         for kind, keyword, note, reason in module.verdicts:
             groups.setdefault(reason or "**Unexpected.**", []).append(
                 f"- {kind} `{keyword}`: {note}")
+        for reason, lines in groups.items():
+            out += [reason, "", *lines, ""]
+    out += ["## mraptor by module", "",
+            "mraptor calls a file SUSPICIOUS when its VBA runs on its own (A) and writes a "
+            "file or memory (W) or runs code outside VBA (X), which is why the Files table "
+            "shows every workbook so: the demos build themselves in Auto_Open, and the "
+            "runtime declares Windows API functions. Like olevba, it matches whole words "
+            "anywhere in the code. Each module's matches, grouped under the reason ReDim "
+            "has them:", ""]
+    for module in modules:
+        flags = "".join(flag if any(entry[0] == flag for entry in module.raptor) else "-"
+                        for flag, _ in RAPTOR_FLAGS)
+        out += [f"### {module.name}: {flags}", ""]
+        if not module.raptor:
+            out += ["No matches.", ""]
+            continue
+        groups = {}
+        for flag, text, reason in module.raptor:
+            groups.setdefault(reason or "**Unexpected.**", []).append(f"- {flag} `{text}`")
         for reason, lines in groups.items():
             out += [reason, "", *lines, ""]
     out += ["## Unexpected", ""]
@@ -266,6 +346,7 @@ def main() -> int:
             continue
         if not extracted:
             problems.append(f"{path.name}: olevba found no VBA in it")
+        scanned.raptor = raptor_verdict(path)
         for name, code in extracted:
             scanned.modules.append(name)
             if not code.strip():
@@ -290,17 +371,28 @@ def main() -> int:
         for kind, keyword, note, reason in module.verdicts:
             if reason is None:
                 problems.append(f"{module.name}: olevba {kind} {keyword!r}: {note}")
+        judge_raptor(module, expected)
+        for flag, text, reason in module.raptor:
+            if reason is None:
+                problems.append(f"{module.name}: mraptor {flag} {text!r}")
 
     seen = {module.name for module in ordered}
     found = {(module.name, f"{kind}: {keyword}".casefold())
              for module in ordered for kind, keyword, _, _ in module.verdicts}
+    matched = {(module.name, f"{flag}: {text}".casefold())
+               for module in ordered for flag, text, _ in module.raptor}
     stale = [f"{name}: {key}" for name, entries in expected["modules"].items()
              if name in seen for key in entries if (name, key.casefold()) not in found]
+    stale += [f"{name}: mraptor {key}" for name, entries in expected["mraptor"].items()
+              if name in seen for key in entries if (name, key.casefold()) not in matched]
 
     for scanned in files:
-        print(f"{scanned.path.name}  {scanned.digest}  {', '.join(scanned.modules)}")
+        print(f"{scanned.path.name}  {scanned.digest}  mraptor {scanned.raptor}  "
+              f"{', '.join(scanned.modules)}")
     for module in ordered:
-        print(f"  {module.name}: {len(module.verdicts)} olevba findings")
+        flags = "".join(flag if any(entry[0] == flag for entry in module.raptor) else "-"
+                        for flag, _ in RAPTOR_FLAGS)
+        print(f"  {module.name}: {len(module.verdicts)} olevba findings, mraptor {flags}")
     for entry in stale:
         print(plain(f"expected but not found: {entry}"))
     for problem in problems:

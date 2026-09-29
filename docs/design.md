@@ -161,10 +161,11 @@ theme sets, stand as drawn, where rewriting them was half of a 100-control swap.
 - `tools/check.py` runs pyvbaanalysis over every `.bas` and `.cls`; any finding in ReDim's own
   sources fails the gate, and one inside the vendored ROneCOne is printed and not counted. CI
   installs the newest pyvbaanalysis on every run
-- `tools/security_scan.py` runs olevba over the runtime files and built workbooks and fails on
-  any finding `tools/security_expected.json` does not list with its reason, and on any p-code
-  in a workbook. CI runs it on every push, and the security-report workflow runs it over each
-  release's assets and attaches the report (see SECURITY.md)
+- `tools/security_scan.py` runs olevba and mraptor over the runtime files and built workbooks
+  and fails on any finding `tools/security_expected.json` does not list with its reason, and on
+  any p-code in a workbook. The Security workflow runs it on every push, and the release
+  security workflow runs it over each release's assets and attaches the report (see
+  SECURITY.md)
 - `tools/stamp_release.py` writes the release header into every source a release ships (both
   runtime files and each demo module): the version from `REDIM_VERSION`, that version's
   CHANGELOG date, the repository, and the MIT license text from `LICENSE`, ahead of

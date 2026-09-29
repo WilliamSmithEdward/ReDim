@@ -51,12 +51,20 @@ The other demos reach no network and write no file.
 
 ## What scanners report
 
-Macro scanners flag much of the above, and ordinary words too: olevba matches keywords such as
-"run", "open", and "call" anywhere in the code, comments included.
-[`tools/security_expected.json`](tools/security_expected.json) lists every olevba finding for
-each module with the reason for it. On each push, CI runs
+Macro scanners flag much of the above, and ordinary words too: olevba and mraptor match
+keywords such as "run", "open", and "call" anywhere in the code, comments included.
+[`tools/security_expected.json`](tools/security_expected.json) lists every olevba finding and
+mraptor match for each module with the reason for it. On each push, the
+[Security workflow](.github/workflows/security.yml) runs
 [`tools/security_scan.py`](tools/security_scan.py) over the runtime files and freshly built demo
-workbooks, and fails on any finding the list does not explain.
+workbooks, and fails on any finding the list does not explain, and on an expected one that no
+longer occurs.
+
+mraptor (MacroRaptor) calls every ReDim workbook SUSPICIOUS. It flags VBA that runs on its own
+(A) and also writes a file or memory (W) or runs code outside VBA (X). The demos build
+themselves in `Auto_Open`, the runtime declares Windows API functions, and ROneCOne carries its
+File and Process surfaces, so each workbook shows all three. `ReDimUI.cls` alone reads "Macro
+OK": nothing in it runs on its own.
 
 The scan also checks each workbook for p-code. ReDim builds its workbooks from VBA source with
 pyOpenVBA, and Excel compiles the source when a workbook opens, so a workbook holds no compiled
@@ -67,10 +75,11 @@ code and never runs. 1.1.0 builds without it.
 
 ## Release security reports
 
-From 1.1.0, each release carries `ReDim_X.Y.Z_Security_Report.md`. The
-[security-report workflow](.github/workflows/security-report.yml) writes it from the release's
-published files: the SHA-256 of every workbook and source file, each module's olevba findings
-with their reasons, and the p-code check. The report names the workflow run that wrote it.
+From 1.1.0, each release carries `vX.Y.Z-security-report.md`. The
+[release security workflow](.github/workflows/release-security.yml) writes it from the
+release's published files: the SHA-256 of every workbook and source file, mraptor's verdict on
+each file, each module's olevba findings and mraptor matches with their reasons, and the p-code
+check. The report names the workflow run that wrote it.
 
 To check a download, compare its SHA-256 with the report, or with the digest GitHub lists
 beside each asset:
@@ -84,6 +93,7 @@ To scan a file yourself:
 ```
 pip install oletools
 olevba -a ReDim_Snake.xlsm
+mraptor ReDim_Snake.xlsm
 ```
 
 ## Opening the demo workbooks

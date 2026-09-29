@@ -1,0 +1,67 @@
+name: Security
+
+# olevba and mraptor (oletools) report what the shipped VBA could do. The
+# runtime calls Windows, the demos build themselves when a workbook opens,
+# and the ROneCOne runtime they embed reads files, runs processes, and
+# makes HTTP requests by design, so the scan holds every finding, by module,
+# to tools/security_expected.json and fails on any change in either
+# direction, and on p-code a workbook's source does not explain. The
+# release report lives in release-security.yml, the one workflow that
+# needs write access.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  scan:
+    name: olevba and mraptor against the expected findings
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out ReDim
+        uses: actions/checkout@v5
+
+      # The workbooks embed the ROneCOne release ReDim ships.
+      - name: Check out ROneCOne
+        uses: actions/checkout@v5
+        with:
+          repository: WilliamSmithEdward/ROneCOne
+          ref: v1.10.1
+          path: .ronecone
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      # oletools brings olevba, mraptor, and pcodedmp; pyOpenVBA builds the
+      # demo workbooks from source, as a release does.
+      - name: Install the scanner
+        run: pip install oletools==0.60.2 pyopenvba==6.3.0
+
+      - name: Build the demo workbooks
+        env:
+          REDIM_RONECONE_PATH: ${{ github.workspace }}/.ronecone/src/ROneCOne.cls
+        run: python tools/build_workbooks.py
+
+      - name: Scan the runtime and the demo workbooks
+        run: >-
+          python tools/security_scan.py --strict --report security-report.md
+          src/ReDimUI.cls src/ReDimHost.bas .ronecone/src/ROneCOne.cls demo/*.xlsm
+
+      - name: Keep the report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: security-report
+          path: security-report.md
+          if-no-files-found: ignore
