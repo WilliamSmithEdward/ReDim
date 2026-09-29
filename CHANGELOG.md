@@ -88,6 +88,12 @@
   or workbook to come forward, and the sheet is protected at once as
   before. `TestSelectionRuleWaits` protects a surface with every window
   hidden.
+- Each control's part of a frame now runs on a guard of its own, and
+  toasts done fading leave before the pointer and focus watches. With
+  one guard for the whole pass, a control whose frame faulted every time
+  stopped every control after it: toasts stayed past their time, a
+  dismissed one never finished fading, and the tray never closed up.
+  Hardening for toasts that stay up and take no clicks (#4).
 - CI installs the newest pyvbaanalysis on every run, where it pinned
   2.2.1, and ReDim's sources have no findings under 2.3.0. A finding
   inside the vendored ROneCOne is now printed and no longer fails

@@ -5499,18 +5499,17 @@ Private Sub TickComponentsSection( _
     If ReDimUI.ConsumeForcedPressEdge() Then pressEdge = True
     Set expiredIds = New Collection
     For Each componentValue In Tickables()
-        componentValue.TickAnimation mSheet, elapsedMs
-        componentValue.TickPressDrag Me, leftButtonDown
-        componentValue.TickListWatch pressEdge, runWork, anyButtonDown
-        If runWork Then
-            If componentValue.IsExpiredToast(nowMs) Then
-                componentValue.BeginToastExit
-            End If
-        End If
-        If componentValue.IsToastExitDone Then
-            expiredIds.Add componentValue.ComponentId
-        End If
+        TickOneComponent componentValue, nowMs, elapsedMs, runWork, leftButtonDown, _
+            anyButtonDown, pressEdge, expiredIds
     Next componentValue
+    ' Toasts done fading leave before the pointer and focus watches run, so
+    ' a fault in those cannot hold them on the sheet.
+    For Each expiredId In expiredIds
+        If TryGetComponent(CStr(expiredId), componentValue) Then
+            componentValue.Remove
+        End If
+    Next expiredId
+    If expiredIds.Count > 0 Then CompactToastSlots
     TickPointer nowMs, leftButtonDown
     TickHold nowMs, leftButtonDown
     ' The control holding keyboard focus, tickable or not, watches for a
@@ -5520,12 +5519,33 @@ Private Sub TickComponentsSection( _
             componentValue.TickFocusWatch Me, pressEdge, runWork, anyButtonDown
         End If
     End If
-    For Each expiredId In expiredIds
-        If TryGetComponent(CStr(expiredId), componentValue) Then
-            componentValue.Remove
-        End If
-    Next expiredId
-    If expiredIds.Count > 0 Then CompactToastSlots
+    Exit Sub
+Fault:
+    ReDimUI.NoteTickFault
+End Sub
+
+' One control's part of a frame, on a guard of its own. With one guard for
+' the whole pass, a control that faulted every frame stopped every control
+' after it: toasts stayed past their time, a dismissed toast never finished
+' fading, and the tray never closed up.
+Private Sub TickOneComponent( _
+    ByVal componentValue As ReDimUI, _
+    ByVal nowMs As LongLong, _
+    ByVal elapsedMs As Long, _
+    ByVal runWork As Boolean, _
+    ByVal leftButtonDown As Boolean, _
+    ByVal anyButtonDown As Boolean, _
+    ByVal pressEdge As Boolean, _
+    ByVal expiredIds As Collection _
+)
+    On Error GoTo Fault
+    componentValue.TickAnimation mSheet, elapsedMs
+    componentValue.TickPressDrag Me, leftButtonDown
+    componentValue.TickListWatch pressEdge, runWork, anyButtonDown
+    If runWork Then
+        If componentValue.IsExpiredToast(nowMs) Then componentValue.BeginToastExit
+    End If
+    If componentValue.IsToastExitDone Then expiredIds.Add componentValue.ComponentId
     Exit Sub
 Fault:
     ReDimUI.NoteTickFault
