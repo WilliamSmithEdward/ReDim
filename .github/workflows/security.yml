@@ -46,7 +46,7 @@ jobs:
       # oletools brings olevba, mraptor, and pcodedmp; pyOpenVBA builds the
       # demo workbooks from source, as a release does.
       - name: Install the scanner
-        run: pip install oletools==0.60.2 pyopenvba==6.3.0
+        run: pip install oletools==0.60.2 pyopenvba==6.3.2
 
       - name: Build the demo workbooks
         env:

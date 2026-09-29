@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.1.1 - unreleased
+
+- The Security workflow builds the demos with pyOpenVBA 6.3.2, where it
+  pinned 6.3.0. 6.3.2's blank workbook has no p-code in `Module1`, so
+  the stray comment is gone at its source; the build still removes
+  `Module1`.
+
 ## 1.1.0 - 2026-09-28
 
 - A table can filter by state keys, so another control narrows it:
