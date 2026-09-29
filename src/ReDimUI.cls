@@ -768,7 +768,11 @@ Private mAppliedLeftRowStates() As String
 Private mAppliedRightRowStates() As String
 Private mAppliedScrollLeftSig As String
 Private mAppliedScrollRightSig As String
-Private mAppliedCellFill As Long
+Private mAppliedCellLook As String
+' A cell-backed field hidden keeps its cell's number format here while
+' the cell hides its words.
+Private mCellFormatBeforeHide As Variant
+Private mCellWordsHidden As Boolean
 ' AltText's override of the generated description, and the description
 ' last written to the shape.
 Private mAltText As String
@@ -3749,8 +3753,12 @@ Public Sub Confirm( _
     ' The dialog takes the keys: OK holds focus, Tab stays among its
     ' buttons, Enter confirms, and Esc cancels. A dialog shown over one
     ' already open keeps the control that held focus before the first.
+    ' The palette closes under a dialog, and the control it would have
+    ' given the keys back to takes them after the answer.
     If ReDimUI.IsComponentFocused(mAppId, ReDimUI.FocusedComponentId) Then
-        If Left$(ReDimUI.FocusedComponentId, 4) <> "mdl_" Then
+        If ReDimUI.FocusedComponentId = PALETTE_FIELD_ID Then
+            mFocusBeforeModal = mFocusBeforePalette
+        ElseIf Not IsDialogPart(ReDimUI.FocusedComponentId) Then
             mFocusBeforeModal = ReDimUI.FocusedComponentId
         End If
     Else
@@ -3804,7 +3812,7 @@ Friend Sub HideModal()
     Dim modalId As Variant
 
     RequireRole ROLE_APP, "HideModal"
-    heldByDialog = Left$(ReDimUI.FocusedComponentId, 4) = "mdl_" _
+    heldByDialog = IsDialogPart(ReDimUI.FocusedComponentId) _
         And ReDimUI.IsComponentFocused(mAppId, ReDimUI.FocusedComponentId)
     BeginUpdate
     For Each modalId In ModalPartIds()
@@ -3825,6 +3833,20 @@ End Sub
 ' The parts Confirm draws, bottom to top.
 Private Function ModalPartIds() As Variant
     ModalPartIds = Array("mdl_ov", "mdl_card", "mdl_ok", "mdl_cancel")
+End Function
+
+' Whether an id names a part of Confirm's dialog. The palette's parts
+' share the reserved "mdl_" prefix, but its field holds focus as any
+' field does: a dialog closing never takes it, and it keeps its watch.
+Private Function IsDialogPart(ByVal partId As String) As Boolean
+    Dim modalId As Variant
+
+    For Each modalId In ModalPartIds()
+        If partId = modalId Then
+            IsDialogPart = True
+            Exit Function
+        End If
+    Next modalId
 End Function
 
 ' A dialog or the palette closing gives focus back to the control that
@@ -3901,6 +3923,11 @@ Public Function PrepareCanvas( _
     End If
     Set PrepareCanvas = Me
 End Function
+
+' Whether PrepareCanvas painted the sheet's cells in the canvas color.
+Friend Property Get CanvasPainted() As Boolean
+    CanvasPainted = mCanvasPainted
+End Property
 
 ' The tab whose panel a Tabs control shows: 0 while the control is
 ' hidden or has no tabs, so its panels hide with it; -1 when the app
@@ -5822,7 +5849,7 @@ Friend Function HasAppWork() As Boolean
     ' the 16 ms timer running for nothing; the palette's field keeps one.
     focusedId = ReDimUI.FocusedComponentId
     If ReDimUI.IsComponentFocused(mAppId, focusedId) Then
-        If Left$(focusedId, 4) <> "mdl_" Or focusedId = PALETTE_FIELD_ID Then
+        If Not IsDialogPart(focusedId) Then
             HasAppWork = True
             Exit Function
         End If
@@ -8614,6 +8641,9 @@ Friend Sub SyncInputFromSheet(ByVal hostApp As ReDimUI, ByVal changed As Range)
 
     If mKind <> KIND_INPUT And mKind <> KIND_COMBO Then Exit Sub
     If LenB(mAnchor) = 0 Then Exit Sub
+    ' A hidden field takes no edits, as its locked cell takes none on a
+    ' protected surface.
+    If Not mVisible Then Exit Sub
     On Error Resume Next
     Set cell = InputCell(hostApp.Sheet)
     On Error GoTo 0
@@ -10323,23 +10353,32 @@ Private Function TakeStateValue(ByVal hostApp As ReDimUI, ByRef stateValue As Va
     TakeStateValue = True
 End Function
 
-' A state value as a picked day: a date, or a number in the range a
-' date holds (a numeric string counts, as persisted state often is one).
+' A state value as a picked day: a date, date text, or a number in the
+' range a date holds (a numeric string counts, as persisted state often
+' is one). Date text comes first, though it may read as a number too, as
+' "27.09.2026" does under German settings, dots taken as thousands marks;
+' a plain number such as "12.5" stays a serial.
 Private Function DayFromState(ByRef stateValue As Variant, ByRef takenDay As Double) As Boolean
     Dim serial As Double
 
     If VarType(stateValue) = vbDate Then
         takenDay = CDbl(DayOnly(stateValue))
+    ElseIf IsDateText(stateValue) Then
+        takenDay = CDbl(DayOnly(CDate(stateValue)))
     ElseIf IsNumeric(stateValue) Then
         serial = CDbl(stateValue)
         If serial < DAY_SERIAL_FIRST Or serial >= DAY_SERIAL_LAST + 1 Then Exit Function
         takenDay = CDbl(DayOnly(CDate(serial)))
-    ElseIf IsDate(stateValue) Then
-        takenDay = CDbl(DayOnly(CDate(stateValue)))
     Else
         Exit Function
     End If
     DayFromState = True
+End Function
+
+Private Function IsDateText(ByRef stateValue As Variant) As Boolean
+    If VarType(stateValue) <> vbString Then Exit Function
+    If Not IsDate(stateValue) Then Exit Function
+    IsDateText = Not PlainNumberWords(CStr(stateValue))
 End Function
 
 ' The item a state value names, as the control writes one: by the
@@ -21194,7 +21233,7 @@ Friend Sub TickFocusWatch( _
     If Not ReDimUI.IsComponentFocused(hostApp.AppId, mComponentId) Then Exit Sub
     ' A modal's buttons keep focus until the dialog closes; the palette
     ' closes at a press elsewhere, as a field would lose focus.
-    If Left$(mComponentId, 4) = "mdl_" And mComponentId <> PALETTE_FIELD_ID Then Exit Sub
+    If IsDialogPart(mComponentId) Then Exit Sub
     ' The selection compare costs three COM reads, so it rides the work
     ' cadence; a 50 ms commit latency is imperceptible. The press edge
     ' stays at frame rate.
@@ -21489,23 +21528,47 @@ Friend Function PickComboItem( _
     Touch
 End Function
 
+' A cell-backed field's cell is the field. Shown, it takes the field's
+' look and is unlocked, so ProtectSurface keeps it editable. Hidden, as a
+' tab not shown hides it, it takes the canvas's look with its words
+' hidden by the ";;;" number format, and is locked, so a protected
+' surface takes no typing there; its own number format comes back with it.
 Private Sub ApplyInputCell( _
     ByVal hostSheet As Worksheet, _
     ByVal themeValue As ReDimUI _
 )
     Dim cell As Range
+    Dim cellLook As String
 
-    If Not mAppliedValid Or mAppliedCellFill <> themeValue.SurfaceColor Then
-        Set cell = InputCell(hostSheet)
+    cellLook = CStr(mVisible) & ":" & CStr(themeValue.SurfaceColor) & ":" & _
+        CStr(themeValue.CanvasColor)
+    If mAppliedValid And mAppliedCellLook = cellLook Then Exit Sub
+    Set cell = InputCell(hostSheet)
+    If mVisible Then
         cell.Font.Name = themeValue.FontName
         cell.Font.Size = themeValue.BaseFontSize
         cell.Font.Color = themeValue.OnSurfaceColor
         cell.Interior.Color = themeValue.SurfaceColor
         cell.HorizontalAlignment = xlLeft
-        ' Unlocked from birth so ProtectSurface keeps inputs editable.
+        If mCellWordsHidden Then
+            cell.NumberFormat = mCellFormatBeforeHide
+            mCellWordsHidden = False
+        End If
         cell.Locked = False
-        mAppliedCellFill = themeValue.SurfaceColor
+    Else
+        If Not mCellWordsHidden Then
+            mCellFormatBeforeHide = cell.NumberFormat
+            mCellWordsHidden = True
+        End If
+        cell.NumberFormat = ";;;"
+        If OwnerApp.CanvasPainted Then
+            cell.Interior.Color = themeValue.CanvasColor
+        Else
+            cell.Interior.ColorIndex = xlColorIndexNone
+        End If
+        cell.Locked = True
     End If
+    mAppliedCellLook = cellLook
 End Sub
 
 Friend Sub UnlockInputCell(ByVal hostSheet As Worksheet)
@@ -21513,6 +21576,8 @@ Friend Sub UnlockInputCell(ByVal hostSheet As Worksheet)
 
     If mKind <> KIND_INPUT And mKind <> KIND_COMBO Then Exit Sub
     If LenB(mAnchor) = 0 Then Exit Sub
+    ' A hidden field's cell stays locked, out of the typing's way.
+    If Not mVisible Then Exit Sub
     On Error Resume Next
     Set cell = InputCell(hostSheet)
     If Not cell Is Nothing Then cell.Locked = False

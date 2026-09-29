@@ -927,6 +927,15 @@ Public Function TestWritesToEdges() As String
     app.SetState "due", 1E+20
     transcript = transcript & "|hugeIgnored=" & CStr(app.DatePicker("due").PickedDate = _
         CDate(46287#))
+    ' Date text that also reads as a number is the date: "3,4,2026" here,
+    ' commas taken as thousands marks, as "27.09.2026" is under German
+    ' settings with dots. A plain number such as "12.5" stays a serial.
+    app.SetState "due", "3,4,2026"
+    transcript = transcript & "|dateTextFirst=" & CStr(app.DatePicker("due").PickedDate = _
+        CDate("3,4,2026"))
+    app.SetState "due", "12.5"
+    transcript = transcript & "|plainStaysSerial=" & CStr(app.DatePicker("due").PickedDate = _
+        CDate(12#))
     app.SetState "dark", True
     transcript = transcript & "|listenerSees=" & gListenerSaw
     app.Toggle("dark").Checked False

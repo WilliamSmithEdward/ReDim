@@ -5428,6 +5428,82 @@ Public Function TestCommandPalette() As String
     TestCommandPalette = transcript
 End Function
 
+' A cell-backed field on a tab not shown hides as its frame does: its cell
+' takes the canvas's look with its words hidden, and is locked, so a
+' protected surface takes no typing there, and an edit made to it anyway
+' reaches no handler. Its tab shown again gives the field back.
+Public Function TestHiddenCellField() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim cell As Range
+    Dim transcript As String
+
+    gChangeCount = 0
+    ReDimUI.AutoPump False
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "wid113")
+    app.PrepareCanvas
+    app.Tabs("tabs").AtRect(24, 24, 300, 30).Items "One", "Two"
+    app.TextInput("who").At("C6").WritesTo("who").OnChange "TestReDimWidgets.RecordChange"
+    app.TextInput("who").OnTab "tabs", 2
+    app.Render
+    app.ProtectSurface
+    Set cell = host.Range("C6")
+    transcript = "hidden=" & CStr(cell.NumberFormat = ";;;") & "/" & _
+        CStr(cell.Interior.Color = host.Range("F12").Interior.Color) & "/" & CStr(cell.Locked)
+    cell.Value = "Bob"
+    app.HandleSheetChange cell
+    transcript = transcript & "|editIgnored=" & gChangeCount & "/" & _
+        CStr(app.StateOrDefault("who", ""))
+    app.Tabs("tabs").Value 2
+    transcript = transcript & "|shown=" & CStr(cell.NumberFormat <> ";;;") & "/" & _
+        CStr(cell.Interior.Color <> host.Range("F12").Interior.Color) & "/" & _
+        CStr(cell.Locked = False) & "/" & cell.Text
+    app.Tabs("tabs").Value 1
+    transcript = transcript & "|hiddenAgain=" & CStr(cell.NumberFormat = ";;;") & "/" & _
+        CStr(cell.Locked)
+    ReDimUI.AutoPump True
+    TestHiddenCellField = transcript
+End Function
+
+' The palette's field is not the dialog's. A Confirm raised while the
+' palette is open, as an op's outcome can raise one, closes the palette,
+' and after the answer the control that had the keys before the palette
+' takes them back; CloseModal with no dialog up leaves an open palette
+' open and focused.
+Public Function TestPaletteUnderDialog() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim transcript As String
+
+    ReDimUI.AutoPump False
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "wid112")
+    app.TextInput("name").AtRect 24, 24, 160, 22
+    app.Button("save").AtRect(24, 60, 90, 28).Text("Save").OnClick "TestReDimWidgets.RecordChange"
+    app.CommandPalette
+    app.Render
+
+    app.TextInput("name").Focus
+    app.OpenCommandPalette
+    app.Confirm "Saved", "The report is saved."
+    transcript = "dialogTakes=" & ReDimUI.FocusedComponentId & "/" & _
+        CStr(host.Shapes("rdm_wid112_mdl_pal_field").Visible = msoFalse)
+    ReDimUI.DispatchShape "rdm_wid112_mdl_ok"
+    transcript = transcript & "|keysBack=" & ReDimUI.FocusedComponentId
+
+    app.OpenCommandPalette
+    app.CloseModal
+    transcript = transcript & "|paletteStays=" & ReDimUI.FocusedComponentId & "/" & _
+        CStr(host.Shapes("rdm_wid112_mdl_pal_field").Visible = msoTrue)
+    ReDimUI.EndKeyboardFocus
+    transcript = transcript & "|leaves=" & _
+        CStr(host.Shapes("rdm_wid112_mdl_pal_field").Visible = msoFalse)
+    RdxReleaseKeys
+    ReDimUI.AutoPump True
+    TestPaletteUnderDialog = transcript
+End Function
+
 ' Menus and the palette at their edges: Alt+Up closes a filtered menu
 ' and runs nothing; Enter opens an empty menu and leaves the default
 ' button alone; a click that opens a menu gives it the keys; the palette

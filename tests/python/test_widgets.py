@@ -2107,6 +2107,28 @@ def test_rebuilds_with(run_widgets):
     assert facts["staysDown"] == "True/1", "an app taken down on purpose stays down"
 
 
+def test_hidden_cell_field(run_widgets):
+    facts = parse_transcript(run_widgets("TestHiddenCellField"))
+    assert facts["hidden"] == "True/True/True", (
+        "a hidden cell-backed field's cell takes the canvas look, words hidden, and is locked"
+    )
+    assert facts["editIgnored"] == "0/", "an edit to a hidden field's cell reaches no handler"
+    assert facts["shown"] == "True/True/True/Bob", "its tab shown again gives the field back"
+    assert facts["hiddenAgain"] == "True/True", "hidden again, the cell hides again"
+
+
+def test_palette_under_dialog(run_widgets):
+    facts = parse_transcript(run_widgets("TestPaletteUnderDialog"))
+    assert facts["dialogTakes"] == "mdl_ok/True", "a dialog closes the palette and takes the keys"
+    assert facts["keysBack"] == "name", (
+        "after the answer, the control that had the keys before the palette takes them back"
+    )
+    assert facts["paletteStays"] == "mdl_pal_field/True", (
+        "CloseModal with no dialog up leaves an open palette open and focused"
+    )
+    assert facts["leaves"] == "True", "leaving the palette still closes it"
+
+
 def test_bound_filters(run_widgets):
     facts = parse_transcript(run_widgets("TestBoundFilters"))
     assert facts["start"] == "5"

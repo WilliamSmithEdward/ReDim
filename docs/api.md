@@ -204,7 +204,9 @@ All fluent, all return the component:
   the build declares. A setter such as `Checked` or `Value` changes the control until the
   key is next written or the app renders; to change a following control for good, set its
   key. A `Toggle`, `TickBox`, or `Expander` follows `True` and `False`, a `Stepper` or
-  `SlideBar` a number (clamped), a `DatePicker` a `Date` or a date serial number, a
+  `SlideBar` a number (clamped), a `DatePicker` a `Date`, date text, or a date serial
+  number (text that reads as a date is the date, though it may read as a number too, as
+  "27.09.2026" does under German settings), a
   `SelectBox`, `RadioGroup`, or `Tabs` the first item whose value or text the key holds, in
   any case (`Empty` or `Null` picks none), and a float `TextInput` or `ComboBox` its text,
   except while it has the keys; a single-line field shows a line break as a space. A value
@@ -369,7 +371,7 @@ dependencies:
   `Value 0` clears it, both firing nothing and writing nothing to a key that has a value
   (a key with none takes the date, as above), and `Value` keeps the day of a date given
   with a time; `PickedDate` reads it as a `Date`, or `Empty` while there is none.
-  `BindValue` takes a `Date` or a date serial. The calendar is the control's list: one
+  `BindValue` takes a `Date`, date text, or a date serial. The calendar is the control's list: one
   list is open per app, and a press off the calendar and face, a click on another
   control, Esc, a move of the grid selection, or the picker turning hidden or disabled
   closes it.
@@ -472,7 +474,10 @@ ui.Sparkline("errors").AtRect(120, 50, 120, 30).Danger.ValuesFrom Array(2, 8, 3,
   same app, placed under the strip as usual. A control's own `Visible` and
   `BindVisible` still decide whether it shows on its tab, and one set while its tab
   is hidden waits for the tab. A panel that hides closes its open list, and a field
-  on it that has keyboard focus commits and lets focus go. Hiding the `Tabs` control
+  on it that has keyboard focus commits and lets focus go. A cell-backed `TextInput` or
+  `ComboBox` hides its cell with it: the cell takes the canvas look with its words
+  hidden and is locked, so a protected surface takes no typing there, and an edit made
+  to it anyway fires nothing. Hiding the `Tabs` control
   hides every panel, `Remove` shows them all, and a `Tabs` control can itself sit on
   another's panel. A tab inserted or removed with `AddItem` or `RemoveItem` carries the
   numbers after it along, so each control stays on its tab, and a removed tab's controls
@@ -801,8 +806,10 @@ ui.Button("cancel").Sized(90, 30).Text("Cancel").Secondary.InStack "buttons"
 `ui.CommandPalette` gives an app a searchable list of everything it can do, the way code
 editors do. Ctrl+Shift+P opens it while the app's sheet is in front, and so does
 `ui.OpenCommandPalette` from code, unless a `Confirm` is waiting for an answer, which keeps
-the commands behind it out of reach. It opens as a field at the top of the visible window,
-over a list with the keys in the field. The list holds, in this order:
+the commands behind it out of reach. A `Confirm` raised while the palette is open, as an
+op's outcome can raise one, closes the palette, and after the answer the control that had
+the keys before the palette takes them back. It opens as a field at the top of the visible
+window, over a list with the keys in the field. The list holds, in this order:
 
 - the app's own entries, added with `ui.AddCommand "Export to CSV", "Module.Export",
   "Download"`;

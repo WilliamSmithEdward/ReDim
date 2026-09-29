@@ -30,6 +30,21 @@
 - An app's `HotKey` takes its key back when a focused control lets the
   keys go. Arrow hot keys no longer need arming again after a field had
   focus.
+- Date text in a `DatePicker`'s key or `BindValue` could read as a
+  number: under German settings "27.09.2026", dots taken as thousands
+  marks, was 27092026 and refused, and "01.03.2026" landed in the year
+  4725. Text that reads as a date is now the date first; a plain number
+  such as "12.5" stays a serial. "3,4,2026" showed the same fault here,
+  commas taken as thousands marks, and is the test.
+- A `Confirm` raised while the command palette was open, as an op's
+  outcome can raise one, left no control with the keys after the answer.
+  The control that had them before the palette now takes them back.
+  `CloseModal` with no dialog up took the keys from an open palette and
+  left it drawn with nothing to close it; it now leaves the palette be.
+- A cell-backed `TextInput` or `ComboBox` on a tab not shown kept its
+  cell showing and editable, and an edit there fired `OnChange`. Hidden,
+  the cell now takes the canvas look with its words hidden, and is
+  locked; its own number format comes back when the field shows.
 
 ## 1.0.4 - 2026-09-27
 

@@ -252,6 +252,10 @@ def test_writes_to_edges(run_core):
     )
     assert facts["dateFromText"] == "True", "a numeric string must name a date"
     assert facts["hugeIgnored"] == "True", "a number past the date range must be ignored"
+    assert facts["dateTextFirst"] == "True", (
+        "date text that also reads as a number must be the date, not a serial"
+    )
+    assert facts["plainStaysSerial"] == "True", "a plain number must stay a serial"
     assert facts["listenerSees"] == "True", "a listener must read the value the control shows"
     assert facts["writeOverrules"] == "True", "writing the key must overrule a setter"
     assert facts["requiredClears"] == "True", "state filling a pick must clear Required"
