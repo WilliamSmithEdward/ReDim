@@ -482,3 +482,79 @@ Public Function BenchComponents() As String
     ReDimUI.AutoPump True
     BenchComponents = gTranscript
 End Function
+
+' 1.1.0's paths: a 1000-row table filtered by state keys, narrowed by a
+' search key, a column key, and lifted again; a search field writing its
+' key live; and a protected surface holding the typing keys, through
+' protecting, a field's focus and blur, and a stray key.
+Public Function BenchFilters() As String
+    Dim ui As ReDimUI
+    Dim host As Worksheet
+    Dim idx As Long
+    Dim started As Double
+    Dim grid() As Variant
+
+    StartScenario
+    Set host = NewCanvas()
+    Set ui = ReDimUI.Mount(host, "benchf")
+    ui.TextInput("q").AtRect(24, 24, 200, 22).WritesTo("q").WritesLive True, 0
+    ui.Button("go").AtRect(240, 24, 80, 24).Text "Go"
+    ReDim grid(1 To 1001, 1 To 3)
+    grid(1, 1) = "Name"
+    grid(1, 2) = "Qty"
+    grid(1, 3) = "Zone"
+    For idx = 2 To 1001
+        grid(idx, 1) = "Item" & Format$(idx - 1, "0000")
+        grid(idx, 2) = (idx * 7919) Mod 1000
+        grid(idx, 3) = IIf(idx Mod 3 = 0, "North", "South")
+    Next idx
+    With ui.Table("tbl")
+        .AtRect 24, 70, 480, 300
+        .TableFrom grid
+        .FilterBy "q"
+        .FilterColumn 3, "zone", "All"
+    End With
+    ui.Render
+
+    started = NowMs()
+    ui.SetState "q", "Item0"
+    Record "filterKey1000", NowMs() - started
+    started = NowMs()
+    ui.SetState "q", "Item09"
+    Record "filterNarrow1000", NowMs() - started
+    started = NowMs()
+    ui.SetState "zone", "North"
+    Record "filterColumn1000", NowMs() - started
+    started = NowMs()
+    ui.SetState "q", ""
+    ui.SetState "zone", "All"
+    Record "filterLift1000", NowMs() - started
+
+    ui.TextInput("q").Focus
+    RdxKeyChar "I"
+    started = NowMs()
+    ReDimUI.PumpOnce
+    Record "liveWrite1000", NowMs() - started
+    ReDimUI.EndKeyboardFocus
+
+    started = NowMs()
+    ui.ProtectSurface
+    Record "protectSurface", NowMs() - started
+    started = NowMs()
+    For idx = 1 To 10
+        ReDimUI.DispatchShape "rdm_benchf_q"
+        ReDimUI.EndKeyboardFocus
+    Next idx
+    Record "focusBlurProtected", (NowMs() - started) / 10
+    started = NowMs()
+    For idx = 1 To 20
+        RdxKeyChar "x"
+    Next idx
+    Record "strayKey", (NowMs() - started) / 20
+    started = NowMs()
+    ui.ProtectSurface False
+    Record "unprotectSurface", NowMs() - started
+    RdxReleaseKeys
+    ReDimUI.AutoPump True
+    BenchFilters = gTranscript
+End Function
