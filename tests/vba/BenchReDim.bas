@@ -430,9 +430,16 @@ Public Function BenchComponents() As String
     ui.Skeleton("skel").AtRect(420, 120, 200, 60).SkeletonLines 3
     ui.Render
 
+    ' A tab's first showing draws its controls; a later one shows them.
     started = NowMs()
     ReDimUI.DispatchShape "rdm_benchc_tabs__tb2"
     Record "tabSwitch10", NowMs() - started
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_benchc_tabs__tb1"
+    Sleep 200
+    started = NowMs()
+    ReDimUI.DispatchShape "rdm_benchc_tabs__tb2"
+    Record "tabSwitchAgain10", NowMs() - started
 
     started = NowMs()
     ReDimUI.DispatchShape "rdm_benchc_due"
