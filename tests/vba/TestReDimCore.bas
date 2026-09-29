@@ -1346,3 +1346,43 @@ Public Function TestFocusHandoff() As String
     ReDimUI.AutoPump True
     TestFocusHandoff = transcript
 End Function
+
+' ProtectSurface while no window is active, as when a Workbook_Open runs
+' after Enable Editing in Protected View, before the workbook's window
+' shows. Excel faults when EnableSelection is set then, which no error
+' trap catches, so the rule waits; a sheet coming forward sets it.
+Public Function TestSelectionRuleWaits() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim other As Worksheet
+    Dim book As Workbook
+    Dim transcript As String
+    Dim eventsWere As Boolean
+
+    ReDimUI.AutoPump False
+    Set other = NewCanvas()
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "core18")
+    app.Button("go").AtRect(20, 20, 80, 24).Text "Go"
+    app.Render
+    host.EnableSelection = xlNoRestrictions
+    For Each book In Workbooks
+        book.Windows(1).Visible = False
+    Next book
+    transcript = "noWindow=" & CStr(ActiveWindow Is Nothing)
+    app.ProtectSurface
+    transcript = transcript & "|protected=" & CStr(host.ProtectContents) & _
+        "|ruleWaits=" & CStr(host.EnableSelection = xlNoRestrictions)
+    For Each book In Workbooks
+        book.Windows(1).Visible = True
+    Next book
+    eventsWere = Application.EnableEvents
+    Application.EnableEvents = True
+    other.Activate
+    host.Activate
+    Application.EnableEvents = eventsWere
+    transcript = transcript & "|ruleSet=" & CStr(host.EnableSelection = xlUnlockedCells)
+    app.Unmount True
+    ReDimUI.AutoPump True
+    TestSelectionRuleWaits = transcript
+End Function

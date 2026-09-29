@@ -76,6 +76,15 @@
   p-code that disagrees with its source is what VBA-stomping scanners
   look for. The build now removes `Module1`, and the scan fails on any
   p-code in a workbook.
+- A workbook that built its ReDim app in `Workbook_Open` failed on
+  open from an email attachment or a download, once Enable Editing was
+  clicked in Protected View (#5). `Workbook_Open` can run there before
+  the workbook's window shows, and `ProtectSurface` set the sheet's
+  selection rule, which fails past any error trap while no window is
+  active; under test it took Excel down. The rule now waits for a sheet
+  or workbook to come forward, and the sheet is protected at once as
+  before. `TestSelectionRuleWaits` protects a surface with every window
+  hidden.
 - CI installs the newest pyvbaanalysis on every run, where it pinned
   2.2.1, and ReDim's sources have no findings under 2.3.0. A finding
   inside the vendored ROneCOne is now printed and no longer fails

@@ -353,6 +353,16 @@ def test_error_words(run_core):
     )
 
 
+def test_selection_rule_waits(run_core):
+    facts = parse_transcript(run_core("TestSelectionRuleWaits"))
+    assert facts["noWindow"] == "True"
+    assert facts["protected"] == "True"
+    assert facts["ruleWaits"] == "True", (
+        "with no window active, ProtectSurface must not set EnableSelection: Excel faults"
+    )
+    assert facts["ruleSet"] == "True", "a sheet coming forward sets the rule that waited"
+
+
 def test_hotkey_lifecycle_and_version(run_core):
     facts = parse_transcript(run_core("TestHotKeyLifecycle"))
     assert facts["procCallable"] == "True"

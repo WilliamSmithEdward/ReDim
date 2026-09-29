@@ -543,6 +543,9 @@ Private mToastRailStored As Boolean
 Private mToastRestackPending As Boolean
 Private mHotKeys As Collection
 Private mSurfaceProtected As Boolean
+' The selection rule ProtectSurface set, and whether it waits for a window.
+Private mSelectionRule As XlEnableSelection
+Private mSelectionRulePending As Boolean
 Private mIsWindow As Boolean
 Private mOnShowProc As String
 Private mOnHideProc As String
@@ -1306,7 +1309,13 @@ Private Sub mExcelApp_WorkbookActivate(ByVal Wb As Workbook)
 End Sub
 
 Private Sub SheetCameForward()
+    Dim appValue As ReDimUI
+
     If mCloseHeld Then Exit Sub
+    ' A window is active again: a selection rule that waited for one sets.
+    For Each appValue In mApps
+        appValue.ApplyPendingSelectionRule
+    Next appValue
     SyncKeyCapture
     RefreshAccessKeys
     If HasPendingWork() Then RequestPump
@@ -5170,21 +5179,42 @@ Public Function ProtectSurface( _
         Next componentValue
         RestoreSurfaceProtection
         If allowCellSelection Then
-            mSheet.EnableSelection = xlNoRestrictions
+            ApplySelectionRule xlNoRestrictions
         Else
-            mSheet.EnableSelection = xlUnlockedCells
+            ApplySelectionRule xlUnlockedCells
         End If
         mSurfaceProtected = True
     Else
         On Error Resume Next
         mSheet.Unprotect
-        mSheet.EnableSelection = xlNoRestrictions
+        ApplySelectionRule xlNoRestrictions
         On Error GoTo 0
         mSurfaceProtected = False
     End If
     ReDimUI.SyncSurfaceKeys
     Set ProtectSurface = Me
 End Function
+
+' Sets the sheet's selection rule, or keeps it for later while no window is
+' active: EnableSelection set then fails past any error trap, and under
+' test it took Excel down. A Workbook_Open that runs after Enable Editing
+' in Protected View, before the workbook's window shows, is such a moment.
+' The rule waits for the next sheet or workbook to come forward.
+Private Sub ApplySelectionRule(ByVal selectionRule As XlEnableSelection)
+    mSelectionRule = selectionRule
+    mSelectionRulePending = (ActiveWindow Is Nothing)
+    If Not mSelectionRulePending Then mSheet.EnableSelection = selectionRule
+End Sub
+
+' A selection rule that waited for a window, set now that one is active.
+Friend Sub ApplyPendingSelectionRule()
+    If Not mSelectionRulePending Then Exit Sub
+    If ActiveWindow Is Nothing Then Exit Sub
+    mSelectionRulePending = False
+    On Error Resume Next
+    mSheet.EnableSelection = mSelectionRule
+    On Error GoTo 0
+End Sub
 
 Public Property Get IsSurfaceProtected() As Boolean
     RequireRole ROLE_APP, "IsSurfaceProtected"
