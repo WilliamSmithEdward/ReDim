@@ -95,10 +95,12 @@
   dismissed one never finished fading, and the tray never closed up.
   Hardening for toasts that stay up and take no clicks (#4).
 - CI installs the newest pyvbaanalysis on every run, where it pinned
-  2.2.1, and ReDim's sources have no findings under 2.3.0. A finding
-  inside the vendored ROneCOne is now printed and no longer fails
-  ReDim's gate: 2.3.0 reports ROneCOne's `Item` property, whose `Set`
-  takes an Object while its `Get` returns a Variant, which Excel compiles.
+  2.2.1. Under 2.3.1 neither ReDim's sources nor the vendored ROneCOne
+  has a finding. A finding inside ROneCOne is printed and no longer
+  fails ReDim's gate, since it is ROneCOne's to fix. 2.3.0 reported one,
+  on ROneCOne's `Item` property, whose `Set` takes an Object while its
+  `Get` returns a Variant. Excel compiles that, and 2.3.1 no longer
+  reports it.
 
 ## 1.0.4 - 2026-09-27
 
