@@ -158,7 +158,9 @@ theme sets, stand as drawn, where rewriting them was half of a 100-control swap.
   byte-for-byte round trips, matching the ROneCOne pipeline. It removes the blank workbook's
   `Module1`, whose p-code held a comment its empty source did not, so a built workbook holds
   VBA source alone and Excel compiles it on open
-- `tools/check.py` runs pyvbaanalysis over every `.bas` and `.cls`; any finding fails the gate
+- `tools/check.py` runs pyvbaanalysis over every `.bas` and `.cls`; any finding in ReDim's own
+  sources fails the gate, and one inside the vendored ROneCOne is printed and not counted. CI
+  installs the newest pyvbaanalysis on every run
 - `tools/security_scan.py` runs olevba over the runtime files and built workbooks and fails on
   any finding `tools/security_expected.json` does not list with its reason, and on any p-code
   in a workbook. CI runs it on every push, and the security-report workflow runs it over each

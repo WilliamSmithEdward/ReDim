@@ -144,7 +144,7 @@ VBA sources are plain files; workbooks are built artifacts.
 
 ```bash
 pip install -r requirements-dev.txt
-python tools/check.py          # pyvbaanalysis static gate, zero findings required
+python tools/check.py          # pyvbaanalysis static gate, zero findings in ReDim's sources
 python tools/stamp_release.py  # after a version bump: header in every release source
 python tools/build_workbooks.py
 python tools/security_scan.py --strict src/ReDimUI.cls src/ReDimHost.bas demo/*.xlsm
@@ -160,8 +160,8 @@ guard that exports the runtime, the demos, and sample host code through the VBE 
 every name back as written.
 
 It drives a real Excel instance, so it cannot run on hosted CI. Continuous integration runs
-the two static gates instead: pyvbaanalysis over the same sources plus the ROneCOne runtime,
-and the olevba scan over the runtime and demo workbooks it builds. The live suite is a local
+the two static gates instead: the newest pyvbaanalysis over the same sources plus the ROneCOne
+runtime, and the olevba scan over the runtime and demo workbooks it builds. The live suite is a local
 step before release.
 
 ## License

@@ -76,6 +76,11 @@
   p-code that disagrees with its source is what VBA-stomping scanners
   look for. The build now removes `Module1`, and the scan fails on any
   p-code in a workbook.
+- CI installs the newest pyvbaanalysis on every run, where it pinned
+  2.2.1, and ReDim's sources have no findings under 2.3.0. A finding
+  inside the vendored ROneCOne is now printed and no longer fails
+  ReDim's gate: 2.3.0 reports ROneCOne's `Item` property, whose `Set`
+  takes an Object while its `Get` returns a Variant, which Excel compiles.
 
 ## 1.0.4 - 2026-09-27
 
