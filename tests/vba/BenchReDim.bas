@@ -408,8 +408,9 @@ End Function
 
 ' The 1.0.0 components: a tab switch over panels of ten buttons, a date
 ' picker's calendar opening, turning a month, and picking a day, a
-' skeleton's pulse frames, and a 1000-row table filled from an array,
-' sorted by a header, paged, and a row picked.
+' skeleton's pulse frames, a 1000-row table filled from an array, sorted
+' by a header, paged, and a row picked, and a tab switch to a panel of
+' lists, a toggle, and a progress bar.
 Public Function BenchComponents() As String
     Dim ui As ReDimUI
     Dim host As Worksheet
@@ -486,6 +487,33 @@ Public Function BenchComponents() As String
     started = NowMs()
     ReDimUI.DispatchShape "rdm_benchc_tbl__tr3"
     Record "tableRowPick1000", NowMs() - started
+
+    ' A panel of controls drawn from many parts each, last so the shapes it
+    ' adds leave the timings above alone: its first showing draws them, and
+    ' a later one shows the parts they hid. Declared in an update, as a
+    ' control added to a drawn app draws at each call until OnTab hides it.
+    ui.BeginUpdate
+    ui.RadioGroup("rg").AtRect(24, 540, 160, 130) _
+        .Items("North", "South", "East", "West", "Up", "Down").OnTab "tabs", 3
+    ui.CheckList("cl").AtRect(200, 540, 160, 130) _
+        .Items("Red", "Green", "Blue", "Cyan", "Magenta").OnTab "tabs", 3
+    ui.TransferList("tl").AtRect(380, 540, 360, 130) _
+        .ItemsFrom(Array("Alpha", "Bravo", "Charlie")) _
+        .ChosenFrom(Array("Delta", "Echo")).OnTab "tabs", 3
+    ui.Toggle("tg").AtRect(24, 690, 120, 24).OnTab "tabs", 3
+    ui.ProgressBar("pb").AtRect(200, 696, 160, 12).OnTab "tabs", 3
+    ui.ProgressBar("pb").Value 40
+    ui.EndUpdate
+    Sleep 200
+    started = NowMs()
+    ReDimUI.DispatchShape "rdm_benchc_tabs__tb3"
+    Record "tabSwitchParts", NowMs() - started
+    Sleep 200
+    ReDimUI.DispatchShape "rdm_benchc_tabs__tb2"
+    Sleep 200
+    started = NowMs()
+    ReDimUI.DispatchShape "rdm_benchc_tabs__tb3"
+    Record "tabSwitchAgainParts", NowMs() - started
     ReDimUI.AutoPump True
     BenchComponents = gTranscript
 End Function
