@@ -155,8 +155,14 @@ theme sets, stand as drawn, where rewriting them was half of a 100-control swap.
 ## Build and verification
 
 - `tools/build_workbooks.py` injects sources into `.xlsm` files with pyOpenVBA and verifies
-  byte-for-byte round trips, matching the ROneCOne pipeline
+  byte-for-byte round trips, matching the ROneCOne pipeline. It removes the blank workbook's
+  `Module1`, whose p-code held a comment its empty source did not, so a built workbook holds
+  VBA source alone and Excel compiles it on open
 - `tools/check.py` runs pyvbaanalysis over every `.bas` and `.cls`; any finding fails the gate
+- `tools/security_scan.py` runs olevba over the runtime files and built workbooks and fails on
+  any finding `tools/security_expected.json` does not list with its reason, and on any p-code
+  in a workbook. CI runs it on every push, and the security-report workflow runs it over each
+  release's assets and attaches the report (see SECURITY.md)
 - `tools/stamp_release.py` writes the release header into every source a release ships (both
   runtime files and each demo module): the version from `REDIM_VERSION`, that version's
   CHANGELOG date, the repository, and the MIT license text from `LICENSE`, ahead of

@@ -63,6 +63,19 @@
   later switch to each of the What's New demo's tabs takes 4 to 5 ms:
   its Lists tab took 76, Forms 60, and Filters 38. The bench's
   `tabSwitchAgainParts` times a panel of such controls.
+- Each release now carries `ReDim_X.Y.Z_Security_Report.md`, olevba's
+  scan of every attached workbook and source file, with each file's
+  SHA-256 and the reason for each finding. A workflow writes it from the
+  published files. CI runs the same scan on every push and fails on any
+  finding `tools/security_expected.json` does not explain. SECURITY.md
+  says how to report a vulnerability privately and what ReDim's code and
+  the demos do.
+- The demo workbooks carried an empty `Module1` from pyOpenVBA's blank
+  workbook, whose compiled p-code held a comment its source did not:
+  "TESTING ONLY DO NOT INCLUDE THIS IN FINAL OUTPUT". It never ran, but
+  p-code that disagrees with its source is what VBA-stomping scanners
+  look for. The build now removes `Module1`, and the scan fails on any
+  p-code in a workbook.
 
 ## 1.0.4 - 2026-09-27
 

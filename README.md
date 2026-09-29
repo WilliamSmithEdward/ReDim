@@ -124,6 +124,14 @@ and it builds itself (each ships an `Auto_Open`); the entry macro rebuilds on de
 | `ReDim_Expense_Tracker.xlsm` | A small bookkeeping app from the 1.0 controls: a stacked form checked by `ValidateAll`, a table that filters as you type and deletes with an Undo toast, a sparkline and badge over six months, a budget meter, an Actions menu, and the command palette | `BuildExpenseTracker` |
 | `ReDim_Whats_New.xlsm` | A tour of 1.0.3 with a log of what each action did: two-way `WritesTo`, `Tag` and `TagValue`, filterable lists with disabled items, lists that scroll, `Required` picks, `AutoGrow` and placement that follows, themes from the `With` builders in any font, the pointer tint, focus rings, an op's task result, jobs sharing a step, and the error sink | `BuildWhatsNew` |
 
+## Security
+
+Report a vulnerability privately from the repository's Security tab; [SECURITY.md](SECURITY.md)
+has the details. It also sets out what ReDim's VBA does with Windows, keys, and the clipboard,
+what the embedded ROneCOne runtime can do, and why macro scanners flag it. From 1.1.0, each
+release attaches `ReDim_X.Y.Z_Security_Report.md`: olevba's findings for every workbook and
+source file, each explained, with the files' SHA-256 hashes.
+
 ## Documentation
 
 - [Getting started and API](docs/api.md)
@@ -139,19 +147,22 @@ pip install -r requirements-dev.txt
 python tools/check.py          # pyvbaanalysis static gate, zero findings required
 python tools/stamp_release.py  # after a version bump: header in every release source
 python tools/build_workbooks.py
+python tools/security_scan.py --strict src/ReDimUI.cls src/ReDimHost.bas demo/*.xlsm
+                               # olevba: every finding explained in tools/security_expected.json
 python -m pytest tests/python  # live Excel suite via pyvbaharness
 python tools/bench.py --save before   # timings in live Excel; later runs add --compare before
 ```
 
 The live suite covers mount and adoption, dispatch and guards, bindings, batching, theming, the
 async op lifecycle, jobs, cancellation, every widget, a real armed-timer end-to-end run, a VBA
-compile gate for every shipped workbook, smoke runs of all five demos, and an identifier-casing
+compile gate for every shipped workbook, smoke runs of all seven demos, and an identifier-casing
 guard that exports the runtime, the demos, and sample host code through the VBE and requires
 every name back as written.
 
 It drives a real Excel instance, so it cannot run on hosted CI. Continuous integration runs
-the static gate only, over the same sources plus the ROneCOne runtime; the live suite is a
-local step before release.
+the two static gates instead: pyvbaanalysis over the same sources plus the ROneCOne runtime,
+and the olevba scan over the runtime and demo workbooks it builds. The live suite is a local
+step before release.
 
 ## License
 

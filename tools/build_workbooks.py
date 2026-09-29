@@ -24,6 +24,9 @@ from vba_sources import (  # noqa: E402
 )
 
 
+TEMPLATE_MODULE = "Module1"
+
+
 def framework_modules() -> dict[str, tuple[str, VBAModuleKind]]:
     return {
         "ROneCOne": (
@@ -45,6 +48,12 @@ def build_workbook(target: Path, extra_modules: dict[str, tuple[str, VBAModuleKi
         target.unlink()
     with ExcelFile.create_new(target) as workbook:
         project = workbook.vba_project()
+        # The blank workbook's Module1 has no source, but its compiled
+        # p-code still holds a comment typed into the template. P-code that
+        # disagrees with its source is what VBA-stomping scanners look for,
+        # and ReDim needs no Module1.
+        if TEMPLATE_MODULE in {module.name for module in project.modules}:
+            project.delete_module(TEMPLATE_MODULE)
         for name, (source, kind) in modules.items():
             project.add_module(name, source, kind=kind)
         workbook.save()
@@ -53,6 +62,8 @@ def build_workbook(target: Path, extra_modules: dict[str, tuple[str, VBAModuleKi
         missing = set(modules) - actual
         if missing:
             raise RuntimeError(f"{target.name} is missing modules: {sorted(missing)}")
+        if TEMPLATE_MODULE in actual:
+            raise RuntimeError(f"{target.name} still holds the template's {TEMPLATE_MODULE}")
         for name, (source, _) in modules.items():
             if verification.get_module(name) != source:
                 raise RuntimeError(
