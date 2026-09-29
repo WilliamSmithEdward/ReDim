@@ -5438,6 +5438,104 @@ Public Function TestCommandPalette() As String
     TestCommandPalette = transcript
 End Function
 
+' A composite on a tab hides by hiding its shapes at once, and shows the
+' ones that showed when its tab shows again: a windowed radio group's rows
+' past its window stay hidden; a pick and an item added while hidden draw
+' when it shows; a theme set meanwhile reaches it; and a part deleted
+' while hidden comes back, with every other part, a transfer list's
+' reorder arrows among them, showing again.
+Public Function TestSweptPanels() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim transcript As String
+    Dim shownBefore As String
+    Dim movesBefore As String
+
+    ReDimUI.AutoPump False
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "wid114")
+    app.Tabs("tabs").AtRect(24, 24, 300, 30).Items "One", "Two"
+    app.Label("first").AtRect(24, 70, 200, 20).Text("On one").OnTab "tabs", 1
+    app.RadioGroup("planet").AtRect(24, 70, 180, 110) _
+        .Items("Mercury", "Venus", "Earth", "Mars", "Jupiter", "Saturn", "Uranus", _
+        "Neptune", "Pluto").OnTab "tabs", 2
+    app.CheckList("toppings").AtRect(230, 70, 170, 150) _
+        .Items("Cheese", "Tomato", "Basil").OnTab "tabs", 2
+    app.TransferList("order").AtRect(24, 240, 380, 140) _
+        .ItemsFrom(Array("Alpha", "Bravo")).ChosenFrom(Array("Echo", "Foxtrot")) _
+        .Reorderable.OnTab "tabs", 2
+    app.Render
+    app.Tabs("tabs").Value 2
+    shownBefore = ShownParts(host, "rdm_wid114_planet")
+    app.Tabs("tabs").Value 1
+    transcript = "allHidden=" & CStr(LenB(ShownParts(host, "rdm_wid114_planet")) = 0 _
+        And LenB(ShownParts(host, "rdm_wid114_toppings")) = 0 _
+        And LenB(ShownParts(host, "rdm_wid114_order")) = 0)
+    app.Tabs("tabs").Value 2
+    transcript = transcript & "|sameShown=" & CStr( _
+        ShownParts(host, "rdm_wid114_planet") = shownBefore _
+        And Not ShapeShows(host, "rdm_wid114_planet__t9"))
+
+    app.Tabs("tabs").Value 1
+    app.RadioGroup("planet").Value 2
+    app.CheckList("toppings").AddItem "Olives"
+    app.Tabs("tabs").Value 2
+    transcript = transcript & "|changesDrawn=" & CStr(ShapeShows(host, "rdm_wid114_planet__d2") _
+        And ShapeShows(host, "rdm_wid114_toppings__t4"))
+
+    app.Tabs("tabs").Value 1
+    app.SetTheme ReDimUI.ThemeLight.WithPrimary(RGB(200, 0, 0), RGB(255, 255, 255))
+    app.Tabs("tabs").Value 2
+    transcript = transcript & "|themeDrawn=" & CStr( _
+        host.Shapes("rdm_wid114_planet__d2").Fill.ForeColor.RGB = RGB(200, 0, 0))
+
+    shownBefore = ShownParts(host, "rdm_wid114_planet")
+    movesBefore = ShownParts(host, "rdm_wid114_order")
+    app.Tabs("tabs").Value 1
+    host.Shapes("rdm_wid114_planet__t3").Delete
+    host.Shapes("rdm_wid114_order__mvr").Delete
+    app.Tabs("tabs").Value 2
+    transcript = transcript & "|partBack=" & CStr(ShownParts(host, "rdm_wid114_planet") = shownBefore _
+        And ShownParts(host, "rdm_wid114_order") = movesBefore _
+        And InStr(movesBefore, "__mvu;") > 0 And InStr(movesBefore, "__mvr;") > 0)
+    ReDimUI.AutoPump True
+    TestSweptPanels = transcript
+End Function
+
+' The names of a control's shapes that show, its own and its parts', in
+' name order, so a part made again reads as it did.
+Private Function ShownParts(ByVal host As Worksheet, ByVal controlShapeName As String) As String
+    Dim candidateShape As Shape
+    Dim shownNames() As String
+    Dim shownCount As Long
+    Dim idx As Long
+    Dim probe As Long
+    Dim held As String
+
+    ReDim shownNames(1 To host.Shapes.Count + 1)
+    For Each candidateShape In host.Shapes
+        If candidateShape.Name = controlShapeName Or Left$(candidateShape.Name, Len(controlShapeName) + 2) = controlShapeName & "__" Then
+            If candidateShape.Visible = msoTrue Then
+                shownCount = shownCount + 1
+                shownNames(shownCount) = candidateShape.Name
+            End If
+        End If
+    Next candidateShape
+    For idx = 2 To shownCount
+        held = shownNames(idx)
+        probe = idx - 1
+        Do While probe >= 1
+            If shownNames(probe) <= held Then Exit Do
+            shownNames(probe + 1) = shownNames(probe)
+            probe = probe - 1
+        Loop
+        shownNames(probe + 1) = held
+    Next idx
+    For idx = 1 To shownCount
+        ShownParts = ShownParts & shownNames(idx) & ";"
+    Next idx
+End Function
+
 ' A cell-backed field on a tab not shown hides as its frame does: its cell
 ' takes the canvas's look with its words hidden, and is locked, so a
 ' protected surface takes no typing there, and an edit made to it anyway

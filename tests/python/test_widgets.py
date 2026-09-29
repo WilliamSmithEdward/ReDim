@@ -2114,6 +2114,19 @@ def test_rebuilds_with(run_widgets):
     assert facts["staysDown"] == "True/1", "an app taken down on purpose stays down"
 
 
+def test_swept_panels(run_widgets):
+    facts = parse_transcript(run_widgets("TestSweptPanels"))
+    assert facts["allHidden"] == "True", "a composite on a hidden tab hides every shape"
+    assert facts["sameShown"] == "True", (
+        "shown again, the shapes that showed show, and rows past the window stay hidden"
+    )
+    assert facts["changesDrawn"] == "True", "a pick and an item added while hidden draw"
+    assert facts["themeDrawn"] == "True", "a theme set while hidden reaches the composite"
+    assert facts["partBack"] == "True", (
+        "a part deleted while hidden comes back, and every other part shows again"
+    )
+
+
 def test_hidden_cell_field(run_widgets):
     facts = parse_transcript(run_widgets("TestHiddenCellField"))
     assert facts["hidden"] == "True/True/True", (

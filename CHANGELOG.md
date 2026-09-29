@@ -57,6 +57,12 @@
   words, text margins, visibility, click, and alternative text as drawn,
   which it rewrote on every control: a 100-control swap takes 45 ms
   instead of 109.
+- A control drawn from many parts, such as a list, table, date picker,
+  or toggle, hides and shows its shapes in one call each, where a tab
+  switch rewrote each part. A later switch to the What's New demo's
+  Lists tab takes 4 ms instead of 76, and to its Filters tab 6 instead
+  of 38. The bench's `tabSwitchAgainParts` times a panel of five such
+  controls: 3 ms, from 41.
 
 ## 1.0.4 - 2026-09-27
 

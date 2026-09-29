@@ -1120,6 +1120,11 @@ Private mAppliedValid As Boolean
 ' restyled, while its words, margins, visibility, click, and alternative
 ' text, which no theme sets, stand as drawn.
 Private mThemeOnly As Boolean
+' Whether the last full draw left the control showing, and, for a
+' composite hidden all at once, the shapes that showed when it hid.
+Private mDrawnVisible As Boolean
+Private mSwept As Boolean
+Private mSweptShown As Collection
 Private mAppliedThemeRevision As Long
 ' The bounds the control last drew at, which Below and RightOf placements
 ' read; empty until its first draw.
@@ -8997,8 +9002,25 @@ Friend Sub NoteShapeDrawn(ByVal drawnName As String)
     mShapesMade = mShapesMade + 1
     If Not mSurfaceFresh Then Exit Sub
     If TryGetItem(mDrawnShapes, drawnName, drawnMark) Then Exit Sub
-    mDrawnShapes.Add True, drawnName
+    mDrawnShapes.Add drawnName, drawnName
 End Sub
+
+' The names of the shapes the app drew for one control, its own and its
+' parts'. Nothing on a sheet that held the app's shapes when it mounted,
+' whose earlier shapes went unrecorded.
+Friend Function DrawnNamesOf(ByVal controlShapeName As String) As Collection
+    Dim drawnName As Variant
+    Dim partPrefix As String
+
+    If Not mSurfaceFresh Then Exit Function
+    Set DrawnNamesOf = New Collection
+    partPrefix = controlShapeName & PART_SEPARATOR
+    For Each drawnName In mDrawnShapes
+        If drawnName = controlShapeName Or Left$(drawnName, Len(partPrefix)) = partPrefix Then
+            DrawnNamesOf.Add CStr(drawnName)
+        End If
+    Next drawnName
+End Function
 
 ' A shape of this app's that was just deleted is surely absent again.
 Friend Sub NoteShapeDropped(ByVal drawnName As String)
@@ -10054,6 +10076,10 @@ Friend Sub Apply( _
     ' is, draws when it first shows: drawn hidden, every panel of an app's
     ' tabs cost most of its first render.
     If DrawWaits(hostApp) Then Exit Sub
+    ' A composite hides by hiding its shapes at once, and shows again the
+    ' ones that showed; drawn both ways part by part, it was most of a tab
+    ' switch.
+    If SweepsVisibility(hostSheet, hostApp) Then Exit Sub
     ' A theme swapped, or edited in place, restyles the control in full:
     ' its diffs compare fills and words, and a look can change a border
     ' or a font and keep those.
@@ -10102,6 +10128,7 @@ Friend Sub Apply( _
     ApplyAltText mainShape
     mAppliedValid = True
     mThemeOnly = False
+    mDrawnVisible = mVisible
     ' A control that moved or resized since it was drawn, by a builder, by
     ' its stack, or by text it grew to, moves what is placed against it;
     ' a first draw leaves that to the render in progress. Only a field's
@@ -10134,6 +10161,115 @@ Private Function DrawWaits(ByVal hostApp As ReDimUI) As Boolean
     If (mKind = KIND_INPUT Or mKind = KIND_COMBO) And LenB(mAnchor) > 0 Then Exit Function
     DrawWaits = True
 End Function
+
+' A composite that hides hides every shape of its own in one call, noting
+' the ones that showed, and draws nothing more while hidden. Shown again,
+' those shapes show in one call and the draw goes on as ever, so whatever
+' changed meanwhile draws against the look it had when it hid. When a
+' shape went meanwhile, the rest show one by one and every part draws
+' anew, as for a main shape made again. Only on a sheet where the app
+' recorded every shape it drew, never with a list, ring, cursor, or tip
+' up, whose parts come and go, and never for a stack's member, whose
+' stack lays out again when it hides. True when the draw is done.
+Private Function SweepsVisibility(ByVal hostSheet As Worksheet, ByVal hostApp As ReDimUI) As Boolean
+    Dim drawnNames As Collection
+    Dim shownNames As Collection
+    Dim drawnName As Variant
+
+    If mSwept Then
+        If Not mVisible Then
+            SweepsVisibility = True
+            Exit Function
+        End If
+        mSwept = False
+        If Not SetShapesVisible(hostSheet, mSweptShown, msoTrue) Then
+            ShowShapesLeft hostSheet, mSweptShown
+            ForgetPartSignatures
+            mAppliedValid = False
+            mThemeOnly = False
+        End If
+        mAppliedVisible = True
+        Set mSweptShown = Nothing
+        Exit Function
+    End If
+    If mVisible Or Not mDrawnVisible Or Not mAppliedValid Then Exit Function
+    If Not SweepsItsParts() Then Exit Function
+    Set drawnNames = hostApp.DrawnNamesOf(ShapeName)
+    If drawnNames Is Nothing Then Exit Function
+    If drawnNames.Count = 0 Then Exit Function
+    Set shownNames = New Collection
+    On Error GoTo NoSweep
+    For Each drawnName In drawnNames
+        If Len(drawnName) > Len(ShapeName) Then
+            If TransientPart(LCase$(Mid$(drawnName, Len(ShapeName) + Len(PART_SEPARATOR) + 1))) Then
+                Exit Function
+            End If
+        End If
+        If hostSheet.Shapes(CStr(drawnName)).Visible = msoTrue Then shownNames.Add drawnName
+    Next drawnName
+    On Error GoTo 0
+    If Not SetShapesVisible(hostSheet, shownNames, msoFalse) Then Exit Function
+    mSwept = True
+    Set mSweptShown = shownNames
+    mAppliedVisible = False
+    mDrawnVisible = False
+    SweepsVisibility = True
+NoSweep:
+End Function
+
+' The kinds drawn from many parts, which hide and show all at once. Tabs
+' and expanders carry other controls with them, and draw as ever.
+Private Function SweepsItsParts() As Boolean
+    If LenB(mStackId) > 0 Then Exit Function
+    Select Case mKind
+        Case KIND_RADIO, KIND_CHECKLIST, KIND_TRANSFER, KIND_TABLE, KIND_TICKBOX, _
+            KIND_STEPPER, KIND_SLIDEBAR, KIND_SELECT, KIND_DATE, KIND_SPARKLINE, _
+            KIND_TOGGLE, KIND_PROGRESS
+            SweepsItsParts = True
+        Case KIND_COMBO
+            SweepsItsParts = IsFloatField()
+    End Select
+End Function
+
+' Shows or hides the named shapes in one ShapeRange call; False when a
+' name is gone or the call fails. No names is done at once.
+Private Function SetShapesVisible( _
+    ByVal hostSheet As Worksheet, _
+    ByVal shapeNames As Collection, _
+    ByVal visibleState As MsoTriState _
+) As Boolean
+    Dim nameList() As String
+    Dim drawnName As Variant
+    Dim idx As Long
+
+    If shapeNames Is Nothing Then Exit Function
+    If shapeNames.Count = 0 Then
+        SetShapesVisible = True
+        Exit Function
+    End If
+    ReDim nameList(1 To shapeNames.Count)
+    For Each drawnName In shapeNames
+        idx = idx + 1
+        nameList(idx) = drawnName
+    Next drawnName
+    On Error GoTo Failed
+    hostSheet.Shapes.Range(nameList).Visible = visibleState
+    SetShapesVisible = True
+Failed:
+End Function
+
+' Shows the named shapes still on the sheet one at a time, for when one
+' of them is gone and the single call refused them all.
+Private Sub ShowShapesLeft(ByVal hostSheet As Worksheet, ByVal shapeNames As Collection)
+    Dim drawnName As Variant
+
+    If shapeNames Is Nothing Then Exit Sub
+    On Error Resume Next
+    For Each drawnName In shapeNames
+        hostSheet.Shapes(CStr(drawnName)).Visible = msoTrue
+    Next drawnName
+    On Error GoTo 0
+End Sub
 
 Private Sub ApplyAltText(ByVal mainShape As Shape)
     Dim described As String
