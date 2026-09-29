@@ -410,7 +410,8 @@ End Function
 ' picker's calendar opening, turning a month, and picking a day, a
 ' skeleton's pulse frames, a 1000-row table filled from an array, sorted
 ' by a header, paged, and a row picked, and a tab switch to a panel of
-' lists, a toggle, and a progress bar.
+' lists, a toggle, a progress bar, a stack with a field and a pick, and a
+' tab strip with a list on its panel.
 Public Function BenchComponents() As String
     Dim ui As ReDimUI
     Dim host As Worksheet
@@ -503,6 +504,13 @@ Public Function BenchComponents() As String
     ui.Toggle("tg").AtRect(24, 690, 120, 24).OnTab "tabs", 3
     ui.ProgressBar("pb").AtRect(200, 696, 160, 12).OnTab "tabs", 3
     ui.ProgressBar("pb").Value 40
+    ui.Stack("st").AtRect(24, 740, 200, 0).Gap(6).OnTab "tabs", 3
+    ui.TextInput("stName").Sized(200, 22).Caption("Name").InStack("st").OnTab "tabs", 3
+    ui.SelectBox("stTeam").Sized(200, 24).Items("Design", "Sales").InStack("st") _
+        .OnTab "tabs", 3
+    ui.Tabs("inner").AtRect(260, 740, 240, 30).Items("A", "B").OnTab "tabs", 3
+    ui.CheckList("innerList").AtRect(260, 780, 240, 60).Items("Email", "Weekly") _
+        .OnTab "inner", 1
     ui.EndUpdate
     Sleep 200
     started = NowMs()
