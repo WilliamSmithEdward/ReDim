@@ -1,12 +1,14 @@
 name: Security
 
-# olevba and mraptor (oletools) report what the shipped VBA could do. The
+# olevba and mraptor (oletools) report what the shipped VBA could do. YARA-X
+# checks extracted VBA for malware execution and persistence patterns. ClamAV
+# scans the built files and extracted VBA with current official signatures. The
 # runtime calls Windows, the demos build themselves when a workbook opens,
 # and the ROneCOne runtime they embed reads files, runs processes, and
-# makes HTTP requests by design, so the scan holds every finding, by module,
-# to tools/security_expected.json and fails on any change in either
-# direction, and on p-code a workbook's source does not explain. The
-# release report lives in release-security.yml, the one workflow that
+# makes HTTP requests by design, so the scan holds every olevba and mraptor
+# finding, by module, to tools/security_expected.json. It also fails on an
+# unreviewed YARA-X or ClamAV match and on p-code a workbook's source does not
+# explain. The release report lives in release-security.yml, the one workflow that
 # needs write access.
 
 on:
@@ -24,7 +26,7 @@ concurrency:
 
 jobs:
   scan:
-    name: olevba and mraptor against the expected findings
+    name: olevba, mraptor, YARA-X, and ClamAV
     runs-on: ubuntu-latest
     steps:
       - name: Check out ReDim
@@ -46,7 +48,21 @@ jobs:
       # oletools brings olevba, mraptor, and pcodedmp; pyOpenVBA builds the
       # demo workbooks from source, as a release does.
       - name: Install the scanner
-        run: pip install oletools==0.60.2 pyopenvba==6.3.2
+        run: pip install oletools==0.60.2 pyopenvba==6.3.2 yara-x==1.20.0
+
+      - name: Check the YARA-X rules
+        run: python -m unittest discover -s tests/python -p test_yara_rules.py
+
+      - name: Check ClamAV finding handling
+        run: python -m unittest discover -s tests/python -p test_clamav_scan.py
+
+      - name: Install ClamAV and current signatures
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clamav clamav-freshclam
+          sudo systemctl stop clamav-freshclam || true
+          sudo freshclam
+          clamscan --version
 
       - name: Build the demo workbooks
         env:
@@ -55,7 +71,7 @@ jobs:
 
       - name: Scan the runtime and the demo workbooks
         run: >-
-          python tools/security_scan.py --strict --report security-report.md
+          python tools/security_scan.py --strict --clamav --report security-report.md
           src/ReDimUI.cls src/ReDimHost.bas .ronecone/src/ROneCOne.cls demo/*.xlsm
 
       - name: Keep the report

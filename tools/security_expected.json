@@ -1,5 +1,5 @@
 {
-  "description": "Every olevba finding and mraptor match security_scan.py may meet in ReDim's VBA, by module, with the reason ReDim has it. One missing here fails the scan. Under modules, keys read \"Type: keyword\" as olevba reports them; under mraptor, \"Flag: match\" for its A (runs on its own), W (writes), and X (runs code outside VBA) patterns. Keys compare without case; values name a reason below.",
+  "description": "Reviewed olevba, mraptor, YARA-X, and ClamAV findings. An unlisted finding fails the scan. YARA-X keys are rule identifiers by module; ClamAV keys are signature names under file:<name> or module:<name>. Keys compare without case; values name a reason below.",
   "reasons": {
     "prose": "An English word in a comment, a name, or a demo's text. The scanners match their keywords as whole words anywhere in the code, comments included.",
     "chr": "Chr and ChrW build characters from their codes: icon glyphs, key names, and separators.",
@@ -30,7 +30,12 @@
     "rc-http-put": "The HTTP method PUT, in the HttpClient's PutAsync.",
     "rc-register": "CancellationToken.Register, which records a callback. The scanners read Register as the Excel 4 macro REGISTER.",
     "rc-event-name": "A constant named ROLE_FILE_CHANGE. The scanners read any name ending in _Change as an ActiveX event handler.",
-    "doc-guid": "The workbook's document module holds no code, only Excel's attribute lines. Its VB_Base line names Excel's Workbook or Worksheet class by GUID, which reads as hex."
+    "doc-guid": "The workbook's document module holds no code, only Excel's attribute lines. Its VB_Base line names Excel's Workbook or Worksheet class by GUID, which reads as hex.",
+    "yara-native": "The framework and ROneCOne declare Windows APIs for timers, UI input, clipboard, hashing, native delegates, and process support, as described above.",
+    "yara-process": "ROneCOne exposes a general-purpose Process surface. ReDim and its demos do not call it.",
+    "yara-network": "ROneCOne exposes HTTP methods; PokeDex uses them to fetch Pokemon data from PokeAPI.",
+    "yara-file": "ROneCOne exposes File and Directory methods, including streams and binary file operations. ReDim's demos use them only for documented temp-file caches.",
+    "yara-dynamic": "ReDim invokes named app handlers with Application.Run; ROneCOne also supports dynamic callbacks and native delegates."
   },
   "modules": {
     "ThisWorkbook": {
@@ -223,5 +228,37 @@
       "X: Run": "prose",
       "X: call": "prose"
     }
+  },
+  "clamav": {},
+  "yara": {
+    "ReDimUI": {
+      "VBA_Native_API": "yara-native",
+      "VBA_Dynamic_Invocation": "yara-dynamic"
+    },
+    "ReDimHost": {
+      "VBA_Auto_Execution": "auto-close",
+      "VBA_Native_API": "yara-native",
+      "VBA_Dynamic_Invocation": "yara-dynamic"
+    },
+    "ROneCOne": {
+      "VBA_Native_API": "yara-native",
+      "VBA_Process_Launch_Capability": "yara-process",
+      "VBA_Network_Capability": "yara-network",
+      "VBA_File_Write_Capability": "yara-file",
+      "VBA_Dynamic_Invocation": "yara-dynamic"
+    },
+    "ExpenseTracker": {"VBA_Auto_Execution": "auto-open"},
+    "MissionControl": {"VBA_Auto_Execution": "auto-open"},
+    "Navigator": {"VBA_Auto_Execution": "auto-open"},
+    "PokeDex": {
+      "VBA_Auto_Execution": "auto-open",
+      "VBA_Network_Capability": "yara-network"
+    },
+    "SnakeGame": {"VBA_Auto_Execution": "auto-open"},
+    "WhatsNew": {
+      "VBA_Auto_Execution": "auto-open",
+      "VBA_Dynamic_Invocation": "prose"
+    },
+    "WidgetGallery": {"VBA_Auto_Execution": "auto-open"}
   }
 }

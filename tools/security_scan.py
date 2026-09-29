@@ -1,4 +1,4 @@
-"""Security scan of ReDim's VBA with olevba and mraptor, plus a p-code check.
+"""Security scan of ReDim's VBA with olevba, mraptor, YARA-X, ClamAV, and a p-code check.
 
 CI runs it over the sources and freshly built demo workbooks on every push;
 the release workflow runs it over a release's assets and attaches the report
@@ -18,12 +18,20 @@ and the runtime declares Windows API functions. So the scan records
 mraptor's verdict for each file and lists every match of its three
 patterns by module; each must be listed in security_expected.json too.
 
+YARA-X scans the extracted source of each module with vba_malware.yar.
+Each match must have a module-specific reason in security_expected.json;
+an unlisted match fails the scan.
+
+With --clamav, ClamAV scans the input files and extracted module source
+using current official signatures. Matches need a file- or module-specific
+reason in security_expected.json. A scanner error also fails the scan.
+
 A workbook's VBA project must hold no p-code lines. ReDim builds its
 workbooks from source alone and Excel compiles them when they open, so
 p-code in a workbook is code its source does not show, which is what VBA
 stomping hides. olevba's own stomping check runs as well.
 
-Usage: security_scan.py [--strict] [--report FILE] [--title TEXT] FILE [FILE ...]
+Usage: security_scan.py [--strict] [--clamav] [--report FILE] [--title TEXT] FILE [FILE ...]
 Exit 0 when nothing unexpected turned up, 1 otherwise; with --strict, an
 expected finding that matched nothing fails the scan too.
 """
@@ -35,16 +43,19 @@ import hashlib
 import json
 import os
 import re
+import subprocess
 import tempfile
 import zipfile
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from importlib.metadata import version
 from pathlib import Path
 
 # oletools is imported where it is used, so the parts that need only the
 # standard library load, and test, without it.
 
 EXPECTED_PATH = Path(__file__).resolve().parent / "security_expected.json"
+YARA_RULES_PATH = Path(__file__).resolve().parent / "vba_malware.yar"
 SHORT_ENCODED = re.compile(r"[A-Za-z0-9+/=]{1,16}")
 ENCODED_KINDS = ("Hex String", "Base64 String")
 PCODE_MODULE = re.compile(r"^(?:VBA/)?(\S+) - \d+ bytes$")
@@ -61,6 +72,28 @@ class Module:
     verdicts: list[tuple[str, str, str, str | None]] = field(default_factory=list)
     # (mraptor flag, match, reason or None when unexpected)
     raptor: list[tuple[str, str, str | None]] = field(default_factory=list)
+    yara_matches: list[str] = field(default_factory=list)
+    yara_reasons: dict[str, str | None] = field(default_factory=dict)
+
+
+def yara_rules():
+    import yara_x
+
+    return yara_x.compile(YARA_RULES_PATH.read_text(encoding="utf-8"))
+
+
+def scan_yara(module: Module, rules) -> None:
+    results = rules.scan(module.code.encode("utf-8"))
+    module.yara_matches = [match.identifier for match in results.matching_rules]
+
+
+def judge_yara(module: Module, expected: dict) -> None:
+    allowed = {key.casefold(): reason
+               for key, reason in expected["yara"].get(module.name, {}).items()}
+    module.yara_reasons = {
+        match: expected["reasons"].get(allowed.get(match.casefold()))
+        for match in module.yara_matches
+    }
 
 
 @dataclass
@@ -71,6 +104,70 @@ class ScannedFile:
     modules: list[str] = field(default_factory=list)
     pcode: dict | None = None
     raptor: str | None = None
+
+
+@dataclass
+class ClamAVScan:
+    version: str = "not run"
+    # (file:<name> or module:<name>, signature, reviewed reason or None)
+    findings: list[tuple[str, str, str | None]] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
+
+
+def parse_clamav_output(output: str, path_labels: dict[str, str]
+                        ) -> tuple[list[tuple[str, str]], list[str]]:
+    findings: list[tuple[str, str]] = []
+    errors: list[str] = []
+    for line in output.splitlines():
+        path, separator, verdict = line.rpartition(": ")
+        if not separator:
+            continue
+        label = path_labels.get(path)
+        if verdict.endswith(" FOUND"):
+            if label is None:
+                errors.append(f"ClamAV reported an unknown path: {line}")
+            else:
+                findings.append((label, verdict.removesuffix(" FOUND")))
+        elif verdict.endswith(" ERROR"):
+            errors.append(line)
+    return findings, errors
+
+
+def scan_clamav(paths: list[Path], modules: list[Module], expected: dict) -> ClamAVScan:
+    result = ClamAVScan()
+    try:
+        version_run = subprocess.run(["clamscan", "--version"], capture_output=True,
+                                     text=True, check=False, timeout=30)
+        if version_run.returncode != 0:
+            result.errors.append(f"clamscan --version failed: {version_run.stderr.strip()}")
+            return result
+        result.version = version_run.stdout.strip()
+        with tempfile.TemporaryDirectory() as work:
+            labels = {str(path.resolve()): f"file:{path.name}" for path in paths}
+            for index, module in enumerate(modules):
+                source = Path(work) / f"module-{index}.vba"
+                source.write_text(module.code, encoding="utf-8")
+                labels[str(source)] = f"module:{module.name}"
+            command = ["clamscan", "--allmatch", "--infected", "--no-summary",
+                       "--official-db-only=yes", *labels]
+            scan = subprocess.run(command, capture_output=True, text=True,
+                                  check=False, timeout=600)
+            found, errors = parse_clamav_output(scan.stdout + scan.stderr, labels)
+            result.errors.extend(errors)
+            if scan.returncode not in (0, 1):
+                result.errors.append(f"clamscan exited {scan.returncode}: "
+                                     f"{(scan.stderr or scan.stdout).strip()}")
+            elif scan.returncode == 1 and not found:
+                result.errors.append("clamscan reported an infection without a readable finding")
+            reasons = expected["reasons"]
+            for label, signature in sorted(set(found)):
+                allowed = {key.casefold(): reason for key, reason in
+                           expected["clamav"].get(label, {}).items()}
+                result.findings.append((label, signature,
+                                        reasons.get(allowed.get(signature.casefold()))))
+    except (OSError, subprocess.TimeoutExpired) as error:
+        result.errors.append(f"ClamAV could not run: {error}")
+    return result
 
 
 def sha256_of(data: bytes) -> str:
@@ -226,16 +323,19 @@ def tool_versions() -> dict[str, str]:
     from pcodedmp import pcodedmp
 
     return {"olevba": olevba.__version__, "mraptor": mraptor.__version__,
+            "yara-x": version("yara-x"),
             "pcodedmp": pcodedmp.__VERSION__}
 
 
 def write_report(target: Path, title: str, files: list[ScannedFile],
-                 modules: list[Module], problems: list[str], stale: list[str]) -> None:
+                 modules: list[Module], clamav: ClamAVScan | None,
+                 problems: list[str], stale: list[str]) -> None:
     versions = tool_versions()
     stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     out: list[str] = [f"# {title}", "",
                       f"Scanned {stamp} with olevba {versions['olevba']} and mraptor "
-                      f"{versions['mraptor']} (oletools), and pcodedmp {versions['pcodedmp']}."]
+                      f"{versions['mraptor']} (oletools), YARA-X {versions['yara-x']}, "
+                      f"and pcodedmp {versions['pcodedmp']}."]
     run_id = os.environ.get("GITHUB_RUN_ID")
     if run_id:
         server = os.environ.get("GITHUB_SERVER_URL", "https://github.com")
@@ -287,7 +387,30 @@ def write_report(target: Path, title: str, files: list[ScannedFile],
                 f"- {kind} `{keyword}`: {note}")
         for reason, lines in groups.items():
             out += [reason, "", *lines, ""]
-    out += ["## mraptor by module", "",
+    out += ["## YARA-X VBA malware rules", "",
+            "The rules in `tools/vba_malware.yar` scan extracted VBA module source, "
+            "including modules in workbooks. Each match needs a reviewed, "
+            "module-specific reason in `tools/security_expected.json`.", ""]
+    for module in modules:
+        if not module.yara_matches:
+            out.append(f"- {module.name}: no matches.")
+        else:
+            for match in module.yara_matches:
+                out.append(f"- {module.name}: `{match}` — "
+                           f"{module.yara_reasons.get(match) or '**Unexpected.**'}")
+    out += ["", "## ClamAV", ""]
+    if clamav is None:
+        out.append("Not run. Reproduce with `--clamav` and current official signatures.")
+    else:
+        out += [f"Engine and signature database: `{clamav.version}`.", "",
+                "Scanned each input file and extracted VBA module with official signatures.", ""]
+        if not clamav.findings:
+            out.append("No signatures matched.")
+        for label, signature, reason in clamav.findings:
+            out.append(f"- {label}: `{signature}` — {reason or '**Unexpected.**'}")
+        for error in clamav.errors:
+            out.append(f"- Scan error: {error}")
+    out += ["", "## mraptor by module", "",
             "mraptor calls a file SUSPICIOUS when its VBA runs on its own (A) and writes a "
             "file or memory (W) or runs code outside VBA (X), which is why the Files table "
             "shows every workbook so: the demos build themselves in Auto_Open, and the "
@@ -315,9 +438,9 @@ def write_report(target: Path, title: str, files: list[ScannedFile],
     out += ["", "## Reproduce", "",
             "From a ReDim checkout, with the files to scan:", "",
             "```",
-            f"pip install oletools=={versions['olevba']}",
+            f"pip install oletools=={versions['olevba']} yara-x=={versions['yara-x']}",
             "olevba -a <file>",
-            "python tools/security_scan.py <file> ...",
+            f"python tools/security_scan.py {'--clamav ' if clamav else ''}<file> ...",
             "```", ""]
     target.write_text("\n".join(out), encoding="utf-8")
 
@@ -327,6 +450,8 @@ def main() -> int:
     options.add_argument("files", nargs="+", type=Path)
     options.add_argument("--strict", action="store_true",
                          help="also fail on expected findings that matched nothing")
+    options.add_argument("--clamav", action="store_true",
+                         help="scan input files and extracted VBA with ClamAV")
     options.add_argument("--report", type=Path, help="write the Markdown report here")
     options.add_argument("--title", default="ReDim security scan")
     args = options.parse_args()
@@ -366,7 +491,13 @@ def main() -> int:
                     problems.append(f"{path.name}: olevba detected VBA stomping")
 
     ordered = sorted(modules.values(), key=lambda module: (module.name.casefold(), module.digest))
+    rules = yara_rules()
     for module in ordered:
+        scan_yara(module, rules)
+        judge_yara(module, expected)
+        for match in module.yara_matches:
+            if module.yara_reasons[match] is None:
+                problems.append(f"{module.name}: unexpected YARA-X rule {match} matched")
         judge_module(module, expected)
         for kind, keyword, note, reason in module.verdicts:
             if reason is None:
@@ -375,6 +506,13 @@ def main() -> int:
         for flag, text, reason in module.raptor:
             if reason is None:
                 problems.append(f"{module.name}: mraptor {flag} {text!r}")
+
+    clamav = scan_clamav(args.files, ordered, expected) if args.clamav else None
+    if clamav is not None:
+        problems.extend(clamav.errors)
+        for label, signature, reason in clamav.findings:
+            if reason is None:
+                problems.append(f"{label}: unexpected ClamAV signature {signature}")
 
     seen = {module.name for module in ordered}
     found = {(module.name, f"{kind}: {keyword}".casefold())
@@ -385,6 +523,19 @@ def main() -> int:
              if name in seen for key in entries if (name, key.casefold()) not in found]
     stale += [f"{name}: mraptor {key}" for name, entries in expected["mraptor"].items()
               if name in seen for key in entries if (name, key.casefold()) not in matched]
+    yara_found = {(module.name, match.casefold())
+                  for module in ordered for match in module.yara_matches}
+    stale += [f"{name}: YARA-X {key}" for name, entries in expected["yara"].items()
+              if name in seen for key in entries if (name, key.casefold()) not in yara_found]
+    if clamav is not None:
+        scanned_labels = {f"file:{path.name}" for path in args.files}
+        scanned_labels.update(f"module:{module.name}" for module in ordered)
+        clam_found = {(label, signature.casefold())
+                      for label, signature, _ in clamav.findings}
+        stale += [f"{label}: ClamAV {signature}"
+                  for label, entries in expected["clamav"].items()
+                  if label in scanned_labels for signature in entries
+                  if (label, signature.casefold()) not in clam_found]
 
     for scanned in files:
         print(f"{scanned.path.name}  {scanned.digest}  mraptor {scanned.raptor}  "
@@ -392,7 +543,11 @@ def main() -> int:
     for module in ordered:
         flags = "".join(flag if any(entry[0] == flag for entry in module.raptor) else "-"
                         for flag, _ in RAPTOR_FLAGS)
-        print(f"  {module.name}: {len(module.verdicts)} olevba findings, mraptor {flags}")
+        print(f"  {module.name}: {len(module.verdicts)} olevba findings, mraptor {flags}, "
+              f"YARA-X {', '.join(module.yara_matches) or 'clear'}")
+    if clamav is not None:
+        print(f"ClamAV {clamav.version}: {len(clamav.findings)} findings, "
+              f"{len(clamav.errors)} errors")
     for entry in stale:
         print(plain(f"expected but not found: {entry}"))
     for problem in problems:
@@ -400,7 +555,7 @@ def main() -> int:
     print(f"scanned {len(files)} files, {len(ordered)} modules, "
           f"unexpected: {len(problems)}")
     if args.report:
-        write_report(args.report, args.title, files, ordered, problems, stale)
+        write_report(args.report, args.title, files, ordered, clamav, problems, stale)
     return 1 if problems or (args.strict and stale) else 0
 
 

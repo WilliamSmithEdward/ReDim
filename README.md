@@ -136,8 +136,8 @@ and it builds itself (each ships an `Auto_Open`); the entry macro rebuilds on de
 Report a vulnerability privately from the repository's Security tab; [SECURITY.md](SECURITY.md)
 has the details. It also sets out what ReDim's VBA does with Windows, keys, and the clipboard,
 what the embedded ROneCOne runtime can do, and why macro scanners flag it. From 1.1.0, each
-release attaches `vX.Y.Z-security-report.md`: olevba's findings and mraptor's matches for every
-workbook and source file, each explained, with the files' SHA-256 hashes.
+release attaches `vX.Y.Z-security-report.md`: olevba, mraptor, YARA-X, and ClamAV scan results
+with reviewed reasons, plus SHA-256 hashes for every workbook and source file.
 
 ## Documentation
 
@@ -154,8 +154,8 @@ pip install -r requirements-dev.txt
 python tools/check.py          # pyvbaanalysis static gate, zero findings in ReDim's sources
 python tools/stamp_release.py  # after a version bump: header in every release source
 python tools/build_workbooks.py
-python tools/security_scan.py --strict src/ReDimUI.cls src/ReDimHost.bas demo/*.xlsm
-                               # olevba, mraptor: every finding in tools/security_expected.json
+python tools/security_scan.py --strict --clamav src/ReDimUI.cls src/ReDimHost.bas demo/*.xlsm
+                               # reviewed findings; requires ClamAV and current signatures
 python -m pytest tests/python  # live Excel suite via pyvbaharness
 python tools/bench.py --save before   # timings in live Excel; later runs add --compare before
 ```
@@ -168,7 +168,8 @@ every name back as written.
 
 It drives a real Excel instance, so it cannot run on hosted CI. Continuous integration runs
 two static gates instead: the newest pyvbaanalysis over the same sources plus the ROneCOne
-runtime (CI), and the olevba and mraptor scan over the runtime and the demo workbooks it builds
+runtime (CI), and the olevba, mraptor, YARA-X, and ClamAV scan over the runtime and demo workbooks
+it builds
 (Security). The live suite is a local step before release.
 
 ## License
