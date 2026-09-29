@@ -58,11 +58,11 @@
   which it rewrote on every control: a 100-control swap takes 45 ms
   instead of 109.
 - A control drawn from many parts, such as a list, table, date picker,
-  or toggle, hides and shows its shapes in one call each, where a tab
-  switch rewrote each part. A later switch to the What's New demo's
-  Lists tab takes 4 ms instead of 76, and to its Filters tab 6 instead
-  of 38. The bench's `tabSwitchAgainParts` times a panel of five such
-  controls: 3 ms, from 41.
+  toggle, tab strip, or float field, in a stack or not, hides and shows
+  its shapes in one call each, where a tab switch rewrote each part. A
+  later switch to each of the What's New demo's tabs takes 4 to 5 ms:
+  its Lists tab took 76, Forms 60, and Filters 38. The bench's
+  `tabSwitchAgainParts` times a panel of such controls.
 
 ## 1.0.4 - 2026-09-27
 

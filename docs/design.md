@@ -36,14 +36,16 @@ shows. The app's first render then draws what shows and nothing else: drawn hidd
 panels of the What's New demo's tabs were four fifths of its first render. On a sheet an earlier
 session drew for the app, a hidden control draws as before, so a shape saved showing hides.
 
-A control drawn from many parts, such as a list, table, or picker, hides by hiding every shape it
-drew in one `ShapeRange` call, and shows the same shapes again in another. Drawn part by part
-both ways, a later switch to the What's New demo's Lists tab took 76 ms; it takes 4. While
-hidden the control draws nothing, and shown again it draws whatever changed meanwhile against
-the look it hid with. If a shape went missing meanwhile, the others show one by one and every
-part draws again. The app knows each shape it drew only on a sheet that held none of its shapes
-when it mounted, so on any other sheet, and for a stack's members, whose stack lays out again, a
-control hides part by part as before.
+A control drawn from many parts, such as a list, table, picker, tab strip, or float field, hides
+by hiding every shape it drew in one `ShapeRange` call, and shows the same shapes again in
+another. Drawn part by part both ways, a later switch to the What's New demo's Lists tab took
+76 ms; it takes 4. While hidden the control draws nothing but what it carries: a tab strip still
+hides its panels, and a stack's member still tells its stack, which lays out again without it.
+Shown again, it draws whatever changed meanwhile against the look it hid with. If a shape went
+missing meanwhile, the others show one by one and every part draws again. A control hides part
+by part as before while a list or calendar of its own is open, and on a sheet that held the
+app's shapes when it mounted, since the app knows each shape it drew only on a sheet that held
+none.
 
 A control resolves its rectangle as it draws: from a cell, its own points, its stack's slot, or
 the control it sits `Below` or `RightOf`. A resolved rectangle stands until the app hears of a

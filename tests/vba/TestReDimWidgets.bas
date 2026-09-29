@@ -5502,6 +5502,95 @@ Public Function TestSweptPanels() As String
     TestSweptPanels = transcript
 End Function
 
+' What a hiding composite carries: a stack's members hide with their tab
+' and come back at their places; one member hidden alone still gives its
+' place to the next and to what sits Below the stack; a tab strip on the
+' tab takes a tab picked while hidden to its panels when it shows; a
+' float field keeps its caption and hint and shows text set while hidden;
+' and a picker hidden with its calendar open closes the calendar.
+Public Function TestSweptCarriers() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim transcript As String
+    Dim shownBefore As String
+    Dim goTop As Double
+    Dim afterTop As Double
+
+    ReDimUI.AutoPump False
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "wid115")
+    app.Tabs("tabs").AtRect(24, 24, 300, 30).Items "One", "Two"
+    app.Label("first").AtRect(24, 70, 200, 20).Text("On one").OnTab "tabs", 1
+    app.Stack("form").AtRect(24, 70, 200, 0).Gap(6).OnTab "tabs", 2
+    app.SelectBox("team").Sized(200, 24).Items("Design", "Sales").InStack("form") _
+        .OnTab "tabs", 2
+    app.RadioGroup("contact").Sized(200, 58).Items("Email", "Phone", "Chat") _
+        .InStack("form").OnTab "tabs", 2
+    app.Button("go").Sized(80, 28).Text("Go").InStack("form").OnTab "tabs", 2
+    app.Label("after").Below("form", 8).Sized(200, 20).Text("After").OnTab "tabs", 2
+    app.Tabs("inner").AtRect(260, 70, 240, 30).Items("Alerts", "Quiet").OnTab "tabs", 2
+    app.CheckList("alerts").AtRect(260, 110, 240, 70).Items("Email", "Weekly") _
+        .OnTab "inner", 1
+    app.Toggle("quiet").AtRect(260, 110, 44, 22).Text("Quiet hours").OnTab "inner", 2
+    app.TextInput("notes").AtRect(260, 220, 240, 22).Caption("Notes").Hint("A hint") _
+        .OnTab "tabs", 2
+    app.DatePicker("due").AtRect(260, 290, 150, 24).OnTab "tabs", 2
+    app.Render
+    app.Tabs("tabs").Value 2
+    shownBefore = ShownParts(host, "rdm_wid115_team") & ShownParts(host, "rdm_wid115_contact") _
+        & ShownParts(host, "rdm_wid115_inner") & ShownParts(host, "rdm_wid115_alerts") _
+        & ShownParts(host, "rdm_wid115_notes") & ShownParts(host, "rdm_wid115_due")
+    goTop = host.Shapes("rdm_wid115_go").Top
+    afterTop = host.Shapes("rdm_wid115_after").Top
+
+    app.Tabs("tabs").Value 1
+    transcript = "allHidden=" & CStr(LenB(ShownParts(host, "rdm_wid115_team") _
+        & ShownParts(host, "rdm_wid115_contact") & ShownParts(host, "rdm_wid115_inner") _
+        & ShownParts(host, "rdm_wid115_alerts") & ShownParts(host, "rdm_wid115_notes") _
+        & ShownParts(host, "rdm_wid115_due")) = 0)
+    app.Tabs("tabs").Value 2
+    transcript = transcript & "|sameShown=" & CStr(ShownParts(host, "rdm_wid115_team") _
+        & ShownParts(host, "rdm_wid115_contact") & ShownParts(host, "rdm_wid115_inner") _
+        & ShownParts(host, "rdm_wid115_alerts") & ShownParts(host, "rdm_wid115_notes") _
+        & ShownParts(host, "rdm_wid115_due") = shownBefore)
+    transcript = transcript & "|samePlaces=" & CStr( _
+        Abs(host.Shapes("rdm_wid115_go").Top - goTop) < 0.01 _
+        And Abs(host.Shapes("rdm_wid115_after").Top - afterTop) < 0.01)
+
+    app.RadioGroup("contact").Visible False
+    transcript = transcript & "|memberGap=" & CStr( _
+        host.Shapes("rdm_wid115_go").Top < goTop - 40 _
+        And host.Shapes("rdm_wid115_after").Top < afterTop - 40 _
+        And LenB(ShownParts(host, "rdm_wid115_contact")) = 0)
+    app.RadioGroup("contact").Visible True
+    transcript = transcript & "|memberBack=" & CStr( _
+        Abs(host.Shapes("rdm_wid115_go").Top - goTop) < 0.01 _
+        And Abs(host.Shapes("rdm_wid115_after").Top - afterTop) < 0.01 _
+        And ShapeShows(host, "rdm_wid115_contact__t3"))
+
+    app.Tabs("tabs").Value 1
+    app.Tabs("inner").Value 2
+    app.TextInput("notes").InputValue = "Changed"
+    app.Tabs("tabs").Value 2
+    transcript = transcript & "|innerPanel=" & CStr(ShapeShows(host, "rdm_wid115_quiet") _
+        And LenB(ShownParts(host, "rdm_wid115_alerts")) = 0 _
+        And ShapeShows(host, "rdm_wid115_inner__tb2"))
+    transcript = transcript & "|fieldBack=" & CStr(ShapeShows(host, "rdm_wid115_notes__fc") _
+        And ShapeShows(host, "rdm_wid115_notes__fh") _
+        And host.Shapes("rdm_wid115_notes").TextFrame2.TextRange.Text = "Changed")
+
+    ReDimUI.DispatchShape "rdm_wid115_due"
+    transcript = transcript & "|calendarUp=" & CStr(ShapeShows(host, "rdm_wid115_due__cb"))
+    app.Tabs("tabs").Value 1
+    transcript = transcript & "|calendarClosed=" & CStr(Not ShapeExists(host, "rdm_wid115_due__cb") _
+        And Not ShapeShows(host, "rdm_wid115_due"))
+    app.Tabs("tabs").Value 2
+    transcript = transcript & "|pickerBack=" & CStr(ShapeShows(host, "rdm_wid115_due") _
+        And Not ShapeExists(host, "rdm_wid115_due__cb"))
+    ReDimUI.AutoPump True
+    TestSweptCarriers = transcript
+End Function
+
 ' The names of a control's shapes that show, its own and its parts', in
 ' name order, so a part made again reads as it did.
 Private Function ShownParts(ByVal host As Worksheet, ByVal controlShapeName As String) As String

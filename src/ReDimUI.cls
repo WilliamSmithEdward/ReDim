@@ -10079,7 +10079,7 @@ Friend Sub Apply( _
     ' A composite hides by hiding its shapes at once, and shows again the
     ' ones that showed; drawn both ways part by part, it was most of a tab
     ' switch.
-    If SweepsVisibility(hostSheet, hostApp) Then Exit Sub
+    If SweepsVisibility(hostSheet, themeValue, hostApp) Then Exit Sub
     ' A theme swapped, or edited in place, restyles the control in full:
     ' its diffs compare fills and words, and a look can change a border
     ' or a font and keep those.
@@ -10163,21 +10163,26 @@ Private Function DrawWaits(ByVal hostApp As ReDimUI) As Boolean
 End Function
 
 ' A composite that hides hides every shape of its own in one call, noting
-' the ones that showed, and draws nothing more while hidden. Shown again,
-' those shapes show in one call and the draw goes on as ever, so whatever
-' changed meanwhile draws against the look it had when it hid. When a
-' shape went meanwhile, the rest show one by one and every part draws
-' anew, as for a main shape made again. Only on a sheet where the app
-' recorded every shape it drew, never with a list, ring, cursor, or tip
-' up, whose parts come and go, and never for a stack's member, whose
-' stack lays out again when it hides. True when the draw is done.
-Private Function SweepsVisibility(ByVal hostSheet As Worksheet, ByVal hostApp As ReDimUI) As Boolean
+' the ones that showed, and draws nothing more while hidden but what it
+' carries (CarryHidden). Shown again, those shapes show in one call and
+' the draw goes on as ever, so whatever changed meanwhile draws against
+' the look it had when it hid. When a shape went meanwhile, the rest show
+' one by one and every part draws anew, as for a main shape made again.
+' Only on a sheet where the app recorded every shape it drew, and never
+' with a list, calendar, ring, cursor, or tip up, whose parts come and
+' go. True when the draw is done.
+Private Function SweepsVisibility( _
+    ByVal hostSheet As Worksheet, _
+    ByVal themeValue As ReDimUI, _
+    ByVal hostApp As ReDimUI _
+) As Boolean
     Dim drawnNames As Collection
     Dim shownNames As Collection
     Dim drawnName As Variant
 
     If mSwept Then
         If Not mVisible Then
+            CarryHidden themeValue, hostApp
             SweepsVisibility = True
             Exit Function
         End If
@@ -10194,6 +10199,10 @@ Private Function SweepsVisibility(ByVal hostSheet As Worksheet, ByVal hostApp As
     End If
     If mVisible Or Not mDrawnVisible Or Not mAppliedValid Then Exit Function
     If Not SweepsItsParts() Then Exit Function
+    ' A picker's calendar card is up exactly while its calendar is.
+    If mKind = KIND_DATE Then
+        If Not hostApp.ShapeSurelyAbsent(ShapeName & PART_SEPARATOR & "cb") Then Exit Function
+    End If
     Set drawnNames = hostApp.DrawnNamesOf(ShapeName)
     If drawnNames Is Nothing Then Exit Function
     If drawnNames.Count = 0 Then Exit Function
@@ -10214,19 +10223,27 @@ Private Function SweepsVisibility(ByVal hostSheet As Worksheet, ByVal hostApp As
     mAppliedVisible = False
     mDrawnVisible = False
     SweepsVisibility = True
+    CarryHidden themeValue, hostApp
 NoSweep:
 End Function
 
-' The kinds drawn from many parts, which hide and show all at once. Tabs
-' and expanders carry other controls with them, and draw as ever.
+' What a hidden composite's draw still does for other controls, as the
+' end of Apply does: a tab strip's panels hide with it, and a stack's
+' member tells its stack, which lays out again without it.
+Private Sub CarryHidden(ByVal themeValue As ReDimUI, ByVal hostApp As ReDimUI)
+    If mKind = KIND_TABS Then SyncTabPanels hostApp
+    If LenB(mStackId) > 0 Then NoteFlow hostApp, themeValue
+End Sub
+
+' The kinds drawn from many parts, which hide and show all at once: the
+' lists, pickers, and switches, a tab strip, and a field that floats.
 Private Function SweepsItsParts() As Boolean
-    If LenB(mStackId) > 0 Then Exit Function
     Select Case mKind
         Case KIND_RADIO, KIND_CHECKLIST, KIND_TRANSFER, KIND_TABLE, KIND_TICKBOX, _
             KIND_STEPPER, KIND_SLIDEBAR, KIND_SELECT, KIND_DATE, KIND_SPARKLINE, _
-            KIND_TOGGLE, KIND_PROGRESS
+            KIND_TOGGLE, KIND_PROGRESS, KIND_TABS
             SweepsItsParts = True
-        Case KIND_COMBO
+        Case KIND_COMBO, KIND_INPUT
             SweepsItsParts = IsFloatField()
     End Select
 End Function

@@ -2127,6 +2127,26 @@ def test_swept_panels(run_widgets):
     )
 
 
+def test_swept_carriers(run_widgets):
+    facts = parse_transcript(run_widgets("TestSweptCarriers"))
+    assert facts["allHidden"] == "True", "stack members, a tab strip, and a field hide with the tab"
+    assert facts["sameShown"] == "True", "shown again, the same shapes show"
+    assert facts["samePlaces"] == "True", "a stack's members and what sits Below it keep their places"
+    assert facts["memberGap"] == "True", (
+        "a member hidden alone gives its place to the next and to what sits Below the stack"
+    )
+    assert facts["memberBack"] == "True", "the member shown again takes its place back"
+    assert facts["innerPanel"] == "True", (
+        "a tab picked on a hidden strip shows its panel when the strip shows"
+    )
+    assert facts["fieldBack"] == "True", (
+        "a float field keeps its caption and hint and shows text set while hidden"
+    )
+    assert facts["calendarUp"] == "True"
+    assert facts["calendarClosed"] == "True", "a picker hidden with its calendar open closes it"
+    assert facts["pickerBack"] == "True", "the picker shows again with its calendar closed"
+
+
 def test_hidden_cell_field(run_widgets):
     facts = parse_transcript(run_widgets("TestHiddenCellField"))
     assert facts["hidden"] == "True/True/True", (
