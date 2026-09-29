@@ -1,0 +1,62 @@
+name: Propose YARA Forge update
+
+on:
+  schedule:
+    - cron: '41 9 * * 1' # Weekly Monday UTC, after YARA Forge's Sunday release
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: write
+
+concurrency:
+  group: yara-forge-update
+  cancel-in-progress: false
+
+jobs:
+  propose:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: true
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12.14'
+      - name: Verify updater behavior
+        run: python -m unittest discover -s tests/python -p 'test_yara_forge.py'
+      - name: Fetch the latest core release and checksum
+        id: update
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python tools/yara_forge.py update
+      - name: Open or update the review PR and scan its branch
+        if: steps.update.outputs.release != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NEW_RELEASE: ${{ steps.update.outputs.release }}
+          NEW_SHA256: ${{ steps.update.outputs.sha256 }}
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git switch -C automation/yara-forge
+          git add tools/yara_forge_pin.json
+          git commit -m "Pin YARA Forge core release $NEW_RELEASE"
+          if git ls-remote --exit-code --heads origin automation/yara-forge >/dev/null; then
+            git fetch origin automation/yara-forge:refs/remotes/origin/automation/yara-forge
+          fi
+          git push --force-with-lease origin HEAD:automation/yara-forge
+          cat > /tmp/yara-forge-pr.md <<EOF
+          Proposes YARA Forge core release [$NEW_RELEASE](https://github.com/YARAHQ/yara-forge/releases/tag/$NEW_RELEASE).
+
+          The pinned yara-forge-rules-core.zip SHA-256 is $NEW_SHA256. Security downloads only this tagged archive, verifies its checksum, then scans raw files and extracted VBA with YARA-X. New rule matches fail the YARA-X job until reviewed. ClamAV and macro checks run as separate jobs.
+
+          Security is explicitly dispatched on this branch below. GitHub may also show approval-required pull_request runs for a PR created with GITHUB_TOKEN; review and approve those runs if required. Wait for all Security jobs to pass before merging.
+          EOF
+          if gh pr view automation/yara-forge --json number >/dev/null 2>&1; then
+            gh pr edit automation/yara-forge --title "Update YARA Forge core rules to $NEW_RELEASE" --body-file /tmp/yara-forge-pr.md
+          else
+            gh pr create --base main --head automation/yara-forge --title "Update YARA Forge core rules to $NEW_RELEASE" --body-file /tmp/yara-forge-pr.md
+          fi
+          gh workflow run security.yml --ref automation/yara-forge

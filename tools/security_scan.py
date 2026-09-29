@@ -19,8 +19,9 @@ mraptor's verdict for each file and lists every match of its three
 patterns by module; each must be listed in security_expected.json too.
 
 YARA-X scans the extracted source of each module with vba_malware.yar.
-Each match must have a module-specific reason in security_expected.json;
-an unlisted match fails the scan.
+With --forge-rules it also scans input files and extracted modules with a
+checksum-pinned YARA Forge core bundle. Each match needs a file- or
+module-specific reason in security_expected.json; unlisted matches fail.
 
 With --clamav, ClamAV scans the input files and extracted module source
 using current official signatures. Matches need a file- or module-specific
@@ -31,7 +32,9 @@ workbooks from source alone and Excel compiles them when they open, so
 p-code in a workbook is code its source does not show, which is what VBA
 stomping hides. olevba's own stomping check runs as well.
 
-Usage: security_scan.py [--strict] [--clamav] [--report FILE] [--title TEXT] FILE [FILE ...]
+Usage: security_scan.py [--strict] [--clamav] [--forge-rules FILE]
+                        [--macro-only | --yara-only | --clamav-only]
+                        [--report FILE] [--title TEXT] FILE [FILE ...]
 Exit 0 when nothing unexpected turned up, 1 otherwise; with --strict, an
 expected finding that matched nothing fails the scan too.
 """
@@ -48,7 +51,7 @@ import tempfile
 import zipfile
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from importlib.metadata import version
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 # oletools is imported where it is used, so the parts that need only the
@@ -74,6 +77,7 @@ class Module:
     raptor: list[tuple[str, str, str | None]] = field(default_factory=list)
     yara_matches: list[str] = field(default_factory=list)
     yara_reasons: dict[str, str | None] = field(default_factory=dict)
+    forge_matches: list[str] = field(default_factory=list)
 
 
 def yara_rules():
@@ -104,6 +108,7 @@ class ScannedFile:
     modules: list[str] = field(default_factory=list)
     pcode: dict | None = None
     raptor: str | None = None
+    forge_matches: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -322,14 +327,43 @@ def tool_versions() -> dict[str, str]:
     from oletools import mraptor, olevba
     from pcodedmp import pcodedmp
 
+    try:
+        yara_version = version("yara-x")
+    except PackageNotFoundError:
+        yara_version = "not installed"
     return {"olevba": olevba.__version__, "mraptor": mraptor.__version__,
-            "yara-x": version("yara-x"),
+            "yara-x": yara_version,
             "pcodedmp": pcodedmp.__VERSION__}
+
+
+def forge_findings(files: list[ScannedFile], modules: list[Module],
+                   rules_path: Path, expected: dict) -> tuple[list[tuple[str, str, str | None]], list[str]]:
+    """Scan raw inputs and deduplicated VBA source with a pinned Forge bundle."""
+    import yara_x
+
+    rules = yara_x.compile(rules_path.read_text(encoding="utf-8"))
+    findings: list[tuple[str, str, str | None]] = []
+    problems: list[str] = []
+    for label, data, target in [
+        *((f"file:{item.path.name}", item.path.read_bytes(), item) for item in files),
+        *((f"module:{item.name}", item.code.encode("utf-8"), item) for item in modules),
+    ]:
+        matches = sorted({match.identifier for match in rules.scan(data).matching_rules})
+        target.forge_matches = matches
+        allowed = {key.casefold(): reason for key, reason in expected.get("forge", {}).get(label, {}).items()}
+        for match in matches:
+            reason = expected["reasons"].get(allowed.get(match.casefold()))
+            findings.append((label, match, reason))
+            if reason is None:
+                problems.append(f"{label}: unexpected YARA Forge rule {match} matched")
+    return findings, problems
 
 
 def write_report(target: Path, title: str, files: list[ScannedFile],
                  modules: list[Module], clamav: ClamAVScan | None,
-                 problems: list[str], stale: list[str]) -> None:
+                 problems: list[str], stale: list[str],
+                 forge: list[tuple[str, str, str | None]] | None = None,
+                 macro_enabled: bool = True, yara_enabled: bool = True) -> None:
     versions = tool_versions()
     stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     out: list[str] = [f"# {title}", "",
@@ -370,11 +404,12 @@ def write_report(target: Path, title: str, files: list[ScannedFile],
             stomping = "detected" if pcode["stomped"] else "not detected"
             out.append(f"- {scanned.path.name}: p-code lines: {held}; "
                        f"olevba's stomping check: {stomping}.")
-    out += ["", "## olevba findings by module", "",
+    if macro_enabled:
+        out += ["", "## olevba findings by module", "",
             "olevba matches its keywords as whole words anywhere in the code, comments "
             "included, so it also flags ordinary words. Each finding is grouped under "
             "the reason ReDim has it.", ""]
-    for module in modules:
+    for module in modules if macro_enabled else []:
         out += [f"### {module.name}", "",
                 f"{len(module.code.splitlines()):,} lines, SHA-256 `{module.digest}`, "
                 f"in {', '.join(module.files)}.", ""]
@@ -387,17 +422,27 @@ def write_report(target: Path, title: str, files: list[ScannedFile],
                 f"- {kind} `{keyword}`: {note}")
         for reason, lines in groups.items():
             out += [reason, "", *lines, ""]
-    out += ["## YARA-X VBA malware rules", "",
+    if yara_enabled:
+        out += ["## YARA-X VBA malware rules", "",
             "The rules in `tools/vba_malware.yar` scan extracted VBA module source, "
             "including modules in workbooks. Each match needs a reviewed, "
             "module-specific reason in `tools/security_expected.json`.", ""]
-    for module in modules:
+    for module in modules if yara_enabled else []:
         if not module.yara_matches:
             out.append(f"- {module.name}: no matches.")
         else:
             for match in module.yara_matches:
                 out.append(f"- {module.name}: `{match}` — "
                            f"{module.yara_reasons.get(match) or '**Unexpected.**'}")
+    if forge is not None:
+        pin = json.loads((YARA_RULES_PATH.parent / "yara_forge_pin.json").read_text(encoding="utf-8"))
+        out += ["", "## YARA Forge core rules", "",
+                f"Release `{pin['release']}`, archive SHA-256 `{pin['sha256']}`. "
+                "Scanned raw input files and extracted VBA modules.", ""]
+        if not forge:
+            out.append("No rules matched.")
+        for label, match, reason in forge:
+            out.append(f"- {label}: `{match}` — {reason or '**Unexpected.**'}")
     out += ["", "## ClamAV", ""]
     if clamav is None:
         out.append("Not run. Reproduce with `--clamav` and current official signatures.")
@@ -410,14 +455,15 @@ def write_report(target: Path, title: str, files: list[ScannedFile],
             out.append(f"- {label}: `{signature}` — {reason or '**Unexpected.**'}")
         for error in clamav.errors:
             out.append(f"- Scan error: {error}")
-    out += ["", "## mraptor by module", "",
+    if macro_enabled:
+        out += ["", "## mraptor by module", "",
             "mraptor calls a file SUSPICIOUS when its VBA runs on its own (A) and writes a "
             "file or memory (W) or runs code outside VBA (X), which is why the Files table "
             "shows every workbook so: the demos build themselves in Auto_Open, and the "
             "runtime declares Windows API functions. Like olevba, it matches whole words "
             "anywhere in the code. Each module's matches, grouped under the reason ReDim "
             "has them:", ""]
-    for module in modules:
+    for module in modules if macro_enabled else []:
         flags = "".join(flag if any(entry[0] == flag for entry in module.raptor) else "-"
                         for flag, _ in RAPTOR_FLAGS)
         out += [f"### {module.name}: {flags}", ""]
@@ -452,9 +498,22 @@ def main() -> int:
                          help="also fail on expected findings that matched nothing")
     options.add_argument("--clamav", action="store_true",
                          help="scan input files and extracted VBA with ClamAV")
+    rows = options.add_mutually_exclusive_group()
+    rows.add_argument("--macro-only", action="store_true", help="run only olevba, mraptor, and p-code checks")
+    rows.add_argument("--yara-only", action="store_true", help="run only local and Forge YARA-X rules")
+    rows.add_argument("--clamav-only", action="store_true", help="run only ClamAV")
+    options.add_argument("--forge-rules", type=Path,
+                         help="checksum-verified YARA Forge core rules from tools/yara_forge.py fetch")
     options.add_argument("--report", type=Path, help="write the Markdown report here")
     options.add_argument("--title", default="ReDim security scan")
     args = options.parse_args()
+    macro_enabled = not (args.yara_only or args.clamav_only)
+    yara_enabled = not (args.macro_only or args.clamav_only)
+    clam_enabled = args.clamav or args.clamav_only
+    if args.yara_only and not args.forge_rules:
+        options.error("--yara-only requires --forge-rules")
+    if args.forge_rules and not yara_enabled:
+        options.error("--forge-rules requires YARA-X checks")
 
     expected = json.loads(EXPECTED_PATH.read_text(encoding="utf-8"))
     problems: list[str] = []
@@ -471,7 +530,8 @@ def main() -> int:
             continue
         if not extracted:
             problems.append(f"{path.name}: olevba found no VBA in it")
-        scanned.raptor = raptor_verdict(path)
+        if macro_enabled:
+            scanned.raptor = raptor_verdict(path)
         for name, code in extracted:
             scanned.modules.append(name)
             if not code.strip():
@@ -479,7 +539,7 @@ def main() -> int:
             key = (name, sha256_of(code.encode("utf-8")))
             module = modules.setdefault(key, Module(name, code, key[1]))
             module.files.append(path.name)
-        if path.suffix.lower() in WORKBOOK_SUFFIXES:
+        if macro_enabled and path.suffix.lower() in WORKBOOK_SUFFIXES:
             scanned.pcode = check_pcode(path)
             if "error" in scanned.pcode:
                 problems.append(f"{path.name}: the p-code check could not run: "
@@ -491,23 +551,29 @@ def main() -> int:
                     problems.append(f"{path.name}: olevba detected VBA stomping")
 
     ordered = sorted(modules.values(), key=lambda module: (module.name.casefold(), module.digest))
-    rules = yara_rules()
+    rules = yara_rules() if yara_enabled else None
     for module in ordered:
-        scan_yara(module, rules)
-        judge_yara(module, expected)
-        for match in module.yara_matches:
-            if module.yara_reasons[match] is None:
-                problems.append(f"{module.name}: unexpected YARA-X rule {match} matched")
-        judge_module(module, expected)
-        for kind, keyword, note, reason in module.verdicts:
-            if reason is None:
-                problems.append(f"{module.name}: olevba {kind} {keyword!r}: {note}")
-        judge_raptor(module, expected)
-        for flag, text, reason in module.raptor:
-            if reason is None:
-                problems.append(f"{module.name}: mraptor {flag} {text!r}")
+        if yara_enabled:
+            scan_yara(module, rules)
+            judge_yara(module, expected)
+            for match in module.yara_matches:
+                if module.yara_reasons[match] is None:
+                    problems.append(f"{module.name}: unexpected YARA-X rule {match} matched")
+        if macro_enabled:
+            judge_module(module, expected)
+            for kind, keyword, note, reason in module.verdicts:
+                if reason is None:
+                    problems.append(f"{module.name}: olevba {kind} {keyword!r}: {note}")
+            judge_raptor(module, expected)
+            for flag, text, reason in module.raptor:
+                if reason is None:
+                    problems.append(f"{module.name}: mraptor {flag} {text!r}")
 
-    clamav = scan_clamav(args.files, ordered, expected) if args.clamav else None
+    forge = None
+    if args.forge_rules:
+        forge, forge_problems = forge_findings(files, ordered, args.forge_rules, expected)
+        problems.extend(forge_problems)
+    clamav = scan_clamav(args.files, ordered, expected) if clam_enabled else None
     if clamav is not None:
         problems.extend(clamav.errors)
         for label, signature, reason in clamav.findings:
@@ -527,6 +593,18 @@ def main() -> int:
                   for module in ordered for match in module.yara_matches}
     stale += [f"{name}: YARA-X {key}" for name, entries in expected["yara"].items()
               if name in seen for key in entries if (name, key.casefold()) not in yara_found]
+    if not macro_enabled:
+        stale = [entry for entry in stale if ": YARA-X " in entry]
+    if not yara_enabled:
+        stale = [entry for entry in stale if ": YARA-X " not in entry]
+    if forge is not None:
+        forge_found = {(label, match.casefold()) for label, match, _ in forge}
+        scanned_labels = {f"file:{path.name}" for path in args.files}
+        scanned_labels.update(f"module:{module.name}" for module in ordered)
+        stale += [f"{label}: YARA Forge {match}"
+                  for label, entries in expected.get("forge", {}).items()
+                  if label in scanned_labels for match in entries
+                  if (label, match.casefold()) not in forge_found]
     if clamav is not None:
         scanned_labels = {f"file:{path.name}" for path in args.files}
         scanned_labels.update(f"module:{module.name}" for module in ordered)
@@ -538,16 +616,23 @@ def main() -> int:
                   if (label, signature.casefold()) not in clam_found]
 
     for scanned in files:
-        print(f"{scanned.path.name}  {scanned.digest}  mraptor {scanned.raptor}  "
+        print(f"{scanned.path.name}  {scanned.digest}  "
+              f"mraptor {scanned.raptor or 'not run'}  "
               f"{', '.join(scanned.modules)}")
     for module in ordered:
         flags = "".join(flag if any(entry[0] == flag for entry in module.raptor) else "-"
                         for flag, _ in RAPTOR_FLAGS)
-        print(f"  {module.name}: {len(module.verdicts)} olevba findings, mraptor {flags}, "
-              f"YARA-X {', '.join(module.yara_matches) or 'clear'}")
+        summaries = []
+        if macro_enabled:
+            summaries.append(f"{len(module.verdicts)} olevba findings, mraptor {flags}")
+        if yara_enabled:
+            summaries.append(f"YARA-X {', '.join(module.yara_matches) or 'clear'}")
+        print(f"  {module.name}: {', '.join(summaries) or 'extracted'}")
     if clamav is not None:
         print(f"ClamAV {clamav.version}: {len(clamav.findings)} findings, "
               f"{len(clamav.errors)} errors")
+    if forge is not None:
+        print(f"YARA Forge: {len(forge)} findings")
     for entry in stale:
         print(plain(f"expected but not found: {entry}"))
     for problem in problems:
@@ -555,7 +640,8 @@ def main() -> int:
     print(f"scanned {len(files)} files, {len(ordered)} modules, "
           f"unexpected: {len(problems)}")
     if args.report:
-        write_report(args.report, args.title, files, ordered, clamav, problems, stale)
+        write_report(args.report, args.title, files, ordered, clamav, problems, stale,
+                     forge, macro_enabled, yara_enabled)
     return 1 if problems or (args.strict and stale) else 0
 
 
