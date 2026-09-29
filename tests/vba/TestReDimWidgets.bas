@@ -324,6 +324,13 @@ Private Function ShapeExists(ByVal host As Worksheet, ByVal shapeName As String)
     ShapeExists = Not probe Is Nothing
 End Function
 
+' Whether a control's shape shows: drawn, and visible. A control hidden
+' before its first draw has no shape until it shows.
+Private Function ShapeShows(ByVal host As Worksheet, ByVal shapeName As String) As Boolean
+    If Not ShapeExists(host, shapeName) Then Exit Function
+    ShapeShows = (host.Shapes(shapeName).Visible = msoTrue)
+End Function
+
 ' True for a list pager drawn with nothing beyond it: the arrow alone.
 Private Function PagerInert(ByVal host As Worksheet, ByVal shapeName As String) As Boolean
     If Not ShapeExists(host, shapeName) Then Exit Function
@@ -4533,10 +4540,13 @@ Public Function TestTabs() As String
     app.Label("ver").AtRect(24, 70, 200, 20).Text("Version 1").OnTab "tabs", 3
     app.Render
 
-    transcript = "firstPanel=" & CStr(host.Shapes("rdm_wid53_name").Visible = msoTrue _
-        And host.Shapes("rdm_wid53_beta").Visible = msoFalse _
-        And host.Shapes("rdm_wid53_ver").Visible = msoFalse _
-        And host.Shapes("rdm_wid53_later").Visible = msoFalse)
+    transcript = "firstPanel=" & CStr(ShapeShows(host, "rdm_wid53_name") _
+        And Not ShapeShows(host, "rdm_wid53_beta") _
+        And Not ShapeShows(host, "rdm_wid53_ver") _
+        And Not ShapeShows(host, "rdm_wid53_later"))
+    ' The panels not shown wait to draw until their tab first shows.
+    transcript = transcript & "|panelsWait=" & CStr(Not ShapeExists(host, "rdm_wid53_beta") _
+        And Not ShapeExists(host, "rdm_wid53_ver"))
     transcript = transcript & "|firstBold=" & CStr( _
         host.Shapes("rdm_wid53_tabs__tb1").TextFrame2.TextRange.Font.Bold = msoTrue _
         And host.Shapes("rdm_wid53_tabs__tb2").TextFrame2.TextRange.Font.Bold = msoFalse)
@@ -4549,26 +4559,26 @@ Public Function TestTabs() As String
 
     ReDimUI.DispatchShape "rdm_wid53_tabs__tb2"
     transcript = transcript & "|clickSwitches=" & CStr( _
-        host.Shapes("rdm_wid53_name").Visible = msoFalse _
-        And host.Shapes("rdm_wid53_beta").Visible = msoTrue _
+        Not ShapeShows(host, "rdm_wid53_name") _
+        And ShapeShows(host, "rdm_wid53_beta") _
         And app.Tabs("tabs").CurrentValue = 2)
     transcript = transcript & "|writes=" & CStr(app.State("tabState"))
     transcript = transcript & "|fires=" & gChangeCount
     transcript = transcript & "|hiddenStays=" & _
-        CStr(host.Shapes("rdm_wid53_later").Visible = msoFalse)
+        CStr(Not ShapeShows(host, "rdm_wid53_later"))
     transcript = transcript & "|altText=" & CStr(InStr(1, _
         host.Shapes("rdm_wid53_tabs").AlternativeText, "Advanced selected, tab 2 of 3") > 0)
 
     app.Label("later").Visible True
     app.Label("ver").Visible False
     transcript = transcript & "|visibleOnTab=" & _
-        CStr(host.Shapes("rdm_wid53_later").Visible = msoTrue)
+        CStr(ShapeShows(host, "rdm_wid53_later"))
 
     app.Tabs("tabs").Focus
     RdxKeyChar "{RIGHT}"
     transcript = transcript & "|keyRight=" & CStr(app.Tabs("tabs").CurrentValue = 3 _
-        And host.Shapes("rdm_wid53_beta").Visible = msoFalse _
-        And host.Shapes("rdm_wid53_ver").Visible = msoFalse)
+        And Not ShapeShows(host, "rdm_wid53_beta") _
+        And Not ShapeShows(host, "rdm_wid53_ver"))
     With host.Shapes("rdm_wid53_tabs__tb3").TextFrame2.TextRange.Font
         transcript = transcript & "|shownInk=" & CStr(.Bold = msoTrue _
             And .Fill.ForeColor.RGB = app.Theme.OnSurfaceColor)
@@ -4579,7 +4589,7 @@ Public Function TestTabs() As String
     End With
     app.Label("ver").Visible True
     transcript = transcript & "|visibleWaited=" & _
-        CStr(host.Shapes("rdm_wid53_ver").Visible = msoTrue)
+        CStr(ShapeShows(host, "rdm_wid53_ver"))
     RdxKeyChar "{RIGHT}"
     transcript = transcript & "|keyWraps=" & CStr(app.Tabs("tabs").CurrentValue)
     RdxKeyChar "{END}"
@@ -5200,12 +5210,12 @@ Public Function TestExpander() As String
     app.Label("after").Sized(200, 18).Text("After").InStack "page"
     app.Render
 
-    transcript = "closed=" & CStr(host.Shapes("rdm_wid60_proxy").Visible = msoFalse _
+    transcript = "closed=" & CStr(Not ShapeShows(host, "rdm_wid60_proxy") _
         And Left$(host.Shapes("rdm_wid60_adv").TextFrame2.TextRange.Text, 1) _
             = ReDimUI.IconGlyph("ChevronRight")) & "," & host.Shapes("rdm_wid60_after").Top
     ReDimUI.DispatchShape "rdm_wid60_adv"
     transcript = transcript & "|opens=" & CStr( _
-        host.Shapes("rdm_wid60_proxy").Visible = msoTrue _
+        ShapeShows(host, "rdm_wid60_proxy") _
         And app.State("advOpen") = True And gChangeCount = 1 _
         And app.Expander("adv").IsExpanded _
         And Left$(host.Shapes("rdm_wid60_adv").TextFrame2.TextRange.Text, 1) _
@@ -5215,10 +5225,10 @@ Public Function TestExpander() As String
     app.Expander("adv").Focus
     RdxKeyChar "{LEFT}"
     transcript = transcript & "|keyCloses=" & CStr( _
-        host.Shapes("rdm_wid60_proxy").Visible = msoFalse And gChangeCount = 2) & "," & _
+        Not ShapeShows(host, "rdm_wid60_proxy") And gChangeCount = 2) & "," & _
         host.Shapes("rdm_wid60_after").Top
     RdxKeyChar "{RIGHT}"
-    transcript = transcript & "|keyOpens=" & CStr(host.Shapes("rdm_wid60_proxy").Visible = msoTrue)
+    transcript = transcript & "|keyOpens=" & CStr(ShapeShows(host, "rdm_wid60_proxy"))
     RdxReleaseKeys
     ReDimUI.AutoPump True
     TestExpander = transcript
@@ -7165,7 +7175,9 @@ Public Function TestThemeRestyle() As String
     app.Toggle("dark").AtRect(24, 24, 44, 22).WritesTo("darkMode").Text("Dark").Checked True
     transcript = "noEarlyDraw=" & CStr(Not ShapeExists(host, "rdm_wid91_dark"))
     app.Card("card").AtRect(24, 60, 200, 60).Text "Card"
-    app.Spinner("spin").AtRect 240, 60, 26, 26
+    app.Spinner("spin").AtRect(240, 60, 26, 26).Visible True
+    ' A spinner starts hidden, and one never shown waits to draw.
+    app.Spinner("idle").AtRect 280, 60, 26, 26
     app.Label("lb").AtRect(24, 160, 120, 20).Text("Named").Caption("Name").BadgeText "3"
     app.Image("pic").AtRect(300, 24, 80, 60).Source imgPath
     app.TextInput("note").AtRect 24, 200, 200, 60
@@ -7181,9 +7193,13 @@ Public Function TestThemeRestyle() As String
     app.SetTheme ReDimUI.ThemeLight.WithFont("Georgia", 11)
     transcript = transcript & "|fontOnly=" & _
         host.Shapes("rdm_wid91_card").TextFrame2.TextRange.Font.Name
+    transcript = transcript & "|hiddenWaits=" & CStr(Not ShapeExists(host, "rdm_wid91_idle"))
     app.SetTheme ReDimUI.ThemeLight.WithPrimary(RGB(200, 0, 0), RGB(255, 255, 255))
     transcript = transcript & "|spinnerPrimary=" & CStr( _
         host.Shapes("rdm_wid91_spin").Fill.ForeColor.RGB = RGB(200, 0, 0))
+    app.Spinner("idle").Visible True
+    transcript = transcript & "|drawsWhenShown=" & CStr( _
+        host.Shapes("rdm_wid91_idle").Fill.ForeColor.RGB = RGB(200, 0, 0))
     app.Theme.WithSurface app.Theme.SurfaceColor, RGB(9, 9, 9)
     app.SetTheme app.Theme
     transcript = transcript & "|editedInPlace=" & CStr( _
@@ -8586,7 +8602,7 @@ Private Function ShownLabels(ByVal host As Worksheet) As String
     Dim idx As Long
 
     For idx = 1 To 3
-        If host.Shapes("rdm_wid109_l" & idx).Visible = msoTrue Then
+        If ShapeShows(host, "rdm_wid109_l" & idx) Then
             ShownLabels = ShownLabels & "l" & idx
         End If
     Next idx

@@ -121,7 +121,8 @@ All fluent, all return the component:
   (`theme.WarningColor`).
 - Visibility: `Visible(flag)`, `Enabled(flag)`. `OnTab(tabsId, tabNumber)` puts the
   control on a tab's panel of a `Tabs` control, where it shows only while that tab does;
-  `OnTab "", 0` takes it off.
+  `OnTab "", 0` takes it off. A control hidden before its first draw, such as one on a
+  tab not shown, draws when it first shows, so it has no shapes on the sheet until then.
 - Accessibility: `AltText(text)` replaces the alternative text ReDim writes on the
   control's shape (see [Accessibility](#accessibility)); an empty string restores it.
 - Icons (`Button`, `Label`): `Icon("Save")` draws a Windows icon before the text, or

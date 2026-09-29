@@ -45,6 +45,14 @@
   cell showing and editable, and an edit there fired `OnChange`. Hidden,
   the cell now takes the canvas look with its words hidden, and is
   locked; its own number format comes back when the field shows.
+- A control hidden before its first draw, as one on a tab not shown is,
+  now draws when it first shows. An app's first render drew every panel
+  of its tabs, hidden: the What's New demo's warm build falls from 306 ms
+  to 68 and its first build from 1,220 ms to 809, the Widget Gallery's
+  warm build by 18%. The drawing moves to each tab's first visit, which
+  costs about what the build saved on it. A hidden control has no shapes
+  on the sheet until then; on a sheet an earlier session drew, a hidden
+  control draws as before.
 
 ## 1.0.4 - 2026-09-27
 

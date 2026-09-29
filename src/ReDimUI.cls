@@ -3924,6 +3924,11 @@ Public Function PrepareCanvas( _
     Set PrepareCanvas = Me
 End Function
 
+' Whether the app's sheet held none of its shapes when it mounted.
+Friend Property Get SurfaceFresh() As Boolean
+    SurfaceFresh = mSurfaceFresh
+End Property
+
 ' Whether PrepareCanvas painted the sheet's cells in the canvas color.
 Friend Property Get CanvasPainted() As Boolean
     CanvasPainted = mCanvasPainted
@@ -10041,6 +10046,10 @@ Friend Sub Apply( _
             mIconGlyph = ReDimUI.IconGlyph("ChevronRight")
         End If
     End If
+    ' A control hidden before its first draw, as one on a tab not shown
+    ' is, draws when it first shows: drawn hidden, every panel of an app's
+    ' tabs cost most of its first render.
+    If DrawWaits(hostApp) Then Exit Sub
     ' A theme swapped, or edited in place, restyles the control in full:
     ' its diffs compare fills and words, and a look can change a border
     ' or a font and keep those.
@@ -10108,6 +10117,17 @@ Friend Sub Apply( _
     If mKind = KIND_STACK Then MoveStackMembers hostSheet, themeValue, hostApp
     If LenB(mStackId) > 0 Then NoteFlow hostApp, themeValue
 End Sub
+
+' Whether a draw waits until the control shows: hidden, not drawn yet,
+' and on a sheet that held none of the app's shapes when it mounted, so
+' no shape of the control is there to hide. A cell-backed field draws
+' anyway, since its cell shows unless the field hides it.
+Private Function DrawWaits(ByVal hostApp As ReDimUI) As Boolean
+    If mVisible Or LenB(mAppliedBoundsKey) > 0 Then Exit Function
+    If Not hostApp.SurfaceFresh Then Exit Function
+    If (mKind = KIND_INPUT Or mKind = KIND_COMBO) And LenB(mAnchor) > 0 Then Exit Function
+    DrawWaits = True
+End Function
 
 Private Sub ApplyAltText(ByVal mainShape As Shape)
     Dim described As String

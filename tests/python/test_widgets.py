@@ -1258,6 +1258,9 @@ def test_tabs(run_widgets):
     assert facts["firstPanel"] == "True", (
         "the first tab must show its panel and hide the others"
     )
+    assert facts["panelsWait"] == "True", (
+        "the panels not shown draw nothing until their tab first shows"
+    )
     assert facts["firstBold"] == "True"
     assert facts["barUnderFirst"] == "True"
     assert facts["clickSwitches"] == "True"
@@ -1860,7 +1863,11 @@ def test_theme_restyle(run_widgets):
     )
     assert facts["borderOnly"] == "True", "a theme that changes only the border repaints it"
     assert facts["fontOnly"] == "Georgia", "a theme that changes only the font restyles text"
+    assert facts["hiddenWaits"] == "True", "a control hidden from the start waits to draw"
     assert facts["spinnerPrimary"] == "True"
+    assert facts["drawsWhenShown"] == "True", (
+        "a control drawn when it first shows takes the theme current then"
+    )
     assert facts["editedInPlace"] == "True", "a theme edited in place repaints the parts"
     assert facts["removeTakesParts"] == "True", "Remove takes a label's caption and badge"
     assert facts["pictureBack"] == "True", "a hand-deleted Image gets its picture back"

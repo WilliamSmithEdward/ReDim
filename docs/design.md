@@ -31,6 +31,11 @@ against last-applied props and touches only changed shape members. A flush that 
 components, or opens or closes a drop list or calendar, runs with `ScreenUpdating` off, so Excel
 paints the result once instead of part by part.
 
+A control hidden before its first draw, as one on a tab not shown is, draws when it first
+shows. The app's first render then draws what shows and nothing else: drawn hidden, the other
+panels of the What's New demo's tabs were four fifths of its first render. On a sheet an earlier
+session drew for the app, a hidden control draws as before, so a shape saved showing hides.
+
 A control resolves its rectangle as it draws: from a cell, its own points, its stack's slot, or
 the control it sits `Below` or `RightOf`. A resolved rectangle stands until the app hears of a
 change (any control marked dirty, or a stack laying out again), so a chain of relative controls
