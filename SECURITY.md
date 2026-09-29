@@ -54,8 +54,9 @@ The other demos reach no network and write no file.
 Macro scanners flag much of the above, and ordinary words too: olevba and mraptor match
 keywords such as "run", "open", and "call" anywhere in the code, comments included.
 [`tools/security_expected.json`](tools/security_expected.json) lists every olevba finding and
-mraptor match for each module with the reason for it. On each push, the
-[Security workflow](.github/workflows/security.yml) runs
+mraptor match for each module with the reason for it. On pushes, pull requests, and daily
+at 08:17 UTC, the [Security workflow](.github/workflows/security.yml) runs separate macro,
+YARA-X, and ClamAV jobs with their own statuses and reports. The macro job runs
 [`tools/security_scan.py`](tools/security_scan.py) over the runtime files and freshly built demo
 workbooks, and fails on any finding the list does not explain, and on an expected one that no
 longer occurs.
@@ -75,8 +76,19 @@ in strict CI, a documented match that disappears also fails so the baseline stay
 Focused rules for encoded PowerShell, remote execution through Windows binaries, and Run key
 persistence have no exceptions. A clear scan cannot establish that a workbook is safe.
 
+The YARA-X job also runs [YARA Forge's core rules](https://github.com/YARAHQ/yara-forge)
+against every raw file and extracted VBA module. The exact upstream release and archive
+SHA-256 are in [`tools/yara_forge_pin.json`](tools/yara_forge_pin.json); CI verifies the
+download before compiling it. A weekly Monday
+[updater](.github/workflows/yara-forge-update.yml) proposes a new release and checksum in a
+PR when available. It dispatches the existing Security workflow on that PR's branch; wait
+for the YARA-X, ClamAV, and macro jobs before merging. Forge matches require a specific
+file or module and rule allowance in `tools/security_expected.json` with a reviewed
+reason. There are currently no Forge allowances.
+
 ClamAV scans each source file and workbook as a file, then scans the VBA modules extracted
-from them. CI updates ClamAV's official signature database before the scan. A detection is
+from them. Each CI run installs ClamAV, stops its background updater, and runs `freshclam`
+before scanning, so scheduled runs use current official signatures. A detection is
 recorded by file or module and signature name in the report; an undocumented detection or
 scanner error fails the workflow. Reviewed detections can be given specific reasons in
 `tools/security_expected.json`. Signature updates can change the results, so the report
@@ -95,7 +107,8 @@ code and never runs. 1.1.0 builds without it.
 From 1.1.0, each release carries `vX.Y.Z-security-report.md`. The
 [release security workflow](.github/workflows/release-security.yml) writes it from the
 release's published files: the SHA-256 of every workbook and source file, mraptor's verdict on
-each file, each module's olevba findings, mraptor matches, YARA-X and ClamAV results, and the p-code
+each file, each module's olevba findings, mraptor matches, YARA-X (including pinned YARA
+Forge) and ClamAV results, and the p-code
 check. The report names the workflow run that wrote it.
 
 To check a download, compare its SHA-256 with the report, or with the digest GitHub lists

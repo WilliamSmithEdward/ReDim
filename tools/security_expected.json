@@ -230,6 +230,7 @@
     }
   },
   "clamav": {},
+  "forge": {},
   "yara": {
     "ReDimUI": {
       "VBA_Native_API": "yara-native",

@@ -1,21 +1,12 @@
 name: Security
 
-# olevba and mraptor (oletools) report what the shipped VBA could do. YARA-X
-# checks extracted VBA for malware execution and persistence patterns. ClamAV
-# scans the built files and extracted VBA with current official signatures. The
-# runtime calls Windows, the demos build themselves when a workbook opens,
-# and the ROneCOne runtime they embed reads files, runs processes, and
-# makes HTTP requests by design, so the scan holds every olevba and mraptor
-# finding, by module, to tools/security_expected.json. It also fails on an
-# unreviewed YARA-X or ClamAV match and on p-code a workbook's source does not
-# explain. The release report lives in release-security.yml, the one workflow that
-# needs write access.
-
 on:
   push:
     branches: [main]
   pull_request:
   workflow_dispatch:
+  schedule:
+    - cron: '17 8 * * *' # Daily UTC
 
 permissions:
   contents: read
@@ -25,59 +16,109 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  scan:
-    name: olevba, mraptor, YARA-X, and ClamAV
+  macro:
+    name: olevba, mraptor, and p-code
     runs-on: ubuntu-24.04
     steps:
-      - name: Check out ReDim
-        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-
-      # The workbooks embed the ROneCOne release ReDim ships.
-      - name: Check out ROneCOne
-        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           repository: WilliamSmithEdward/ROneCOne
           ref: a84b5719e443c50d02575a50a645531d0c3a7858 # v1.10.1
           path: .ronecone
-
-      - name: Set up Python
-        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: '3.12.14'
+      - name: Install scanner and workbook builder
+        run: pip install oletools==0.60.2 pyopenvba==6.3.2
+      - name: Build demo workbooks
+        env:
+          REDIM_RONECONE_PATH: ${{ github.workspace }}/.ronecone/src/ROneCOne.cls
+        run: python tools/build_workbooks.py
+      - name: Scan macros and p-code
+        run: >-
+          python tools/security_scan.py --strict --macro-only --report macro-report.md
+          src/ReDimUI.cls src/ReDimHost.bas .ronecone/src/ROneCOne.cls demo/*.xlsm
+      - name: Keep report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: macro-report
+          path: macro-report.md
+          if-no-files-found: ignore
 
-      # oletools brings olevba, mraptor, and pcodedmp; pyOpenVBA builds the
-      # demo workbooks from source, as a release does.
-      - name: Install the scanner
+  yara:
+    name: YARA-X (VBA and YARA Forge)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          repository: WilliamSmithEdward/ROneCOne
+          ref: a84b5719e443c50d02575a50a645531d0c3a7858 # v1.10.1
+          path: .ronecone
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12.14'
+      - name: Install scanner and workbook builder
         run: pip install oletools==0.60.2 pyopenvba==6.3.2 yara-x==1.20.0
+      - name: Check YARA-X rules and pin handling
+        run: python -m unittest discover -s tests/python -p 'test_yara_rules.py'
+      - name: Fetch checksum-pinned YARA Forge rules
+        run: python tools/yara_forge.py fetch
+      - name: Build demo workbooks
+        env:
+          REDIM_RONECONE_PATH: ${{ github.workspace }}/.ronecone/src/ROneCOne.cls
+        run: python tools/build_workbooks.py
+      - name: Scan raw files and VBA
+        run: >-
+          python tools/security_scan.py --strict --yara-only
+          --forge-rules build/yara-forge/core.yar --report yara-report.md
+          src/ReDimUI.cls src/ReDimHost.bas .ronecone/src/ROneCOne.cls demo/*.xlsm
+      - name: Keep report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: yara-report
+          path: yara-report.md
+          if-no-files-found: ignore
 
-      - name: Check the YARA-X rules
-        run: python -m unittest discover -s tests/python -p test_yara_rules.py
-
+  clamav:
+    name: ClamAV (current official signatures)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          repository: WilliamSmithEdward/ROneCOne
+          ref: a84b5719e443c50d02575a50a645531d0c3a7858 # v1.10.1
+          path: .ronecone
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12.14'
+      - name: Install scanner and workbook builder
+        run: pip install oletools==0.60.2 pyopenvba==6.3.2
       - name: Check ClamAV finding handling
-        run: python -m unittest discover -s tests/python -p test_clamav_scan.py
-
-      - name: Install ClamAV and current signatures
+        run: python -m unittest discover -s tests/python -p 'test_clamav_scan.py'
+      - name: Update ClamAV signatures
         run: |
           sudo apt-get update
           sudo apt-get install -y clamav clamav-freshclam
           sudo systemctl stop clamav-freshclam || true
           sudo freshclam
           clamscan --version
-
-      - name: Build the demo workbooks
+      - name: Build demo workbooks
         env:
           REDIM_RONECONE_PATH: ${{ github.workspace }}/.ronecone/src/ROneCOne.cls
         run: python tools/build_workbooks.py
-
-      - name: Scan the runtime and the demo workbooks
+      - name: Scan raw files and VBA
         run: >-
-          python tools/security_scan.py --strict --clamav --report security-report.md
+          python tools/security_scan.py --strict --clamav-only --report clamav-report.md
           src/ReDimUI.cls src/ReDimHost.bas .ronecone/src/ROneCOne.cls demo/*.xlsm
-
-      - name: Keep the report
+      - name: Keep report
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: security-report
-          path: security-report.md
+          name: clamav-report
+          path: clamav-report.md
           if-no-files-found: ignore

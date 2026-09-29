@@ -44,6 +44,9 @@ jobs:
       - name: Install the scanner
         run: pip install oletools==0.60.2 yara-x==1.20.0
 
+      - name: Fetch checksum-pinned YARA Forge rules
+        run: python tools/yara_forge.py fetch
+
       - name: Install ClamAV and current signatures
         run: |
           sudo apt-get update
@@ -85,7 +88,8 @@ jobs:
         run: |
           report="release-assets/$TAG-security-report.md"
           status=0
-          python tools/security_scan.py --clamav --report "$report" \
+          python tools/security_scan.py --clamav \
+            --forge-rules build/yara-forge/core.yar --report "$report" \
             --title "Security report for ReDim $TAG" \
             release-assets/*.xlsm release-assets/*.cls release-assets/*.bas || status=$?
           test -f "$report"
