@@ -80,7 +80,8 @@ from them. CI updates ClamAV's official signature database before the scan. A de
 recorded by file or module and signature name in the report; an undocumented detection or
 scanner error fails the workflow. Reviewed detections can be given specific reasons in
 `tools/security_expected.json`. Signature updates can change the results, so the report
-records the engine and database version used.
+records the engine and database version used. The initial CI scan found no ClamAV signatures,
+so there are currently no ClamAV allowances.
 
 The scan also checks each workbook for p-code. ReDim builds its workbooks from VBA source with
 pyOpenVBA, and Excel compiles the source when a workbook opens, so a workbook holds no compiled
