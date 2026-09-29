@@ -16,6 +16,7 @@ permissions:
 
 jobs:
   static-analysis:
+    name: Static analysis
     runs-on: ubuntu-24.04
     steps:
       - name: Check out ReDim
@@ -46,3 +47,19 @@ jobs:
         env:
           REDIM_RONECONE_PATH: ${{ github.workspace }}/.ronecone/src/ROneCOne.cls
         run: python tools/check.py
+
+  ci-passed:
+    name: CI passed
+    if: always()
+    needs: [static-analysis]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Check every CI job passed
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "Results: $RESULTS"
+          for result in $RESULTS; do
+            [ "$result" = success ] || exit 1
+          done

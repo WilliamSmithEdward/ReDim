@@ -1,6 +1,6 @@
 # ReDim
 
-[![CI](https://github.com/WilliamSmithEdward/ReDim/actions/workflows/analyze.yml/badge.svg)](https://github.com/WilliamSmithEdward/ReDim/actions/workflows/analyze.yml)
+[![CI](https://github.com/WilliamSmithEdward/ReDim/actions/workflows/ci.yml/badge.svg)](https://github.com/WilliamSmithEdward/ReDim/actions/workflows/ci.yml)
 [![Security](https://github.com/WilliamSmithEdward/ReDim/actions/workflows/security.yml/badge.svg)](https://github.com/WilliamSmithEdward/ReDim/actions/workflows/security.yml)
 [![Latest release](https://img.shields.io/github/v/release/WilliamSmithEdward/ReDim)](https://github.com/WilliamSmithEdward/ReDim/releases/latest)
 [![MIT license](https://img.shields.io/github/license/WilliamSmithEdward/ReDim)](LICENSE)

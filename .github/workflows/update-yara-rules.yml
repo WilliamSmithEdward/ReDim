@@ -1,4 +1,4 @@
-name: Propose YARA Forge update
+name: Update YARA rules
 
 on:
   schedule:
@@ -11,11 +11,12 @@ permissions:
   actions: write
 
 concurrency:
-  group: yara-forge-update
+  group: update-yara-rules
   cancel-in-progress: false
 
 jobs:
   propose:
+    name: Propose a YARA rule update
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -50,13 +51,13 @@ jobs:
           cat > /tmp/yara-forge-pr.md <<EOF
           Proposes YARA Forge core release [$NEW_RELEASE](https://github.com/YARAHQ/yara-forge/releases/tag/$NEW_RELEASE).
 
-          The pinned yara-forge-rules-core.zip SHA-256 is $NEW_SHA256. Security downloads only this tagged archive, verifies its checksum, then scans raw files and extracted VBA with YARA-X. New rule matches fail the YARA-X job until reviewed. ClamAV and macro checks run as separate jobs.
+          The pinned yara-forge-rules-core.zip SHA-256 is $NEW_SHA256. Malware scan downloads only this tagged archive, verifies its checksum, then scans raw files and extracted VBA with YARA-X. New rule matches fail the YARA-X job until reviewed. ClamAV runs as a separate job and macro checks in Security.
 
-          Security is explicitly dispatched on this branch below. GitHub may also show approval-required pull_request runs for a PR created with GITHUB_TOKEN; review and approve those runs if required. Wait for all Security jobs to pass before merging.
+          Malware scan is explicitly dispatched on this branch below. GitHub may also show approval-required pull_request runs for a PR created with GITHUB_TOKEN; review and approve those runs if required. Wait for every Malware scan job to pass before merging.
           EOF
           if gh pr view automation/yara-forge --json number >/dev/null 2>&1; then
             gh pr edit automation/yara-forge --title "Update YARA Forge core rules to $NEW_RELEASE" --body-file /tmp/yara-forge-pr.md
           else
             gh pr create --base main --head automation/yara-forge --title "Update YARA Forge core rules to $NEW_RELEASE" --body-file /tmp/yara-forge-pr.md
           fi
-          gh workflow run security.yml --ref automation/yara-forge
+          gh workflow run malware-scan.yml --ref automation/yara-forge

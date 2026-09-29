@@ -163,7 +163,7 @@ theme sets, stand as drawn, where rewriting them was half of a 100-control swap.
   installs the pinned pyvbaanalysis version in `requirements-dev.txt`
 - `tools/security_scan.py` runs olevba, mraptor, YARA-X, and ClamAV over the runtime files and
   built workbooks. It fails on an unexplained scanner finding, ClamAV error, or any p-code in a
-  workbook. The Security workflow runs it on every push, and the release
+  workbook. The Security and Malware scan workflows run it on every push, and the release
   security workflow runs it over each release's assets and attaches the report (see
   SECURITY.md)
 - `tools/stamp_release.py` writes the release header into every source a release ships (both

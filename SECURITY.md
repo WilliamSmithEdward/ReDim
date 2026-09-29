@@ -55,8 +55,9 @@ Macro scanners flag much of the above, and ordinary words too: olevba and mrapto
 keywords such as "run", "open", and "call" anywhere in the code, comments included.
 [`tools/security_expected.json`](tools/security_expected.json) lists every olevba finding and
 mraptor match for each module with the reason for it. On pushes, pull requests, and daily
-at 08:17 UTC, the [Security workflow](.github/workflows/security.yml) runs separate macro,
-YARA-X, and ClamAV jobs with their own statuses and reports. The macro job runs
+at 08:17 UTC, the [Security workflow](.github/workflows/security.yml) runs the macro job and the
+[Malware scan workflow](.github/workflows/malware-scan.yml) runs separate YARA-X and ClamAV
+jobs, each with its own status and report. The macro job runs
 [`tools/security_scan.py`](tools/security_scan.py) over the runtime files and freshly built demo
 workbooks, and fails on any finding the list does not explain, and on an expected one that no
 longer occurs.
@@ -80,9 +81,9 @@ The YARA-X job also runs [YARA Forge's core rules](https://github.com/YARAHQ/yar
 against every raw file and extracted VBA module. The exact upstream release and archive
 SHA-256 are in [`tools/yara_forge_pin.json`](tools/yara_forge_pin.json); CI verifies the
 download before compiling it. A weekly Monday
-[updater](.github/workflows/yara-forge-update.yml) proposes a new release and checksum in a
-PR when available. It dispatches the existing Security workflow on that PR's branch; wait
-for the YARA-X, ClamAV, and macro jobs before merging. Forge matches require a specific
+[updater](.github/workflows/update-yara-rules.yml) proposes a new release and checksum in a
+PR when available. It dispatches the Malware scan workflow on that PR's branch; wait
+for the YARA-X and ClamAV jobs before merging. Forge matches require a specific
 file or module and rule allowance in `tools/security_expected.json` with a reviewed
 reason. There are currently no Forge allowances.
 
