@@ -160,7 +160,7 @@ theme sets, stand as drawn, where rewriting them was half of a 100-control swap.
   VBA source alone and Excel compiles it on open
 - `tools/check.py` runs pyvbaanalysis over every `.bas` and `.cls`; any finding in ReDim's own
   sources fails the gate, and one inside the vendored ROneCOne is printed and not counted. CI
-  installs the newest pyvbaanalysis on every run
+  installs the pinned pyvbaanalysis version in `requirements-dev.txt`
 - `tools/security_scan.py` runs olevba, mraptor, YARA-X, and ClamAV over the runtime files and
   built workbooks. It fails on an unexplained scanner finding, ClamAV error, or any p-code in a
   workbook. The Security workflow runs it on every push, and the release

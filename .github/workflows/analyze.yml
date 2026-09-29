@@ -1,7 +1,7 @@
 name: CI
 
 # The live suite drives a real Excel instance and cannot run on a hosted
-# runner, so CI covers the static gate: the newest pyvbaanalysis over every
+# runner, so CI covers the static gate: pinned pyvbaanalysis over every
 # VBA source, with zero findings in ReDim's own. The olevba and mraptor
 # scan runs in security.yml. The live suite stays a local step.
 
@@ -16,32 +16,31 @@ permissions:
 
 jobs:
   static-analysis:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Check out ReDim
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
       # The analyzer resolves cross-module references against the runtime,
       # which lives in its own repository beside this one. The ref is the
       # ROneCOne release ReDim ships and is tested against, not its main.
       - name: Check out ROneCOne
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           repository: WilliamSmithEdward/ROneCOne
-          ref: v1.10.1
+          ref: a84b5719e443c50d02575a50a645531d0c3a7858 # v1.10.1
           path: .ronecone
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
-          python-version: '3.12'
+          python-version: '3.12.14'
 
       # Only the analyzer: requirements-dev.txt also pulls the live-Excel
-      # harness, which has no meaning on a Linux runner. The newest release
-      # on every run, so a rule it adds meets ReDim here first; the gate
-      # prints the version it ran.
+      # harness, which has no meaning on a Linux runner. Keep the analyzer
+      # version aligned with requirements-dev.txt and update it deliberately.
       - name: Install the analyzer
-        run: pip install --upgrade pyvbaanalysis
+        run: pip install pyvbaanalysis==2.3.1
 
       - name: Run the static gate
         env:

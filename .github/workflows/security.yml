@@ -27,23 +27,23 @@ concurrency:
 jobs:
   scan:
     name: olevba, mraptor, YARA-X, and ClamAV
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Check out ReDim
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
       # The workbooks embed the ROneCOne release ReDim ships.
       - name: Check out ROneCOne
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           repository: WilliamSmithEdward/ROneCOne
-          ref: v1.10.1
+          ref: a84b5719e443c50d02575a50a645531d0c3a7858 # v1.10.1
           path: .ronecone
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
-          python-version: '3.12'
+          python-version: '3.12.14'
 
       # oletools brings olevba, mraptor, and pcodedmp; pyOpenVBA builds the
       # demo workbooks from source, as a release does.
@@ -76,7 +76,7 @@ jobs:
 
       - name: Keep the report
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: security-report
           path: security-report.md

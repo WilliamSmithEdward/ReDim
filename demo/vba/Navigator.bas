@@ -1,5 +1,5 @@
 Attribute VB_Name = "Navigator"
-' ReDim 1.1.0 (2026-09-28)
+' ReDim 1.1.1 (2026-09-29)
 ' https://github.com/WilliamSmithEdward/ReDim
 '
 ' MIT License

@@ -1,6 +1,6 @@
-pyopenvba>=3.1.0
-pyvbaharness>=1.0.0
-pyvbaanalysis>=2.3.1
-oletools>=0.60.2
+pyopenvba==6.3.2
+pyvbaharness==1.1.6
+pyvbaanalysis==2.3.1
+oletools==0.60.2
 yara-x==1.20.0
-pytest>=8
+pytest==9.1.1

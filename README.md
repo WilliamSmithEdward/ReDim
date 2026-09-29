@@ -167,7 +167,7 @@ guard that exports the runtime, the demos, and sample host code through the VBE 
 every name back as written.
 
 It drives a real Excel instance, so it cannot run on hosted CI. Continuous integration runs
-two static gates instead: the newest pyvbaanalysis over the same sources plus the ROneCOne
+two static gates instead: pinned pyvbaanalysis over the same sources plus the ROneCOne
 runtime (CI), and the olevba, mraptor, YARA-X, and ClamAV scan over the runtime and demo workbooks
 it builds
 (Security). The live suite is a local step before release.
