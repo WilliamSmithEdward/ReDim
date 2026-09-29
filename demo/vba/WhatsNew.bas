@@ -1,5 +1,5 @@
 Attribute VB_Name = "WhatsNew"
-' ReDim 1.0.4 (2026-09-27)
+' ReDim 1.1.0 (2026-09-28)
 ' https://github.com/WilliamSmithEdward/ReDim
 '
 ' MIT License
@@ -26,8 +26,8 @@ Attribute VB_Name = "WhatsNew"
 
 Option Explicit
 
-' What's New: a tour of what ReDim 1.0.3 adds, a tab for each part, with
-' a log on the right that says what every action did.
+' What's New: a tour of what ReDim 1.0.3 and 1.1.0 add, a tab for each
+' part, with a log on the right that says what every action did.
 '
 ' - Two-way state: WritesTo goes both ways, one listener takes an array
 '   of keys, three buttons share a handler through Tag and
@@ -43,6 +43,8 @@ Option Explicit
 '   jobs sharing one step, the error sink naming a handler ReDim cannot
 '   run, a handler that traps its own error, and a Confirm opened from
 '   another.
+' - Filters: a search box that writes its key as it is typed, a status
+'   pick, and a region check list narrow one table at once.
 '
 ' The command palette (Ctrl+Shift+P) turns to any tab.
 

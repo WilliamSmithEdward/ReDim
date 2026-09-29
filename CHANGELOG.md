@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.1.0 - unreleased
+## 1.1.0 - 2026-09-28
 
 - A table can filter by state keys, so another control narrows it:
   `FilterBy "q"` filters by a key's text as typing does, and
@@ -101,6 +101,7 @@
   on ROneCOne's `Item` property, whose `Set` takes an Object while its
   `Get` returns a Variant. Excel compiles that, and 2.3.1 no longer
   reports it.
+- Requires ROneCOne 1.9.1 or later, and is tested against 1.10.1.
 
 ## 1.0.4 - 2026-09-27
 
