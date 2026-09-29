@@ -2,8 +2,9 @@ name: Release security report
 
 # Each published release gets the security scan's report on its own assets:
 # every workbook and source file, their SHA-256 hashes, olevba's and
-# mraptor's findings with the reason for each, and the p-code check, judged
-# by tools/security_expected.json at the release tag. The report is
+# mraptor's findings with the reason for each, YARA-X and ClamAV matches,
+# and the p-code check. Reviewed findings are judged by
+# tools/security_expected.json at the release tag. The report is
 # attached to the release as <tag>-security-report.md.
 
 on:
@@ -23,25 +24,33 @@ concurrency:
 
 jobs:
   report:
-    name: olevba and mraptor report
-    runs-on: ubuntu-latest
+    name: olevba, mraptor, YARA-X, and ClamAV report
+    runs-on: ubuntu-24.04
     env:
       TAG: ${{ github.event.release.tag_name || inputs.tag }}
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
     steps:
       - name: Check out the tagged commit
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           ref: ${{ github.event.release.tag_name || inputs.tag }}
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
-          python-version: '3.12'
+          python-version: '3.12.14'
 
       - name: Install the scanner
-        run: pip install oletools==0.60.2
+        run: pip install oletools==0.60.2 yara-x==1.20.0
+
+      - name: Install ClamAV and current signatures
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clamav clamav-freshclam
+          sudo systemctl stop clamav-freshclam || true
+          sudo freshclam
+          clamscan --version
 
       # Assets can land after the release is published. Wait until the
       # runtime files and a workbook are there and two looks 30 seconds
@@ -76,7 +85,7 @@ jobs:
         run: |
           report="release-assets/$TAG-security-report.md"
           status=0
-          python tools/security_scan.py --report "$report" \
+          python tools/security_scan.py --clamav --report "$report" \
             --title "Security report for ReDim $TAG" \
             release-assets/*.xlsm release-assets/*.cls release-assets/*.bas || status=$?
           test -f "$report"

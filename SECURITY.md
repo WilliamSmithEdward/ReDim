@@ -66,6 +66,23 @@ themselves in `Auto_Open`, the runtime declares Windows API functions, and ROneC
 File and Process surfaces, so each workbook shows all three. `ReDimUI.cls` alone reads "Macro
 OK": nothing in it runs on its own.
 
+YARA-X scans the extracted VBA source of every module, including modules inside workbooks,
+with the repository's [VBA malware rules](tools/vba_malware.yar). The broad rules flag
+automatic execution, native API calls, process and network access, file writing, and dynamic
+invocation. [`tools/security_expected.json`](tools/security_expected.json) records each
+reviewed module and rule pair with the reason it is expected. An unlisted match fails CI;
+in strict CI, a documented match that disappears also fails so the baseline stays current.
+Focused rules for encoded PowerShell, remote execution through Windows binaries, and Run key
+persistence have no exceptions. A clear scan cannot establish that a workbook is safe.
+
+ClamAV scans each source file and workbook as a file, then scans the VBA modules extracted
+from them. CI updates ClamAV's official signature database before the scan. A detection is
+recorded by file or module and signature name in the report; an undocumented detection or
+scanner error fails the workflow. Reviewed detections can be given specific reasons in
+`tools/security_expected.json`. Signature updates can change the results, so the report
+records the engine and database version used. The initial CI scan found no ClamAV signatures,
+so there are currently no ClamAV allowances.
+
 The scan also checks each workbook for p-code. ReDim builds its workbooks from VBA source with
 pyOpenVBA, and Excel compiles the source when a workbook opens, so a workbook holds no compiled
 p-code. P-code that disagrees with its source is how VBA stomping hides code, and any p-code
@@ -78,7 +95,7 @@ code and never runs. 1.1.0 builds without it.
 From 1.1.0, each release carries `vX.Y.Z-security-report.md`. The
 [release security workflow](.github/workflows/release-security.yml) writes it from the
 release's published files: the SHA-256 of every workbook and source file, mraptor's verdict on
-each file, each module's olevba findings and mraptor matches with their reasons, and the p-code
+each file, each module's olevba findings, mraptor matches, YARA-X and ClamAV results, and the p-code
 check. The report names the workflow run that wrote it.
 
 To check a download, compare its SHA-256 with the report, or with the digest GitHub lists
@@ -91,9 +108,10 @@ Get-FileHash .\ReDim_Snake.xlsm -Algorithm SHA256
 To scan a file yourself:
 
 ```
-pip install oletools
+pip install oletools==0.60.2 yara-x==1.20.0
 olevba -a ReDim_Snake.xlsm
 mraptor ReDim_Snake.xlsm
+python tools/security_scan.py --clamav ReDim_Snake.xlsm  # requires clamscan and current signatures
 ```
 
 ## Opening the demo workbooks

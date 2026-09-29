@@ -63,11 +63,12 @@ def test_every_expected_finding_names_a_reason():
     expected = json.loads(security_scan.EXPECTED_PATH.read_text(encoding="utf-8"))
     reasons = expected["reasons"]
     used = set()
-    for section in ("modules", "mraptor"):
+    for section in ("modules", "mraptor", "yara", "clamav"):
         for module, entries in expected[section].items():
             for key, reason in entries.items():
                 assert reason in reasons, f"{section} {module} {key} names no reason: {reason}"
-                assert ": " in key, f"{section} {module} {key} is not 'Type: keyword'"
+                if section in ("modules", "mraptor"):
+                    assert ": " in key, f"{section} {module} {key} is not 'Type: keyword'"
                 used.add(reason)
     for module, entries in expected["mraptor"].items():
         assert all(key[0] in "AWX" for key in entries), f"mraptor {module}: flags are A, W, X"

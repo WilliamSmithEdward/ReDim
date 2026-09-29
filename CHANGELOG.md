@@ -1,11 +1,14 @@
 # Changelog
 
-## 1.1.1 - unreleased
+## 1.1.1 - 2026-09-29
 
 - The Security workflow builds the demos with pyOpenVBA 6.3.2, where it
   pinned 6.3.0. 6.3.2's blank workbook has no p-code in `Module1`, so
   the stray comment is gone at its source; the build still removes
   `Module1`.
+- Security CI and release reports scan VBA with YARA-X and scan source files,
+  workbooks, and extracted VBA with ClamAV. Reviewed YARA-X capability matches
+  are documented by module; new malware signatures or scanner errors fail CI.
 
 ## 1.1.0 - 2026-09-28
 
