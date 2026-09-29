@@ -137,7 +137,9 @@ their inks, the success, warning, danger, border, and canvas colors, and the fon
 `theme.ContrastReport` checks every pairing the controls draw against WCAG. `ui.SetTheme`
 restyles every component through the normal diff path. A theme's revision follows its look,
 shared by every theme whose tokens all match, so `SetTheme` with a fresh copy of the look
-already drawn, as a rebuild does, restyles nothing.
+already drawn, as a rebuild does, restyles nothing. A new theme restyles a control's fills,
+edges, and fonts; its words, text margins, visibility, click, and alternative text, which no
+theme sets, stand as drawn, where rewriting them was half of a 100-control swap.
 
 ## Build and verification
 

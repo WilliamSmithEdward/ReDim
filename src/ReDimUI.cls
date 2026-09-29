@@ -1116,6 +1116,10 @@ Private mResolvedPass As Long
 ' fully restyled exactly once. Geometry is deliberately absent: it diffs
 ' against the live shape so manual drags are corrected.
 Private mAppliedValid As Boolean
+' The cache is void only because the theme changed: the shape's look is
+' restyled, while its words, margins, visibility, click, and alternative
+' text, which no theme sets, stand as drawn.
+Private mThemeOnly As Boolean
 Private mAppliedThemeRevision As Long
 ' The bounds the control last drew at, which Below and RightOf placements
 ' read; empty until its first draw.
@@ -10055,6 +10059,7 @@ Friend Sub Apply( _
     ' or a font and keep those.
     If mAppliedThemeRevision <> themeValue.ThemeRevision Then
         mAppliedThemeRevision = themeValue.ThemeRevision
+        mThemeOnly = mAppliedValid
         mAppliedValid = False
     End If
     EnsureGeometryResolved hostSheet, hostApp
@@ -10096,6 +10101,7 @@ Friend Sub Apply( _
     End If
     ApplyAltText mainShape
     mAppliedValid = True
+    mThemeOnly = False
     ' A control that moved or resized since it was drawn, by a builder, by
     ' its stack, or by text it grew to, moves what is placed against it;
     ' a first draw leaves that to the render in progress. Only a field's
@@ -10134,7 +10140,7 @@ Private Sub ApplyAltText(ByVal mainShape As Shape)
 
     described = AccessibleDescription()
     If described = mAppliedAltText Then
-        If mAppliedValid Or LenB(described) = 0 Then Exit Sub
+        If mAppliedValid Or mThemeOnly Or LenB(described) = 0 Then Exit Sub
     End If
     mAppliedAltText = described
     On Error Resume Next
@@ -10907,6 +10913,7 @@ Private Function EnsureShape(ByVal hostSheet As Worksheet) As Shape
         mainShape.Name = ShapeName
         hostApp.NoteShapeDrawn ShapeName
         mAppliedValid = False
+        mThemeOnly = False
         ForgetPartSignatures
     End If
     Set EnsureShape = mainShape
@@ -11172,7 +11179,7 @@ Private Sub ApplyGeometry(ByVal mainShape As Shape)
         sizeMoved = True
     End If
     If sizeMoved And mMultiLine And IsFloatField() Then HoldFieldCorner mainShape
-    If Not mAppliedValid Or mAppliedVisible <> mVisible Then
+    If (Not mAppliedValid And Not mThemeOnly) Or mAppliedVisible <> mVisible Then
         mainShape.Visible = BoolToMso(mVisible)
         mAppliedVisible = mVisible
     End If
@@ -11998,7 +12005,11 @@ Private Sub ApplyText(ByVal mainShape As Shape, ByVal themeValue As ReDimUI)
             resolvedColor = themeValue.OnMutedColor
         End If
     End If
-    If Not mAppliedValid Then
+    ' A new theme restyles the font below; the words, margins, and
+    ' alignment it cannot change stand.
+    Dim styledFull As Boolean
+    styledFull = Not mAppliedValid And Not mThemeOnly
+    If styledFull Then
         mainShape.TextFrame2.MarginLeft = 6
         mainShape.TextFrame2.MarginRight = FaceMarginRight()
         mainShape.TextFrame2.MarginTop = 3
@@ -12041,7 +12052,7 @@ Private Sub ApplyText(ByVal mainShape As Shape, ByVal themeValue As ReDimUI)
         Or mAppliedFontSize <> resolvedSize _
         Or mAppliedFontBold <> mFontBold _
         Or mAppliedIconGlyph <> mIconGlyph
-    textChanged = (Not mAppliedValid) Or (mAppliedText <> shownText)
+    textChanged = styledFull Or (mAppliedText <> shownText)
     If textChanged Then
         ' Replaced text takes its first character's font, which an icon
         ' holds in the icon font, and a toned toast's icon in the tone's
@@ -13595,7 +13606,7 @@ Private Sub ApplyBehavior(ByVal mainShape As Shape, ByVal hostSheet As Worksheet
     ' in its name doubles inside the quotes: "Bob's Budget.xlsm" made
     ' Excel refuse the OnAction, and every Render raised 1004.
     desiredAction = "'" & Replace(ThisWorkbook.Name, "'", "''") & "'!RdxDispatch"
-    If Not mAppliedValid Or mAppliedOnAction <> desiredAction Then
+    If (Not mAppliedValid And Not mThemeOnly) Or mAppliedOnAction <> desiredAction Then
         mainShape.OnAction = desiredAction
         mAppliedOnAction = desiredAction
     End If

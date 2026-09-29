@@ -53,6 +53,10 @@
   costs about what the build saved on it. A hidden control has no shapes
   on the sheet until then; on a sheet an earlier session drew, a hidden
   control draws as before.
+- `SetTheme` restyles a control's fills, edges, and fonts and leaves its
+  words, text margins, visibility, click, and alternative text as drawn,
+  which it rewrote on every control: a 100-control swap takes 45 ms
+  instead of 109.
 
 ## 1.0.4 - 2026-09-27
 
