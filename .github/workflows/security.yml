@@ -33,7 +33,7 @@ jobs:
         with:
           python-version: '3.12.14'
       - name: Install scanner and workbook builder
-        run: pip install oletools==0.60.2 pyopenvba==6.3.2
+        run: pip install -c requirements-dev.txt oletools pyopenvba
       - name: Build demo workbooks
         env:
           REDIM_RONECONE_PATH: ${{ github.workspace }}/.ronecone/src/ROneCOne.cls

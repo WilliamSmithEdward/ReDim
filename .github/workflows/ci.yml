@@ -38,10 +38,10 @@ jobs:
           python-version: '3.12.14'
 
       # Only the analyzer: requirements-dev.txt also pulls the live-Excel
-      # harness, which has no meaning on a Linux runner. Keep the analyzer
-      # version aligned with requirements-dev.txt and update it deliberately.
+      # harness, which has no meaning on a Linux runner. -c takes the version
+      # from requirements-dev.txt, which Dependabot keeps current.
       - name: Install the analyzer
-        run: pip install pyvbaanalysis==2.3.1
+        run: pip install -c requirements-dev.txt pyvbaanalysis
 
       - name: Run the static gate
         env:

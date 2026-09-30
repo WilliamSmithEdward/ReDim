@@ -42,7 +42,7 @@ jobs:
           python-version: '3.12.14'
 
       - name: Install the scanner
-        run: pip install oletools==0.60.2 yara-x==1.20.0
+        run: pip install -c requirements-dev.txt oletools yara-x
 
       - name: Fetch checksum-pinned YARA Forge rules
         run: python tools/yara_forge.py fetch
