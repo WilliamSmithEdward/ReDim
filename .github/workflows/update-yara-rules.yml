@@ -1,65 +1,85 @@
 name: Update YARA rules
 
+# The same in every repository; the canonical copy lives in
+# WilliamSmithEdward/repo-standards (templates/yara). Each Monday, and on
+# demand, proposes the newest YARA pins .github/security/yara_update.py allows
+# in a pull request, which CI, Security and Malware scan check before anyone
+# merges it.
+#
+# Two jobs, so the untrusted release metadata is only ever read without write
+# access: `prepare` works out the move with a read-only token, `propose` checks
+# the proposal against the pin file on main and commits it through the GitHub
+# API. No checkout keeps credentials. Needs the repository setting "Allow GitHub
+# Actions to create and approve pull requests".
+
 on:
   schedule:
-    - cron: '41 9 * * 1' # Weekly Monday UTC, after YARA Forge's Sunday release
+    - cron: "37 6 * * 1"
   workflow_dispatch:
 
 permissions:
-  contents: write
-  pull-requests: write
-  actions: write
+  contents: read
 
 concurrency:
   group: update-yara-rules
   cancel-in-progress: false
 
 jobs:
-  propose:
-    name: Propose a YARA rule update
+  prepare:
+    name: Work out the YARA pin update
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      changed: ${{ steps.prepare.outputs.changed }}
     steps:
-      # Keeps the checkout's credentials: a later step pushes the update
-      # branch with git. This job uploads no artifacts.
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 # zizmor: ignore[artipacked]
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          persist-credentials: true
+          persist-credentials: false
+
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: '3.12.14'
-      - name: Verify updater behavior
-        run: python -m unittest discover -s tests/python -p 'test_yara_forge.py'
-      - name: Fetch the latest core release and checksum
-        id: update
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: python tools/yara_forge.py update
-      - name: Open or update the review PR and scan its branch
-        if: steps.update.outputs.release != ''
+          python-version: "3.12.14"
+
+      - name: Work out the move
+        id: prepare
         env:
           GH_TOKEN: ${{ github.token }}
-          NEW_RELEASE: ${{ steps.update.outputs.release }}
-          NEW_SHA256: ${{ steps.update.outputs.sha256 }}
-        run: |
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git switch -C automation/yara-forge
-          git add tools/yara_forge_pin.json
-          git commit -m "Pin YARA Forge core release $NEW_RELEASE"
-          if git ls-remote --exit-code --heads origin automation/yara-forge >/dev/null; then
-            git fetch origin automation/yara-forge:refs/remotes/origin/automation/yara-forge
-          fi
-          git push --force-with-lease origin HEAD:automation/yara-forge
-          cat > /tmp/yara-forge-pr.md <<EOF
-          Proposes YARA Forge core release [$NEW_RELEASE](https://github.com/YARAHQ/yara-forge/releases/tag/$NEW_RELEASE).
+        run: python .github/security/yara_update.py prepare --out "$RUNNER_TEMP/proposal"
 
-          The pinned yara-forge-rules-core.zip SHA-256 is $NEW_SHA256. Malware scan downloads only this tagged archive, verifies its checksum, then scans raw files and extracted VBA with YARA-X. New rule matches fail the YARA-X job until reviewed. ClamAV runs as a separate job and macro checks in Security.
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: steps.prepare.outputs.changed == 'true'
+        with:
+          name: yara-proposal
+          path: ${{ runner.temp }}/proposal/
+          if-no-files-found: error
+          retention-days: 7
 
-          Malware scan is explicitly dispatched on this branch below. GitHub may also show approval-required pull_request runs for a PR created with GITHUB_TOKEN; review and approve those runs if required. Wait for every Malware scan job to pass before merging.
-          EOF
-          if gh pr view automation/yara-forge --json number >/dev/null 2>&1; then
-            gh pr edit automation/yara-forge --title "Update YARA Forge core rules to $NEW_RELEASE" --body-file /tmp/yara-forge-pr.md
-          else
-            gh pr create --base main --head automation/yara-forge --title "Update YARA Forge core rules to $NEW_RELEASE" --body-file /tmp/yara-forge-pr.md
-          fi
-          gh workflow run malware-scan.yml --ref automation/yara-forge
+  propose:
+    name: Propose a YARA rule update
+    needs: prepare
+    if: needs.prepare.outputs.changed == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write # the update branch and its commit, through the API
+      pull-requests: write # the pull request
+      actions: write # starting CI, Security and Malware scan on the branch
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12.14"
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: yara-proposal
+          path: ${{ runner.temp }}/proposal
+
+      - name: Propose the update
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python .github/security/yara_update.py propose --in "$RUNNER_TEMP/proposal"

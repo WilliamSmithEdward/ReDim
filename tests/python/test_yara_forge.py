@@ -1,9 +1,9 @@
 """The upstream bundle must be exact, bounded, and verified before scanning."""
 
 import hashlib
+import importlib.util
 import io
 import json
-import os
 import sys
 import tempfile
 import unittest
@@ -33,8 +33,9 @@ class YaraForgeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             pin = root / "pin.json"
-            pin.write_text(json.dumps({"release": "20260927", "asset": yara_forge.ASSET,
-                                       "sha256": "0" * 64}), encoding="utf-8")
+            pin.write_text(json.dumps({"yara_forge": {"release": "20260927", "asset": yara_forge.ASSET,
+                                       "url": yara_forge.release_asset("20260927"),
+                                       "sha256": "0" * 64}}), encoding="utf-8")
             with patch.object(yara_forge, "PIN", pin), patch.object(yara_forge, "RULES", root / "core.yar"), \
                  patch.object(yara_forge, "download", return_value=archive()):
                 with self.assertRaisesRegex(ValueError, "SHA-256 mismatch"):
@@ -46,13 +47,24 @@ class YaraForgeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             pin = root / "pin.json"
-            pin.write_text(json.dumps({"release": "20260927", "asset": yara_forge.ASSET,
-                                       "sha256": hashlib.sha256(data).hexdigest()}), encoding="utf-8")
+            pin.write_text(json.dumps({"yara_forge": {"release": "20260927", "asset": yara_forge.ASSET,
+                                       "url": yara_forge.release_asset("20260927"),
+                                       "sha256": hashlib.sha256(data).hexdigest()}}), encoding="utf-8")
             rules = root / "core.yar"
             with patch.object(yara_forge, "PIN", pin), patch.object(yara_forge, "RULES", rules), \
                  patch.object(yara_forge, "download", return_value=data):
                 yara_forge.fetch()
             self.assertEqual(rules.read_bytes(), yara_forge.unpack(data))
+
+    def test_the_pin_file_is_one_the_standard_updater_accepts(self):
+        root = Path(__file__).resolve().parents[2]
+        spec = importlib.util.spec_from_file_location(
+            "yara_update", root / ".github" / "security" / "yara_update.py")
+        updater = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(updater)
+        pins = json.loads((root / ".github" / "security" / "yara.json").read_text(encoding="utf-8"))
+        updater.check_move(pins, pins)
+        self.assertEqual(yara_forge.read_pin(), pins["yara_forge"])
 
     def test_forge_match_requires_reviewed_file_or_module_reason(self):
         try:
@@ -77,26 +89,6 @@ class YaraForgeTests(unittest.TestCase):
             expected["forge"]["module:Sample"] = {}
             _, problems = security_scan.forge_findings([file], [module], rules, expected)
             self.assertEqual(problems, ["module:Sample: unexpected YARA Forge rule Demo_Finding matched"])
-
-    def test_update_proposes_new_tag_and_checksum(self):
-        data = archive()
-        tag = "20261004"
-        release = {"tag_name": tag, "assets": [{"name": yara_forge.ASSET,
-                   "browser_download_url": yara_forge.release_asset(tag)}]}
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            pin = root / "pin.json"
-            pin.write_text(json.dumps({"release": "20260927", "asset": yara_forge.ASSET,
-                                       "sha256": "0" * 64}), encoding="utf-8")
-            output = root / "output"
-            with patch.object(yara_forge, "PIN", pin), \
-                 patch.object(yara_forge.urllib.request, "urlopen",
-                              return_value=io.BytesIO(json.dumps(release).encode())), \
-                 patch.object(yara_forge, "download", return_value=data), \
-                 patch.dict(os.environ, {"GITHUB_OUTPUT": str(output)}):
-                yara_forge.update()
-            self.assertEqual(json.loads(pin.read_text())["sha256"], hashlib.sha256(data).hexdigest())
-            self.assertIn(f"release={tag}", output.read_text())
 
 
 if __name__ == "__main__":

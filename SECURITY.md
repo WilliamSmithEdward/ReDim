@@ -79,7 +79,7 @@ persistence have no exceptions. A clear scan cannot establish that a workbook is
 
 The YARA-X job also runs [YARA Forge's core rules](https://github.com/YARAHQ/yara-forge)
 against every raw file and extracted VBA module. The exact upstream release and archive
-SHA-256 are in [`tools/yara_forge_pin.json`](tools/yara_forge_pin.json); CI verifies the
+SHA-256 are in [`.github/security/yara.json`](.github/security/yara.json); CI verifies the
 download before compiling it. A weekly Monday
 [updater](.github/workflows/update-yara-rules.yml) proposes a new release and checksum in a
 PR when available. It dispatches the Malware scan workflow on that PR's branch; wait

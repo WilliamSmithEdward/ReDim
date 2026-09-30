@@ -435,7 +435,8 @@ def write_report(target: Path, title: str, files: list[ScannedFile],
                 out.append(f"- {module.name}: `{match}` — "
                            f"{module.yara_reasons.get(match) or '**Unexpected.**'}")
     if forge is not None:
-        pin = json.loads((YARA_RULES_PATH.parent / "yara_forge_pin.json").read_text(encoding="utf-8"))
+        pin = json.loads((YARA_RULES_PATH.parent.parent / ".github" / "security" / "yara.json")
+                         .read_text(encoding="utf-8"))["yara_forge"]
         out += ["", "## YARA Forge core rules", "",
                 f"Release `{pin['release']}`, archive SHA-256 `{pin['sha256']}`. "
                 "Scanned raw input files and extracted VBA modules.", ""]
