@@ -1,0 +1,17 @@
+version: 2
+updates:
+  # Every action is pinned to a commit SHA with its version in a comment.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+
+  # requirements-dev.txt pins the analyzers and scanners.
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
