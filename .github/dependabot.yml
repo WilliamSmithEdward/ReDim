@@ -8,7 +8,16 @@ updates:
     cooldown:
       default-days: 7
 
-  # requirements-dev.txt pins the analyzers and scanners.
+  # .github/requirements holds the hash-locked tools each workflow installs.
+  - package-ecosystem: pip
+    directory: /.github/requirements
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+
+  # requirements-dev.txt locks the local tools: the CI locks plus the
+  # live-Excel harness and pytest.
   - package-ecosystem: pip
     directory: /
     schedule:

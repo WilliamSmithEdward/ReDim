@@ -1,0 +1,8 @@
+# Local development tools: the CI and malware scan locks plus the live-Excel
+# harness and pytest. Compile from the repository root with:
+#   uv pip compile requirements-dev.in --universal --generate-hashes --python-version 3.12 -o requirements-dev.txt
+# Dependabot proposes each new release.
+-r .github/requirements/ci.in
+-r .github/requirements/malware.in
+pyvbaharness==1.1.6
+pytest==9.1.1

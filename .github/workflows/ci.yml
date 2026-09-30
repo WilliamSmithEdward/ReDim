@@ -38,10 +38,11 @@ jobs:
           python-version: '3.12.14'
 
       # Only the analyzer: requirements-dev.txt also pulls the live-Excel
-      # harness, which has no meaning on a Linux runner. -c takes the version
-      # from requirements-dev.txt, which Dependabot keeps current.
+      # harness, which has no meaning on a Linux runner. The hash-locked
+      # .github/requirements/ci.txt holds just the analyzer; Dependabot keeps it
+      # current.
       - name: Install the analyzer
-        run: pip install -c requirements-dev.txt pyvbaanalysis
+        run: pip install --require-hashes -r .github/requirements/ci.txt
 
       - name: Run the static gate
         env:

@@ -1,0 +1,7 @@
+# Security scan tools: oletools (olevba, mraptor) and pyOpenVBA, which builds
+# the demo workbooks the scan reads. The ClamAV job uses it too.
+# Compile from this directory with:
+#   uv pip compile security.in --universal --generate-hashes --python-version 3.12 -o security.txt
+# Dependabot proposes each new release.
+oletools==0.60.2
+pyopenvba==6.3.2
