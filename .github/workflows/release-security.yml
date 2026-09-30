@@ -6,6 +6,10 @@ name: Release security report
 # and the p-code check. Reviewed findings are judged by
 # tools/security_expected.json at the release tag. The report is
 # attached to the release as <tag>-security-report.md.
+#
+# Started by hand with a release's tag it is always a dry run: it writes the
+# report on that release's assets exactly as a release would, and uploads it
+# as the release-preview artifact instead of attaching it.
 
 on:
   release:
@@ -13,7 +17,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Release tag to report on, such as v1.1.0
+        description: Release tag to report on (a dry run), such as v1.1.0
         required: true
 
 permissions:
@@ -98,5 +102,15 @@ jobs:
             --title "Security report for ReDim $TAG" \
             release-assets/*.xlsm release-assets/*.cls release-assets/*.bas || status=$?
           test -f "$report"
-          gh release upload "$TAG" "$report" --clobber
+          if [ "$GITHUB_EVENT_NAME" = release ]; then
+            gh release upload "$TAG" "$report" --clobber
+          fi
           exit "$status"
+
+      - name: Keep what the release would carry
+        if: ${{ !cancelled() && github.event_name != 'release' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-preview
+          path: "release-assets/${{ env.TAG }}-security-report.md"
+          if-no-files-found: error
