@@ -23,8 +23,8 @@ concurrency:
   group: release-security-${{ github.event.release.tag_name || inputs.tag }}
 
 jobs:
-  report:
-    name: olevba, mraptor, YARA-X, and ClamAV report
+  release-report:
+    name: Attach release report
     runs-on: ubuntu-24.04
     env:
       TAG: ${{ github.event.release.tag_name || inputs.tag }}
