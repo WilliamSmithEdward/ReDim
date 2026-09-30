@@ -198,9 +198,9 @@ pygments==2.21.0 \
     --hash=sha256:2363c69b61c4a97c838da3b130dcd6468f4848992b21a82f2a63ec34377137d9 \
     --hash=sha256:610ca751c9bc2492b38eb9a38a7fbc93edbbb2d7182edaf34e66ae493dee5c8c
     # via pytest
-pyopenvba==6.3.3 \
-    --hash=sha256:842d0dea4891c13378a36045938d0cc7f4506a296bb073b56e530d9da0f8043c \
-    --hash=sha256:cfcc3551d3daa2b8c27d16e2d77e917e43ac10c81452504ca799c19f419b7b5c
+pyopenvba==6.3.4 \
+    --hash=sha256:092b5339a833f0ad705889c9d6702539813a62c9377cd4b961be615b50935ae0 \
+    --hash=sha256:f490cd9a6f65c59bd1c9e73a747cbbe51e8c9b7436ddadd4831a05c7c2a0bbe6
     # via
     #   -r .github/requirements/ci.in
     #   -r .github/requirements/malware.in
