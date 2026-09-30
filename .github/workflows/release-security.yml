@@ -7,8 +7,9 @@ name: Release security report
 # tools/security_expected.json at the release tag. The report is
 # attached to the release as <tag>-security-report.md.
 #
-# Started by hand with a release's tag it is always a dry run: it writes the
-# report on that release's assets exactly as a release would, and uploads it
+# Started by hand with a release's tag it is always a dry run: it runs the
+# scanner as it stands on the branch it was started from, which is what the
+# next release will run, over that release's assets, and uploads the report
 # as the release-preview artifact instead of attaching it.
 
 on:
@@ -38,7 +39,7 @@ jobs:
       - name: Check out the tagged commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.release.tag_name || inputs.tag }}
+          ref: ${{ github.event.release.tag_name || github.sha }}
           persist-credentials: false
 
       - name: Set up Python
