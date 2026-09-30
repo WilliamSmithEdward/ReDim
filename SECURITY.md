@@ -88,8 +88,9 @@ file or module and rule allowance in `tools/security_expected.json` with a revie
 reason. There are currently no Forge allowances.
 
 ClamAV scans each source file and workbook as a file, then scans the VBA modules extracted
-from them. Each CI run installs ClamAV, stops its background updater, and runs `freshclam`
-before scanning, so scheduled runs use current official signatures. A detection is
+from them. The engine is the ClamAV image pinned by digest in `.github/security/clamav`,
+which Dependabot keeps current. Each CI run builds it and runs `freshclam` before scanning,
+so scheduled runs use current official signatures. A detection is
 recorded by file or module and signature name in the report; an undocumented detection or
 scanner error fails the workflow. Reviewed detections can be given specific reasons in
 `tools/security_expected.json`. Signature updates can change the results, so the report

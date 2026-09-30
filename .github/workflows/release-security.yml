@@ -47,13 +47,15 @@ jobs:
       - name: Fetch checksum-pinned YARA Forge rules
         run: python tools/yara_forge.py fetch
 
+      # The engine is the image pinned in .github/security/clamav, which
+      # Dependabot follows. freshclam fetches and verifies today's signatures
+      # into the volume the clamscan shim reads.
       - name: Install ClamAV and current signatures
         run: |
-          sudo apt-get update
-          sudo apt-get install -y clamav clamav-freshclam
-          sudo systemctl stop clamav-freshclam || true
-          sudo freshclam
-          clamscan --version
+          docker build --quiet --tag clamav-pinned .github/security/clamav
+          docker run --rm --entrypoint freshclam --volume clamav-db:/var/lib/clamav clamav-pinned --stdout
+          echo "$GITHUB_WORKSPACE/.github/security/clamav" >> "$GITHUB_PATH"
+          .github/security/clamav/clamscan --version
 
       # Assets can land after the release is published. Wait until the
       # runtime files and a workbook are there and two looks 30 seconds
@@ -85,6 +87,8 @@ jobs:
       # The report goes up even when the scan finds something unexpected;
       # the run then fails, so the finding is seen.
       - name: Write and attach the report
+        env:
+          TMPDIR: ${{ runner.temp }}
         run: |
           report="release-assets/$TAG-security-report.md"
           status=0
