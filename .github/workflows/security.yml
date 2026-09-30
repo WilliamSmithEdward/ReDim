@@ -2,6 +2,7 @@ name: Security
 
 # olevba, mraptor and the p-code check over the runtime files and freshly
 # built demo workbooks. ClamAV and YARA-X run in malware-scan.yml.
+# zizmor audits the workflows themselves and keeps its own exceptions (see its job).
 
 on:
   push:
@@ -24,11 +25,14 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: WilliamSmithEdward/ROneCOne
           ref: a84b5719e443c50d02575a50a645531d0c3a7858 # v1.10.1
           path: .ronecone
+          persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.12.14'
@@ -50,10 +54,51 @@ jobs:
           path: macro-report.md
           if-no-files-found: ignore
 
+  # zizmor audits the workflows themselves: template injection, credential
+  # persistence, over-broad permissions, dangerous triggers, and actions with
+  # known advisories or impostor commits. Findings it should not raise are
+  # turned off in .github/zizmor.yml or ignored inline, each with its reason;
+  # anything else fails the job.
+  zizmor:
+    name: zizmor
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12.14"
+
+      - name: Install zizmor
+        run: python -m pip install --require-hashes -r .github/requirements/zizmor.txt
+
+      # The token lets the online audits look up advisories and check that each
+      # pinned SHA belongs to the action it names.
+      - name: Audit the workflows
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          status=0
+          zizmor --format sarif .github/workflows > zizmor.sarif || status=$?
+          zizmor --format plain .github/workflows || true
+          exit "$status"
+
+      - uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        if: ${{ !cancelled() }}
+        with:
+          sarif_file: zizmor.sarif
+          category: zizmor
+
   security-passed:
     name: Security passed
     if: always()
-    needs: [macros]
+    needs: [macros, zizmor]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:

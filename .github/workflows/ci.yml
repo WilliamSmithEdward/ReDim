@@ -21,6 +21,8 @@ jobs:
     steps:
       - name: Check out ReDim
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       # The analyzer resolves cross-module references against the runtime,
       # which lives in its own repository beside this one. The ref is the
@@ -31,6 +33,7 @@ jobs:
           repository: WilliamSmithEdward/ROneCOne
           ref: a84b5719e443c50d02575a50a645531d0c3a7858 # v1.10.1
           path: .ronecone
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
