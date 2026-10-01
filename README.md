@@ -111,18 +111,20 @@ user keeps working in the workbook.
 Three imports, no references, no registration. Windows x64 Microsoft 365 Excel, the same target
 as ROneCOne.
 
-Take the two ReDim files from the release rather than downloading them from `src/`. The
-repository stores them with LF line endings, and the VBE imports an LF-only class file as a
-standard module with its header pasted in as code. The release copies carry the CRLF endings
-the VBE expects.
+Take all three files from the release rather than downloading them from a repository's `src/`.
+The repositories store them with LF line endings, and the VBE imports an LF-only class file as
+a standard module with its header pasted in as code. The release copies carry the CRLF endings
+the VBE expects. They are built in CI from the tagged commit, with signed provenance:
+`gh attestation verify ReDimUI.cls --repo WilliamSmithEdward/ReDim` checks a download.
 
 ## Demos
 
-Built workbooks are attached to each
-[release](https://github.com/WilliamSmithEdward/ReDim/releases). They are build artifacts
-rather than sources, so they are not tracked here; `python tools/build_workbooks.py`
-regenerates them into `demo/` from the VBA in `demo/vba/`. Open one with macros enabled
-and it builds itself (each ships an `Auto_Open`); the entry macro rebuilds on demand.
+Releases do not carry the demo workbooks. Build them from the VBA in `demo/vba/` with
+`python tools/build_workbooks.py`, which writes them into `demo/`. It injects the sources with
+pyOpenVBA, so it needs Python and no Office; it reads `ROneCOne.cls` from a ROneCOne checkout
+next to this one, or from the path in `REDIM_RONECONE_PATH`. Releases up to 1.1.1 attach the
+workbooks they were built with. Open one with macros enabled and it builds itself (each ships
+an `Auto_Open`); the entry macro rebuilds on demand.
 
 | Workbook | Shows | Entry macro |
 |---|---|---|
@@ -140,7 +142,7 @@ Report a vulnerability privately from the repository's Security tab; [SECURITY.m
 has the details. It also sets out what ReDim's VBA does with Windows, keys, and the clipboard,
 what the embedded ROneCOne runtime can do, and why macro scanners flag it. From 1.1.0, each
 release attaches `vX.Y.Z-security-report.md`: olevba, mraptor, YARA-X, and ClamAV scan results
-with reviewed reasons, plus SHA-256 hashes for every workbook and source file.
+with reviewed reasons, plus SHA-256 hashes for every file the release carries.
 
 ## Documentation
 
@@ -177,6 +179,6 @@ it builds
 
 ## License
 
-MIT. Every source a release ships, the two runtime files and each demo module, opens with
+MIT. Every source ReDim ships, the two runtime files and each demo module, opens with
 the license text and the ReDim version and date it belongs to, so a copied module still says
 what it is and under what terms.

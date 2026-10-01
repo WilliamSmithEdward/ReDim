@@ -1,0 +1,7 @@
+# zizmor audits the workflows in the Security workflow. Each rule turned off
+# here says why and when it comes back.
+rules:
+  # Asks for `gh release create` in place of softprops/action-gh-release in
+  # publish.yml. The release path is changed only after it can be dry-run.
+  superfluous-actions:
+    disable: true

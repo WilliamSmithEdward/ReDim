@@ -14,6 +14,11 @@
   `ROLE_FILE_EVENT`, so the scanners no longer read it as an event handler
   and its two accepted findings are removed. The pin's comment in `ci.yml`
   says how to move it, since no updater follows it.
+- Releases are built, scanned and signed in CI: pushing a `vX.Y.Z` tag runs
+  Publish, which creates the release with `ReDimUI.cls`, `ReDimHost.bas`,
+  `ROneCOne.cls`, their signed provenance and the security report. Releases
+  no longer attach the demo workbooks; `python tools/build_workbooks.py`
+  builds them from `demo/vba/`.
 
 ## 1.1.1 - 2026-09-29
 

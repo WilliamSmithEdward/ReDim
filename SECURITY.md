@@ -69,9 +69,12 @@ The other demos reach no network and write no file.
 
 ### Opening the demo workbooks
 
-Office blocks macros in files downloaded from the internet. After checking
-a workbook's hash (see Releases), open its Properties in File Explorer,
-select **Unblock**, and then open it and enable content.
+Releases no longer carry the demo workbooks. Build them from `demo/vba/`
+with `python tools/build_workbooks.py`; a workbook built on your own
+machine is not marked as downloaded. Office blocks macros in a workbook
+downloaded from an earlier release: after checking its hash against that
+release's security report, open its Properties in File Explorer, select
+**Unblock**, and then open it and enable content.
 
 ## How the code is checked
 
@@ -115,11 +118,10 @@ builds fresh from source with pyOpenVBA for the run.
   records the engine and database version used.
 - **OpenSSF Scorecard** rates the repository's security practices on every
   change to `main` and weekly, and the README badge shows the result.
-  Some of its checks do not fit this project. A single maintainer cannot
-  have a second person approve every change. The workbooks and modules are
-  built locally rather than by CI, so a release carries the security
-  report's SHA-256 list rather than a build provenance signature. Fuzzing
-  does not apply: ReDim is VBA, which runs only inside Office.
+  Two of its checks do not fit this project. A single maintainer cannot
+  have a second person approve every change. Fuzzing does not apply:
+  ReDim is VBA, which runs only inside Office. Signed-Releases rises as
+  releases carry the provenance bundle; it counts the last five.
 
 A clean scan cannot establish that a workbook is safe.
 
@@ -150,7 +152,9 @@ Current entries:
   The focused rules have no entries.
 - YARA Forge and ClamAV: there are none. The initial CI scan found no
   ClamAV signatures.
-- zizmor: there are none; the repository has no `.github/zizmor.yml` and
+- zizmor: `.github/zizmor.yml` turns off `superfluous-actions`, which asks
+  Publish to create the release with `gh release` in place of
+  softprops/action-gh-release, until that change can be dry-run. There are
   no inline exceptions.
 
 ## Pinning and updates
@@ -163,10 +167,11 @@ hash-locked `requirements-dev.txt`, and the YARA Forge rules to a release
 and its SHA-256 in `.github/security/yara.json`. ClamAV's signatures change
 too often to pin, so freshclam fetches and verifies them on every run.
 
-The `ROneCOne.cls` that CI analyzes and Security and Malware scan build into
-the demo workbooks is checked out from the ROneCOne repository at a full
-commit SHA (v1.10.3). No updater follows it; it moves by hand in the
-workflows, and the comment at the pin in `ci.yml` gives the commands.
+The `ROneCOne.cls` that CI analyzes, Security and Malware scan build into
+the demo workbooks, and Publish releases is checked out from the ROneCOne
+repository at a full commit SHA (v1.10.3). No updater follows it; it moves
+by hand in the workflows, and the comment at the pin in `ci.yml` gives the
+commands.
 
 Dependabot proposes updates to GitHub Actions, the Python lock files
 (`.github/requirements/` and `requirements-dev.txt`) and the ClamAV image
@@ -178,26 +183,35 @@ and Malware scan pass; a third-party major version waits for review.
 
 ## Releases
 
-The workbooks and modules are built locally, and the GitHub release
-carries `ReDimUI.cls`, `ReDimHost.bas`, `ROneCOne.cls` and the demo
-workbooks.
+Pushing a `vX.Y.Z` tag runs the Publish workflow
+(`.github/workflows/publish.yml`). It refuses a tag that is not
+`REDIM_VERSION` in `ReDimUI.cls`, runs `tools/stamp_release.py` and fails
+if that changes any committed source, and takes the release files from the
+tagged commit with the CRLF endings the VBE expects. It then runs
+`tools/security_scan.py` over those files with ClamAV and the pinned YARA
+Forge rules, judging findings by `tools/security_expected.json` at the
+tag, and only when the scan passes signs the files' build provenance and
+creates the GitHub release with:
 
-Publishing the release starts `.github/workflows/release-security.yml`.
-It waits for the release's assets to settle, downloads them, and runs
-`tools/security_scan.py` over them with ClamAV and the pinned YARA Forge
-rules, judging findings by `tools/security_expected.json` at the release
-tag. It attaches `vX.Y.Z-security-report.md` to the release even when the
-scan finds something unexpected, and then fails, so the finding is seen.
-Started by hand with a release's tag, the workflow is a dry run and
-attaches nothing.
+- `ReDimUI.cls` and `ReDimHost.bas`: the runtime.
+- `ROneCOne.cls`: the ROneCOne release the runtime is tested against,
+  checked out at the commit pinned in the workflows.
+- `ReDim-<version>.sigstore.json`: the signed build provenance.
+- `vX.Y.Z-security-report.md`: the scan's report.
+
+Releases no longer carry the demo workbooks; `tools/build_workbooks.py`
+builds them from `demo/vba/` with pyOpenVBA. Releases up to 1.1.1 were
+built locally, carry the workbooks, and have no provenance. Started by
+hand, Publish is a dry run: it builds, scans and assembles the same files
+and uploads them as the `release-preview` artifact instead.
 
 ### Release security reports
 
 From 1.1.0, each release carries `vX.Y.Z-security-report.md`: the SHA-256
-of every workbook and source file, mraptor's verdict on each file, each
-module's olevba findings, mraptor matches, YARA-X (including pinned YARA
-Forge) and ClamAV results, and the p-code check. The report names the
-workflow run that wrote it.
+of every released file, mraptor's verdict on each file, each module's
+olevba findings, mraptor matches, YARA-X (including pinned YARA Forge) and
+ClamAV results, and the p-code check. The report names the workflow run
+that wrote it. Reports up to 1.1.1 also cover the workbooks.
 
 Workbooks up to 1.0.4 carry an empty `Module1` from the build template
 whose p-code holds one comment line,
@@ -206,20 +220,27 @@ never runs. 1.1.0 builds without it.
 
 ### Verifying a download
 
-Compare a download's SHA-256 with the report, or with the digest GitHub
+To check that a file was built by this repository's Publish workflow from
+a tagged commit:
+
+```bash
+gh attestation verify ReDimUI.cls --repo WilliamSmithEdward/ReDim
+```
+
+Or compare a download's SHA-256 with the report, or with the digest GitHub
 lists beside each asset:
 
 ```powershell
-Get-FileHash .\ReDim_Snake.xlsm -Algorithm SHA256
+Get-FileHash .\ReDimUI.cls -Algorithm SHA256
 ```
 
 To scan a file yourself:
 
 ```
 pip install oletools==0.60.2 yara-x==1.20.0
-olevba -a ReDim_Snake.xlsm
-mraptor ReDim_Snake.xlsm
-python tools/security_scan.py --clamav ReDim_Snake.xlsm  # requires clamscan and current signatures
+olevba -a ReDimHost.bas
+mraptor ReDimHost.bas
+python tools/security_scan.py --clamav ReDimHost.bas  # requires clamscan and current signatures
 ```
 
 ## Repository settings

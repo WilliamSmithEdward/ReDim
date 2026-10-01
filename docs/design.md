@@ -163,14 +163,15 @@ theme sets, stand as drawn, where rewriting them was half of a 100-control swap.
   installs the pyvbaanalysis version locked in `.github/requirements/ci.txt`
 - `tools/security_scan.py` runs olevba, mraptor, YARA-X, and ClamAV over the runtime files and
   built workbooks. It fails on an unexplained scanner finding, ClamAV error, or any p-code in a
-  workbook. The Security and Malware scan workflows run it on every push, and the release
-  security workflow runs it over each release's assets and attaches the report (see
+  workbook. The Security and Malware scan workflows run it on every push, and Publish runs it
+  over the release files it builds from a `vX.Y.Z` tag and attaches the report (see
   SECURITY.md)
-- `tools/stamp_release.py` writes the release header into every source a release ships (both
+- `tools/stamp_release.py` writes the release header into every source ReDim ships (both
   runtime files and each demo module): the version from `REDIM_VERSION`, that version's
   CHANGELOG date, the repository, and the MIT license text from `LICENSE`, ahead of
   `Option Explicit`. `tests/python/test_source_guards.py` fails until every source carries the
-  current header, so a version bump cannot ship a stale one
+  current header, so a version bump cannot ship a stale one, and Publish runs it and fails if
+  it changes a committed source
 - `tests/python/test_compile.py` compiles every shipped workbook with the real VBA compiler via
   pyvbaharness, because two grammar rules bit during development that static analysis does not
   model: statement-position calls with multiple parenthesized arguments, and case-insensitive

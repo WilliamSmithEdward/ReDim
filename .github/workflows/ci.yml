@@ -28,8 +28,9 @@ jobs:
       # which lives in its own repository beside this one. The ref is the
       # ROneCOne release ReDim ships and is tested against, not its main.
       # Nothing updates this pin: Dependabot cannot follow a checkout ref.
-      # Move it by hand, here and in security.yml and malware-scan.yml, to
-      # the commit a release tag points at:
+      # Move it by hand, here and in security.yml, malware-scan.yml and
+      # publish.yml, which releases this file, to the commit a release tag
+      # points at:
       #   gh api repos/WilliamSmithEdward/ROneCOne/git/ref/tags/<tag>
       # returns an annotated tag; read its commit with
       #   gh api repos/WilliamSmithEdward/ROneCOne/git/tags/<tag sha> --jq .object.sha
