@@ -4,4 +4,4 @@
 #   uv pip compile security.in --universal --generate-hashes --python-version 3.12 -o security.txt
 # Dependabot proposes each new release.
 oletools==0.60.2
-pyopenvba==6.3.4
+pyopenvba==6.3.5
