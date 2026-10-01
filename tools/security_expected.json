@@ -29,7 +29,6 @@
     "rc-task-run": "Task.Run starts an app's procedure as a task; the word also appears in comments.",
     "rc-http-put": "The HTTP method PUT, in the HttpClient's PutAsync.",
     "rc-register": "CancellationToken.Register, which records a callback. The scanners read Register as the Excel 4 macro REGISTER.",
-    "rc-event-name": "A constant named ROLE_FILE_CHANGE. The scanners read any name ending in _Change as an ActiveX event handler.",
     "doc-guid": "The workbook's document module holds no code, only Excel's attribute lines. Its VB_Base line names Excel's Workbook or Worksheet class by GUID, which reads as hex.",
     "yara-native": "The framework and ROneCOne declare Windows APIs for timers, UI input, clipboard, hashing, native delegates, and process support, as described above.",
     "yara-process": "ROneCOne exposes a general-purpose Process surface. ReDim and its demos do not call it.",
@@ -79,7 +78,6 @@
       "IOC: winmm.dll": "winmm"
     },
     "ROneCOne": {
-      "AutoExec: ROLE_FILE_CHANGE": "rc-event-name",
       "Suspicious: environment": "rc-process",
       "Suspicious: Open": "prose",
       "Suspicious: write": "prose",
@@ -184,7 +182,6 @@
       "X: call": "prose"
     },
     "ROneCOne": {
-      "A: ROLE_FILE_CHANGE": "rc-event-name",
       "W: RtlMoveMemory": "rc-memory",
       "W: ADODB.Stream": "rc-files",
       "W: CopyFile": "rc-files",

@@ -9,6 +9,11 @@
 - `requirements-dev.txt` installs on Windows again: it had been compiled without the
   Windows-only packages pywin32, colorama and win-unicode-console, so `--require-hashes`
   refused it there. Recompiled with its own command; no other pin moved.
+- CI, Security and Malware scan check out ROneCOne 1.10.3, where they pinned
+  1.10.1. 1.10.3 renames the private constant `ROLE_FILE_CHANGE` to
+  `ROLE_FILE_EVENT`, so the scanners no longer read it as an event handler
+  and its two accepted findings are removed. The pin's comment in `ci.yml`
+  says how to move it, since no updater follows it.
 
 ## 1.1.1 - 2026-09-29
 

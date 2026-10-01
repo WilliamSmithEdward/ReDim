@@ -139,13 +139,13 @@ Current entries:
 
 - olevba findings for 12 modules (`ThisWorkbook`, `Sheet1`, `ReDimUI`,
   `ReDimHost`, `ROneCOne` and the seven demo modules) and mraptor matches
-  for 10, each naming one of 35 recorded reasons.
+  for 10, each naming one of 34 recorded reasons.
 - mraptor calls every ReDim workbook SUSPICIOUS. It flags VBA that runs on
   its own (A) and also writes a file or memory (W) or runs code outside VBA
   (X). The demos build themselves in `Auto_Open`, the runtime declares
   Windows API functions, and ROneCOne carries its File and Process
-  surfaces, so each workbook shows all three. `ReDimUI.cls` alone reads
-  "Macro OK": nothing in it runs on its own.
+  surfaces, so each workbook shows all three. `ReDimUI.cls` and
+  `ROneCOne.cls` read "Macro OK": nothing in them runs on its own.
 - YARA-X rule matches from the repository's broad rules for 10 modules.
   The focused rules have no entries.
 - YARA Forge and ClamAV: there are none. The initial CI scan found no
@@ -163,9 +163,10 @@ hash-locked `requirements-dev.txt`, and the YARA Forge rules to a release
 and its SHA-256 in `.github/security/yara.json`. ClamAV's signatures change
 too often to pin, so freshclam fetches and verifies them on every run.
 
-The `ROneCOne.cls` that Security and Malware scan build into the demo
-workbooks is checked out from the ROneCOne repository at a full commit SHA
-(v1.10.1). No updater follows it; it moves by hand in the workflows.
+The `ROneCOne.cls` that CI analyzes and Security and Malware scan build into
+the demo workbooks is checked out from the ROneCOne repository at a full
+commit SHA (v1.10.3). No updater follows it; it moves by hand in the
+workflows, and the comment at the pin in `ci.yml` gives the commands.
 
 Dependabot proposes updates to GitHub Actions, the Python lock files
 (`.github/requirements/` and `requirements-dev.txt`) and the ClamAV image
