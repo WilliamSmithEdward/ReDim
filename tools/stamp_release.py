@@ -1,6 +1,6 @@
 """Stamps every release source with the release header.
 
-Each VBA source a release ships (both runtime files and every demo module)
+Each VBA source ReDim ships (both runtime files and every demo module)
 opens with the ReDim version and its release date, the repository, and the
 MIT license text, as comments ahead of Option Explicit. The version comes
 from REDIM_VERSION in ReDimUI.cls, the date from that version's CHANGELOG

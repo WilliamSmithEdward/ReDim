@@ -5,7 +5,7 @@
 
 These rules are the same in every WilliamSmithEdward repository.
 
-- **How a release happens here:** publishing a GitHub release starts the release reports, which scan it and attach their reports to it. Any other step, such as a marketplace upload, is described elsewhere in this file.
+- **How a release happens here:** pushing a `vX.Y.Z` tag runs Publish, which builds the release files in CI and creates the GitHub release with them, their signed provenance and the security reports. Any other step, such as a marketplace upload, is described elsewhere in this file.
 - **Starting a workflow by hand never releases anything.** Publish and every
   release report are dry runs when started with `gh workflow run` or the Run
   workflow button. They build, scan and assemble the release files exactly
@@ -32,3 +32,21 @@ These rules are the same in every WilliamSmithEdward repository.
 - **A scanner finding is fixed or accepted with a written reason** in the
   repository's accepted list. Never silence a scanner without one.
 <!-- repo-standards:end -->
+
+## Releasing
+
+1. Bump `REDIM_VERSION` in `src/ReDimUI.cls` and add a
+   `## X.Y.Z - YYYY-MM-DD` section to CHANGELOG.md. The release's notes are
+   taken from that section, and Publish fails without one.
+2. Run `python tools/stamp_release.py` to write the new header into every
+   release source. Publish runs it again and fails if it changes anything.
+3. Merge to `main` through a pull request.
+4. Optionally dry-run Publish: `gh workflow run publish.yml --ref main`,
+   then `gh run download <run-id> -n release-preview`.
+5. The owner tags the merged commit:
+   `git tag vX.Y.Z && git push origin vX.Y.Z`.
+
+Publish refuses a tag that is not `REDIM_VERSION`. It releases
+`ReDimUI.cls`, `ReDimHost.bas` and the `ROneCOne.cls` pinned in the
+workflows, with CRLF endings, and no workbooks. The demos are built from
+`demo/vba/` with `python tools/build_workbooks.py`.

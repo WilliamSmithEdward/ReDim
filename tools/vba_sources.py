@@ -51,8 +51,8 @@ def prepare_class_source(path: Path) -> str:
     raise ValueError(f"Class export preamble has no END marker: {path}")
 
 
-# Every VBA source a release ships: the two runtime files attached to the
-# release, and the demo modules built into its workbooks.
+# Every VBA source ReDim ships: the two runtime files attached to a release,
+# and the demo modules tools/build_workbooks.py builds into the demos.
 RELEASE_SOURCES = [SRC / "ReDimUI.cls", SRC / "ReDimHost.bas"] + sorted(
     DEMO_VBA.glob("*.bas")
 )

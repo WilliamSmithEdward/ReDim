@@ -1,0 +1,257 @@
+name: Publish
+
+# A v*.*.* tag releases ReDim. The build job refuses a tag that is not
+# REDIM_VERSION in ReDimUI.cls, proves the committed sources carry that
+# version's release header, and takes the release files from the tagged
+# commit: ReDimUI.cls, ReDimHost.bas and the pinned ROneCOne.cls, with the
+# CRLF endings the VBE expects. The security report job scans those files;
+# this workflow signs their build provenance and creates the GitHub release
+# with them, the signed bundle and the report. Demo workbooks are not
+# released: tools/build_workbooks.py builds them from demo/vba/.
+#
+# Started by hand, this is always a dry run: it builds, scans and assembles
+# the release files exactly as a release would, and uploads them as the
+# release-preview artifact instead of signing or releasing anything.
+
+"on":
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build the release files
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The ROneCOne release ReDim ships and is tested against. The pin moves
+      # by hand; ci.yml says how.
+      - name: Check out ROneCOne
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: WilliamSmithEdward/ROneCOne
+          ref: beae812c18ea29196fc7c26028da23ddcbb2ebe6 # v1.10.3
+          path: .ronecone
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12.14"
+
+      # First, so a mistyped tag fails in seconds. vba_sources imports only
+      # the standard library. A manual run has no tag to check.
+      - name: Verify tag matches REDIM_VERSION
+        id: version
+        run: |
+          version=$(python -c "import sys; sys.path.insert(0, 'tools'); from vba_sources import redim_version; print(redim_version())")
+          if [[ "$GITHUB_REF" == refs/tags/* ]] && [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match REDIM_VERSION $version."
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      # The header names the version and its CHANGELOG date, so stamping
+      # fails without a CHANGELOG entry, and any change it makes means the
+      # committed sources were not stamped for this version.
+      - name: Check the sources carry this version's header
+        run: |
+          python tools/stamp_release.py
+          git diff --exit-code
+
+      # The repository stores the sources with LF endings; the VBE imports an
+      # LF-only class file as a standard module, so the release copies carry
+      # CRLF. This reproduces ROneCOne's own release copy of ROneCOne.cls.
+      - name: Assemble the release files
+        run: |
+          mkdir release-files
+          for file in src/ReDimUI.cls src/ReDimHost.bas .ronecone/src/ROneCOne.cls; do
+            sed -e 's/\r$//' -e 's/$/\r/' "$file" > "release-files/$(basename "$file")"
+          done
+          sha256sum release-files/*
+
+      - name: Keep the release files
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-files
+          path: release-files/
+          if-no-files-found: error
+
+  # The scan a release has always carried, now over the CI-built files:
+  # olevba, mraptor, YARA-X with the pinned YARA Forge rules, ClamAV and the
+  # p-code check, with findings judged by tools/security_expected.json at
+  # this commit. The report is kept even when the scan finds something
+  # unexpected; the job then fails, and nothing is released.
+  security-report:
+    name: Security report
+    needs: build
+    runs-on: ubuntu-24.04
+    env:
+      VERSION: ${{ needs.build.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12.14"
+
+      - name: Install the scanner
+        run: pip install --require-hashes -r .github/requirements/release.txt
+
+      - name: Fetch checksum-pinned YARA Forge rules
+        run: python tools/yara_forge.py fetch
+
+      # The engine is the image pinned in .github/security/clamav, which
+      # Dependabot follows. freshclam fetches and verifies today's signatures
+      # into the volume the clamscan shim reads.
+      - name: Install ClamAV and current signatures
+        run: |
+          docker build --quiet --tag clamav-pinned .github/security/clamav
+          docker run --rm --entrypoint freshclam --volume clamav-db:/var/lib/clamav clamav-pinned --stdout
+          echo "$GITHUB_WORKSPACE/.github/security/clamav" >> "$GITHUB_PATH"
+          .github/security/clamav/clamscan --version
+
+      - name: Download the release files
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-files
+          path: release-files/
+
+      - name: Scan the release files
+        env:
+          TMPDIR: ${{ runner.temp }}
+        run: |
+          mkdir security-report
+          python tools/security_scan.py --clamav \
+            --forge-rules build/yara-forge/core.yar \
+            --report "security-report/v$VERSION-security-report.md" \
+            --title "Security report for ReDim v$VERSION" \
+            release-files/*.cls release-files/*.bas
+
+      - name: Keep the report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: security-report
+          path: security-report/
+          if-no-files-found: error
+
+  publish:
+    name: Attest the release files
+    needs: [build, security-report]
+    if: ${{ startsWith(github.ref, 'refs/tags/') && github.event_name != 'workflow_dispatch' }}
+    runs-on: ubuntu-24.04
+    permissions:
+      id-token: write # sign the attestation
+      attestations: write # store it
+    steps:
+      - name: Download the release files
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-files
+          path: release-files/
+
+      # Signed build provenance: `gh attestation verify <file> --repo
+      # WilliamSmithEdward/ReDim` shows which commit and run built a file.
+      - name: Attest the release files
+        id: attest
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: release-files/*
+
+      # The signed bundle goes on the GitHub release too, so a download can be
+      # checked offline: gh attestation verify <file> --bundle <bundle>.
+      - name: Keep the provenance bundle
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: provenance
+          path: ${{ steps.attest.outputs.bundle-path }}
+          if-no-files-found: error
+
+  # On a dry run `publish` is skipped; this job still assembles the release
+  # and uploads it as an artifact, and only the last step is skipped.
+  github-release:
+    name: Create GitHub release
+    needs: [build, security-report, publish]
+    if: >-
+      ${{ !cancelled() && needs.build.result == 'success' && needs.security-report.result == 'success'
+      && (needs.publish.result == 'success' || github.event_name == 'workflow_dispatch') }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write # create the release
+    env:
+      DRY_RUN: ${{ github.event_name == 'workflow_dispatch' }}
+      VERSION: ${{ needs.build.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download the release files
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-files
+          path: release/
+
+      - name: Download the security report
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: security-report
+          path: release/
+
+      - name: Download the provenance bundle
+        if: env.DRY_RUN != 'true'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: provenance
+          path: provenance/
+
+      - name: Name the bundle after the release
+        if: env.DRY_RUN != 'true'
+        run: |
+          test "$(find provenance -type f | wc -l)" = 1
+          mv provenance/* "release/ReDim-$VERSION.sigstore.json"
+
+      - name: Extract the changelog section for this version
+        run: |
+          awk -v ver="$VERSION" '
+            index($0, "## " ver " - ") == 1 { capture=1; next }
+            capture && /^## / { exit }
+            capture { print }
+          ' CHANGELOG.md > release_notes.md
+          if ! grep -q '[^[:space:]]' release_notes.md; then
+            echo "::error::CHANGELOG.md has no section for $VERSION."
+            exit 1
+          fi
+          ls -l release
+
+      - name: Keep what the release would carry
+        if: env.DRY_RUN == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-preview
+          path: |
+            release/
+            release_notes.md
+          if-no-files-found: error
+
+      - name: Create GitHub release
+        if: env.DRY_RUN != 'true'
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
+        with:
+          # The title is the tag and nothing else. The headline is in the body.
+          name: ${{ github.ref_name }}
+          tag_name: ${{ github.ref_name }}
+          body_path: release_notes.md
+          files: release/*
+          fail_on_unmatched_files: true
