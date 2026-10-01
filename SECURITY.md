@@ -1,128 +1,212 @@
-# Security
+# Security policy
 
 ## Reporting a vulnerability
 
-Report it privately: on the repository's Security tab choose **Report a vulnerability**, or go
-straight to <https://github.com/WilliamSmithEdward/ReDim/security/advisories/new>. The report
-stays between you and the maintainer until an advisory is published. Please do not describe a
-vulnerability in a public issue.
+Report a vulnerability privately, not in a public issue or pull request:
+[open a private report](https://github.com/WilliamSmithEdward/ReDim/security/advisories/new).
+Only the maintainer sees it. Include the release you used, the workbook or
+module involved, and the smallest file or steps that show the problem,
+with credentials and private data removed.
+
+A confirmed vulnerability is fixed in a release on the GitHub releases
+page, and the advisory is published with it,
+crediting you unless you ask otherwise.
 
 ## Supported versions
 
-Fixes go into the next release. ReDim is released from `main` and earlier versions get no
-patches, so use the [latest release](https://github.com/WilliamSmithEdward/ReDim/releases).
+Only the latest release on the GitHub releases page receives security
+fixes. Older releases are not maintained separately; update when a fix
+ships. ReDim is released from `main`.
 
-## What the code does
+## Scope
 
-ReDim is VBA. Like any macro, it runs inside Excel with the rights of the person who opens the
-workbook.
+ReDim is VBA. Like any macro, it runs inside Excel with the rights of the
+person who opens the workbook. A vulnerability here is ReDim's code, or
+the demo workbooks, reaching something beyond what is described below.
 
 `ReDimUI.cls` and `ReDimHost.bas`:
 
-- call Windows API functions: `SetTimer` and `KillTimer` for the frame timer and
-  `timeBeginPeriod` and `timeEndPeriod` for its resolution; `GetFocus`, `GetKeyState`,
-  `GetClassNameW`, `PostMessageW`, and `MapVirtualKeyW` to route keys; gdi32 to measure text;
-  user32 and kernel32 for the clipboard, the pointer, and settings such as the caret blink time;
-  and `RegGetValueW` to read two values under `HKEY_CURRENT_USER` that hold the Windows dark mode
-  and accent color;
-- bind keys with `Application.OnKey` for an app's hot keys and shortcuts, and while a ReDim
-  control has focus or a protected surface holds the typing keys; `Unmount`, `Shutdown`, and
-  closing the workbook release them;
-- call the handler procedures an app names, such as `OnClick` and `OnChange`, with
-  `Application.Run`;
+- call Windows API functions: `SetTimer` and `KillTimer` for the frame
+  timer and `timeBeginPeriod` and `timeEndPeriod` for its resolution;
+  `GetFocus`, `GetKeyState`, `GetClassNameW`, `PostMessageW`, and
+  `MapVirtualKeyW` to route keys; gdi32 to measure text; user32 and
+  kernel32 for the clipboard, the pointer, and settings such as the caret
+  blink time; and `RegGetValueW` to read two values under
+  `HKEY_CURRENT_USER` that hold the Windows dark mode and accent color;
+- bind keys with `Application.OnKey` for an app's hot keys and shortcuts,
+  and while a ReDim control has focus or a protected surface holds the
+  typing keys; `Unmount`, `Shutdown`, and closing the workbook release
+  them;
+- call the handler procedures an app names, such as `OnClick` and
+  `OnChange`, with `Application.Run`;
 - read and write the clipboard for copy and paste in fields and tables;
 - start no program, open no network connection, and write no file.
 
-`ROneCOne.cls`, which ReDim needs and every demo workbook embeds, is a general-purpose runtime.
-Its Process surface can start a program (`cmd.exe` through `WScript.Shell`, or
-`CreateProcessW`), its HttpClient makes HTTP requests (WinHttp), its File and Directory surfaces
-read and write files, its Data surface uses ADODB, and its Hash surface uses Windows CNG
-(`bcrypt.dll`). Each runs only when an app calls it. ReDim itself uses ROneCOne's tasks,
-cancellation tokens, and JSON.
+### The ROneCOne runtime
 
-The demo workbooks build themselves in `Auto_Open`. Two of them go further:
+`ROneCOne.cls`, which ReDim needs and every demo workbook embeds, is a
+general-purpose runtime. Its Process surface can start a program
+(`cmd.exe` through `WScript.Shell`, or `CreateProcessW`), its HttpClient
+makes HTTP requests (WinHttp), its File and Directory surfaces read and
+write files, its Data surface uses ADODB, and its Hash surface uses
+Windows CNG (`bcrypt.dll`). Each runs only when an app calls it. ReDim
+itself uses ROneCOne's tasks, cancellation tokens, and JSON. Report a
+vulnerability in the runtime itself to
+[ROneCOne](https://github.com/WilliamSmithEdward/ROneCOne/security/advisories/new).
 
-- ReDex (`ReDim_ReDex.xlsm`) reads Pokemon data and sprite images from PokeAPI over HTTPS and
-  caches the sprites in the temp folder as `redex_<id>.png`.
-- Widget Gallery (`ReDim_Widget_Gallery.xlsm`) draws a logo on a chart and saves it to the temp
-  folder as `rdm_gallery_logo.png`.
+### The demo workbooks
+
+The demo workbooks build themselves in `Auto_Open`. Two of them go
+further:
+
+- ReDex (`ReDim_ReDex.xlsm`) reads Pokemon data and sprite images from
+  PokeAPI over HTTPS and caches the sprites in the temp folder as
+  `redex_<id>.png`.
+- Widget Gallery (`ReDim_Widget_Gallery.xlsm`) draws a logo on a chart
+  and saves it to the temp folder as `rdm_gallery_logo.png`.
 
 The other demos reach no network and write no file.
 
-## What scanners report
+### Opening the demo workbooks
 
-Macro scanners flag much of the above, and ordinary words too: olevba and mraptor match
-keywords such as "run", "open", and "call" anywhere in the code, comments included.
-[`tools/security_expected.json`](tools/security_expected.json) lists every olevba finding and
-mraptor match for each module with the reason for it. On pushes, pull requests, and daily
-at 08:17 UTC, the [Security workflow](.github/workflows/security.yml) runs the macro job and the
-[Malware scan workflow](.github/workflows/malware-scan.yml) runs separate YARA-X and ClamAV
-jobs, each with its own status and report. The macro job runs
-[`tools/security_scan.py`](tools/security_scan.py) over the runtime files and freshly built demo
-workbooks, and fails on any finding the list does not explain, and on an expected one that no
-longer occurs.
+Office blocks macros in files downloaded from the internet. After checking
+a workbook's hash (see Releases), open its Properties in File Explorer,
+select **Unblock**, and then open it and enable content.
 
-mraptor (MacroRaptor) calls every ReDim workbook SUSPICIOUS. It flags VBA that runs on its own
-(A) and also writes a file or memory (W) or runs code outside VBA (X). The demos build
-themselves in `Auto_Open`, the runtime declares Windows API functions, and ROneCOne carries its
-File and Process surfaces, so each workbook shows all three. `ReDimUI.cls` alone reads "Macro
-OK": nothing in it runs on its own.
+## How the code is checked
 
-YARA-X scans the extracted VBA source of every module, including modules inside workbooks,
-with the repository's [VBA malware rules](tools/vba_malware.yar). The broad rules flag
-automatic execution, native API calls, process and network access, file writing, and dynamic
-invocation. [`tools/security_expected.json`](tools/security_expected.json) records each
-reviewed module and rule pair with the reason it is expected. An unlisted match fails CI;
-in strict CI, a documented match that disappears also fails so the baseline stays current.
-Focused rules for encoded PowerShell, remote execution through Windows binaries, and Run key
-persistence have no exceptions. A clear scan cannot establish that a workbook is safe.
+Three workflows check every pull request and every push to `main`, and
+their gates decide whether a change can merge: **CI passed**,
+**Security passed** and **Malware scan passed**. A gate passes only when
+every job before it did, and any unexpected finding fails it, whatever its
+severity. Security and Malware scan also run daily at 08:17 UTC.
 
-The YARA-X job also runs [YARA Forge's core rules](https://github.com/YARAHQ/yara-forge)
-against every raw file and extracted VBA module. The exact upstream release and archive
-SHA-256 are in [`.github/security/yara.json`](.github/security/yara.json); CI verifies the
-download before compiling it. A weekly Monday
-[updater](.github/workflows/update-yara-rules.yml) proposes a new release and checksum in a
-PR when available. It starts CI, Security and Malware scan on that PR's branch, and the
-PR merges itself only once all three pass, so a new match holds it until it is reviewed.
-Forge matches require a specific
-file or module and rule allowance in `tools/security_expected.json` with a reviewed
-reason. There are currently no Forge allowances.
+Each scan covers `ReDimUI.cls`, `ReDimHost.bas`, the `ROneCOne.cls` the
+build uses, and the demo workbooks, which `tools/build_workbooks.py`
+builds fresh from source with pyOpenVBA for the run.
 
-ClamAV scans each source file and workbook as a file, then scans the VBA modules extracted
-from them. The engine is the ClamAV image pinned by digest in `.github/security/clamav`,
-which Dependabot keeps current. Each CI run builds it and runs `freshclam` before scanning,
-so scheduled runs use current official signatures. A detection is
-recorded by file or module and signature name in the report; an undocumented detection or
-scanner error fails the workflow. Reviewed detections can be given specific reasons in
-`tools/security_expected.json`. Signature updates can change the results, so the report
-records the engine and database version used. The initial CI scan found no ClamAV signatures,
-so there are currently no ClamAV allowances.
+- **Code:** olevba and mraptor (MacroRaptor), both from oletools, and a
+  p-code check, run by `tools/security_scan.py`. olevba and mraptor match
+  keywords such as "run", "open", and "call" anywhere in the code,
+  comments included, and every finding and mraptor match must be listed
+  for its module with a reason. ReDim builds its workbooks from VBA source
+  and Excel compiles the source when a workbook opens, so a workbook holds
+  no compiled p-code. P-code that disagrees with its source is how VBA
+  stomping hides code, so any p-code fails the scan, and olevba's own
+  stomping check runs as well. The results go to the run's `macro-report`
+  artifact, not to code scanning. CI also runs pyVBAanalysis.
+- **Workflows:** zizmor audits the GitHub Actions workflows; a finding fails
+  Security.
+- **Dependencies:** there is nothing to audit. ReDim's only dependency is
+  ROneCOne, a VBA class checked out at a pinned commit (see Pinning and
+  updates), and the Python tools the workflows run come from hash-locked
+  files.
+- **Malware:** ClamAV, with signatures freshclam fetches and verifies on
+  every run, and YARA-X, with the YARA Forge rules pinned to a release and
+  its SHA-256, scan each source file and workbook as a file and then the
+  VBA modules extracted from them. YARA-X also scans the extracted source
+  with the repository's rules in `tools/vba_malware.yar`: broad rules for
+  automatic execution, native API calls, process and network access, file
+  writing, and dynamic invocation, and focused rules for encoded
+  PowerShell, remote execution through Windows binaries, and Run key
+  persistence. A YARA Forge download that does not match its pinned
+  SHA-256, an unlisted match or detection, or a scanner error fails
+  Malware scan. Signature updates can change the results, so the report
+  records the engine and database version used.
+- **OpenSSF Scorecard** rates the repository's security practices on every
+  change to `main` and weekly, and the README badge shows the result.
+  Some of its checks do not fit this project. A single maintainer cannot
+  have a second person approve every change. The workbooks and modules are
+  built locally rather than by CI, so a release carries the security
+  report's SHA-256 list rather than a build provenance signature. Fuzzing
+  does not apply: ReDim is VBA, which runs only inside Office.
 
-The scan also checks each workbook for p-code. ReDim builds its workbooks from VBA source with
-pyOpenVBA, and Excel compiles the source when a workbook opens, so a workbook holds no compiled
-p-code. P-code that disagrees with its source is how VBA stomping hides code, and any p-code
-fails the scan. Workbooks up to 1.0.4 carry an empty `Module1` from the build template whose
-p-code holds one comment line, `TESTING ONLY DO NOT INCLUDE THIS IN FINAL OUTPUT`. It has no
-code and never runs. 1.1.0 builds without it.
+A clean scan cannot establish that a workbook is safe.
 
-[OpenSSF Scorecard](https://scorecard.dev/viewer/?uri=github.com/WilliamSmithEdward/ReDim)
-rates the repository's security practices on every change to main and weekly, and publishes
-the result the README badge shows. Some of its checks do not fit this project: a single
-maintainer cannot have a second person approve every change, the workbooks and modules are
-built locally rather than by CI, so a release carries this report's SHA-256 list rather than
-a build provenance signature, and ReDim is VBA, which no fuzzer can run outside Office.
+## Accepted findings
 
-## Release security reports
+A finding is fixed, or accepted with a written reason in
+[`tools/security_expected.json`](tools/security_expected.json). An entry
+matches the tool, the module (or, for YARA Forge and ClamAV, the file or
+module), and the finding: an olevba finding, an mraptor match, a YARA-X
+rule identifier, or a ClamAV signature name. Entries are not tied to a
+file's content. In the Security and Malware scan runs (`--strict`), an
+entry that no longer matches fails the scan, so the list stays current.
+zizmor keeps its exceptions in `.github/zizmor.yml` or inline beside the
+line they excuse, each with its reason.
 
-From 1.1.0, each release carries `vX.Y.Z-security-report.md`. The
-[release security workflow](.github/workflows/release-security.yml) writes it from the
-release's published files: the SHA-256 of every workbook and source file, mraptor's verdict on
-each file, each module's olevba findings, mraptor matches, YARA-X (including pinned YARA
-Forge) and ClamAV results, and the p-code
-check. The report names the workflow run that wrote it.
+Current entries:
 
-To check a download, compare its SHA-256 with the report, or with the digest GitHub lists
-beside each asset:
+- olevba findings for 12 modules (`ThisWorkbook`, `Sheet1`, `ReDimUI`,
+  `ReDimHost`, `ROneCOne` and the seven demo modules) and mraptor matches
+  for 10, each naming one of 35 recorded reasons.
+- mraptor calls every ReDim workbook SUSPICIOUS. It flags VBA that runs on
+  its own (A) and also writes a file or memory (W) or runs code outside VBA
+  (X). The demos build themselves in `Auto_Open`, the runtime declares
+  Windows API functions, and ROneCOne carries its File and Process
+  surfaces, so each workbook shows all three. `ReDimUI.cls` alone reads
+  "Macro OK": nothing in it runs on its own.
+- YARA-X rule matches from the repository's broad rules for 10 modules.
+  The focused rules have no entries.
+- YARA Forge and ClamAV: there are none. The initial CI scan found no
+  ClamAV signatures.
+- zizmor: there are none; the repository has no `.github/zizmor.yml` and
+  no inline exceptions.
+
+## Pinning and updates
+
+Everything the workflows run is pinned: actions to full commit SHAs,
+runners to named OS releases, the ClamAV image to a digest, Python tools
+(oletools, YARA-X, pyOpenVBA, zizmor, pyVBAanalysis) to hash-locked lock
+files in `.github/requirements/`, the local development tools to the
+hash-locked `requirements-dev.txt`, and the YARA Forge rules to a release
+and its SHA-256 in `.github/security/yara.json`. ClamAV's signatures change
+too often to pin, so freshclam fetches and verifies them on every run.
+
+The `ROneCOne.cls` that Security and Malware scan build into the demo
+workbooks is checked out from the ROneCOne repository at a full commit SHA
+(v1.10.1). No updater follows it; it moves by hand in the workflows.
+
+Dependabot proposes updates to GitHub Actions, the Python lock files
+(`.github/requirements/` and `requirements-dev.txt`) and the ClamAV image
+once a version is a week old (the owner's own packages, such as pyOpenVBA
+and pyVBAanalysis, at once), and at once for a security advisory. The
+Update YARA rules workflow proposes new YARA pins each week. A minor or
+patch update, and the YARA pull request, merges itself once CI, Security
+and Malware scan pass; a third-party major version waits for review.
+
+## Releases
+
+The workbooks and modules are built locally, and the GitHub release
+carries `ReDimUI.cls`, `ReDimHost.bas`, `ROneCOne.cls` and the demo
+workbooks.
+
+Publishing the release starts `.github/workflows/release-security.yml`.
+It waits for the release's assets to settle, downloads them, and runs
+`tools/security_scan.py` over them with ClamAV and the pinned YARA Forge
+rules, judging findings by `tools/security_expected.json` at the release
+tag. It attaches `vX.Y.Z-security-report.md` to the release even when the
+scan finds something unexpected, and then fails, so the finding is seen.
+Started by hand with a release's tag, the workflow is a dry run and
+attaches nothing.
+
+### Release security reports
+
+From 1.1.0, each release carries `vX.Y.Z-security-report.md`: the SHA-256
+of every workbook and source file, mraptor's verdict on each file, each
+module's olevba findings, mraptor matches, YARA-X (including pinned YARA
+Forge) and ClamAV results, and the p-code check. The report names the
+workflow run that wrote it.
+
+Workbooks up to 1.0.4 carry an empty `Module1` from the build template
+whose p-code holds one comment line,
+`TESTING ONLY DO NOT INCLUDE THIS IN FINAL OUTPUT`. It has no code and
+never runs. 1.1.0 builds without it.
+
+### Verifying a download
+
+Compare a download's SHA-256 with the report, or with the digest GitHub
+lists beside each asset:
 
 ```powershell
 Get-FileHash .\ReDim_Snake.xlsm -Algorithm SHA256
@@ -137,7 +221,18 @@ mraptor ReDim_Snake.xlsm
 python tools/security_scan.py --clamav ReDim_Snake.xlsm  # requires clamscan and current signatures
 ```
 
-## Opening the demo workbooks
+## Repository settings
 
-Office blocks macros in files downloaded from the internet. After checking a workbook's hash,
-open its Properties in File Explorer, select **Unblock**, and then open it and enable content.
+<!-- repo-standards:begin security-settings. Copied from WilliamSmithEdward/repo-standards, templates/security/settings-block.md. Change it there; the weekly rescan fails a copy that differs. -->
+- `main` accepts changes only through a pull request that passes
+  **CI passed**, **Security passed** and **Malware scan passed**. The
+  ruleset has no bypass, for the owner either, and refuses force-pushes and
+  deleting the branch.
+- A `v*` release tag cannot be moved or deleted once pushed, except by a
+  repository admin.
+- A workflow that uses an action not pinned to a full commit SHA fails to
+  run. Workflow tokens are read-only unless a job is granted more for
+  itself.
+- Secret scanning with push protection, Dependabot alerts and security
+  updates, and private vulnerability reporting are on.
+<!-- repo-standards:end -->
