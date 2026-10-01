@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- OpenSSF Scorecard rates the repository's security practices on every change to main and
+  weekly, and the README shows its badge.
+- The release security workflow grants write access to the one job that uploads the report,
+  rather than to the whole workflow. No change to ReDim itself.
+- `requirements-dev.txt` installs on Windows again: it had been compiled without the
+  Windows-only packages pywin32, colorama and win-unicode-console, so `--require-hashes`
+  refused it there. Recompiled with its own command; no other pin moved.
+
 ## 1.1.1 - 2026-09-29
 
 - The Security workflow builds the demos with pyOpenVBA 6.3.2, where it

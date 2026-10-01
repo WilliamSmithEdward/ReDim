@@ -82,8 +82,9 @@ against every raw file and extracted VBA module. The exact upstream release and 
 SHA-256 are in [`.github/security/yara.json`](.github/security/yara.json); CI verifies the
 download before compiling it. A weekly Monday
 [updater](.github/workflows/update-yara-rules.yml) proposes a new release and checksum in a
-PR when available. It dispatches the Malware scan workflow on that PR's branch; wait
-for the YARA-X and ClamAV jobs before merging. Forge matches require a specific
+PR when available. It starts CI, Security and Malware scan on that PR's branch, and the
+PR merges itself only once all three pass, so a new match holds it until it is reviewed.
+Forge matches require a specific
 file or module and rule allowance in `tools/security_expected.json` with a reviewed
 reason. There are currently no Forge allowances.
 
@@ -103,6 +104,13 @@ p-code. P-code that disagrees with its source is how VBA stomping hides code, an
 fails the scan. Workbooks up to 1.0.4 carry an empty `Module1` from the build template whose
 p-code holds one comment line, `TESTING ONLY DO NOT INCLUDE THIS IN FINAL OUTPUT`. It has no
 code and never runs. 1.1.0 builds without it.
+
+[OpenSSF Scorecard](https://scorecard.dev/viewer/?uri=github.com/WilliamSmithEdward/ReDim)
+rates the repository's security practices on every change to main and weekly, and publishes
+the result the README badge shows. Some of its checks do not fit this project: a single
+maintainer cannot have a second person approve every change, the workbooks and modules are
+built locally rather than by CI, so a release carries this report's SHA-256 list rather than
+a build provenance signature, and ReDim is VBA, which no fuzzer can run outside Office.
 
 ## Release security reports
 
