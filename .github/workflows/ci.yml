@@ -27,11 +27,17 @@ jobs:
       # The analyzer resolves cross-module references against the runtime,
       # which lives in its own repository beside this one. The ref is the
       # ROneCOne release ReDim ships and is tested against, not its main.
+      # Nothing updates this pin: Dependabot cannot follow a checkout ref.
+      # Move it by hand, here and in security.yml and malware-scan.yml, to
+      # the commit a release tag points at:
+      #   gh api repos/WilliamSmithEdward/ROneCOne/git/ref/tags/<tag>
+      # returns an annotated tag; read its commit with
+      #   gh api repos/WilliamSmithEdward/ROneCOne/git/tags/<tag sha> --jq .object.sha
       - name: Check out ROneCOne
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: WilliamSmithEdward/ROneCOne
-          ref: a84b5719e443c50d02575a50a645531d0c3a7858 # v1.10.1
+          ref: beae812c18ea29196fc7c26028da23ddcbb2ebe6 # v1.10.3
           path: .ronecone
           persist-credentials: false
 
