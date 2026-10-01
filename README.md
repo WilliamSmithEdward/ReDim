@@ -2,6 +2,7 @@
 
 [![CI](https://github.com/WilliamSmithEdward/ReDim/actions/workflows/ci.yml/badge.svg)](https://github.com/WilliamSmithEdward/ReDim/actions/workflows/ci.yml)
 [![Security](https://github.com/WilliamSmithEdward/ReDim/actions/workflows/security.yml/badge.svg)](https://github.com/WilliamSmithEdward/ReDim/actions/workflows/security.yml)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/WilliamSmithEdward/ReDim/badge)](https://scorecard.dev/viewer/?uri=github.com/WilliamSmithEdward/ReDim)
 [![Latest release](https://img.shields.io/github/v/release/WilliamSmithEdward/ReDim)](https://github.com/WilliamSmithEdward/ReDim/releases/latest)
 [![MIT license](https://img.shields.io/github/license/WilliamSmithEdward/ReDim)](LICENSE)
 [![Microsoft 365 Excel on Windows x64](https://img.shields.io/badge/Excel-Microsoft_365_Windows_x64-217346)](#installation)
