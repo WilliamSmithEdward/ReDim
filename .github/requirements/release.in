@@ -3,4 +3,4 @@
 #   uv pip compile release.in --universal --generate-hashes --python-version 3.12 -o release.txt
 # Dependabot proposes each new release.
 oletools==0.60.2
-yara-x==1.20.0
+yara-x==1.21.0
