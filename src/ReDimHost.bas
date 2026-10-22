@@ -43,6 +43,35 @@ Private Declare PtrSafe Function KillTimer Lib "user32" ( _
     ByVal nIDEvent As LongPtr _
 ) As Long
 
+' A WM_TIMER that reaches the TIMERPROC while VBA is in break mode, or
+' after an edit to this module, takes Excel down. So the timer is held
+' while code ReDim runs could stop in the debugger, and the pump waits
+' while Excel's active window is the VBA editor or a VBA dialog, where a
+' breakpoint, Break, or an edit is a keystroke away. GetActiveWindow
+' names the window Excel's thread has active, in front or not.
+Private Declare PtrSafe Function GetActiveWindow Lib "user32" () As LongPtr
+
+Private Declare PtrSafe Function GetAncestor Lib "user32" ( _
+    ByVal windowHandle As LongPtr, _
+    ByVal ancestorKind As Long _
+) As LongPtr
+
+Private Const GA_ROOTOWNER As Long = 3
+
+' 24 days, under SetTimer's longest interval of about 24.8. A held timer
+' keeps its id and does not fire.
+Private Const PUMP_HELD_MS As Long = 24 * 86400 * 1000
+
+' A tick holds the timer while it runs, then sets the next one to come
+' when the interval says, as the periodic timer had it.
+Private Declare PtrSafe Function QueryPerformanceCounter Lib "kernel32" ( _
+    ByRef counter As LongLong _
+) As Long
+
+Private Declare PtrSafe Function QueryPerformanceFrequency Lib "kernel32" ( _
+    ByRef ticksPerSecond As LongLong _
+) As Long
+
 ' SetTimer rides the global timer resolution, which defaults to roughly
 ' 15.6 ms and quantizes frames into uneven buckets. Raising it to 1 ms
 ' while the pump is armed makes frames land on schedule; it is restored on
@@ -98,7 +127,15 @@ Private Const PUMP_MAX_CONSECUTIVE_ERRORS As Long = 10
 Private Const PUMP_ID_NAME As String = "rdm_pump_id"
 
 Private gTimerId As LongPtr
-Private gInTick As Boolean
+Private gIntervalMs As Long
+' How deep the code holding the pump is nested: a tick, a click or key,
+' and each handler ReDim runs. While anything holds it, the timer waits
+' and no tick runs.
+Private gHoldDepth As Long
+' True while the pump waits for a workbook window to be active again.
+Private gPumpPaused As Boolean
+Private gActiveWindowOverridden As Boolean
+Private gActiveWindowOverride As LongPtr
 Private gConsecutiveErrors As Long
 Private gTimerResolutionRaised As Boolean
 Private gPinCursor As Boolean
@@ -123,11 +160,13 @@ Private gCapturedCodes As Collection
 Public Sub RdxKeyChar(ByVal keyText As String)
     On Error Resume Next
     Err.Clear
+    RdxHoldPump
     ReDimUI.DispatchKey keyText
     If Err.Number <> 0 Then
         Err.Clear
         ReDimUI.NoteTickFault
     End If
+    RdxReleasePump
 End Sub
 
 ' The keys a focused control captures: OnKey codes paired with the key
@@ -454,11 +493,13 @@ End Sub
 Public Sub RdxShortcut(ByVal keyCode As String)
     On Error Resume Next
     Err.Clear
+    RdxHoldPump
     ReDimUI.DispatchShortcut keyCode
     If Err.Number <> 0 Then
         Err.Clear
         ReDimUI.NoteTickFault
     End If
+    RdxReleasePump
 End Sub
 
 ' Alt+letter target for access keys, bound only while an app sheet with
@@ -466,11 +507,13 @@ End Sub
 Public Sub RdxAccessKey(ByVal keyLetter As String)
     On Error Resume Next
     Err.Clear
+    RdxHoldPump
     ReDimUI.DispatchAccessKey keyLetter
     If Err.Number <> 0 Then
         Err.Clear
         ReDimUI.NoteTickFault
     End If
+    RdxReleasePump
 End Sub
 
 ' The command palette's key: opens the palette of the app on the active
@@ -478,11 +521,13 @@ End Sub
 Public Sub RdxOpenPalette()
     On Error Resume Next
     Err.Clear
+    RdxHoldPump
     ReDimUI.OpenPaletteOnActiveSheet
     If Err.Number <> 0 Then
         Err.Clear
         ReDimUI.NoteTickFault
     End If
+    RdxReleasePump
 End Sub
 
 ' The command palette field's OnChange: runs the entry picked. Never
@@ -491,11 +536,13 @@ End Sub
 Public Sub RdxPalettePick()
     On Error Resume Next
     Err.Clear
+    RdxHoldPump
     ReDimUI.RunPalettePick
     If Err.Number <> 0 Then
         Err.Clear
         ReDimUI.NoteTickFault
     End If
+    RdxReleasePump
 End Sub
 
 ' Shape.OnAction target for every ReDim component. Application.Caller carries
@@ -503,15 +550,18 @@ End Sub
 Public Sub RdxDispatch()
     Dim callerName As Variant
 
+    RdxHoldPump
     On Error GoTo SwallowError
     callerName = Application.Caller
     If VarType(callerName) = vbString Then
         ReDimUI.DispatchShape CStr(callerName)
     End If
+    RdxReleasePump
     Exit Sub
 
 SwallowError:
     ' A dispatch failure must never surface Excel's runtime error dialog.
+    RdxReleasePump
 End Sub
 
 ' SetTimer callback. Keep this minimal: one guarded call into the runtime.
@@ -522,6 +572,9 @@ Public Sub RdxPumpCallback( _
     ByVal idEvent As LongPtr, _
     ByVal dwTime As Long _
 )
+    Dim tickStarted As LongLong
+    Dim tickEnded As LongLong
+
     ' A tick from a timer this state did not arm comes from one a VBA
     ' reset orphaned. It stops itself and gives back the timer resolution
     ' its arming raised, where it ticked on beside the new pump, and on its
@@ -530,8 +583,16 @@ Public Sub RdxPumpCallback( _
         If KillTimer(0, idEvent) <> 0 Then timeEndPeriod 1
         Exit Sub
     End If
-    If gInTick Then Exit Sub
-    gInTick = True
+    ' No tick runs inside another, or under a click or key still running.
+    If gHoldDepth > 0 Then Exit Sub
+    If PumpMustPause() Then
+        PausePump
+        Exit Sub
+    End If
+    ' The tick holds the timer: a breakpoint in the work it runs, or in a
+    ' handler that work calls, stops in the debugger with no WM_TIMER due.
+    QueryPerformanceCounter tickStarted
+    RdxHoldPump
     On Error Resume Next
     ReDimUI.TickAll
     If Err.Number <> 0 Then
@@ -542,14 +603,41 @@ Public Sub RdxPumpCallback( _
         If Not ReDimUI.HasPendingWork Then RdxStopPump
     End If
     On Error GoTo 0
-    gInTick = False
+    QueryPerformanceCounter tickEnded
+    ReleaseHold NextTickMs(tickStarted, tickEnded)
 End Sub
+
+' The wait before the next tick: what is left of the interval after a tick
+' that took elapsed time. Windows waits at least 10 ms.
+Private Function NextTickMs(ByVal tickStarted As LongLong, ByVal tickEnded As LongLong) As Long
+    Static ticksPerSecond As LongLong
+    Dim tookMs As Double
+
+    If ticksPerSecond = 0 Then QueryPerformanceFrequency ticksPerSecond
+    tookMs = (tickEnded - tickStarted) * 1000# / ticksPerSecond
+    If tookMs >= gIntervalMs - 1 Then
+        NextTickMs = 1
+    Else
+        NextTickMs = gIntervalMs - CLng(tookMs)
+    End If
+End Function
 
 Public Sub RdxEnsurePump(Optional ByVal intervalMs As Long = PUMP_DEFAULT_INTERVAL_MS)
     If gTimerId <> 0 Then Exit Sub
+    If PumpMustPause() Then
+        gPumpPaused = True
+        Exit Sub
+    End If
+    gPumpPaused = False
     RdxKillOrphanTimer
     gConsecutiveErrors = 0
-    gTimerId = SetTimer(0, 0, intervalMs, AddressOf RdxPumpCallback)
+    gIntervalMs = intervalMs
+    ' Armed under a hold, the timer waits for the hold to let go.
+    If gHoldDepth > 0 Then
+        gTimerId = SetTimer(0, 0, PUMP_HELD_MS, AddressOf RdxPumpCallback)
+    Else
+        gTimerId = SetTimer(0, 0, intervalMs, AddressOf RdxPumpCallback)
+    End If
     If gTimerId <> 0 Then
         RdxStoreTimerId gTimerId
         If Not gTimerResolutionRaised Then
@@ -568,11 +656,74 @@ Public Sub RdxStopPump()
         gTimerId = 0
         RdxClearStoredTimerId
     End If
+    gPumpPaused = False
     RdxReleaseCursorPin
     If gTimerResolutionRaised Then
         timeEndPeriod 1
         gTimerResolutionRaised = False
     End If
+End Sub
+
+' Holds the pump while VBA code runs that could stop in the debugger: the
+' armed timer waits until the last hold lets go, so break mode finds no
+' WM_TIMER due. Holds nest, and each must be let go.
+Public Sub RdxHoldPump()
+    gHoldDepth = gHoldDepth + 1
+    If gHoldDepth = 1 And gTimerId <> 0 Then
+        SetTimer 0, gTimerId, PUMP_HELD_MS, AddressOf RdxPumpCallback
+    End If
+End Sub
+
+Public Sub RdxReleasePump()
+    ReleaseHold gIntervalMs
+End Sub
+
+' Lets one hold go. The last sets the timer to tick again after waitMs,
+' or pauses the pump if the VBA editor or a VBA dialog came forward in
+' the meantime, as stepping through code in the debugger does; a pump
+' paused before carries on once a workbook window is active again.
+Private Sub ReleaseHold(ByVal waitMs As Long)
+    If gHoldDepth = 0 Then Exit Sub
+    gHoldDepth = gHoldDepth - 1
+    If gHoldDepth > 0 Then Exit Sub
+    If gTimerId = 0 And Not gPumpPaused Then Exit Sub
+    If PumpMustPause() Then
+        If gTimerId <> 0 Then PausePump
+    ElseIf gTimerId <> 0 Then
+        SetTimer 0, gTimerId, waitMs, AddressOf RdxPumpCallback
+    Else
+        gPumpPaused = False
+        On Error Resume Next
+        ReDimUI.RequestPump
+        On Error GoTo 0
+    End If
+End Sub
+
+' Whether the pump must wait: the window Excel's thread has active is not
+' a workbook's own, but the VBA editor, one of its windows, or a VBA
+' dialog such as a run-time error. A dialog Excel owns, and no window
+' active, as in a hidden Excel, leave the pump running.
+Private Function PumpMustPause() As Boolean
+    Dim activeHandle As LongPtr
+    Dim classBuffer As String
+    Dim classLength As Long
+
+    If gActiveWindowOverridden Then
+        activeHandle = gActiveWindowOverride
+    Else
+        activeHandle = GetActiveWindow()
+    End If
+    If activeHandle = 0 Then Exit Function
+    classBuffer = String$(16, vbNullChar)
+    classLength = GetClassNameW(GetAncestor(activeHandle, GA_ROOTOWNER), StrPtr(classBuffer), 16)
+    PumpMustPause = (Left$(classBuffer, classLength) <> "XLMAIN")
+End Function
+
+' The timer goes, as at a stop, and the next click, key, selection, or
+' sheet change in Excel brings it back.
+Private Sub PausePump()
+    RdxStopPump
+    gPumpPaused = True
 End Sub
 
 ' Cursor pinning is opt-in. Pinning suppresses Excel's busy-cursor flip
@@ -609,6 +760,28 @@ End Sub
 Public Function RdxPumpArmed() As Boolean
     RdxPumpArmed = (gTimerId <> 0)
 End Function
+
+' Whether code holds the pump now, and whether it waits for a workbook
+' window, for tests.
+Public Function RdxPumpHeld() As Boolean
+    RdxPumpHeld = (gHoldDepth > 0)
+End Function
+
+Public Function RdxPumpPaused() As Boolean
+    RdxPumpPaused = gPumpPaused
+End Function
+
+' Test seam: the pump reads this window, 0 for none, as Excel's active
+' one until RdxClearActiveWindowOverride. A background Excel cannot hand
+' activation back from the VBA editor to a workbook window by itself.
+Public Sub RdxOverrideActiveWindow(ByVal windowHandle As LongPtr)
+    gActiveWindowOverridden = True
+    gActiveWindowOverride = windowHandle
+End Sub
+
+Public Sub RdxClearActiveWindowOverride()
+    gActiveWindowOverridden = False
+End Sub
 
 ' Deterministic single tick for tests and debugging: one nominal 50 ms
 ' frame with the work pass forced, without arming a timer.

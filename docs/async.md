@@ -98,6 +98,18 @@ traps its own errors, as a handler does.
 
 - The timer callback body is one guarded call. Errors never escape into Excel; ten consecutive
   faults kill the timer.
+- The timer callback is VBA code, and a WM_TIMER that reaches it while VBA is in break mode, or
+  after an edit to `ReDimHost`, takes Excel down. So the timer is held, set to wait 24 days with
+  its id kept, while code ReDim runs could stop in the debugger: each tick, each click, key,
+  shortcut, and Excel event ReDim handles, and each handler, step, listener, check, and rebuild
+  it calls. The last hold to let go sets the next frame. A breakpoint, `Stop`, or Debug in VBA's
+  error dialog anywhere in that code finds no WM_TIMER due.
+- The pump pauses while Excel's active window is not a workbook's own: the VBA editor or one of
+  its windows, or a VBA dialog such as a run-time error or a `MsgBox`, where an edit or a break
+  is a keystroke away. Each tick checks, and so does each arm and each hold letting go, which
+  covers stepping out of a handler in the debugger. A paused pump comes back at the next click,
+  key, selection, or sheet change in the workbook. A dialog Excel owns, such as Format Cells,
+  does not pause it, and neither does a hidden Excel with no window active.
 - Renders that happen inside a tick never toggle `Application.ScreenUpdating`: flipping it at
   pump frequency redraws scroll bars and blips the cursor. Flushes outside ticks still use it
   when they repaint several controls, or open or close a drop list or calendar.
@@ -109,8 +121,8 @@ traps its own errors, as a handler does.
   stop, so frames land on schedule instead of quantizing into the default ~15.6 ms buckets.
 - While anything animates, budget jobs still using the default budget yield to the frame rate
   (8 ms per work pass); an explicit `BudgetMs` is always honored as given.
-- The pump stops itself when no ops, jobs, toasts, or visible spinners remain, and re-arms on
-  the next `Start`.
+- The pump stops itself once nothing needs it: no op, job, toast, or animation, and no watch
+  for a focused control, the pointer, a press, or a drag. It arms again when one starts.
 - The armed timer id is stored in a workbook-scoped name. After VBA state loss, the next arm
   kills the orphan first, and a tick from a timer the current state did not arm kills that
   timer and gives back the timer resolution its arming raised.
@@ -128,6 +140,14 @@ One thread. Ticks fire only while Excel pumps messages: they pause during anothe
 cell is being edited, and behind native modal dialogs. Delegate bodies block their tick for their
 full duration. These are Excel's rules; ReDim's job is to make the cooperative model feel
 effortless, not to pretend the host is multithreaded.
+
+While a click or key handler runs, the pump waits, even when the handler waits inside itself
+with `DoEvents`, a blocking `Await`, or a `MsgBox`: a handler that loops until an op finishes
+never sees it finish. The op's outcome handlers are the way to wait on it. The debugger rails
+cover the code ReDim runs. Code it does not start, run from Excel while the pump runs, such as a
+macro from a Forms button or the Macros dialog or a sheet event of the workbook's own, can still
+stop at a breakpoint with a WM_TIMER due, and Excel closes. Nothing of ReDim's runs between that
+macro starting and its stop. Run such code from the VBA editor, where the pump waits.
 
 Pauses are visual, not corrupting: animations are time-based, paces are wall-clock, and task
 state advances on the next tick, so everything catches up correctly when the interaction ends.

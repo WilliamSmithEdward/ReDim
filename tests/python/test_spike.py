@@ -11,9 +11,11 @@ Also pinned here: a harness constraint discovered during the spike. Module
 globals do not survive across run_macro round trips, so every live scenario
 must complete inside a single VBA call, and a SetTimer must never stay armed
 across harness call boundaries (its TIMERPROC address goes stale with the
-project reset and the next WM_TIMER kills the process). Production Excel does
-not mutate the project between clicks, so this rule is test-only; the
-framework still ships orphan-timer recovery for real state-loss events.
+project reset and the next WM_TIMER kills the process). An edit in the VBA
+editor does the same, and there the pump pauses while the editor is Excel's
+active window (test_pump_debugger.py). The harness edits a hidden Excel with
+no window active, which the pause does not see, so the rule stays for tests;
+the framework still ships orphan-timer recovery for real state-loss events.
 """
 
 from __future__ import annotations

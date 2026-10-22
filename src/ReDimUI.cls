@@ -1226,14 +1226,19 @@ End Function
 
 ' Cell edits reach cell-backed TextInput components here, and closing the
 ' hosting workbook tears the pump down before its TIMERPROC goes stale.
+' The sheet, selection, and activation events hold the pump while they
+' run, as a click does, and bring back a pump paused while the VBA
+' editor was active.
 Private Sub mExcelApp_SheetChange(ByVal Sh As Object, ByVal Target As Range)
     Dim appValue As ReDimUI
 
+    RdxHoldPump
     On Error Resume Next
     For Each appValue In mApps
         If appValue.Sheet Is Sh Then appValue.HandleSheetChange Target
     Next appValue
     On Error GoTo 0
+    RdxReleasePump
 End Sub
 
 ' BeforeClose comes before Excel's save prompt, where the user may still
@@ -1312,6 +1317,7 @@ Private Sub SheetCameForward()
     Dim appValue As ReDimUI
 
     If mCloseHeld Then Exit Sub
+    RdxHoldPump
     ' A window is active again: a selection rule that waited for one sets.
     For Each appValue In mApps
         appValue.ApplyPendingSelectionRule
@@ -1320,6 +1326,7 @@ Private Sub SheetCameForward()
     RefreshAccessKeys
     If HasPendingWork() Then RequestPump
     CheckSystemLook
+    RdxReleasePump
 End Sub
 
 ' A selection the user makes in the workbook after a close began means
@@ -1329,10 +1336,12 @@ Private Sub mExcelApp_SheetSelectionChange(ByVal Sh As Object, ByVal Target As R
         If Not Sh.Parent Is ThisWorkbook Then Exit Sub
         ResumeAfterClose
     End If
+    RdxHoldPump
     ' An unlocked cell selected on a protected surface types as any cell
     ' does; a locked one has the surface hold its keys again.
     SyncSurfaceKeys
     CheckSystemLook
+    RdxReleasePump
 End Sub
 
 Public Property Get App(ByVal targetAppId As String) As ReDimUI
@@ -1510,9 +1519,11 @@ Private Function RebuildForgottenApp(ByVal targetAppId As String) As Boolean
     recorded = RecordedRebuild(targetAppId)
     If LenB(recorded) = 0 Then Exit Function
     mRebuilding = True
+    RdxHoldPump
     On Error Resume Next
     Application.Run recorded
     On Error GoTo 0
+    RdxReleasePump
     mRebuilding = False
     RebuildForgottenApp = TryGetObject(mApps, targetAppId, appValue)
 End Function
@@ -1847,9 +1858,13 @@ Friend Function RunHandlerAs( _
     Set priorComponent = mSenderComponent
     Set mSenderApp = hostApp
     Set mSenderComponent = componentValue
+    ' Every handler ReDim runs holds the pump: a breakpoint in one stops
+    ' in the debugger with no WM_TIMER due, whatever started it.
+    RdxHoldPump
     On Error GoTo HandlerFailed
     Application.Run handlerProc
     On Error GoTo 0
+    RdxReleasePump
     Set mSenderApp = priorApp
     Set mSenderComponent = priorComponent
     RunHandlerAs = True
@@ -1857,6 +1872,7 @@ Friend Function RunHandlerAs( _
 HandlerFailed:
     failure = HandlerFailureText(componentValue, handlerProc, Err.Number, Err.Description)
     On Error GoTo 0
+    RdxReleasePump
     Set mSenderApp = priorApp
     Set mSenderComponent = priorComponent
     hostApp.ReportAppError failure
@@ -1884,9 +1900,11 @@ Friend Function RunStepAs( _
     Set priorComponent = mSenderComponent
     Set mSenderApp = hostApp
     Set mSenderComponent = senderValue
+    RdxHoldPump
     On Error GoTo StepFailed
     RunStepAs = Application.Run(stepProc)
     On Error GoTo 0
+    RdxReleasePump
     Set mSenderApp = priorApp
     Set mSenderComponent = priorComponent
     Exit Function
@@ -1895,6 +1913,7 @@ StepFailed:
     failSource = Err.Source
     failDescription = Err.Description
     On Error GoTo 0
+    RdxReleasePump
     Set mSenderApp = priorApp
     Set mSenderComponent = priorComponent
     Err.Raise failNumber, failSource, failDescription
@@ -4658,6 +4677,7 @@ Private Sub InvokeStateHandlers(ByVal stateKey As String)
     If handlers Is Nothing Then Exit Sub
     For Each handlerProc In handlers
         failure = vbNullString
+        RdxHoldPump
         On Error Resume Next
         Application.Run CStr(handlerProc)
         If Err.Number <> 0 Then
@@ -4665,6 +4685,7 @@ Private Sub InvokeStateHandlers(ByVal stateKey As String)
                 Err.Description, "state key '" & stateKey & "'")
         End If
         On Error GoTo 0
+        RdxReleasePump
         If LenB(failure) > 0 Then ReportAppError failure
     Next handlerProc
 End Sub
@@ -5382,9 +5403,11 @@ End Sub
 Friend Sub ReportAppError(ByVal messageText As String)
     RequireRole ROLE_APP, "ReportAppError"
     If LenB(mErrorHandlerProc) > 0 Then
+        RdxHoldPump
         On Error Resume Next
         Application.Run mErrorHandlerProc, messageText
         On Error GoTo 0
+        RdxReleasePump
     Else
         Application.StatusBar = messageText
         Debug.Print messageText
@@ -13689,9 +13712,11 @@ Private Sub RunValidation(ByVal hostApp As ReDimUI)
         mValidationLive = False
         Exit Sub
     End If
+    RdxHoldPump
     On Error GoTo CheckFailed
     verdict = Application.Run(mValidateProc, mText)
     On Error GoTo 0
+    RdxReleasePump
     mValidationError = CStr(verdict)
     mValidationLive = (LenB(mValidationError) > 0)
     Exit Sub
@@ -13699,6 +13724,7 @@ CheckFailed:
     ' Named like any handler ReDim cannot run: the check and its field.
     failure = HandlerFailureText(Me, mValidateProc, Err.Number, Err.Description)
     On Error GoTo 0
+    RdxReleasePump
     mValidationError = vbNullString
     mValidationLive = False
     hostApp.ReportAppError failure

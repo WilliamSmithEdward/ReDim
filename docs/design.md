@@ -190,14 +190,25 @@ theme sets, stand as drawn, where rewriting them was half of a 100-control swap.
 Harness constraint, pinned by the spike suite: module globals do not survive across
 `run_macro` round trips, so every live scenario completes inside one VBA call that returns a
 transcript, and no SetTimer stays armed across harness call boundaries (the reset makes the
-TIMERPROC address stale and the next WM_TIMER kills the process). Production Excel does not
-mutate the project between interactions, so the constraint is test-only. The framework still
-records the armed timer id in a workbook-scoped name and kills any orphan before arming a new
-timer, which covers real state-loss events such as an unhandled error ending execution.
+TIMERPROC address stale and the next WM_TIMER kills the process). A developer meets the same
+hazard in the VBA editor, where typing into `ReDimHost` with the timer armed ended Excel within
+two seconds, and a second one there: break mode, which no WM_TIMER survives. The pump therefore
+holds its timer while code ReDim runs could stop in the debugger, and pauses while the editor or
+a VBA dialog is Excel's active window ([async.md](async.md#rails)). The harness rewrites modules
+through the object model in a hidden Excel with no window active, which the pause does not see,
+so the constraint stays for tests. The framework still records the armed timer id in a
+workbook-scoped name and kills any orphan before arming a new timer, which covers real
+state-loss events such as an unhandled error ending execution.
+`tests/python/test_pump_debugger.py` stops in a click handler and in a job's step, and types
+into `ReDimHost` with the editor active, each in an Excel of its own.
 
 ## Known constraints
 
 - One Excel thread: pump ticks fire only while Excel idles or pumps messages; they pause during
   another macro, cell edit mode, or a modal dialog. This is documented, not hidden.
+- The pump's timer callback is VBA code. Code ReDim does not start, run from Excel while the pump
+  runs, can stop at a breakpoint with a WM_TIMER due, and Excel then closes. Only a machine-code
+  callback could check VBA's mode before calling in, and ReDim ships no machine code. Run that
+  code from the VBA editor, where the pump waits.
 - `AdvanceTask` is Friend scope, which requires ReDim modules to live in the same VBA project as
   `ROneCOne.cls`. That is already the installation model.
