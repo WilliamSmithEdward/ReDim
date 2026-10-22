@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- `test_adaptive_budget` checks the budget each job pass ran on: 15 ms
+  idle, 8 ms while a spinner animates, and an explicit `BudgetMs` as
+  given (#6). It compared how many 3 ms steps fit in each pass, which
+  failed intermittently. One step of jitter decided it, and the
+  harness's hidden Excel may not get the 1 ms timer resolution the test
+  asks for: without it `Sleep 3` took 15.3 ms there, and one run in ten
+  took as many steps animating as idle. A job now keeps the budget its
+  last pass ran on (`LastBudgetMs`, Friend), the test's failures print
+  its transcript, and it unmounts its app, so it runs again in one
+  session.
 - Stopping in the debugger took Excel down while ReDim's frame timer
   was running: at a breakpoint, a `Stop`, Debug in VBA's error dialog,
   or the editor's Break. So did typing anything into `ReDimHost`. The

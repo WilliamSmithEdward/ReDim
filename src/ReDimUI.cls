@@ -1160,6 +1160,7 @@ Private mOpLastError As String
 Private mJobStepProc As String
 Private mJobBudgetMs As Long
 Private mJobBudgetExplicit As Boolean
+Private mJobLastBudgetMs As Long
 Private mJobPaceMs As Long
 Private mJobLastStepMs As LongLong
 Private mJobDoneProc As String
@@ -22401,6 +22402,12 @@ Friend Property Get JobIsRunning() As Boolean
     JobIsRunning = mJobRunning
 End Property
 
+' The budget the job's last work pass ran on, in milliseconds, for tests:
+' how many steps fit in it depends on the clock's granularity as well.
+Friend Property Get LastBudgetMs() As Long
+    LastBudgetMs = mJobLastBudgetMs
+End Property
+
 Friend Sub RequestJobCancel()
     RequireRole ROLE_JOB, "RequestJobCancel"
     mJobCancelRequested = True
@@ -22439,6 +22446,7 @@ Friend Sub TickJob( _
     ' the precise clock so sub-16 ms budgets mean what they say.
     effectiveBudget = mJobBudgetMs
     If animating And Not mJobBudgetExplicit Then effectiveBudget = 8
+    mJobLastBudgetMs = effectiveBudget
     Dim startedPreciseMs As Double
     startedPreciseMs = PreciseNowMs()
     Do
