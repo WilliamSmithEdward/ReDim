@@ -27,12 +27,14 @@ the demo workbooks, reaching something beyond what is described below.
 `ReDimUI.cls` and `ReDimHost.bas`:
 
 - call Windows API functions: `SetTimer` and `KillTimer` for the frame
-  timer and `timeBeginPeriod` and `timeEndPeriod` for its resolution;
-  `GetFocus`, `GetKeyState`, `GetClassNameW`, `PostMessageW`, and
-  `MapVirtualKeyW` to route keys; gdi32 to measure text; user32 and
-  kernel32 for the clipboard, the pointer, and settings such as the caret
-  blink time; and `RegGetValueW` to read two values under
-  `HKEY_CURRENT_USER` that hold the Windows dark mode and accent color;
+  timer, `timeBeginPeriod` and `timeEndPeriod` for its resolution, and
+  `GetActiveWindow` and `GetAncestor` to pause it while the VBA editor or
+  a VBA dialog is Excel's active window; `GetFocus`, `GetKeyState`,
+  `GetClassNameW`, `PostMessageW`, and `MapVirtualKeyW` to route keys;
+  gdi32 to measure text; user32 and kernel32 for the clipboard, the
+  pointer, frame timing, and settings such as the caret blink time; and
+  `RegGetValueW` to read two values under `HKEY_CURRENT_USER` that hold
+  the Windows dark mode and accent color;
 - bind keys with `Application.OnKey` for an app's hot keys and shortcuts,
   and while a ReDim control has focus or a protected surface holds the
   typing keys; `Unmount`, `Shutdown`, and closing the workbook release

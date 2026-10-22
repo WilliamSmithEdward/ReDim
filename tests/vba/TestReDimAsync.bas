@@ -2,16 +2,24 @@ Attribute VB_Name = "TestReDimAsync"
 Option Explicit
 
 ' Live scenarios for the ReDim async engine: ops, the OnClickAsync path,
-' transport tasks across ticks, cancellation, chunked jobs, and one real
-' SetTimer end-to-end run. Deterministic scenarios turn AutoPump off and
-' drive PumpOnce; the end-to-end scenario uses the real timer and proves it
-' disarms itself before returning.
+' transport tasks across ticks, cancellation, chunked jobs, and real
+' SetTimer runs: end to end, and held while code runs. Deterministic
+' scenarios turn AutoPump off and drive PumpOnce; the real-timer scenarios
+' prove the timer disarmed before returning. The Debugger procedures at
+' the end stop in the debugger on purpose, and only test_pump_debugger.py
+' runs them, each in an Excel of its own.
 
 Private Declare PtrSafe Sub Sleep Lib "kernel32" (ByVal milliseconds As Long)
 Private Declare PtrSafe Function timeBeginPeriod Lib "winmm.dll" ( _
     ByVal uPeriod As Long) As Long
 Private Declare PtrSafe Function timeEndPeriod Lib "winmm.dll" ( _
     ByVal uPeriod As Long) As Long
+Private Declare PtrSafe Function GetActiveWindow Lib "user32" () As LongPtr
+Private Declare PtrSafe Function GetAncestor Lib "user32" ( _
+    ByVal windowHandle As LongPtr, ByVal ancestorKind As Long) As LongPtr
+Private Declare PtrSafe Function GetClassNameW Lib "user32" ( _
+    ByVal windowHandle As LongPtr, ByVal classBuffer As LongPtr, _
+    ByVal bufferChars As Long) As Long
 
 Private gWorkRan As Long
 Private gDoneRan As Long
@@ -21,6 +29,9 @@ Private gJobCounter As Long
 Private gResultSeen As Variant
 Private gTagSeen As String
 Private gStepTag As String
+Private gPumpTicks As Long
+Private gDebuggerTicks As Long
+Private gStopInStep As Boolean
 
 Private Function NewCanvas() As Worksheet
     Set NewCanvas = ActiveWorkbook.Worksheets.Add
@@ -572,4 +583,249 @@ Public Function TestSharedBusy() As String
     RdxStopPump
     ReDimUI.AutoPump True
     TestSharedBusy = transcript
+End Function
+
+' A paced step that counts the passes the real timer drives, and never
+' finishes.
+Public Function CountingStep() As Boolean
+    gPumpTicks = gPumpTicks + 1
+    CountingStep = False
+End Function
+
+' Code that holds the pump keeps its timer from firing: armed before a
+' hold or under one, the timer runs no tick until every hold lets go.
+' Each entry point, and each handler ReDim runs, lets go of its hold.
+Public Function TestPumpHolds() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim transcript As String
+    Dim ticksBefore As Long
+
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "async13")
+    app.Button("tap").AtRect(24, 24, 90, 28).Text("Tap").OnClick "TestReDimAsync.RecordWork"
+    app.OnStateChanged "seen", "TestReDimAsync.RecordDone"
+    app.Render
+    app.Job("count").Steps("TestReDimAsync.CountingStep").PacedMs 1
+    gPumpTicks = 0
+    app.Job("count").StartJob
+    ROneCOne.Task.Delay(300).Await
+    transcript = "ticks=" & CStr(gPumpTicks > 0)
+
+    RdxHoldPump
+    ticksBefore = gPumpTicks
+    ROneCOne.Task.Delay(300).Await
+    transcript = transcript & "|heldStill=" & CStr(gPumpTicks = ticksBefore)
+    RdxHoldPump
+    RdxReleasePump
+    ROneCOne.Task.Delay(300).Await
+    transcript = transcript & "|nestedHeld=" & CStr(gPumpTicks = ticksBefore)
+    RdxReleasePump
+    ROneCOne.Task.Delay(300).Await
+    transcript = transcript & "|released=" & CStr(gPumpTicks > ticksBefore)
+
+    RdxStopPump
+    RdxHoldPump
+    RdxEnsurePump
+    ticksBefore = gPumpTicks
+    ROneCOne.Task.Delay(300).Await
+    transcript = transcript & "|armedUnderHold=" & CStr(RdxPumpArmed()) & "/" & _
+        CStr(gPumpTicks = ticksBefore)
+    RdxReleasePump
+    ROneCOne.Task.Delay(300).Await
+    transcript = transcript & "|ticksAfterHold=" & CStr(gPumpTicks > ticksBefore)
+
+    RdxKeyChar "{ESC}"
+    RdxShortcut "^+q"
+    RdxAccessKey "q"
+    RdxOpenPalette
+    RdxPalettePick
+    RdxDispatch
+    transcript = transcript & "|entriesLetGo=" & CStr(Not RdxPumpHeld())
+    ReDimUI.DispatchShape "rdm_async13_tap"
+    app.SetState "seen", 1
+    transcript = transcript & "|handlersLetGo=" & CStr(Not RdxPumpHeld())
+
+    Do While RdxPumpHeld()
+        RdxReleasePump
+    Loop
+    app.CancelJob "count"
+    app.Unmount True
+    RdxStopPump
+    TestPumpHolds = transcript
+End Function
+
+' The pump waits while Excel's active window is not a workbook's own, such
+' as the VBA editor, and comes back with the next click, key, or selection
+' once a workbook window is active again. The seam stands in for Excel's
+' active window: a background Excel cannot hand activation back itself.
+Public Function TestPumpPauses() As String
+    Dim app As ReDimUI
+    Dim host As Worksheet
+    Dim transcript As String
+    Dim ticksBefore As Long
+    Dim editorWindow As LongPtr
+
+    editorWindow = Application.VBE.MainWindow.HWnd
+    Set host = NewCanvas()
+    Set app = ReDimUI.Mount(host, "async14")
+    app.Job("count").Steps("TestReDimAsync.CountingStep").PacedMs 1
+    gPumpTicks = 0
+    app.Job("count").StartJob
+    ROneCOne.Task.Delay(200).Await
+    transcript = "ticks=" & CStr(gPumpTicks > 0)
+
+    RdxOverrideActiveWindow editorWindow
+    ROneCOne.Task.Delay(100).Await
+    transcript = transcript & "|pausedForEditor=" & CStr(RdxPumpPaused()) & "/" & _
+        CStr(Not RdxPumpArmed())
+    ticksBefore = gPumpTicks
+    ROneCOne.Task.Delay(200).Await
+    transcript = transcript & "|waits=" & CStr(gPumpTicks = ticksBefore)
+    RdxKeyChar "{ESC}"
+    RdxEnsurePump
+    transcript = transcript & "|keyWhileEditor=" & CStr(RdxPumpPaused()) & "/" & _
+        CStr(Not RdxPumpArmed())
+
+    RdxOverrideActiveWindow Application.Hwnd
+    ROneCOne.Task.Delay(200).Await
+    transcript = transcript & "|stillWaits=" & CStr(RdxPumpPaused())
+    RdxKeyChar "{ESC}"
+    transcript = transcript & "|keyResumes=" & CStr(RdxPumpArmed()) & "/" & _
+        CStr(Not RdxPumpPaused())
+    ticksBefore = gPumpTicks
+    ROneCOne.Task.Delay(200).Await
+    transcript = transcript & "|ticksAgain=" & CStr(gPumpTicks > ticksBefore)
+
+    ' Stepping out of a handler in the debugger lets go of its hold with
+    ' the editor active.
+    RdxHoldPump
+    RdxOverrideActiveWindow editorWindow
+    RdxReleasePump
+    transcript = transcript & "|releaseIntoEditor=" & CStr(RdxPumpPaused()) & "/" & _
+        CStr(Not RdxPumpArmed())
+    ' No window active, as in a hidden Excel, leaves the pump running.
+    RdxOverrideActiveWindow 0
+    RdxDispatch
+    transcript = transcript & "|noWindowRuns=" & CStr(RdxPumpArmed())
+
+    RdxClearActiveWindowOverride
+    app.CancelJob "count"
+    app.Unmount True
+    RdxStopPump
+    TestPumpPauses = transcript
+End Function
+
+' Live debugger scenarios. A paced job keeps the real timer armed, as a
+' live app's pointer watch or focused field does, before a stop in the
+' debugger or an edit in the VBA editor.
+Public Function DebuggerSetup() As String
+    Dim app As ReDimUI
+
+    gDebuggerTicks = 0
+    gStopInStep = False
+    ReDimUI.AutoPump True
+    Set app = ReDimUI.Mount(NewCanvas(), "debugger")
+    app.Button("halt").AtRect(24, 24, 90, 28).Text("Halt").OnClick "TestReDimAsync.StopInHandler"
+    app.Render
+    app.Job("beat").Steps("TestReDimAsync.DebuggerStep").PacedMs 1
+    app.Job("beat").StartJob
+    DebuggerSetup = DebuggerState()
+End Function
+
+Public Function DebuggerState() As String
+    DebuggerState = "armed=" & CStr(RdxPumpArmed()) & "|paused=" & _
+        CStr(RdxPumpPaused()) & "|ticks=" & CStr(gDebuggerTicks) & _
+        "|active=" & ActiveWindowClass()
+End Function
+
+' The class of the window that owns Excel's active window, as the pump
+' reads it; empty with no window active.
+Private Function ActiveWindowClass() As String
+    Dim activeHandle As LongPtr
+    Dim classBuffer As String
+    Dim classLength As Long
+
+    activeHandle = GetActiveWindow()
+    If activeHandle = 0 Then Exit Function
+    classBuffer = String$(64, vbNullChar)
+    classLength = GetClassNameW(GetAncestor(activeHandle, 3), StrPtr(classBuffer), 64)
+    ActiveWindowClass = Left$(classBuffer, classLength)
+End Function
+
+Public Function DebuggerStep() As Boolean
+    gDebuggerTicks = gDebuggerTicks + 1
+    If gStopInStep Then
+        gStopInStep = False
+        Stop
+    End If
+    DebuggerStep = False
+End Function
+
+Public Sub StopInHandler()
+    Stop
+End Sub
+
+' The click comes once this call has returned, as a user's would.
+Public Sub DebuggerClickLater()
+    Application.OnTime Now, "'" & Replace(ThisWorkbook.Name, "'", "''") & _
+        "'!TestReDimAsync.DebuggerClick"
+End Sub
+
+Public Sub DebuggerClick()
+    ReDimUI.DispatchShape "rdm_debugger_halt"
+End Sub
+
+Public Sub DebuggerStopInStep()
+    gStopInStep = True
+End Sub
+
+' The VBA editor comes forward on ReDimHost with the caret at the start of
+' the TIMERPROC's body, as for a user about to type there. Returns the
+' editor's window.
+Public Function DebuggerOpenHostCode() As String
+    Dim editor As Object
+    Dim hostCode As Object
+    Dim bodyLine As Long
+
+    Set editor = Application.VBE
+    editor.MainWindow.Visible = True
+    editor.MainWindow.SetFocus
+    Set hostCode = ThisWorkbook.VBProject.VBComponents("ReDimHost").CodeModule
+    hostCode.CodePane.Show
+    bodyLine = hostCode.ProcBodyLine("RdxPumpCallback", 0)
+    Do While Right$(RTrim$(hostCode.Lines(bodyLine, 1)), 1) = "_"
+        bodyLine = bodyLine + 1
+    Loop
+    hostCode.CodePane.SetSelection bodyLine + 1, 1, bodyLine + 1, 1
+    DebuggerOpenHostCode = CStr(editor.MainWindow.HWnd)
+End Function
+
+' Excel shows, so a workbook window is its active window.
+Public Sub DebuggerShowExcel()
+    Application.Visible = True
+End Sub
+
+Public Sub DebuggerFocusEditor()
+    Application.VBE.MainWindow.Visible = True
+    Application.VBE.MainWindow.SetFocus
+End Sub
+
+' A selection the user makes, with events on as in a live session.
+Public Sub DebuggerSelectCell()
+    Dim eventsWere As Boolean
+
+    eventsWere = Application.EnableEvents
+    Application.EnableEvents = True
+    ActiveSheet.Range("H20").Select
+    Application.EnableEvents = eventsWere
+End Sub
+
+Public Function DebuggerTeardown() As String
+    ReDimUI.App("debugger").CancelJob "beat"
+    ReDimUI.App("debugger").Unmount True
+    RdxStopPump
+    Application.VBE.MainWindow.Visible = False
+    Application.Visible = False
+    DebuggerTeardown = DebuggerState()
 End Function

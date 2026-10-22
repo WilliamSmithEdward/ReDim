@@ -95,7 +95,9 @@ user keeps working in the workbook.
   for game loops and animations. Cancellation rides ROneCOne CancellationTokenSource.
 - **Crash-railed.** The timer callback is a single guarded call that never lets an error escape,
   kills itself after repeated faults, stops when idle, records its timer id in a workbook name so
-  orphans from VBA state loss are killed before re-arming, and tears down on workbook close.
+  orphans from VBA state loss are killed before re-arming, and tears down on workbook close. The
+  timer holds while code ReDim runs could stop in the debugger, and the pump pauses while the VBA
+  editor or a VBA dialog is in front, so breakpoints, Break, and edits there leave Excel running.
 - **Idempotent.** Re-running setup code adopts existing shapes instead of duplicating them, so an
   unhandled error that resets VBA state never leaves a broken sheet.
 

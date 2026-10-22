@@ -2,6 +2,34 @@
 
 ## Unreleased
 
+- Stopping in the debugger took Excel down while ReDim's frame timer
+  was running: at a breakpoint, a `Stop`, Debug in VBA's error dialog,
+  or the editor's Break. So did typing anything into `ReDimHost`. The
+  timer's callback is VBA code, and a `WM_TIMER` that reaches it in
+  break mode, or after an edit to its module, ends the process. A
+  focused field, pointer effects, a slider, or any op or job keeps the
+  timer running, so debugging such an app closed Excel within seconds.
+  The timer is now held, set to wait 24 days, while code ReDim runs
+  could stop in the debugger: each tick, click, key, and Excel event it
+  handles, and each handler, step, listener, check, and rebuild it
+  calls. The pump also pauses while Excel's active window is not a
+  workbook's own, such as the VBA editor or a VBA dialog, and comes
+  back at the next click, key, selection, or sheet change in the
+  workbook. `test_pump_debugger.py` stops in a click handler and in a
+  job's step and types into `ReDimHost`, each in an Excel of its own;
+  before the fix Excel ended two to nine seconds into each.
+  `TestPumpHolds` and `TestPumpPauses` check the holds and the pause.
+- While a click or key handler runs, the pump waits, even when the
+  handler waits inside itself with `DoEvents`, a blocking `Await`, or a
+  `MsgBox`. A handler that loops until an op finishes never sees it
+  finish; the op's outcome handlers are the way to wait on it. A
+  `MsgBox` that code outside ReDim shows pauses the pump until the next
+  interaction in the workbook.
+- Code ReDim does not start, run from Excel while the pump runs, such
+  as a macro from a Forms button or the Macros dialog or a sheet event
+  of the workbook's own, can still stop at a breakpoint with the timer
+  due, and Excel closes. Run such code from the VBA editor, where the
+  pump waits.
 - OpenSSF Scorecard rates the repository's security practices on every change to main and
   weekly, and the README shows its badge.
 - The release security workflow grants write access to the one job that uploads the report,

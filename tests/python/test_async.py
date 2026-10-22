@@ -129,6 +129,39 @@ def test_render_arms_drag_watch(run_async):
     assert facts["cleanedUp"] == "True"
 
 
+def test_pump_holds(run_async):
+    facts = parse_transcript(run_async("TestPumpHolds"))
+    assert facts["ticks"] == "True", "the real timer drives the job"
+    assert facts["heldStill"] == "True", "a held pump runs no tick"
+    assert facts["nestedHeld"] == "True", "the pump stays held until the last hold lets go"
+    assert facts["released"] == "True", "the ticks come back once the hold lets go"
+    assert facts["armedUnderHold"] == "True/True", "a timer armed under a hold waits for it"
+    assert facts["ticksAfterHold"] == "True"
+    assert facts["entriesLetGo"] == "True", "each click and key entry point lets go of its hold"
+    assert facts["handlersLetGo"] == "True", (
+        "a click handler and a state listener let go of their holds"
+    )
+
+
+def test_pump_pauses(run_async):
+    facts = parse_transcript(run_async("TestPumpPauses"))
+    assert facts["ticks"] == "True", "the real timer drives the job"
+    assert facts["pausedForEditor"] == "True/True", (
+        "the VBA editor as Excel's active window pauses the pump at its next tick"
+    )
+    assert facts["waits"] == "True", "a paused pump runs no tick"
+    assert facts["keyWhileEditor"] == "True/True", (
+        "a key, or a request to arm, while the editor stays active leaves it waiting"
+    )
+    assert facts["stillWaits"] == "True", "a workbook window active again brings nothing back alone"
+    assert facts["keyResumes"] == "True/True", "the next key there brings the pump back"
+    assert facts["ticksAgain"] == "True"
+    assert facts["releaseIntoEditor"] == "True/True", (
+        "a hold let go with the editor active, as stepping does, pauses the pump"
+    )
+    assert facts["noWindowRuns"] == "True", "no window active, as in a hidden Excel, runs it"
+
+
 def test_real_timer_end_to_end(run_async):
     facts = parse_transcript(run_async("TestRealTimerEndToEnd"))
     assert facts["armedAfterStart"] == "True"
