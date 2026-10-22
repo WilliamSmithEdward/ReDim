@@ -413,11 +413,19 @@ End Function
 ' The armed pump raises the timer resolution in production; PumpOnce does
 ' not arm a timer, so the scenario raises it the same way, or budget
 ' arithmetic below ~16 ms would quantize into a single step either way.
+' A default-budget job yields to the frame rate while something animates:
+' its work pass runs on 8 ms instead of 15, and an explicit BudgetMs is
+' honored as given. The test reads the budget each pass ran on. How many
+' 3 ms steps fit in a pass is reported, not judged: one step of jitter,
+' or a Sleep that Windows rounds up to its 15.6 ms tick, decides it.
 Public Function TestAdaptiveBudget() As String
     Dim app As ReDimUI
     Dim host As Worksheet
     Dim stepsIdle As Long
     Dim stepsAnimating As Long
+    Dim budgetIdle As Long
+    Dim budgetAnimating As Long
+    Dim budgetExplicit As Long
     Dim transcript As String
 
     timeBeginPeriod 1
@@ -433,6 +441,7 @@ Public Function TestAdaptiveBudget() As String
     app.Job("crunch").StartJob
     ReDimUI.PumpOnce
     stepsIdle = gJobCounter
+    budgetIdle = app.Job("crunch").LastBudgetMs
     app.CancelJob "crunch"
     ReDimUI.PumpOnce
 
@@ -441,14 +450,24 @@ Public Function TestAdaptiveBudget() As String
     app.Job("crunch").StartJob
     ReDimUI.PumpOnce
     stepsAnimating = gJobCounter
+    budgetAnimating = app.Job("crunch").LastBudgetMs
     app.CancelJob "crunch"
+    ReDimUI.PumpOnce
+
+    app.Job("set").Steps("TestReDimAsync.JobStepEndless").BudgetMs 12
+    app.Job("set").StartJob
+    ReDimUI.PumpOnce
+    budgetExplicit = app.Job("set").LastBudgetMs
+    app.CancelJob "set"
     ReDimUI.PumpOnce
     app.Spinner("spn").Visible False
 
-    transcript = "stepsIdle=" & stepsIdle
+    transcript = "budgetIdle=" & budgetIdle
+    transcript = transcript & "|budgetAnimating=" & budgetAnimating
+    transcript = transcript & "|budgetExplicit=" & budgetExplicit
+    transcript = transcript & "|stepsIdle=" & stepsIdle
     transcript = transcript & "|stepsAnimating=" & stepsAnimating
-    transcript = transcript & "|yieldsToAnimation=" & _
-        CStr(stepsAnimating < stepsIdle)
+    app.Unmount True
     ReDimUI.AutoPump True
     timeEndPeriod 1
     TestAdaptiveBudget = transcript

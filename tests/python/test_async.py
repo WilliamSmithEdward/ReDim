@@ -104,10 +104,16 @@ def test_job_cancel(run_async):
 
 def test_adaptive_budget(run_async):
     facts = parse_transcript(run_async("TestAdaptiveBudget"))
-    assert facts["yieldsToAnimation"] == "True", (
-        "a default-budget job must take fewer steps per pass while animating"
+    assert facts["budgetIdle"] == "15", (
+        f"a default-budget job's pass runs on 15 ms with nothing animating: {facts}"
     )
-    assert int(facts["stepsAnimating"]) >= 1
+    assert facts["budgetAnimating"] == "8", (
+        f"while a spinner animates, the default budget yields to the frame rate: {facts}"
+    )
+    assert facts["budgetExplicit"] == "12", (
+        f"an explicit BudgetMs is honored while a spinner animates: {facts}"
+    )
+    assert int(facts["stepsAnimating"]) >= 1, f"a pass runs at least one step: {facts}"
 
 
 def test_spinner_frame_pinned(run_async):
