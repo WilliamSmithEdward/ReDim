@@ -36,7 +36,11 @@
   rather than to the whole workflow. No change to ReDim itself.
 - `requirements-dev.txt` installs on Windows again: it had been compiled without the
   Windows-only packages pywin32, colorama and win-unicode-console, so `--require-hashes`
-  refused it there. Recompiled with its own command; no other pin moved.
+  refused it there. Recompiled with its own command; no other pin moved. Dependabot's
+  bumps then dropped them again: it recompiles the lock with pip-compile on Linux, which
+  resolves for Linux alone. The lock is recompiled once more, and CI's static analysis job
+  now fails a dev lock without them (`tools/check_dev_lock.py`), so such a bump waits for
+  a recompile instead of merging; AGENTS.md says how to land it.
 - CI, Security and Malware scan check out ROneCOne 1.10.3, where they pinned
   1.10.1. 1.10.3 renames the private constant `ROLE_FILE_CHANGE` to
   `ROLE_FILE_EVENT`, so the scanners no longer read it as an event handler

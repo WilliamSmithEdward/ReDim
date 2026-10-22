@@ -59,6 +59,15 @@ jobs:
           REDIM_RONECONE_PATH: ${{ github.workspace }}/.ronecone/src/ROneCOne.cls
         run: python tools/check.py
 
+      # The live suite runs on Windows, and Dependabot recompiles
+      # requirements-dev.txt with pip-compile on Linux, which drops the
+      # packages only Windows needs. Such a lock fails here; AGENTS.md says
+      # how to land the bump.
+      - name: Check the dev lock pins its Windows packages
+        run: |
+          python -m unittest discover -s tests/python -p 'test_dev_lock.py'
+          python tools/check_dev_lock.py
+
   ci-passed:
     name: CI passed
     if: always()
