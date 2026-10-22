@@ -50,3 +50,18 @@ Publish refuses a tag that is not `REDIM_VERSION`. It releases
 `ReDimUI.cls`, `ReDimHost.bas` and the `ROneCOne.cls` pinned in the
 workflows, with CRLF endings, and no workbooks. The demos are built from
 `demo/vba/` with `python tools/build_workbooks.py`.
+
+## The dev lock
+
+`requirements-dev.txt` installs the local tools on Windows, where the live
+suite runs. Dependabot recompiles it with pip-compile on Linux, which drops
+the packages only Windows needs (pywin32, colorama, win-unicode-console),
+so CI's dev lock check fails its pull request, and it waits instead of
+merging. To land one when asked, recompile on its branch with the lock's
+own command, which keeps the pins Dependabot moved, then commit and push:
+
+```
+uv pip compile requirements-dev.in --universal --generate-hashes --python-version 3.12 -o requirements-dev.txt
+```
+
+`python tools/check_dev_lock.py` runs the same check locally.
