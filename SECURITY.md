@@ -175,13 +175,16 @@ repository at a full commit SHA (v1.10.3). No updater follows it; it moves
 by hand in the workflows, and the comment at the pin in `ci.yml` gives the
 commands.
 
-Dependabot proposes updates to GitHub Actions, the Python lock files
-(`.github/requirements/` and `requirements-dev.txt`) and the ClamAV image
-once a version is a week old (the owner's own packages, such as pyOpenVBA
-and pyVBAanalysis, at once), and at once for a security advisory. The
-Update YARA rules workflow proposes new YARA pins each week. A minor or
-patch update, and the YARA pull request, merges itself once CI, Security
-and Malware scan pass; a third-party major version waits for review.
+Dependabot proposes updates to GitHub Actions and the Python lock files
+(`.github/requirements/` and `requirements-dev.txt`) once a version is a
+week old (the owner's own packages, such as pyOpenVBA and pyVBAanalysis,
+at once), and at once for a security advisory. The Update YARA rules
+workflow proposes new YARA pins each week, and the Update images workflow
+a new ClamAV image once it is a week old, a version rebuilt in place
+included (GitHub refuses Dependabot's updates of that image). A minor or
+patch update, and the YARA and image pull requests, merge themselves once
+CI, Security and Malware scan pass; a third-party major version waits for
+review.
 Dependabot compiles `requirements-dev.txt` for Linux alone, without the
 packages only Windows needs, so CI fails its update until the lock is
 recompiled with its own command, as AGENTS.md describes.
