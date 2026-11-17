@@ -9,7 +9,7 @@ import tempfile
 import unittest
 import zipfile
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools"))
 import yara_forge  # noqa: E402
@@ -55,6 +55,32 @@ class YaraForgeTests(unittest.TestCase):
                  patch.object(yara_forge, "download", return_value=data):
                 yara_forge.fetch()
             self.assertEqual(rules.read_bytes(), yara_forge.unpack(data))
+
+    def test_a_transient_failure_is_retried_and_a_final_one_is_not(self):
+        url = yara_forge.release_asset("20260927")
+        good = MagicMock()
+        good.__enter__.return_value.read.return_value = b"bundle"
+
+        def http(code):
+            return yara_forge.urllib.error.HTTPError(url, code, "error", {}, None)
+
+        with patch.object(yara_forge.urllib.request, "urlopen", side_effect=[http(504), http(503), good]) as urlopen, \
+             patch.object(yara_forge.time, "sleep") as sleep:
+            self.assertEqual(yara_forge.download(url), b"bundle")
+        self.assertEqual(urlopen.call_count, 3)
+        self.assertEqual([c.args[0] for c in sleep.call_args_list], [5, 10])
+        with patch.object(yara_forge.urllib.request, "urlopen", side_effect=[http(404)]) as urlopen, \
+             patch.object(yara_forge.time, "sleep") as sleep:
+            with self.assertRaises(yara_forge.urllib.error.HTTPError):
+                yara_forge.download(url)
+        self.assertEqual(urlopen.call_count, 1)
+        sleep.assert_not_called()
+        with patch.object(yara_forge.urllib.request, "urlopen",
+                          side_effect=[http(504)] * (yara_forge.RETRIES + 1)) as urlopen, \
+             patch.object(yara_forge.time, "sleep"):
+            with self.assertRaises(yara_forge.urllib.error.HTTPError):
+                yara_forge.download(url)
+        self.assertEqual(urlopen.call_count, yara_forge.RETRIES + 1)
 
     def test_the_pin_file_is_one_the_standard_updater_accepts(self):
         root = Path(__file__).resolve().parents[2]
