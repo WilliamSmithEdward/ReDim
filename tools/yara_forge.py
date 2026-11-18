@@ -11,6 +11,8 @@ import hashlib
 import io
 import json
 import re
+import time
+import urllib.error
 import urllib.request
 import zipfile
 from pathlib import Path
@@ -23,12 +25,26 @@ ASSET = "yara-forge-rules-core.zip"
 MEMBER = "packages/core/yara-rules-core.yar"
 MAX_ARCHIVE = 20_000_000
 MAX_RULES = 30_000_000
+# A transient failure, such as a 504 from GitHub's release storage, is tried
+# again after 5, 10 and 20 seconds; any other failure is final at once.
+RETRIES = 3
+TRANSIENT_STATUS = {408, 429, 500, 502, 503, 504}
 
 
 def download(url: str) -> bytes:
     headers = {"User-Agent": "ReDim-security-scan", "Accept": "application/octet-stream"}
-    with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=90) as response:
-        data = response.read(MAX_ARCHIVE + 1)
+    for attempt in range(RETRIES + 1):
+        try:
+            with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=90) as response:
+                data = response.read(MAX_ARCHIVE + 1)
+            break
+        except urllib.error.HTTPError as error:
+            if error.code not in TRANSIENT_STATUS or attempt == RETRIES:
+                raise
+        except (urllib.error.URLError, TimeoutError, ConnectionError):
+            if attempt == RETRIES:
+                raise
+        time.sleep(5 * 2 ** attempt)
     if len(data) > MAX_ARCHIVE:
         raise ValueError("YARA Forge archive exceeds size limit")
     return data
