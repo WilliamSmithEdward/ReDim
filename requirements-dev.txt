@@ -221,9 +221,9 @@ pytest==9.2.0 \
     --hash=sha256:07acdcf88ec174f907dc01af70bf52d49b014bbab03faeeade31c96b18c2e588 \
     --hash=sha256:97c4f3b1f3c7414aa36465e09b8220f1d03627993bd51b1282e193753c80557b
     # via -r requirements-dev.in
-pyvbaanalysis==3.0.2 \
-    --hash=sha256:98473ab07beeb0e179bf3a40058ed611af7e00f96d3e1e9fe27056fdceabed22 \
-    --hash=sha256:d91116510b44f3259f619a9be0a175e7cfa204f157aa7fa6695eff67f8ceef37
+pyvbaanalysis==3.0.3 \
+    --hash=sha256:3c0098bb6c3e6f1257d8080038cca4c36c2a54976f0e4d6cbc54914e993752d3 \
+    --hash=sha256:eea2b828ca2163ee461e3476dae2276fe410b09bafe3a7a9b3870edf52f91812
     # via -r .github/requirements/ci.in
 pyvbaharness==1.1.6 \
     --hash=sha256:0f0fb66c986b0ee08f5e20b5a26d31f1a24b1511c7d0c1491732c915428a3a06 \
